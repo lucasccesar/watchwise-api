@@ -31,11 +31,13 @@ public class User {
     @Column(length = 280)
     private String description;
 
-    @Column(name = "profile_picture", nullable = false)
-    private String profilePicture;
+    @Column(name = "profile_picture", nullable = false, length = 2048)
+    @Builder.Default
+    private String profilePicture = "https://default-image.png";
 
     @Column(name = "is_profile_public", nullable = false)
-    private Boolean isProfilePublic;
+    @Builder.Default
+    private Boolean isProfilePublic = true;
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
