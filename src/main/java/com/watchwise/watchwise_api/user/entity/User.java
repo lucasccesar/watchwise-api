@@ -39,9 +39,9 @@ public class User {
     @Builder.Default
     private Boolean isProfilePublic = true;
 
-    @Column(nullable = false)
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
-    @Column(nullable = false)
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 }
