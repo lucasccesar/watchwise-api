@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.user.repository;
 
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -47,6 +48,7 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Public And Private Users - When OnlyPublic Is False")
     void shouldReturnPublicAndPrivateUsersWhenOnlyPublicIsFalse() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
                 "lucas", false, PageRequest.of(0, 10));
@@ -57,6 +59,7 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Only Public Users - When OnlyPublic Is True")
     void shouldReturnOnlyPublicUsersWhenOnlyPublicIsTrue() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
                 "lucas", true, PageRequest.of(0, 10));
@@ -67,6 +70,7 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Exact Match First - When Username Matches Exactly")
     void shouldReturnExactMatchFirst() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
                 "lucas", false, PageRequest.of(0, 10));
@@ -75,6 +79,7 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Match Regardless Of Case - When Username Prefix Has A Different Case")
     void shouldBeCaseInsensitive() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
                 "LUCAS", false, PageRequest.of(0, 10));
@@ -85,6 +90,7 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Empty Page - When No Username Matches Prefix")
     void shouldReturnEmptyPageWhenNoUsernameMatchesPrefix() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
                 "zzz", false, PageRequest.of(0, 10));
@@ -94,6 +100,7 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Not Return Username - When Prefix Appears In The Middle Instead Of The Start")
     void shouldNotReturnUsernameContainingPrefixInTheMiddle() {
         userRepository.save(buildUser("xlucas", "xlucas@email.com", true));
 
@@ -106,6 +113,7 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Respect Page Size - When Page Size Is Provided")
     void shouldRespectPageSize() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
                 "lucas", false, PageRequest.of(0, 2));

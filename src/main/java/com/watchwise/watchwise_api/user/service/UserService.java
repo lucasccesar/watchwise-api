@@ -1,7 +1,9 @@
 package com.watchwise.watchwise_api.user.service;
 
+import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
-import com.watchwise.watchwise_api.user.dto.UserPreviewDto;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import org.springframework.data.domain.Page;
 
@@ -11,8 +13,10 @@ public interface UserService {
 
     UserResponseDTO saveNewUser(PostUserDTO postUserDTO);
 
-    UserResponseDTO getUserById(UUID id);
+    PublicUserDTO getUserById(UUID id);
 
-    Page<UserPreviewDto> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic);
+    Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic);
+
+    UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO);
 
 }

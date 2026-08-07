@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 
@@ -22,6 +23,7 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[postUserDtoToUser] Should Map All Fields - When PostUserDTO Has All Values Filled")
     void shouldMapAllFieldsWhenPostUserDtoHasAllValuesFilled() {
         PostUserDTO dto = new PostUserDTO(
                 "JohnDoe",
@@ -42,6 +44,7 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[postUserDtoToUser] Should Ignore Id, Password, CreatedAt And UpdatedAt - When Mapping PostUserDTO To User")
     void shouldIgnoreIdPasswordCreatedAtAndUpdatedAtWhenMappingPostUserDtoToUser() {
         PostUserDTO dto = new PostUserDTO(
                 "JohnDoe",
@@ -61,6 +64,7 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[postUserDtoToUser] Should Apply Default IsProfilePublic - When Value Is Null")
     void shouldApplyDefaultIsProfilePublicWhenValueIsNull() {
         PostUserDTO dto = new PostUserDTO(
                 "JohnDoe",
@@ -77,6 +81,7 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[postUserDtoToUser] Should Not Override IsProfilePublic - When Value Is Provided")
     void shouldNotOverrideIsProfilePublicWhenValueIsProvided() {
         PostUserDTO dto = new PostUserDTO(
                 "JohnDoe",
@@ -93,6 +98,7 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[postUserDtoToUser] Should Apply Default ProfilePicture - When Value Is Null")
     void shouldApplyDefaultProfilePictureWhenValueIsNull() {
         PostUserDTO dto = new PostUserDTO(
                 "JohnDoe",
@@ -109,6 +115,7 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[postUserDtoToUser] Should Not Override ProfilePicture - When Value Is Provided")
     void shouldNotOverrideProfilePictureWhenValueIsProvided() {
         PostUserDTO dto = new PostUserDTO(
                 "JohnDoe",
@@ -125,6 +132,7 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[userToUserResponseDto] Should Map All Fields - When Mapping User To UserResponseDTO")
     void shouldMapAllFieldsWhenMappingUserToUserResponseDto() {
         UUID id = UUID.randomUUID();
         LocalDateTime createdAt = LocalDateTime.now();

@@ -1,7 +1,8 @@
 package com.watchwise.watchwise_api.user.mapper;
 
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
-import com.watchwise.watchwise_api.user.dto.UserPreviewDto;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.mapstruct.*;
@@ -17,7 +18,9 @@ public interface UserMapper {
 
     UserResponseDTO userToUserResponseDto(User user);
 
-    UserPreviewDto userToUserPreviewDto(User user);
+    UserPreviewDTO userToUserPreviewDto(User user);
+
+    PublicUserDTO userToPublicUserDto(User user);
 
     @AfterMapping
     default void applyDefaults(@MappingTarget User.UserBuilder builder, PostUserDTO dto) {
@@ -28,4 +31,6 @@ public interface UserMapper {
             builder.profilePicture("https://default-image.png");
         }
     }
+
+
 }

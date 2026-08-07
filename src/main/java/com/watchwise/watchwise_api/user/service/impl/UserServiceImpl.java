@@ -2,9 +2,12 @@ package com.watchwise.watchwise_api.user.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
-import com.watchwise.watchwise_api.user.dto.UserPreviewDto;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -16,6 +19,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
@@ -26,42 +30,96 @@ public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
-    private static final int DEFAULT_PAGE = 0;
-    private static final int DEFAULT_PAGE_SIZE = 20;
+    static final int DEFAULT_PAGE = 0;
+    static final int DEFAULT_PAGE_SIZE = 20;
 
     @Override
     public UserResponseDTO saveNewUser(PostUserDTO postUserDTO) {
 
         User mapperUser = userMapper.postUserDtoToUser(postUserDTO);
-        mapperUser.setPassword(postUserDTO.password());
+        mapperUser.setPassword(passwordEncoder.encode(postUserDTO.password()));
         mapperUser.setEmail(postUserDTO.email().toLowerCase().trim());
         mapperUser.setUsername(postUserDTO.username().trim());
 
         try {
             return userMapper.userToUserResponseDto(userRepository.save(mapperUser));
         } catch (DataIntegrityViolationException e) {
-            String constraintName = extractConstraintName(e);
-
-            if ("uq_users_username".equals(constraintName)) {
-                throw new ConflictException("Username already in use");
-            }
-            if ("uq_users_email".equals(constraintName)) {
-                throw new ConflictException("Email already in use");
-            }
-            throw new ConflictException("Username or email already in use");
+            throw mapUniqueConstraintViolation(e);
         }
     }
 
     @Override
-    public UserResponseDTO getUserById(UUID id) {
-        User foundUser = userRepository.findById(id).orElseThrow(()->new NotFoundException("User not found"));
+    public UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO) {
+        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
 
-        return userMapper.userToUserResponseDto(foundUser);
+        applyPatch(user, patchUserDTO);
+
+        try {
+            return userMapper.userToUserResponseDto(userRepository.save(user));
+        } catch (DataIntegrityViolationException e) {
+            throw mapUniqueConstraintViolation(e);
+        }
+    }
+
+    private void applyPatch(User user, PatchUserDTO patchUserDTO) {
+        if (patchUserDTO.username() != null) {
+            String newUsername = patchUserDTO.username().trim();
+            if (!newUsername.equals(user.getUsername())) {
+                user.setUsername(newUsername);
+            }
+        }
+
+        if (patchUserDTO.email() != null) {
+            String newEmail = patchUserDTO.email().trim().toLowerCase();
+            if (!newEmail.equals(user.getEmail())) {
+                user.setEmail(newEmail);
+            }
+        }
+
+        if (patchUserDTO.password() != null && !passwordEncoder.matches(patchUserDTO.password(), user.getPassword())) {
+            user.setPassword(passwordEncoder.encode(patchUserDTO.password()));
+        }
+
+        if (patchUserDTO.description() != null && !patchUserDTO.description().equals(user.getDescription())) {
+            user.setDescription(patchUserDTO.description());
+        }
+
+        if (patchUserDTO.profilePicture() != null && !patchUserDTO.profilePicture().equals(user.getProfilePicture())) {
+            user.setProfilePicture(patchUserDTO.profilePicture());
+        }
+
+        if (patchUserDTO.isProfilePublic() != null && !patchUserDTO.isProfilePublic().equals(user.getIsProfilePublic())) {
+            user.setIsProfilePublic(patchUserDTO.isProfilePublic());
+        }
+    }
+
+    private ConflictException mapUniqueConstraintViolation(DataIntegrityViolationException e) {
+        String constraintName = extractConstraintName(e);
+
+        if ("uq_users_username".equals(constraintName)) {
+            return new ConflictException("Username already in use");
+        }
+        if ("uq_users_email".equals(constraintName)) {
+            return new ConflictException("Email already in use");
+        }
+        return new ConflictException("Username or email already in use");
     }
 
     @Override
-    public Page<UserPreviewDto> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic) {
+    public PublicUserDTO getUserById(UUID id) {
+    User foundUser = userRepository.findById(id).orElseThrow(()->new NotFoundException("User not found"));
+
+        if (!Boolean.TRUE.equals(foundUser.getIsProfilePublic())) {
+            throw new ForbiddenException("This user profile is private");
+        }
+
+        return userMapper.userToPublicUserDto(foundUser);
+    }
+
+    @Override
+    public Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic) {
 
         if (StringUtils.isEmpty(username)) {
             throw new BadRequestException("Username must be provided");
