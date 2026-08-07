@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
@@ -436,10 +438,30 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUsersByUsername] Should Use Provided Page Size - When Page Size Is At Max Limit")
+    void shouldUseProvidedPageSize_whenPageSizeIsAtMaxLimit() {
+        stubRepositoryReturningEmptyPage();
+
+        userService.getUsersByUsername("john", 1, 1000, true);
+
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        assertEquals(1000, pageRequestCaptor.getValue().getPageSize());
+    }
+
+    @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Page Size Is Negative")
     void shouldThrowException_whenPageSizeIsNegative() {
         assertThrows(BadRequestException.class,
                 () -> userService.getUsersByUsername("john", 1, -5, true));
+
+        verifyNoInteractions(userRepository, userMapper);
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Page Size Is Zero")
+    void shouldThrowException_whenPageSizeIsZero() {
+        assertThrows(BadRequestException.class,
+                () -> userService.getUsersByUsername("john", 1, 0, true));
 
         verifyNoInteractions(userRepository, userMapper);
     }
@@ -512,6 +534,23 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateUser] Should Not Change Username - When The Same Value Is Provided")
+    void shouldNotChangeUsernameWhenSameValueProvided() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO("  " + savedUser.getUsername() + "  ", null, null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(userRepository).save(userCaptor.capture());
+        assertThat(userCaptor.getValue().getUsername()).isEqualTo(savedUser.getUsername());
+    }
+
+    @Test
     @DisplayName("[updateUser] Should Update Email Normalized - When A Different Value Is Provided")
     void shouldUpdateEmailNormalizedWhenDifferentValueProvided() {
         UUID id = savedUser.getId();
@@ -526,6 +565,23 @@ class UserServiceImplTest {
 
         verify(userRepository).save(userCaptor.capture());
         assertThat(userCaptor.getValue().getEmail()).isEqualTo("new.email@email.com");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Not Change Email - When The Same Value Is Provided")
+    void shouldNotChangeEmailWhenSameValueProvided() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  " + savedUser.getEmail().toUpperCase() + "  ", null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(userRepository).save(userCaptor.capture());
+        assertThat(userCaptor.getValue().getEmail()).isEqualTo(savedUser.getEmail());
     }
 
     @Test
@@ -567,6 +623,57 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateUser] Should Update Description - When A Different Value Is Provided")
+    void shouldUpdateDescriptionWhenDifferentValueProvided() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New description", null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(userRepository).save(userCaptor.capture());
+        assertThat(userCaptor.getValue().getDescription()).isEqualTo("New description");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Update ProfilePicture - When A Different Value Is Provided")
+    void shouldUpdateProfilePictureWhenDifferentValueProvided() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, "https://new-picture.com/pic.png", null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(userRepository).save(userCaptor.capture());
+        assertThat(userCaptor.getValue().getProfilePicture()).isEqualTo("https://new-picture.com/pic.png");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Update IsProfilePublic - When A Different Value Is Provided")
+    void shouldUpdateIsProfilePublicWhenDifferentValueProvided() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, false);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(userRepository).save(userCaptor.capture());
+        assertThat(userCaptor.getValue().getIsProfilePublic()).isFalse();
+    }
+
+    @Test
     @DisplayName("[updateUser] Should Throw ConflictException With Username Message - When Update Violates Username Constraint")
     void shouldThrowConflictExceptionWithUsernameMessageWhenUpdateViolatesUsernameConstraint() {
         UUID id = savedUser.getId();
@@ -580,6 +687,63 @@ class UserServiceImplTest {
                 .hasMessage("Username already in use");
 
         verify(userMapper, never()).userToUserResponseDto(any());
+    }
+
+    @Test
+    @DisplayName("[login] Should Return UserResponseDTO - When Credentials Are Valid Using Email")
+    void shouldReturnUserResponseDtoWhenCredentialsAreValidUsingEmail() {
+        LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");
+        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
+                .thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        UserResponseDTO result = userService.login(loginUserDTO);
+
+        assertThat(result).isEqualTo(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[login] Should Return UserResponseDTO - When Credentials Are Valid Using Username")
+    void shouldReturnUserResponseDtoWhenCredentialsAreValidUsingUsername() {
+        LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getUsername(), "Password123");
+        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getUsername(), savedUser.getUsername()))
+                .thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        UserResponseDTO result = userService.login(loginUserDTO);
+
+        assertThat(result).isEqualTo(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[login] Should Throw UnauthorizedException - When Identifier Does Not Match Any User")
+    void shouldThrowUnauthorizedExceptionWhenIdentifierDoesNotMatchAnyUser() {
+        LoginUserDTO loginUserDTO = new LoginUserDTO("unknown@email.com", "Password123");
+        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("unknown@email.com", "unknown@email.com"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.login(loginUserDTO))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("Invalid credentials");
+
+        verifyNoInteractions(passwordEncoder, userMapper);
+    }
+
+    @Test
+    @DisplayName("[login] Should Throw UnauthorizedException - When Password Does Not Match")
+    void shouldThrowUnauthorizedExceptionWhenPasswordDoesNotMatch() {
+        LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "WrongPassword123");
+        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
+                .thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("WrongPassword123", savedUser.getPassword())).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.login(loginUserDTO))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("Invalid credentials");
+
+        verifyNoInteractions(userMapper);
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {

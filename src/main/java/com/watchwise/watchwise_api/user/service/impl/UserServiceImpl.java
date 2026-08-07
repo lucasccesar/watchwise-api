@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
@@ -150,7 +152,7 @@ public class UserServiceImpl implements UserService {
         if (pageSize == null || pageSize > 1000) {
             queryPageSize = DEFAULT_PAGE_SIZE;
         } else {
-            if (pageSize < 0) {
+            if (pageSize <= 0) {
                 throw new BadRequestException("Page size must be greater than 0");
             } else {
                 queryPageSize = pageSize;
@@ -169,6 +171,19 @@ public class UserServiceImpl implements UserService {
             return PageRequest.of(queryPageNumber, queryPageSize);
         }
         return PageRequest.of(queryPageNumber, queryPageSize, sort);
+    }
+
+    @Override
+    public UserResponseDTO login(LoginUserDTO loginUserDTO) {
+        User user = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase(loginUserDTO.identifier(), loginUserDTO.identifier())
+                .orElseThrow(() -> new UnauthorizedException("Invalid credentials"));
+
+        if (!passwordEncoder.matches(loginUserDTO.password(), user.getPassword())) {
+            throw new UnauthorizedException("Invalid credentials");
+        }
+
+        return userMapper.userToUserResponseDto(user);
     }
 
     private String extractConstraintName(DataIntegrityViolationException e) {
