@@ -10,4 +10,6 @@ public interface RefreshTokenService {
 
     RefreshedTokens rotateRefreshToken(String rawRefreshToken);
 
+    void revokeRefreshToken(String rawRefreshToken);
+
 }

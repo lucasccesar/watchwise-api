@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,6 +67,25 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         String newRefreshToken = issueRefreshToken(user.getId(), user.getEmail());
 
         return new RefreshedTokens(newAccessToken, newRefreshToken);
+    }
+
+    @Override
+    public void revokeRefreshToken(String rawRefreshToken) {
+        if (!StringUtils.hasText(rawRefreshToken)) {
+            return;
+        }
+
+        UUID jti;
+        try {
+            jti = jwtService.extractJti(rawRefreshToken);
+        } catch (JwtException | IllegalArgumentException e) {
+            return;
+        }
+
+        refreshTokenRepository.findById(jti).ifPresent(refreshToken -> {
+            refreshToken.setRevoked(true);
+            refreshTokenRepository.save(refreshToken);
+        });
     }
 
     private LocalDateTime toLocalDateTime(java.util.Date date) {

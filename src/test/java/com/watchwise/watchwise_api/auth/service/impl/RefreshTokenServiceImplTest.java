@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import io.jsonwebtoken.JwtException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -176,5 +177,60 @@ class RefreshTokenServiceImplTest {
         assertThat(result).isEqualTo(new RefreshedTokens(newAccessToken, newRefreshToken));
         assertThat(storedToken.getRevoked()).isTrue();
         verify(refreshTokenRepository, times(2)).save(any(RefreshToken.class));
+    }
+
+    @Test
+    @DisplayName("[revokeRefreshToken] Should Do Nothing - When Token Is Blank")
+    void shouldDoNothingWhenTokenIsBlank() {
+        refreshTokenService.revokeRefreshToken(" ");
+
+        verifyNoInteractions(refreshTokenRepository);
+    }
+
+    @Test
+    @DisplayName("[revokeRefreshToken] Should Do Nothing - When Token Cannot Be Parsed")
+    void shouldDoNothingWhenTokenCannotBeParsed() {
+        String token = "malformed-token";
+        when(jwtService.extractJti(token)).thenThrow(new JwtException("malformed"));
+
+        refreshTokenService.revokeRefreshToken(token);
+
+        verifyNoInteractions(refreshTokenRepository);
+    }
+
+    @Test
+    @DisplayName("[revokeRefreshToken] Should Do Nothing - When Token Is Not Found In Database")
+    void shouldDoNothingWhenTokenIsNotFoundInDatabase() {
+        String token = "valid-token";
+        UUID jti = UUID.randomUUID();
+
+        when(jwtService.extractJti(token)).thenReturn(jti);
+        when(refreshTokenRepository.findById(jti)).thenReturn(Optional.empty());
+
+        refreshTokenService.revokeRefreshToken(token);
+
+        verify(refreshTokenRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[revokeRefreshToken] Should Mark Stored Token As Revoked - When Token Is Found In Database")
+    void shouldMarkStoredTokenAsRevokedWhenTokenIsFoundInDatabase() {
+        String token = "valid-token";
+        UUID jti = UUID.randomUUID();
+        RefreshToken storedToken = RefreshToken.builder()
+                .id(jti)
+                .user(user)
+                .revoked(false)
+                .expiresAt(LocalDateTime.now().plusDays(7))
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(jwtService.extractJti(token)).thenReturn(jti);
+        when(refreshTokenRepository.findById(jti)).thenReturn(Optional.of(storedToken));
+
+        refreshTokenService.revokeRefreshToken(token);
+
+        assertThat(storedToken.getRevoked()).isTrue();
+        verify(refreshTokenRepository).save(storedToken);
     }
 }

@@ -66,6 +66,23 @@ public class AuthController {
                 .build();
     }
 
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(
+            @CookieValue(name = CookieUtil.REFRESH_TOKEN_COOKIE, required = false) String refreshToken
+    ) {
+        refreshTokenService.revokeRefreshToken(refreshToken);
+
+        ResponseCookie clearedAccessCookie = cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
+        ResponseCookie clearedRefreshCookie = cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH);
+        ResponseCookie clearedCsrfCookie = cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
+
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE, clearedAccessCookie.toString())
+                .header(HttpHeaders.SET_COOKIE, clearedRefreshCookie.toString())
+                .header(HttpHeaders.SET_COOKIE, clearedCsrfCookie.toString())
+                .build();
+    }
+
     private ResponseCookie buildAccessTokenCookie(UserResponseDTO user) {
         String token = jwtService.generateToken(user.id(), user.email(), TokenType.ACCESS);
         return cookieUtil.buildAccessTokenCookie(token);
