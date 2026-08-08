@@ -9,12 +9,15 @@ import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -30,11 +33,17 @@ public class AuthController {
     private final JwtService jwtService;
     private final CookieUtil cookieUtil;
     private final RefreshTokenService refreshTokenService;
+    private final CsrfAuthenticationStrategy csrfAuthenticationStrategy;
 
     @PostMapping("/register")
-    public ResponseEntity<UserResponseDTO> register(@Valid @RequestBody PostUserDTO postUserDTO, HttpServletResponse response) {
+    public ResponseEntity<UserResponseDTO> register(
+            @Valid @RequestBody PostUserDTO postUserDTO,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
         UserResponseDTO user = userService.saveNewUser(postUserDTO);
 
+        rotateCsrfToken(request, response);
         cookieUtil.addCookie(response, buildAccessTokenCookie(user));
         cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
 
@@ -42,9 +51,14 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<UserResponseDTO> login(@Valid @RequestBody LoginUserDTO loginUserDTO, HttpServletResponse response) {
+    public ResponseEntity<UserResponseDTO> login(
+            @Valid @RequestBody LoginUserDTO loginUserDTO,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
         UserResponseDTO user = userService.login(loginUserDTO);
 
+        rotateCsrfToken(request, response);
         cookieUtil.addCookie(response, buildAccessTokenCookie(user));
         cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
 
@@ -76,6 +90,15 @@ public class AuthController {
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
 
         return ResponseEntity.noContent().build();
+    }
+
+    private void rotateCsrfToken(HttpServletRequest request, HttpServletResponse response) {
+        csrfAuthenticationStrategy.onAuthentication(null, request, response);
+
+        CsrfToken csrfToken = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
+        if (csrfToken != null) {
+            csrfToken.getToken();
+        }
     }
 
     private ResponseCookie buildAccessTokenCookie(UserResponseDTO user) {

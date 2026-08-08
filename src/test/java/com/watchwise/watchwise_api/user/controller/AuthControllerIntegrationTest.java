@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -65,6 +66,26 @@ class AuthControllerIntegrationTest {
                 .andExpect(cookie().exists(CookieUtil.REFRESH_TOKEN_COOKIE))
                 .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE))
                 .andExpect(cookie().httpOnly(CookieUtil.CSRF_TOKEN_COOKIE, false));
+    }
+
+    @Test
+    @DisplayName("[register] Should Replace A Pre-Existing Csrf Token - When A Stale Cookie Was Already Present")
+    void shouldReplaceAPreExistingCsrfTokenWhenAStaleCookieWasAlreadyPresent() throws Exception {
+        MvcResult anonymousResult = mockMvc.perform(get("/protected-test-route"))
+                .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE))
+                .andReturn();
+
+        Cookie staleCsrfCookie = anonymousResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(staleCsrfCookie).isNotNull();
+
+        MvcResult registerResult = mockMvc.perform(registerRequest("rotateduser", "rotateduser@email.com")
+                        .cookie(staleCsrfCookie))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie freshCsrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(freshCsrfCookie).isNotNull();
+        assertThat(freshCsrfCookie.getValue()).isNotEqualTo(staleCsrfCookie.getValue());
     }
 
     @Test
