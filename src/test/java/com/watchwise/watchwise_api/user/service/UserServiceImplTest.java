@@ -95,6 +95,7 @@ class UserServiceImplTest {
                 .profilePicture(postUserDTO.profilePicture())
                 .isProfilePublic(true)
                 .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
                 .build();
 
         userResponseDTO = new UserResponseDTO(
@@ -104,7 +105,8 @@ class UserServiceImplTest {
                 savedUser.getDescription(),
                 savedUser.getProfilePicture(),
                 savedUser.getIsProfilePublic(),
-                savedUser.getCreatedAt()
+                savedUser.getCreatedAt(),
+                savedUser.getUpdatedAt()
         );
 
         publicUserDTO = new PublicUserDTO(

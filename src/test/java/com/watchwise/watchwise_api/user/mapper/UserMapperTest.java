@@ -135,7 +135,8 @@ class UserMapperTest {
     @DisplayName("[userToUserResponseDto] Should Map All Fields - When Mapping User To UserResponseDTO")
     void shouldMapAllFieldsWhenMappingUserToUserResponseDto() {
         UUID id = UUID.randomUUID();
-        LocalDateTime createdAt = LocalDateTime.now();
+        LocalDateTime createdAt = LocalDateTime.now().minusDays(1);
+        LocalDateTime updatedAt = LocalDateTime.now();
 
         User user = User.builder()
                 .id(id)
@@ -146,7 +147,7 @@ class UserMapperTest {
                 .profilePicture("https://picture.com/pic.png")
                 .isProfilePublic(true)
                 .createdAt(createdAt)
-                .updatedAt(createdAt)
+                .updatedAt(updatedAt)
                 .build();
 
         UserResponseDTO result = userMapper.userToUserResponseDto(user);
@@ -158,5 +159,6 @@ class UserMapperTest {
         assertThat(result.profilePicture()).isEqualTo("https://picture.com/pic.png");
         assertThat(result.isProfilePublic()).isTrue();
         assertThat(result.createdAt()).isEqualTo(createdAt);
+        assertThat(result.updatedAt()).isEqualTo(updatedAt);
     }
 }

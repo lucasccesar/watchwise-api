@@ -10,6 +10,7 @@ public record UserResponseDTO(
         String description,
         String profilePicture,
         Boolean isProfilePublic,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        LocalDateTime updatedAt
 ) {
 }
