@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.common.config;
 
 import tools.jackson.databind.ObjectMapper;
 import com.watchwise.watchwise_api.common.security.CsrfCookieFilter;
+import com.watchwise.watchwise_api.common.security.JsonAccessDeniedHandler;
 import com.watchwise.watchwise_api.common.security.JsonAuthenticationEntryPoint;
 import com.watchwise.watchwise_api.common.security.JwtCookieAuthenticationFilter;
 import com.watchwise.watchwise_api.common.security.JwtService;
@@ -39,10 +40,16 @@ public class SecurityConfig {
     }
 
     @Bean
+    public JsonAccessDeniedHandler jsonAccessDeniedHandler(ObjectMapper objectMapper) {
+        return new JsonAccessDeniedHandler(objectMapper);
+    }
+
+    @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtCookieAuthenticationFilter jwtCookieAuthenticationFilter,
             JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint,
+            JsonAccessDeniedHandler jsonAccessDeniedHandler,
             CorsConfigurationSource corsConfigurationSource
     ) throws Exception {
         return http
@@ -56,7 +63,8 @@ public class SecurityConfig {
                         .requestMatchers("/auth/**", "/error").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint(jsonAuthenticationEntryPoint))
+                        .authenticationEntryPoint(jsonAuthenticationEntryPoint)
+                        .accessDeniedHandler(jsonAccessDeniedHandler))
                 .addFilterBefore(jwtCookieAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 .build();
