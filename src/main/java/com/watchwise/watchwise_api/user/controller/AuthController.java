@@ -9,9 +9,9 @@ import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -31,56 +31,51 @@ public class AuthController {
     private final CookieUtil cookieUtil;
     private final RefreshTokenService refreshTokenService;
 
-@PostMapping("/register")
-    public ResponseEntity<UserResponseDTO> register(@Valid @RequestBody PostUserDTO postUserDTO) {
+    @PostMapping("/register")
+    public ResponseEntity<UserResponseDTO> register(@Valid @RequestBody PostUserDTO postUserDTO, HttpServletResponse response) {
         UserResponseDTO user = userService.saveNewUser(postUserDTO);
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .header(HttpHeaders.SET_COOKIE, buildAccessTokenCookie(user).toString())
-                .header(HttpHeaders.SET_COOKIE, buildRefreshTokenCookie(user).toString())
-                .body(user);
+        cookieUtil.addCookie(response, buildAccessTokenCookie(user));
+        cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(user);
     }
 
     @PostMapping("/login")
-    public ResponseEntity<UserResponseDTO> login(@Valid @RequestBody LoginUserDTO loginUserDTO) {
+    public ResponseEntity<UserResponseDTO> login(@Valid @RequestBody LoginUserDTO loginUserDTO, HttpServletResponse response) {
         UserResponseDTO user = userService.login(loginUserDTO);
 
-        return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, buildAccessTokenCookie(user).toString())
-                .header(HttpHeaders.SET_COOKIE, buildRefreshTokenCookie(user).toString())
-                .body(user);
+        cookieUtil.addCookie(response, buildAccessTokenCookie(user));
+        cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
+
+        return ResponseEntity.ok(user);
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<Void> refresh(
-            @CookieValue(name = CookieUtil.REFRESH_TOKEN_COOKIE, required = false) String refreshToken
+            @CookieValue(name = CookieUtil.REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
+            HttpServletResponse response
     ) {
         RefreshedTokens tokens = refreshTokenService.rotateRefreshToken(refreshToken);
 
-        ResponseCookie accessCookie = cookieUtil.buildAccessTokenCookie(tokens.accessToken());
-        ResponseCookie refreshCookie = cookieUtil.buildRefreshTokenCookie(tokens.refreshToken());
+        cookieUtil.addCookie(response, cookieUtil.buildAccessTokenCookie(tokens.accessToken()));
+        cookieUtil.addCookie(response, cookieUtil.buildRefreshTokenCookie(tokens.refreshToken()));
 
-        return ResponseEntity.noContent()
-                .header(HttpHeaders.SET_COOKIE, accessCookie.toString())
-                .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
-                .build();
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
-            @CookieValue(name = CookieUtil.REFRESH_TOKEN_COOKIE, required = false) String refreshToken
+            @CookieValue(name = CookieUtil.REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
+            HttpServletResponse response
     ) {
         refreshTokenService.revokeRefreshToken(refreshToken);
 
-        ResponseCookie clearedAccessCookie = cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
-        ResponseCookie clearedRefreshCookie = cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH);
-        ResponseCookie clearedCsrfCookie = cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
 
-        return ResponseEntity.noContent()
-                .header(HttpHeaders.SET_COOKIE, clearedAccessCookie.toString())
-                .header(HttpHeaders.SET_COOKIE, clearedRefreshCookie.toString())
-                .header(HttpHeaders.SET_COOKIE, clearedCsrfCookie.toString())
-                .build();
+        return ResponseEntity.noContent().build();
     }
 
     private ResponseCookie buildAccessTokenCookie(UserResponseDTO user) {
