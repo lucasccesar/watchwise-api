@@ -127,6 +127,13 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public UserResponseDTO getCurrentUser(UUID id) {
+        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
+
+        return userMapper.userToUserResponseDto(user);
+    }
+
+    @Override
     public Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic) {
 
         if (StringUtils.isEmpty(username)) {

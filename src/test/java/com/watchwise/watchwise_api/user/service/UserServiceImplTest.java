@@ -269,6 +269,46 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getCurrentUser] Should Return UserResponseDTO - When Id Exists")
+    void shouldReturnUserResponseDtoWhenIdExists() {
+        UUID id = savedUser.getId();
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        UserResponseDTO result = userService.getCurrentUser(id);
+
+        assertThat(result).isEqualTo(userResponseDTO);
+        verify(userRepository).findById(id);
+        verify(userMapper).userToUserResponseDto(savedUser);
+    }
+
+    @Test
+    @DisplayName("[getCurrentUser] Should Return UserResponseDTO - When Profile Is Private")
+    void shouldReturnUserResponseDtoWhenProfileIsPrivate() {
+        UUID id = savedUser.getId();
+        savedUser.setIsProfilePublic(false);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        UserResponseDTO result = userService.getCurrentUser(id);
+
+        assertThat(result).isEqualTo(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[getCurrentUser] Should Throw NotFoundException - When Id Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenGettingCurrentUserThatDoesNotExist() {
+        UUID id = UUID.randomUUID();
+        when(userRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.getCurrentUser(id))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+
+        verify(userMapper, never()).userToUserResponseDto(any());
+    }
+
+    @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Username Is Null")
     void shouldThrowException_whenUsernameIsNull() {
         assertThrows(BadRequestException.class,
