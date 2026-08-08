@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.service;
 
+import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
@@ -23,5 +24,7 @@ public interface UserService {
     UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO);
 
     UserResponseDTO login(LoginUserDTO loginUserDTO);
+
+    void deleteAccount(UUID id, DeleteAccountDTO deleteAccountDTO);
 
 }

@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
@@ -197,6 +198,17 @@ public class UserServiceImpl implements UserService {
         }
 
         return userMapper.userToUserResponseDto(user);
+    }
+
+    @Override
+    public void deleteAccount(UUID id, DeleteAccountDTO deleteAccountDTO) {
+        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
+
+        if (!passwordEncoder.matches(deleteAccountDTO.password(), user.getPassword())) {
+            throw new UnauthorizedException("Invalid password");
+        }
+
+        userRepository.delete(user);
     }
 
     private String extractConstraintName(DataIntegrityViolationException e) {

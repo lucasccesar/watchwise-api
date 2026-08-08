@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
@@ -786,6 +787,49 @@ class UserServiceImplTest {
                 .hasMessage("Invalid credentials");
 
         verifyNoInteractions(userMapper);
+    }
+
+    @Test
+    @DisplayName("[deleteAccount] Should Delete User - When Password Matches")
+    void shouldDeleteUserWhenPasswordMatches() {
+        UUID id = savedUser.getId();
+        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+
+        userService.deleteAccount(id, deleteAccountDTO);
+
+        verify(userRepository).delete(savedUser);
+    }
+
+    @Test
+    @DisplayName("[deleteAccount] Should Throw UnauthorizedException - When Password Does Not Match")
+    void shouldThrowUnauthorizedExceptionWhenDeleteAccountPasswordDoesNotMatch() {
+        UUID id = savedUser.getId();
+        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("WrongPassword123");
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("WrongPassword123", savedUser.getPassword())).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.deleteAccount(id, deleteAccountDTO))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("Invalid password");
+
+        verify(userRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("[deleteAccount] Should Throw NotFoundException - When Id Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenDeletingAccountThatDoesNotExist() {
+        UUID id = UUID.randomUUID();
+        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
+        when(userRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.deleteAccount(id, deleteAccountDTO))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+
+        verifyNoInteractions(passwordEncoder);
+        verify(userRepository, never()).delete(any());
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {
