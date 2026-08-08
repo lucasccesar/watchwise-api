@@ -24,6 +24,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Service
@@ -45,6 +46,10 @@ public class UserServiceImpl implements UserService {
         mapperUser.setEmail(postUserDTO.email().toLowerCase().trim());
         mapperUser.setUsername(postUserDTO.username().trim());
 
+        LocalDateTime now = LocalDateTime.now();
+        mapperUser.setCreatedAt(now);
+        mapperUser.setUpdatedAt(now);
+
         try {
             return userMapper.userToUserResponseDto(userRepository.save(mapperUser));
         } catch (DataIntegrityViolationException e) {
@@ -57,6 +62,7 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
 
         applyPatch(user, patchUserDTO);
+        user.setUpdatedAt(LocalDateTime.now());
 
         try {
             return userMapper.userToUserResponseDto(userRepository.save(user));
