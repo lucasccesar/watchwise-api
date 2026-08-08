@@ -1,0 +1,180 @@
+package com.watchwise.watchwise_api.auth.service.impl;
+
+import com.watchwise.watchwise_api.auth.dto.RefreshedTokens;
+import com.watchwise.watchwise_api.auth.entity.RefreshToken;
+import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.common.security.JwtService;
+import com.watchwise.watchwise_api.common.security.TokenType;
+import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.LocalDateTime;
+import java.util.Date;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+class RefreshTokenServiceImplTest {
+
+    @Mock
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Mock
+    private JwtService jwtService;
+
+    @InjectMocks
+    private RefreshTokenServiceImpl refreshTokenService;
+
+    @Captor
+    private ArgumentCaptor<RefreshToken> refreshTokenCaptor;
+
+    private User user;
+    private UUID userId;
+
+    @BeforeEach
+    void setUp() {
+        userId = UUID.randomUUID();
+        user = User.builder()
+                .id(userId)
+                .username("lucas")
+                .email("lucas@email.com")
+                .password("hashed_password")
+                .isProfilePublic(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    @Test
+    @DisplayName("[issueRefreshToken] Should Persist Refresh Token With Id Matching Generated Jti - When Called")
+    void shouldPersistRefreshTokenWithIdMatchingGeneratedJtiWhenCalled() {
+        String token = "refresh-token-value";
+        UUID jti = UUID.randomUUID();
+        Date expiration = new Date(System.currentTimeMillis() + 60_000);
+
+        when(jwtService.generateToken(userId, user.getEmail(), TokenType.REFRESH)).thenReturn(token);
+        when(jwtService.extractJti(token)).thenReturn(jti);
+        when(jwtService.extractExpiration(token)).thenReturn(expiration);
+        when(userRepository.getReferenceById(userId)).thenReturn(user);
+
+        String result = refreshTokenService.issueRefreshToken(userId, user.getEmail());
+
+        verify(refreshTokenRepository).save(refreshTokenCaptor.capture());
+        RefreshToken saved = refreshTokenCaptor.getValue();
+
+        assertThat(result).isEqualTo(token);
+        assertThat(saved.getId()).isEqualTo(jti);
+        assertThat(saved.getUser()).isEqualTo(user);
+        assertThat(saved.getRevoked()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[rotateRefreshToken] Should Throw UnauthorizedException - When Token Is Blank")
+    void shouldThrowUnauthorizedExceptionWhenTokenIsBlank() {
+        assertThatThrownBy(() -> refreshTokenService.rotateRefreshToken("  "))
+                .isInstanceOf(UnauthorizedException.class);
+
+        verifyNoInteractions(refreshTokenRepository);
+    }
+
+    @Test
+    @DisplayName("[rotateRefreshToken] Should Throw UnauthorizedException - When Token Signature Or Type Is Invalid")
+    void shouldThrowUnauthorizedExceptionWhenTokenSignatureOrTypeIsInvalid() {
+        String token = "invalid-token";
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(false);
+
+        assertThatThrownBy(() -> refreshTokenService.rotateRefreshToken(token))
+                .isInstanceOf(UnauthorizedException.class);
+
+        verifyNoInteractions(refreshTokenRepository);
+    }
+
+    @Test
+    @DisplayName("[rotateRefreshToken] Should Throw UnauthorizedException - When Token Is Not Found In Database")
+    void shouldThrowUnauthorizedExceptionWhenTokenIsNotFoundInDatabase() {
+        String token = "valid-token";
+        UUID jti = UUID.randomUUID();
+
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(true);
+        when(jwtService.extractJti(token)).thenReturn(jti);
+        when(refreshTokenRepository.findById(jti)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> refreshTokenService.rotateRefreshToken(token))
+                .isInstanceOf(UnauthorizedException.class);
+    }
+
+    @Test
+    @DisplayName("[rotateRefreshToken] Should Throw UnauthorizedException - When Stored Token Is Already Revoked")
+    void shouldThrowUnauthorizedExceptionWhenStoredTokenIsAlreadyRevoked() {
+        String token = "valid-token";
+        UUID jti = UUID.randomUUID();
+        RefreshToken storedToken = RefreshToken.builder()
+                .id(jti)
+                .user(user)
+                .revoked(true)
+                .expiresAt(LocalDateTime.now().plusDays(7))
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(true);
+        when(jwtService.extractJti(token)).thenReturn(jti);
+        when(refreshTokenRepository.findById(jti)).thenReturn(Optional.of(storedToken));
+
+        assertThatThrownBy(() -> refreshTokenService.rotateRefreshToken(token))
+                .isInstanceOf(UnauthorizedException.class);
+
+        verify(refreshTokenRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[rotateRefreshToken] Should Revoke Old Token And Issue New Token Pair - When Token Is Valid And Not Revoked")
+    void shouldRevokeOldTokenAndIssueNewTokenPairWhenTokenIsValidAndNotRevoked() {
+        String oldToken = "old-refresh-token";
+        String newAccessToken = "new-access-token";
+        String newRefreshToken = "new-refresh-token";
+        UUID oldJti = UUID.randomUUID();
+        UUID newJti = UUID.randomUUID();
+        Date newExpiration = new Date(System.currentTimeMillis() + 60_000);
+
+        RefreshToken storedToken = RefreshToken.builder()
+                .id(oldJti)
+                .user(user)
+                .revoked(false)
+                .expiresAt(LocalDateTime.now().plusDays(7))
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(jwtService.isTokenValid(oldToken, TokenType.REFRESH)).thenReturn(true);
+        when(jwtService.extractJti(oldToken)).thenReturn(oldJti);
+        when(refreshTokenRepository.findById(oldJti)).thenReturn(Optional.of(storedToken));
+        when(jwtService.generateToken(userId, user.getEmail(), TokenType.ACCESS)).thenReturn(newAccessToken);
+        when(jwtService.generateToken(userId, user.getEmail(), TokenType.REFRESH)).thenReturn(newRefreshToken);
+        when(jwtService.extractJti(newRefreshToken)).thenReturn(newJti);
+        when(jwtService.extractExpiration(newRefreshToken)).thenReturn(newExpiration);
+        when(userRepository.getReferenceById(userId)).thenReturn(user);
+
+        RefreshedTokens result = refreshTokenService.rotateRefreshToken(oldToken);
+
+        assertThat(result).isEqualTo(new RefreshedTokens(newAccessToken, newRefreshToken));
+        assertThat(storedToken.getRevoked()).isTrue();
+        verify(refreshTokenRepository, times(2)).save(any(RefreshToken.class));
+    }
+}

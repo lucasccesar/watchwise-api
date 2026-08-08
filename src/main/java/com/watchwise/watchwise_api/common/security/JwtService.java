@@ -20,18 +20,24 @@ public class JwtService {
     private static final String TYPE_CLAIM = "type";
 
     private final SecretKey key;
-    private final long expirationMinutes;
+    private final long accessTokenExpirationMinutes;
+    private final long refreshTokenExpirationDays;
 
     public JwtService(
             @Value("${app.jwt.secret}") String secret,
-            @Value("${app.jwt.expiration-minutes}") long expirationMinutes
+            @Value("${app.jwt.expiration-minutes}") long accessTokenExpirationMinutes,
+            @Value("${app.jwt.refresh-expiration-days}") long refreshTokenExpirationDays
     ) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-        this.expirationMinutes = expirationMinutes;
+        this.accessTokenExpirationMinutes = accessTokenExpirationMinutes;
+        this.refreshTokenExpirationDays = refreshTokenExpirationDays;
     }
 
     public String generateToken(UUID userId, String email, TokenType type) {
         Instant now = Instant.now();
+        Instant expiration = type == TokenType.REFRESH
+                ? now.plus(refreshTokenExpirationDays, ChronoUnit.DAYS)
+                : now.plus(accessTokenExpirationMinutes, ChronoUnit.MINUTES);
 
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())
@@ -39,13 +45,21 @@ public class JwtService {
                 .claim("email", email)
                 .claim(TYPE_CLAIM, type.name())
                 .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(expirationMinutes, ChronoUnit.MINUTES)))
+                .expiration(Date.from(expiration))
                 .signWith(key)
                 .compact();
     }
 
     public UUID extractUserId(String token) {
         return UUID.fromString(parseClaims(token).getSubject());
+    }
+
+    public UUID extractJti(String token) {
+        return UUID.fromString(parseClaims(token).getId());
+    }
+
+    public Date extractExpiration(String token) {
+        return parseClaims(token).getExpiration();
     }
 
     public TokenType extractTokenType(String token) {

@@ -11,7 +11,7 @@ class JwtServiceTest {
 
     private final String secret = "test-secret-test-secret-test-secret-test-secret";
 
-    private final JwtService jwtService = new JwtService(secret, 60);
+    private final JwtService jwtService = new JwtService(secret, 60, 7);
 
     @Test
     @DisplayName("[generateToken] Should Generate Token That Resolves To Same User Id - When Called")
@@ -70,10 +70,27 @@ class JwtServiceTest {
     @DisplayName("[isTokenValid] Should Return False - When Token Was Signed With Different Secret")
     void shouldReturnFalseWhenTokenWasSignedWithDifferentSecret() {
         String otherSecret = "other-secret-other-secret-other-secret-other-secret";
-        JwtService otherJwtService = new JwtService(otherSecret, 60);
+        JwtService otherJwtService = new JwtService(otherSecret, 60, 7);
 
         String token = otherJwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.ACCESS);
 
         assertThat(jwtService.isTokenValid(token, TokenType.ACCESS)).isFalse();
+    }
+
+    @Test
+    @DisplayName("[extractJti] Should Return Same Id Embedded At Generation - When Called")
+    void shouldReturnSameIdEmbeddedAtGenerationWhenCalled() {
+        String token = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.REFRESH);
+
+        assertThat(jwtService.extractJti(token)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[generateToken] Should Generate Refresh Token With Later Expiration Than Access Token - When Called")
+    void shouldGenerateRefreshTokenWithLaterExpirationThanAccessTokenWhenCalled() {
+        String accessToken = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.ACCESS);
+        String refreshToken = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.REFRESH);
+
+        assertThat(jwtService.extractExpiration(refreshToken)).isAfter(jwtService.extractExpiration(accessToken));
     }
 }
