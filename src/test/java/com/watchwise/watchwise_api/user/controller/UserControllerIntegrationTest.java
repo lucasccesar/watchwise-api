@@ -77,6 +77,26 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[updateCurrentUser] Should Accept The Same Csrf Token Twice - When Two Authenticated Requests Are Made In A Row")
+    void shouldAcceptTheSameCsrfTokenTwiceWhenTwoAuthenticatedRequestsAreMadeInARow() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("repeatuser", "repeatuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+        assertThat(csrfCookie).isNotNull();
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"description\": \"First update\" }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"description\": \"Second update\" }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.description").value("Second update"));
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Update Only The Authenticated User - When Another User Exists")
     void shouldUpdateOnlyTheAuthenticatedUserWhenAnotherUserExists() throws Exception {
         mockMvc.perform(registerRequest("userone", "userone@email.com")).andExpect(status().isCreated());
