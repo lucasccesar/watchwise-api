@@ -21,12 +21,15 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -176,6 +179,92 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[deleteCurrentUser] Should Delete Account And Clear Cookies - When Password Matches")
+    void shouldDeleteAccountAndClearCookiesWhenPasswordMatches() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("deleteuser", "deleteuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+        assertThat(csrfCookie).isNotNull();
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().maxAge(CookieUtil.ACCESS_TOKEN_COOKIE, 0))
+                .andExpect(cookie().maxAge(CookieUtil.REFRESH_TOKEN_COOKIE, 0))
+                .andExpect(cookie().maxAge(CookieUtil.CSRF_TOKEN_COOKIE, 0));
+
+        Optional<User> deletedUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("deleteuser", "deleteuser");
+        assertThat(deletedUser).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Return Unauthorized And Keep Account - When Password Does Not Match")
+    void shouldReturnUnauthorizedAndKeepAccountWhenPasswordDoesNotMatch() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("keepuser", "keepuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"WrongPassword123\" }"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid password"));
+
+        Optional<User> keptUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("keepuser", "keepuser");
+        assertThat(keptUser).isPresent();
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Return BadRequest - When Password Is Blank")
+    void shouldReturnBadRequestWhenPasswordIsBlank() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("blankdeleteuser", "blankdeleteuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"\" }"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForDeleteCurrentUser() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("nocookiedeleteuser", "nocookiedeleteuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(csrfCookie).isNotNull();
+
+        mockMvc.perform(delete("/users/me")
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"password\": \"Password123\" }"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingForDeleteCurrentUser() throws Exception {
+        Cookie accessTokenCookie = registerAndGetAccessToken("nocsrfdeleteuser", "nocsrfdeleteuser@email.com");
+
+        mockMvc.perform(delete("/users/me")
+                        .cookie(accessTokenCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"password\": \"Password123\" }"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     @DisplayName("[getUserById] Should Return PublicUserDTO - When User Exists And Profile Is Public")
     void shouldReturnPublicUserDtoWhenUserExistsAndProfileIsPublic() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("viewerpublic", "viewerpublic@email.com");
@@ -321,6 +410,14 @@ class UserControllerIntegrationTest {
 
     private MockHttpServletRequestBuilder patchMeRequest(Cookie accessTokenCookie, Cookie csrfCookie, String body) {
         return patch("/users/me")
+                .cookie(accessTokenCookie, csrfCookie)
+                .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private MockHttpServletRequestBuilder deleteMeRequest(Cookie accessTokenCookie, Cookie csrfCookie, String body) {
+        return delete("/users/me")
                 .cookie(accessTokenCookie, csrfCookie)
                 .header("X-XSRF-TOKEN", csrfCookie.getValue())
                 .contentType(MediaType.APPLICATION_JSON)

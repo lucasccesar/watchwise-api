@@ -1,10 +1,13 @@
 package com.watchwise.watchwise_api.user.controller;
 
+import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,6 +19,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -26,8 +30,11 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,6 +43,9 @@ class UserControllerTest {
 
     @Mock
     private UserService userService;
+
+    @Mock
+    private CookieUtil cookieUtil;
 
     @InjectMocks
     private UserController userController;
@@ -169,5 +179,43 @@ class UserControllerTest {
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(publicUserDTO);
         verify(userService).getUserById(id);
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Return NoContent - When Deletion Succeeds")
+    void shouldReturnNoContentWhenDeletionSucceeds() {
+        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
+        HttpServletResponse response = mock(HttpServletResponse.class);
+
+        ResponseEntity<Void> result = userController.deleteCurrentUser(deleteAccountDTO, response);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Resolve Id From The Security Context - When Called")
+    void shouldResolveIdFromTheSecurityContextWhenDeleteCalled() {
+        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
+        HttpServletResponse response = mock(HttpServletResponse.class);
+
+        userController.deleteCurrentUser(deleteAccountDTO, response);
+
+        verify(userService).deleteAccount(currentUserId, deleteAccountDTO);
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Clear Access, Refresh And Csrf Cookies - When Deletion Succeeds")
+    void shouldClearAccessRefreshAndCsrfCookiesWhenDeletionSucceeds() {
+        DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
+        HttpServletResponse response = mock(HttpServletResponse.class);
+        ResponseCookie clearedCookie = ResponseCookie.from("cleared", "").build();
+        when(cookieUtil.clearCookie(anyString(), anyString())).thenReturn(clearedCookie);
+
+        userController.deleteCurrentUser(deleteAccountDTO, response);
+
+        verify(cookieUtil).clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
+        verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH);
+        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
+        verify(cookieUtil, times(3)).addCookie(eq(response), eq(clearedCookie));
     }
 }

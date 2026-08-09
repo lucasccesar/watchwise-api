@@ -1,15 +1,19 @@
 package com.watchwise.watchwise_api.user.controller;
 
+import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,6 +31,7 @@ import java.util.UUID;
 public class UserController {
 
     private final UserService userService;
+    private final CookieUtil cookieUtil;
 
     @GetMapping
     public ResponseEntity<List<UserPreviewDTO>> getUsersByUsername(
@@ -54,6 +59,20 @@ public class UserController {
     public ResponseEntity<PublicUserDTO> getUserById(@PathVariable UUID userId) {
         PublicUserDTO user = userService.getUserById(userId);
         return ResponseEntity.ok(user);
+    }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<Void> deleteCurrentUser(
+            @Valid @RequestBody DeleteAccountDTO deleteAccountDTO,
+            HttpServletResponse response
+    ) {
+        userService.deleteAccount(getCurrentUserId(), deleteAccountDTO);
+
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
+
+        return ResponseEntity.noContent().build();
     }
 
     private UUID getCurrentUserId() {
