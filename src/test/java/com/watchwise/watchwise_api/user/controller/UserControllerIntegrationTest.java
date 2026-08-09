@@ -215,6 +215,76 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    @DisplayName("[getUsersByUsername] Should Return Matching Users - When Username Prefix Matches")
+    void shouldReturnMatchingUsersWhenUsernamePrefixMatches() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("searchviewer", "searchviewer@email.com");
+        mockMvc.perform(registerRequest("searchuser1", "searchuser1@email.com")).andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("searchuser2", "searchuser2@email.com")).andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("unrelated", "unrelated@email.com")).andExpect(status().isCreated());
+
+        mockMvc.perform(get("/users").param("username", "searchuser").cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].username").value("searchuser1"))
+                .andExpect(jsonPath("$[1].username").value("searchuser2"))
+                .andExpect(jsonPath("$[0].email").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Include Private Profiles In Results - When Username Matches")
+    void shouldIncludePrivateProfilesInResultsWhenUsernameMatches() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("privatesearchviewer", "privatesearchviewer@email.com");
+        mockMvc.perform(registerRequest("privatesearchtarget", "privatesearchtarget@email.com", false))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/users").param("username", "privatesearchtarget").cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].username").value("privatesearchtarget"))
+                .andExpect(jsonPath("$[0].isProfilePublic").value(false));
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Respect Size Parameter - When Provided")
+    void shouldRespectSizeParameterWhenProvided() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("sizeviewer", "sizeviewer@email.com");
+        mockMvc.perform(registerRequest("sizeuser1", "sizeuser1@email.com")).andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("sizeuser2", "sizeuser2@email.com")).andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("sizeuser3", "sizeuser3@email.com")).andExpect(status().isCreated());
+
+        mockMvc.perform(get("/users").param("username", "sizeuser").param("size", "2").cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Return BadRequest - When Username Is Missing")
+    void shouldReturnBadRequestWhenUsernameIsMissing() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("nousernameviewer", "nousernameviewer@email.com");
+
+        mockMvc.perform(get("/users").cookie(viewerAccessToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Username must be provided"));
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Return BadRequest - When Username Is Blank")
+    void shouldReturnBadRequestWhenUsernameIsBlank() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("blankusernameviewer", "blankusernameviewer@email.com");
+
+        mockMvc.perform(get("/users").param("username", "").cookie(viewerAccessToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Username must be provided"));
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetUsersByUsername() throws Exception {
+        mockMvc.perform(get("/users").param("username", "anything"))
+                .andExpect(status().isUnauthorized());
+    }
+
     private Cookie registerAndGetAccessToken(String username, String email) throws Exception {
         MvcResult result = mockMvc.perform(registerRequest(username, email))
                 .andExpect(status().isCreated())
