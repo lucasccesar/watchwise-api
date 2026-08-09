@@ -265,7 +265,7 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").cookie(viewerAccessToken))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Username must be provided"));
+                .andExpect(jsonPath("$.message").value("Required parameter 'username' is missing"));
     }
 
     @Test

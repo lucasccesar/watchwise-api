@@ -30,7 +30,7 @@ public class UserController {
 
     @GetMapping
     public ResponseEntity<List<UserPreviewDTO>> getUsersByUsername(
-            @RequestParam(required = false) String username,
+            @RequestParam String username,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
