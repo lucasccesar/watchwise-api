@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.controller;
 
+import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
 import org.junit.jupiter.api.AfterEach;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -78,5 +80,28 @@ class UserControllerTest {
         userController.getCurrentUser();
 
         verify(userService).getCurrentUser(currentUserId);
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Return UserResponseDTO Of The Authenticated User - When Called")
+    void shouldReturnUserResponseDtoOfTheAuthenticatedUserWhenUpdateCalled() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null);
+        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+
+        ResponseEntity<UserResponseDTO> result = userController.updateCurrentUser(patchUserDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Resolve Id From The Security Context - When Called")
+    void shouldResolveIdFromTheSecurityContextWhenUpdateCalled() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null);
+        when(userService.updateUser(any(UUID.class), any(PatchUserDTO.class))).thenReturn(userResponseDTO);
+
+        userController.updateCurrentUser(patchUserDTO);
+
+        verify(userService).updateUser(currentUserId, patchUserDTO);
     }
 }

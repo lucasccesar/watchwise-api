@@ -89,6 +89,94 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[register] Should Return BadRequest With Validation Errors - When Payload Is Invalid")
+    void shouldReturnBadRequestWithValidationErrorsWhenPayloadIsInvalid() throws Exception {
+        String body = """
+                {
+                    "username": "ab",
+                    "email": "not-an-email",
+                    "password": "short",
+                    "isProfilePublic": true
+                }
+                """;
+
+        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation Failed"))
+                .andExpect(jsonPath("$.errors[*].field").value(org.hamcrest.Matchers.hasItems("username", "email", "password")));
+    }
+
+    @Test
+    @DisplayName("[register] Should Return Conflict With Username Message - When Username Is Already Taken")
+    void shouldReturnConflictWithUsernameMessageWhenUsernameIsAlreadyTaken() throws Exception {
+        mockMvc.perform(registerRequest("duplicateuser", "first@email.com"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(registerRequest("duplicateuser", "second@email.com"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Username already in use"));
+    }
+
+    @Test
+    @DisplayName("[register] Should Return Conflict With Email Message - When Email Is Already Taken")
+    void shouldReturnConflictWithEmailMessageWhenEmailIsAlreadyTaken() throws Exception {
+        mockMvc.perform(registerRequest("firstuser", "duplicate@email.com"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(registerRequest("seconduser", "duplicate@email.com"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Email already in use"));
+    }
+
+    @Test
+    @DisplayName("[login] Should Return UserResponseDTO And Emit Access, Refresh And Csrf Cookies - When Credentials Are Valid")
+    void shouldReturnUserResponseDtoAndEmitCookiesWhenCredentialsAreValid() throws Exception {
+        mockMvc.perform(registerRequest("loginuser", "loginuser@email.com"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(loginRequest("loginuser"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("loginuser"))
+                .andExpect(cookie().exists(CookieUtil.ACCESS_TOKEN_COOKIE))
+                .andExpect(cookie().exists(CookieUtil.REFRESH_TOKEN_COOKIE))
+                .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE));
+    }
+
+    @Test
+    @DisplayName("[login] Should Return Unauthorized - When Password Is Incorrect")
+    void shouldReturnUnauthorizedWhenPasswordIsIncorrect() throws Exception {
+        mockMvc.perform(registerRequest("wrongpassuser", "wrongpassuser@email.com"))
+                .andExpect(status().isCreated());
+
+        String body = """
+                {
+                    "identifier": "wrongpassuser",
+                    "password": "WrongPassword123"
+                }
+                """;
+
+        mockMvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid credentials"));
+    }
+
+    @Test
+    @DisplayName("[login] Should Return Unauthorized - When Identifier Does Not Match Any User")
+    void shouldReturnUnauthorizedWhenIdentifierDoesNotMatchAnyUser() throws Exception {
+        mockMvc.perform(loginRequest("unknownuser"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid credentials"));
+    }
+
+    @Test
+    @DisplayName("[refresh] Should Return Unauthorized - When No Refresh Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoRefreshTokenCookieIsPresent() throws Exception {
+        mockMvc.perform(post("/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid refresh token"));
+    }
+
+    @Test
     @DisplayName("[refresh][logout] Should Rotate Refresh Token And Reject Reuse Of Old Token - When Full Auth Flow Is Executed")
     void shouldRotateRefreshTokenAndRejectReuseOfOldTokenWhenFullAuthFlowIsExecuted() throws Exception {
         mockMvc.perform(registerRequest("flowuser", "flowuser@email.com"))

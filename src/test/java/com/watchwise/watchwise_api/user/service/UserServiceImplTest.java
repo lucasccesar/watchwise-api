@@ -733,6 +733,22 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateUser] Should Throw ConflictException With Email Message - When Update Violates Email Constraint")
+    void shouldThrowConflictExceptionWithEmailMessageWhenUpdateViolatesEmailConstraint() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "taken@email.com", null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class)))
+                .thenThrow(buildDataIntegrityViolationException("uq_users_email"));
+
+        assertThatThrownBy(() -> userService.updateUser(id, patchUserDTO))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Email already in use");
+
+        verify(userMapper, never()).userToUserResponseDto(any());
+    }
+
+    @Test
     @DisplayName("[login] Should Return UserResponseDTO - When Credentials Are Valid Using Email")
     void shouldReturnUserResponseDtoWhenCredentialsAreValidUsingEmail() {
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");
