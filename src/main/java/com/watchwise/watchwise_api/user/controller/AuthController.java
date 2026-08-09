@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.user.controller;
 
 import com.watchwise.watchwise_api.auth.dto.RefreshedTokens;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.TokenType;
@@ -16,6 +17,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.CookieValue;
@@ -41,6 +45,10 @@ public class AuthController {
             HttpServletRequest request,
             HttpServletResponse response
     ) {
+        if (isAuthenticated()) {
+            throw new ConflictException("Already authenticated");
+        }
+
         UserResponseDTO user = userService.saveNewUser(postUserDTO);
 
         rotateCsrfToken(request, response);
@@ -90,6 +98,13 @@ public class AuthController {
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
 
         return ResponseEntity.noContent().build();
+    }
+
+    private boolean isAuthenticated() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null
+                && authentication.isAuthenticated()
+                && !(authentication instanceof AnonymousAuthenticationToken);
     }
 
     private void rotateCsrfToken(HttpServletRequest request, HttpServletResponse response) {

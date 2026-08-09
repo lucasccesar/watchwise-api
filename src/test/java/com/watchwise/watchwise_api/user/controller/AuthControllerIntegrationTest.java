@@ -129,6 +129,21 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[register] Should Return Conflict - When Already Authenticated")
+    void shouldReturnConflictWhenAlreadyAuthenticated() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("alreadyauthuser", "alreadyauthuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+
+        mockMvc.perform(registerRequest("anotheruser", "anotheruser@email.com").cookie(accessTokenCookie))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Already authenticated"));
+    }
+
+    @Test
     @DisplayName("[login] Should Return UserResponseDTO And Emit Access, Refresh And Csrf Cookies - When Credentials Are Valid")
     void shouldReturnUserResponseDtoAndEmitCookiesWhenCredentialsAreValid() throws Exception {
         mockMvc.perform(registerRequest("loginuser", "loginuser@email.com"))
