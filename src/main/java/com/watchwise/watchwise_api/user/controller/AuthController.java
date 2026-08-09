@@ -64,6 +64,10 @@ public class AuthController {
             HttpServletRequest request,
             HttpServletResponse response
     ) {
+        if (isAuthenticated()) {
+            throw new ConflictException("Already authenticated");
+        }
+
         UserResponseDTO user = userService.login(loginUserDTO);
 
         rotateCsrfToken(request, response);
