@@ -21,7 +21,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -154,6 +157,74 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @DisplayName("[getUserById] Should Return PublicUserDTO - When User Exists And Profile Is Public")
+    void shouldReturnPublicUserDtoWhenUserExistsAndProfileIsPublic() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("viewerpublic", "viewerpublic@email.com");
+
+        mockMvc.perform(registerRequest("targetpublic", "targetpublic@email.com"))
+                .andExpect(status().isCreated());
+        User targetUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetpublic", "targetpublic")
+                .orElseThrow();
+
+        mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(targetUser.getId().toString()))
+                .andExpect(jsonPath("$.username").value("targetpublic"))
+                .andExpect(jsonPath("$.isProfilePublic").value(true))
+                .andExpect(jsonPath("$.email").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return Forbidden - When Target Profile Is Private")
+    void shouldReturnForbiddenWhenTargetProfileIsPrivate() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("viewerprivate", "viewerprivate@email.com");
+
+        mockMvc.perform(registerRequest("targetprivate", "targetprivate@email.com", false))
+                .andExpect(status().isCreated());
+        User targetUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetprivate", "targetprivate")
+                .orElseThrow();
+
+        mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return NotFound - When User Does Not Exist")
+    void shouldReturnNotFoundWhenUserDoesNotExist() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("viewernotfound", "viewernotfound@email.com");
+
+        mockMvc.perform(get("/users/" + UUID.randomUUID()).cookie(viewerAccessToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetUserById() throws Exception {
+        mockMvc.perform(registerRequest("targetnoauth", "targetnoauth@email.com"))
+                .andExpect(status().isCreated());
+        User targetUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetnoauth", "targetnoauth")
+                .orElseThrow();
+
+        mockMvc.perform(get("/users/" + targetUser.getId()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    private Cookie registerAndGetAccessToken(String username, String email) throws Exception {
+        MvcResult result = mockMvc.perform(registerRequest(username, email))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+        return accessTokenCookie;
+    }
+
     private MockHttpServletRequestBuilder patchMeRequest(Cookie accessTokenCookie, Cookie csrfCookie, String body) {
         return patch("/users/me")
                 .cookie(accessTokenCookie, csrfCookie)
@@ -163,14 +234,18 @@ class UserControllerIntegrationTest {
     }
 
     private MockHttpServletRequestBuilder registerRequest(String username, String email) {
+        return registerRequest(username, email, true);
+    }
+
+    private MockHttpServletRequestBuilder registerRequest(String username, String email, boolean isProfilePublic) {
         String body = """
                 {
                     "username": "%s",
                     "email": "%s",
                     "password": "Password123",
-                    "isProfilePublic": true
+                    "isProfilePublic": %s
                 }
-                """.formatted(username, email);
+                """.formatted(username, email, isProfilePublic);
 
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)

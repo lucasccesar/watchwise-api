@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.user.controller;
 
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
 import org.junit.jupiter.api.AfterEach;
@@ -103,5 +104,26 @@ class UserControllerTest {
         userController.updateCurrentUser(patchUserDTO);
 
         verify(userService).updateUser(currentUserId, patchUserDTO);
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return PublicUserDTO - When Id Exists")
+    void shouldReturnPublicUserDtoWhenIdExists() {
+        UUID id = UUID.randomUUID();
+        PublicUserDTO publicUserDTO = new PublicUserDTO(
+                id,
+                "JaneDoe",
+                "Some description",
+                "https://picture.com/pic.png",
+                true,
+                LocalDateTime.now()
+        );
+        when(userService.getUserById(id)).thenReturn(publicUserDTO);
+
+        ResponseEntity<PublicUserDTO> result = userController.getUserById(id);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(publicUserDTO);
+        verify(userService).getUserById(id);
     }
 }
