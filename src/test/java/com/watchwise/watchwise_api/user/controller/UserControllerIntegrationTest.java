@@ -62,6 +62,24 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getCurrentUser] Should Return UserResponseDTO - When Access Token Cookie Is Valid")
+    void shouldReturnUserResponseDtoWhenAccessTokenCookieIsValid() throws Exception {
+        Cookie accessTokenCookie = registerAndGetAccessToken("meuser", "meuser@email.com");
+
+        mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("meuser"))
+                .andExpect(jsonPath("$.email").value("meuser@email.com"));
+    }
+
+    @Test
+    @DisplayName("[getCurrentUser] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetCurrentUser() throws Exception {
+        mockMvc.perform(get("/users/me"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Update Authenticated User - When Request Is Valid")
     void shouldUpdateAuthenticatedUserWhenRequestIsValid() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("johndoe", "johndoe@email.com"))
@@ -203,8 +221,8 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserById] Should Return Unauthorized - When No Access Token Cookie Is Present")
-    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetUserById() throws Exception {
+    @DisplayName("[getUserById] Should Return PublicUserDTO - When No Access Token Cookie Is Present")
+    void shouldReturnPublicUserDtoWhenNoAccessTokenCookieIsPresent() throws Exception {
         mockMvc.perform(registerRequest("targetnoauth", "targetnoauth@email.com"))
                 .andExpect(status().isCreated());
         User targetUser = userRepository
@@ -212,7 +230,8 @@ class UserControllerIntegrationTest {
                 .orElseThrow();
 
         mockMvc.perform(get("/users/" + targetUser.getId()))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("targetnoauth"));
     }
 
     @Test
@@ -279,10 +298,15 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUsersByUsername] Should Return Unauthorized - When No Access Token Cookie Is Present")
-    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetUsersByUsername() throws Exception {
-        mockMvc.perform(get("/users").param("username", "anything"))
-                .andExpect(status().isUnauthorized());
+    @DisplayName("[getUsersByUsername] Should Return Matching Users - When No Access Token Cookie Is Present")
+    void shouldReturnMatchingUsersWhenNoAccessTokenCookieIsPresent() throws Exception {
+        mockMvc.perform(registerRequest("noauthsearchtarget", "noauthsearchtarget@email.com"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/users").param("username", "noauthsearchtarget"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].username").value("noauthsearchtarget"));
     }
 
     private Cookie registerAndGetAccessToken(String username, String email) throws Exception {
