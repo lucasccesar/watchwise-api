@@ -162,6 +162,56 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[updateCurrentUser] Should Return NotFound - When Account Was Deleted After Token Was Issued")
+    void shouldReturnNotFoundWhenAccountWasDeletedAfterTokenWasIssued() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("stalepatchuser", "stalepatchuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"description\": \"Updated bio\" }"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Return Conflict - When Updating Username To One Already Taken By Another Real User")
+    void shouldReturnConflictWhenUpdatingUsernameToOneAlreadyTakenByAnotherRealUser() throws Exception {
+        mockMvc.perform(registerRequest("takenusername", "takenusername@email.com"))
+                .andExpect(status().isCreated());
+
+        MvcResult registerResult = mockMvc.perform(registerRequest("conflictuser", "conflictuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"username\": \"takenusername\" }"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Username already in use"));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Return BadRequest - When Email Format Is Invalid")
+    void shouldReturnBadRequestWhenEmailFormatIsInvalid() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("invalidemailuser", "invalidemailuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"email\": \"not-an-email\" }"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Return Forbidden - When Csrf Token Is Missing")
     void shouldReturnForbiddenWhenCsrfTokenIsMissing() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("nocsrfuser", "nocsrfuser@email.com"))
@@ -250,6 +300,24 @@ class UserControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{ \"password\": \"Password123\" }"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Return NotFound - When Account Was Already Deleted")
+    void shouldReturnNotFoundWhenAccountWasAlreadyDeleted() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("doubledeleteuser", "doubledeleteuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
     }
 
     @Test
@@ -364,6 +432,25 @@ class UserControllerIntegrationTest {
         mockMvc.perform(get("/users").param("username", "sizeuser").param("size", "2").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Return Different Page Of Results - When Page Parameter Changes")
+    void shouldReturnDifferentPageOfResultsWhenPageParameterChanges() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("pageviewer", "pageviewer@email.com");
+        mockMvc.perform(registerRequest("pageuser1", "pageuser1@email.com")).andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("pageuser2", "pageuser2@email.com")).andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("pageuser3", "pageuser3@email.com")).andExpect(status().isCreated());
+
+        mockMvc.perform(get("/users").param("username", "pageuser").param("page", "1").param("size", "1").cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].username").value("pageuser1"));
+
+        mockMvc.perform(get("/users").param("username", "pageuser").param("page", "2").param("size", "1").cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].username").value("pageuser2"));
     }
 
     @Test
