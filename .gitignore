@@ -3,8 +3,6 @@ target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
-CLAUDE.md
-docs/
 
 ### STS ###
 .apt_generated
