@@ -119,6 +119,8 @@ Also check whether other parts of the codebase implement the same or similar log
 
 **Error handling:** Domain code throws `NotFoundException` / `BadRequestException` / `ConflictException` (in `common.exception`), each annotated with `@ResponseStatus`. `GlobalExceptionHandler` (extends `ResponseEntityExceptionHandler`) turns these — plus bean-validation failures — into a consistent `ApiError` / `ValidationApiError` JSON body with timestamp, status, error, message, and path. Follow this pattern (throw a typed exception from the service layer) rather than building `ResponseEntity` error responses by hand.
 
+**Don't let Spring's default error bodies leak through.** `ResponseEntityExceptionHandler` (the class `GlobalExceptionHandler` extends) already has its own built-in handling for a fixed set of framework-level exceptions — malformed/unreadable request body (`handleHttpMessageNotReadable`), unsupported `Content-Type` (`handleHttpMediaTypeNotSupported`), a value that can't be converted to the target type such as an invalid UUID in a path variable (`handleTypeMismatch`), method-not-allowed, missing path variable, etc. If one of these isn't explicitly overridden in `GlobalExceptionHandler`, it silently falls back to Spring's own generic `ProblemDetail` response shape (`detail`/`instance`/`status`/`title`, e.g. the literal string `"Failed to read request"`) instead of this project's `ApiError` format — inconsistent with every other error response and, for `HttpMessageNotReadableException`/`HttpMediaTypeNotSupportedException`/`TypeMismatchException` specifically, strictly less informative than what's actually available on the exception. When adding a new controller (or a new field/param shape that can fail to bind — a new enum, a new typed path variable, a new `@RequestBody`), check whether it can trigger one of `ResponseEntityExceptionHandler`'s overridable `handle*` methods and, if the failure is realistically reachable by a real client (not a framework-internal edge case like `handleAsyncRequestTimeoutException` or multipart-specific handlers this API doesn't use), override it in `GlobalExceptionHandler` to return `ApiError` instead of leaving Spring's default. Extract whatever extra detail the exception actually carries — e.g. `InvalidFormatException.getTargetType().getEnumConstants()` for a bad enum value, `TypeMismatchException.getRequiredType()` for a bad path variable — the same way `handleHttpMessageNotReadable`/`handleHttpMediaTypeNotSupported`/`handleTypeMismatch` already do.
+
 **Data-integrity conflicts:** Unique constraint violations are not pre-checked; the service layer lets the DB constraint fire, catches `DataIntegrityViolationException`, extracts the Postgres constraint name via `ConstraintViolationException`, and maps known constraint names (e.g. `uq_users_username`, `uq_users_email`) to specific `ConflictException` messages, falling back to a generic message otherwise. Constraint names are defined in the Flyway migration SQL and must stay in sync with the strings checked in the service. New tables from the translation table above (e.g. `user_lists`, `diary_entries`) should follow the same `uq_<table>_<column>` naming convention.
 
 **Idempotent get-or-create race conditions:** For a service method that gets-or-creates a resource by a natural key (e.g. `ContentServiceImpl.getOrCreateReference`, matched by `tmdbId`+`type` or `seriesTmdbId`+`seasonNumber`+`episodeNumber`+`type`), don't rely on plain check-then-act (look up, then save if missing) — two concurrent calls for the same not-yet-existing resource can both miss the lookup and both attempt to insert, tripping the unique constraint. Wrap the `save` in a try/catch for `DataIntegrityViolationException`; on catch, re-run the same lookup and return the now-existing record instead of throwing (unlike the reject-on-conflict pattern above, an idempotent get-or-create must resolve to the same result regardless of which concurrent caller wins the race). Only propagate the original exception if the re-query still finds nothing — that signals a genuine unexpected DB error, not a race. Apply this same pattern to any future idempotent get-or-create method backed by a DB unique constraint.
@@ -136,9 +138,48 @@ Also check whether other parts of the codebase implement the same or similar log
 - **English only.** All class names, method names, field names, DTOs, enum values, and API route paths are in English — translate on the way in from the Portuguese source schema/dev-stages docs, using the table above. Route paths must match exactly what's defined in `openapi.yaml`, since that's the public contract.
 - **No code comments.** Write self-explanatory code (clear names, small methods) instead of explaining behavior in comments. Javadoc is not required unless explicitly requested.
 - Follow the existing `User` domain (entity, repository, service, mapper, DTOs) as the reference implementation for structure and style when building out any new entity from the translation table.
+- **Default to idiomatic Java 21 / Spring Boot best practices** wherever this file and the existing codebase don't already dictate a specific convention. Where they conflict, the project's own conventions win — this file exists precisely to override generic defaults with decisions already made for this codebase.
 - **Test method naming.** Name test methods `should<ExpectedBehavior>When<Condition>` in camelCase (no underscores) — e.g. `shouldThrowNotFoundExceptionWhenIdDoesNotExist`, `shouldUpdateUsernameTrimmedWhenDifferentValueProvided`.
 - **Test `@DisplayName`.** Pair every `@Test` with a `@DisplayName` in the format `"[methodUnderTest] Should <expected behavior> - When <condition>"`: the method under test in square brackets exactly as written in the source (camelCase, untouched), followed by `Should ... - When ...` with every other word capitalized (Title Case), except type/exception names which keep their real identifier casing (e.g. `ConflictException`, `UserResponseDTO`). Example: `@DisplayName("[updateUser] Should Throw ConflictException With Username Message - When Update Violates Username Constraint")`.
 - **Tests follow refactors.** Whenever code is refactored (renamed, restructured, moved, signature or behavior changed), check how the existing tests covered the old implementation and update them to match — stale assertions, mocks, `@DisplayName`s, or entire test cases left over from the old shape must be fixed or removed, not left passing-but-outdated alongside the refactor.
+
+## Test coverage baseline
+
+This is a **minimum checklist**, not a ceiling — when a method has extra branches (authorization, extra guards, dynamic filters) beyond these generic shapes, add one test per branch on top of the baseline.
+
+### Service unit tests
+
+| Method shape | Baseline | What each covers |
+|---|---|---|
+| `getXById(id)` | 2 | Happy path (found → mapped DTO); NotFound (`Optional.empty()` → `NotFoundException`). +1 per extra authorization/visibility branch (e.g. `getUserById`'s private-profile check → `ForbiddenException`). |
+| `getXsByFilter(...)` (paginated, via `buildPageRequest`) | 2 + F + fixed pagination checklist | Happy path; empty result. +F: one test per dynamic filter/conditional that changes the query, plus one per required-filter validation (`BadRequestException` when missing/blank). Fixed checklist regardless of F (reusing `buildPageRequest` still needs proving it's wired correctly): page number null→default, zero→default, positive→page-1, negative→`BadRequestException`; page size null→default, valid, at max limit, exceeds limit→default, negative→`BadRequestException`, zero→`BadRequestException`; sort applied/not applied if the method supports it. |
+| `saveNewX(dto)` | 1 + K + 2 | Happy path (maps, persists, returns DTO). +K: one test per unique constraint mapped to a specific `ConflictException` message — via the `DataIntegrityViolationException` catch, **not** a pre-check like `existsByX` (see Architecture → Data-integrity conflicts). +2 fixed: unknown constraint name → generic message; cause not a `ConstraintViolationException` (or null) → generic message. +1 per field with a normalization rule (trim/lowercase) worth asserting explicitly. |
+| `updateX(id, dto)` / `patchX(id, dto)` | 2 + 1 + 2×U + K | Happy path; NotFound. +1 fixed: no field changes when all patch fields are null. +2 per updatable field (`U`): changes when a different value is provided (normalized), no-op when the same value is provided. +K: one test per field with a unique constraint, same `DataIntegrityViolationException`-catch pattern as create. +1 per genuine business rule blocking a field from changing (distinct from a conflict). |
+| `deleteX(id, ...)` | 2 | Happy path; NotFound. +1 per extra guard before deletion (password confirmation, resource-ownership check — mandatory starting at Comment/Rating, per `development-stages.md`'s Fase 3 "autorização por dono do recurso"). |
+
+### Controller unit tests (mocked service, no Spring context)
+
+A plain `@ExtendWith(MockitoExtension.class)` controller test calls the controller method directly — there's no `DispatcherServlet`, no `GlobalExceptionHandler`, no Spring Security filter chain running. It **cannot** observe HTTP status translation for thrown exceptions (`NotFoundException`→404, `ConflictException`→409, `BadRequestException`→400, auth failures→401/403); that only happens inside the real MVC stack. Don't write those cases here — they'd just re-assert that a Java exception propagates, which the service test already covers, and they belong in the integration test instead.
+
+| What to test | Baseline |
+|---|---|
+| Happy path per endpoint | 1 — correct status code set by the controller itself (`ResponseEntity.ok`/`.noContent`/`.created`, etc.) and correct body/delegation to the service. |
+| Values the controller derives itself | +1 per such value — e.g. resolving the current user id from `SecurityContextHolder`, building a `Location` header. |
+| Exception → HTTP status mapping | Not covered here — see integration tests below. |
+
+### Controller integration tests (`@SpringBootTest` + `MockMvc` + Testcontainers)
+
+This is where exception→status mapping, validation, real persistence, and security actually get proven end to end. Don't re-derive every service-level branch here — integration tests exist to prove what a mocked repository/service can't (real SQL, real HTTP status codes, real security filters), not to duplicate the service unit-test suite.
+
+| Case | When it applies |
+|---|---|
+| Happy path | Always — real request through the real DB, asserting the response body and, for mutating endpoints, that the row was actually persisted/changed. |
+| NotFound → 404 | Any method that looks up by id. |
+| Conflict → 409 | Any method that can violate a unique constraint — a real duplicate insert, not a mocked exception. |
+| BadRequest → 400 | Each validation rule that can fail (missing/malformed field, invalid page/size) — assert the DB is untouched afterward for mutating endpoints. |
+| Unauthorized → 401 | **Mandatory for every endpoint requiring authentication** — request with no `access_token` cookie. |
+| Forbidden (CSRF) → 403 | **Mandatory for every authenticated mutating endpoint** — request missing the `X-XSRF-TOKEN` header/CSRF cookie (see Architecture → Security). |
+| Extra guard-specific outcomes | Anything method-specific not covered above (e.g. delete with wrong password → 401, private profile → 403). |
 
 ## Avoid
 

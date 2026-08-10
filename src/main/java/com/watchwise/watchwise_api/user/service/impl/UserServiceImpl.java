@@ -146,7 +146,7 @@ public class UserServiceImpl implements UserService {
         boolean onlyPublic = Boolean.TRUE.equals(isProfilePublic);
 
         return userRepository
-                .findByUsernameStartingWithIgnoreCase(username, onlyPublic, pageRequest)
+                .findByUsernameStartingWithIgnoreCase(username.trim(), onlyPublic, pageRequest)
                 .map(userMapper::userToUserPreviewDto);
     }
 
@@ -189,8 +189,9 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserResponseDTO login(LoginUserDTO loginUserDTO) {
+        String identifier = loginUserDTO.identifier().trim();
         User user = userRepository
-                .findByUsernameIgnoreCaseOrEmailIgnoreCase(loginUserDTO.identifier(), loginUserDTO.identifier())
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase(identifier, identifier)
                 .orElseThrow(() -> new UnauthorizedException("Invalid credentials"));
 
         if (!passwordEncoder.matches(loginUserDTO.password(), user.getPassword())) {

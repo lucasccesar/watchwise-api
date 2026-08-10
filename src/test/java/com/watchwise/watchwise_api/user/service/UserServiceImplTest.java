@@ -328,6 +328,17 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUsersByUsername] Should Trim Username Before Query - When Username Has Surrounding Whitespace")
+    void shouldTrimUsernameBeforeQueryWhenUsernameHasSurroundingWhitespace() {
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("john"), anyBoolean(), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        userService.getUsersByUsername("  john  ", 1, 10, true);
+
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq("john"), anyBoolean(), any(PageRequest.class));
+    }
+
+    @Test
     @DisplayName("[getUsersByUsername] Should Return Page Of DTOs - When Happy Path")
     void shouldReturnPageOfDtos_happyPath() {
         String username = "john";
@@ -774,6 +785,21 @@ class UserServiceImplTest {
         UserResponseDTO result = userService.login(loginUserDTO);
 
         assertThat(result).isEqualTo(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[login] Should Trim Identifier Before Lookup - When Identifier Has Surrounding Whitespace")
+    void shouldTrimIdentifierBeforeLookupWhenIdentifierHasSurroundingWhitespace() {
+        LoginUserDTO loginUserDTO = new LoginUserDTO("  " + savedUser.getEmail() + "  ", "Password123");
+        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
+                .thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        UserResponseDTO result = userService.login(loginUserDTO);
+
+        assertThat(result).isEqualTo(userResponseDTO);
+        verify(userRepository).findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail());
     }
 
     @Test

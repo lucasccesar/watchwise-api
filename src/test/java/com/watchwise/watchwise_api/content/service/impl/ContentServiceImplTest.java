@@ -79,6 +79,18 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Series And TmdbId Is Whitespace Only")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeriesAndTmdbIdIsWhitespaceOnly() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("   ", ContentType.SERIES, null, null, null);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("tmdbId must be provided when type is MOVIE or SERIES");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Movie And SeriesTmdbId Is Present")
     void shouldThrowBadRequestExceptionWhenTypeIsMovieAndSeriesTmdbIdIsPresent() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, "200", null, null);
@@ -208,6 +220,48 @@ class ContentServiceImplTest {
 
         assertThat(result).isEqualTo(responseDto);
         verify(contentRepository).save(mapped);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Trim TmdbId Before Querying And Persisting - When TmdbId Has Surrounding Whitespace")
+    void shouldTrimTmdbIdBeforeQueryingAndPersistingWhenTmdbIdHasSurroundingWhitespace() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("  100  ", ContentType.MOVIE, null, null, null);
+        ContentRefCreationDTO normalizedDto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null);
+        Content mapped = Content.builder().tmdbId("100").type(ContentType.MOVIE).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "100", ContentType.MOVIE, null, null, null, null, null);
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(normalizedDto)).thenReturn(mapped);
+        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        verify(contentRepository).findByTmdbIdAndType("100", ContentType.MOVIE);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Trim SeriesTmdbId Before Querying And Persisting - When SeriesTmdbId Has Surrounding Whitespace")
+    void shouldTrimSeriesTmdbIdBeforeQueryingAndPersistingWhenSeriesTmdbIdHasSurroundingWhitespace() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "  200  ", 1, null);
+        ContentRefCreationDTO normalizedDto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 1, null);
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(1).type(ContentType.SEASON).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).type(ContentType.SEASON).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), null, ContentType.SEASON, "200", 1, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, null, ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(normalizedDto)).thenReturn(mapped);
+        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        verify(contentRepository)
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, null, ContentType.SEASON);
     }
 
     @Test

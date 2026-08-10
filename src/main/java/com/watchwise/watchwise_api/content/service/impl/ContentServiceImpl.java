@@ -25,14 +25,15 @@ public class ContentServiceImpl implements ContentService {
 
     @Override
     public ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO) {
-        validate(contentRefCreationDTO);
+        ContentRefCreationDTO normalized = normalize(contentRefCreationDTO);
+        validate(normalized);
 
-        Optional<Content> existing = findExisting(contentRefCreationDTO);
+        Optional<Content> existing = findExisting(normalized);
         if (existing.isPresent()) {
             return contentMapper.contentToContentRefDto(existing.get());
         }
 
-        Content content = contentMapper.contentRefCreationDtoToContent(contentRefCreationDTO);
+        Content content = contentMapper.contentRefCreationDtoToContent(normalized);
         LocalDateTime now = LocalDateTime.now();
         content.setCreatedAt(now);
         content.setUpdatedAt(now);
@@ -40,8 +41,22 @@ public class ContentServiceImpl implements ContentService {
         try {
             return contentMapper.contentToContentRefDto(contentRepository.save(content));
         } catch (DataIntegrityViolationException e) {
-            return contentMapper.contentToContentRefDto(resolveConcurrentCreation(contentRefCreationDTO, e));
+            return contentMapper.contentToContentRefDto(resolveConcurrentCreation(normalized, e));
         }
+    }
+
+    private ContentRefCreationDTO normalize(ContentRefCreationDTO dto) {
+        return new ContentRefCreationDTO(
+                trimOrNull(dto.tmdbId()),
+                dto.type(),
+                trimOrNull(dto.seriesTmdbId()),
+                dto.seasonNumber(),
+                dto.episodeNumber()
+        );
+    }
+
+    private String trimOrNull(String value) {
+        return value == null ? null : value.trim();
     }
 
     private Content resolveConcurrentCreation(ContentRefCreationDTO dto, DataIntegrityViolationException e) {

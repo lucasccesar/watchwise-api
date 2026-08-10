@@ -378,6 +378,16 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getUserById] Should Return BadRequest With Expected Type - When UserId Path Variable Is Not A Valid Uuid")
+    void shouldReturnBadRequestWithExpectedTypeWhenUserIdPathVariableIsNotAValidUuid() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("viewerbaduuid", "viewerbaduuid@email.com");
+
+        mockMvc.perform(get("/users/not-a-uuid").cookie(viewerAccessToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid value 'not-a-uuid' for parameter 'userId'. Expected type: UUID"));
+    }
+
+    @Test
     @DisplayName("[getUserById] Should Return PublicUserDTO - When No Access Token Cookie Is Present")
     void shouldReturnPublicUserDtoWhenNoAccessTokenCookieIsPresent() throws Exception {
         mockMvc.perform(registerRequest("targetnoauth", "targetnoauth@email.com"))
