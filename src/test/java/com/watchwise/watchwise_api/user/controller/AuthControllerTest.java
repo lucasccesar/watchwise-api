@@ -103,8 +103,12 @@ class AuthControllerTest {
     }
 
     private void setAuthenticated() {
+        setAuthenticated(UUID.randomUUID());
+    }
+
+    private void setAuthenticated(UUID userId) {
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(UUID.randomUUID(), null, java.util.List.of())
+                new UsernamePasswordAuthenticationToken(userId, null, java.util.List.of())
         );
     }
 
@@ -327,5 +331,41 @@ class AuthControllerTest {
         authController.logout("some-refresh-token", response);
 
         verify(refreshTokenService).revokeRefreshToken("some-refresh-token");
+    }
+
+    @Test
+    @DisplayName("[logoutAll] Should Return NoContent - When Called")
+    void shouldReturnNoContentWhenLogoutAllCalled() {
+        setAuthenticated(UUID.randomUUID());
+
+        ResponseEntity<Void> result = authController.logoutAll(response);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    @DisplayName("[logoutAll] Should Resolve Id From The Security Context - When Called")
+    void shouldResolveIdFromTheSecurityContextWhenLogoutAllCalled() {
+        UUID currentUserId = UUID.randomUUID();
+        setAuthenticated(currentUserId);
+
+        authController.logoutAll(response);
+
+        verify(refreshTokenService).revokeAllRefreshTokens(currentUserId);
+    }
+
+    @Test
+    @DisplayName("[logoutAll] Should Clear Access, Refresh And Csrf Cookies - When Called")
+    void shouldClearAccessRefreshAndCsrfCookiesWhenLogoutAllCalled() {
+        setAuthenticated(UUID.randomUUID());
+        ResponseCookie clearedCookie = ResponseCookie.from("cleared", "").build();
+        when(cookieUtil.clearCookie(any(), any())).thenReturn(clearedCookie);
+
+        authController.logoutAll(response);
+
+        verify(cookieUtil).clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
+        verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH);
+        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
+        verify(cookieUtil, times(3)).addCookie(eq(response), eq(clearedCookie));
     }
 }

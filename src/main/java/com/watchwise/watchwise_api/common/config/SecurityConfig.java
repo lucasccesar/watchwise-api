@@ -73,9 +73,10 @@ public class SecurityConfig {
                         .csrfTokenRepository(csrfTokenRepository)
                         .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
                         .sessionAuthenticationStrategy(new NullAuthenticatedSessionStrategy())
-                        .ignoringRequestMatchers("/auth/**"))
+                        .ignoringRequestMatchers("/auth/register", "/auth/login", "/auth/oauth/**", "/auth/refresh", "/auth/logout"))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/auth/logout-all").authenticated()
                         .requestMatchers("/auth/**", "/error").permitAll()
                         .requestMatchers("/users/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/users", "/users/{userId}").permitAll()

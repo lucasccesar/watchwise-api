@@ -64,6 +64,23 @@ class UserMapperTest {
     }
 
     @Test
+    @DisplayName("[postUserDtoToUser] Should Apply Entity Builder Default For IsEmailVerified - When Mapping PostUserDTO To User")
+    void shouldApplyEntityBuilderDefaultForIsEmailVerifiedWhenMappingPostUserDtoToUser() {
+        PostUserDTO dto = new PostUserDTO(
+                "JohnDoe",
+                "john.doe@email.com",
+                "Password123",
+                "Some description",
+                "https://picture.com/pic.png",
+                true
+        );
+
+        User result = userMapper.postUserDtoToUser(dto);
+
+        assertThat(result.getIsEmailVerified()).isTrue();
+    }
+
+    @Test
     @DisplayName("[postUserDtoToUser] Should Apply Default IsProfilePublic - When Value Is Null")
     void shouldApplyDefaultIsProfilePublicWhenValueIsNull() {
         PostUserDTO dto = new PostUserDTO(

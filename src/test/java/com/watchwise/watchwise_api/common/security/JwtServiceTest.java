@@ -1,8 +1,13 @@
 package com.watchwise.watchwise_api.common.security;
 
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -12,6 +17,8 @@ class JwtServiceTest {
     private final String secret = "test-secret-test-secret-test-secret-test-secret";
 
     private final JwtService jwtService = new JwtService(secret, 60, 7);
+
+    private final SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
 
     @Test
     @DisplayName("[generateToken] Should Generate Token That Resolves To Same User Id - When Called")
@@ -83,6 +90,16 @@ class JwtServiceTest {
         String token = jwtService.generateToken(UUID.randomUUID(), TokenType.REFRESH);
 
         assertThat(jwtService.extractJti(token)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[generateToken] Should Not Include Email Claim - When Called")
+    void shouldNotIncludeEmailClaimWhenCalled() {
+        String token = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
+
+        Claims claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
+
+        assertThat(claims.get("email")).isNull();
     }
 
     @Test

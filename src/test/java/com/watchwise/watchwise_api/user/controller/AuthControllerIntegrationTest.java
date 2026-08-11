@@ -23,6 +23,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -268,6 +269,16 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[oauthLogin] Should Return BadRequest - When Token Is Blank")
+    void shouldReturnBadRequestWhenOAuthTokenIsBlank() throws Exception {
+        mockMvc.perform(oauthLoginRequest("google", ""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation Failed"));
+
+        verifyNoInteractions(googleTokenVerifier);
+    }
+
+    @Test
     @DisplayName("[oauthLogin] Should Return BadRequest - When Provider Is Not Supported")
     void shouldReturnBadRequestWhenProviderIsNotSupported() throws Exception {
         mockMvc.perform(oauthLoginRequest("facebook", "some-token"))
@@ -372,6 +383,108 @@ class AuthControllerIntegrationTest {
         assertCsrfCookieCleared(logoutResult);
     }
 
+    @Test
+    @DisplayName("[logoutAll] Should Revoke Every Refresh Token For The User - When Called")
+    void shouldRevokeEveryRefreshTokenForTheUserWhenLogoutAllCalled() throws Exception {
+        mockMvc.perform(registerRequest("multideviceuser", "multideviceuser@email.com"))
+                .andExpect(status().isCreated());
+
+        MvcResult deviceALogin = mockMvc.perform(loginRequest("multideviceuser"))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie deviceAAccessCookie = deviceALogin.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie deviceARefreshCookie = deviceALogin.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        Cookie deviceACsrfCookie = deviceALogin.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(deviceAAccessCookie).isNotNull();
+        assertThat(deviceARefreshCookie).isNotNull();
+        assertThat(deviceACsrfCookie).isNotNull();
+
+        MvcResult deviceBLogin = mockMvc.perform(loginRequest("multideviceuser"))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie deviceBRefreshCookie = deviceBLogin.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        assertThat(deviceBRefreshCookie).isNotNull();
+
+        mockMvc.perform(logoutAllRequest(deviceAAccessCookie, deviceACsrfCookie))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/auth/refresh").cookie(deviceARefreshCookie))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/auth/refresh").cookie(deviceBRefreshCookie))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[logoutAll] Should Not Affect Refresh Tokens Of Other Users - When Called")
+    void shouldNotAffectRefreshTokensOfOtherUsersWhenLogoutAllCalled() throws Exception {
+        MvcResult userARegister = mockMvc.perform(registerRequest("logoutalluserA", "logoutalluserA@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie userAAccessCookie = userARegister.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie userACsrfCookie = userARegister.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(userAAccessCookie).isNotNull();
+        assertThat(userACsrfCookie).isNotNull();
+
+        MvcResult userBRegister = mockMvc.perform(registerRequest("logoutalluserB", "logoutalluserB@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie userBRefreshCookie = userBRegister.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        assertThat(userBRefreshCookie).isNotNull();
+
+        mockMvc.perform(logoutAllRequest(userAAccessCookie, userACsrfCookie))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/auth/refresh").cookie(userBRefreshCookie))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("[logoutAll] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForLogoutAll() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("nocookielogoutalluser", "nocookielogoutalluser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(csrfCookie).isNotNull();
+
+        mockMvc.perform(post("/auth/logout-all")
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[logoutAll] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingForLogoutAll() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("nocsrflogoutalluser", "nocsrflogoutalluser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+
+        mockMvc.perform(post("/auth/logout-all").cookie(accessTokenCookie))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("[logoutAll] Should Clear Access, Refresh And Csrf Cookies - When Called")
+    void shouldClearAccessRefreshAndCsrfCookiesWhenLogoutAllCalled() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("clearcookieslogoutalluser", "clearcookieslogoutalluser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+        assertThat(csrfCookie).isNotNull();
+
+        MvcResult logoutAllResult = mockMvc.perform(logoutAllRequest(accessTokenCookie, csrfCookie))
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().maxAge(CookieUtil.ACCESS_TOKEN_COOKIE, 0))
+                .andExpect(cookie().maxAge(CookieUtil.REFRESH_TOKEN_COOKIE, 0))
+                .andReturn();
+        assertCsrfCookieCleared(logoutAllResult);
+    }
+
     private void assertCsrfCookieCleared(MvcResult result) {
         assertThat(result.getResponse().getHeaders("Set-Cookie"))
                 .anySatisfy(header -> assertThat(header)
@@ -417,5 +530,11 @@ class AuthControllerIntegrationTest {
         return post("/auth/oauth/{provider}", provider)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder logoutAllRequest(Cookie accessTokenCookie, Cookie csrfCookie) {
+        return post("/auth/logout-all")
+                .cookie(accessTokenCookie, csrfCookie)
+                .header("X-XSRF-TOKEN", csrfCookie.getValue());
     }
 }
