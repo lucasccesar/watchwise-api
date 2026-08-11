@@ -879,6 +879,39 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[findByEmail] Should Return UserResponseDTO - When Email Exists")
+    void shouldReturnUserResponseDtoWhenEmailExists() {
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        Optional<UserResponseDTO> result = userService.findByEmail(savedUser.getEmail());
+
+        assertThat(result).contains(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[findByEmail] Should Return Empty - When Email Does Not Exist")
+    void shouldReturnEmptyWhenEmailDoesNotExist() {
+        when(userRepository.findByEmailIgnoreCase("unknown@email.com")).thenReturn(Optional.empty());
+
+        Optional<UserResponseDTO> result = userService.findByEmail("unknown@email.com");
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userMapper);
+    }
+
+    @Test
+    @DisplayName("[findByEmail] Should Trim Email Before Lookup - When Email Has Surrounding Whitespace")
+    void shouldTrimEmailBeforeLookupWhenEmailHasSurroundingWhitespace() {
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        userService.findByEmail("  " + savedUser.getEmail() + "  ");
+
+        verify(userRepository).findByEmailIgnoreCase(savedUser.getEmail());
+    }
+
+    @Test
     @DisplayName("[deleteAccount] Should Delete User - When Password Matches")
     void shouldDeleteUserWhenPasswordMatches() {
         UUID id = savedUser.getId();

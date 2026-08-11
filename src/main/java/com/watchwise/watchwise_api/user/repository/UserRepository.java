@@ -18,6 +18,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByUsernameIgnoreCaseOrEmailIgnoreCase(String username, String email);
 
+    Optional<User> findByEmailIgnoreCase(String email);
+
     @Query(
             value = """
         SELECT u FROM User u

@@ -4,9 +4,13 @@ import com.watchwise.watchwise_api.auth.dto.RefreshedTokens;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
 import com.watchwise.watchwise_api.common.security.JwtService;
+import com.watchwise.watchwise_api.common.security.OAuthProvider;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
+import com.watchwise.watchwise_api.user.dto.OAuthAccountNotFoundDTO;
+import com.watchwise.watchwise_api.user.dto.OAuthLoginDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
@@ -23,10 +27,13 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/auth")
@@ -38,6 +45,7 @@ public class AuthController {
     private final CookieUtil cookieUtil;
     private final RefreshTokenService refreshTokenService;
     private final CsrfAuthenticationStrategy csrfAuthenticationStrategy;
+    private final GoogleTokenVerifier googleTokenVerifier;
 
     @PostMapping("/register")
     public ResponseEntity<UserResponseDTO> register(
@@ -69,6 +77,35 @@ public class AuthController {
         }
 
         UserResponseDTO user = userService.login(loginUserDTO);
+
+        rotateCsrfToken(request, response);
+        cookieUtil.addCookie(response, buildAccessTokenCookie(user));
+        cookieUtil.addCookie(response, buildRefreshTokenCookie(user));
+
+        return ResponseEntity.ok(user);
+    }
+
+    @PostMapping("/oauth/{provider}")
+    public ResponseEntity<Object> oauthLogin(
+            @PathVariable OAuthProvider provider,
+            @Valid @RequestBody OAuthLoginDTO oAuthLoginDTO,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
+        if (isAuthenticated()) {
+            throw new ConflictException("Already authenticated");
+        }
+
+        String verifiedEmail = switch (provider) {
+            case GOOGLE -> googleTokenVerifier.verify(oAuthLoginDTO.token());
+        };
+
+        Optional<UserResponseDTO> existingUser = userService.findByEmail(verifiedEmail);
+        if (existingUser.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new OAuthAccountNotFoundDTO(verifiedEmail));
+        }
+
+        UserResponseDTO user = existingUser.get();
 
         rotateCsrfToken(request, response);
         cookieUtil.addCookie(response, buildAccessTokenCookie(user));

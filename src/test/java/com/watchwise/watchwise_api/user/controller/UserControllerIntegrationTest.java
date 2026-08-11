@@ -198,6 +198,24 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[updateCurrentUser] Should Return Conflict - When Updating Username To One Already Taken With Different Case")
+    void shouldReturnConflictWhenUpdatingUsernameToOneAlreadyTakenWithDifferentCase() throws Exception {
+        mockMvc.perform(registerRequest("CaseTakenUser", "casetakenuser@email.com"))
+                .andExpect(status().isCreated());
+
+        MvcResult registerResult = mockMvc.perform(registerRequest("caseconflictuser", "caseconflictuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"username\": \"casetakenuser\" }"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Username already in use"));
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Return BadRequest - When Email Format Is Invalid")
     void shouldReturnBadRequestWhenEmailFormatIsInvalid() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("invalidemailuser", "invalidemailuser@email.com"))

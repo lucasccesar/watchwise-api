@@ -16,6 +16,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -121,6 +122,23 @@ class UserRepositoryTest {
         assertThat(result.getContent()).hasSize(2);
         assertThat(result.getTotalElements()).isEqualTo(3);
         assertThat(result.getTotalPages()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[findByEmailIgnoreCase] Should Return User - When Email Matches Regardless Of Case")
+    void shouldReturnUserWhenEmailMatchesRegardlessOfCase() {
+        Optional<User> result = userRepository.findByEmailIgnoreCase("LUCAS@EMAIL.COM");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getUsername()).isEqualTo("lucas");
+    }
+
+    @Test
+    @DisplayName("[findByEmailIgnoreCase] Should Return Empty - When No User Has That Email")
+    void shouldReturnEmptyWhenNoUserHasThatEmail() {
+        Optional<User> result = userRepository.findByEmailIgnoreCase("nobody@email.com");
+
+        assertThat(result).isEmpty();
     }
 
     private User buildUser(String username, String email, boolean isProfilePublic) {

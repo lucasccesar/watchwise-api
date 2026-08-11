@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import org.springframework.data.domain.Page;
 
+import java.util.Optional;
 import java.util.UUID;
 
 public interface UserService {
@@ -24,6 +25,8 @@ public interface UserService {
     UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO);
 
     UserResponseDTO login(LoginUserDTO loginUserDTO);
+
+    Optional<UserResponseDTO> findByEmail(String email);
 
     void deleteAccount(UUID id, DeleteAccountDTO deleteAccountDTO);
 

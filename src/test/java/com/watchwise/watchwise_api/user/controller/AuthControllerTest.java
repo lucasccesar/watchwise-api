@@ -4,9 +4,13 @@ import com.watchwise.watchwise_api.auth.dto.RefreshedTokens;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
 import com.watchwise.watchwise_api.common.security.JwtService;
+import com.watchwise.watchwise_api.common.security.OAuthProvider;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
+import com.watchwise.watchwise_api.user.dto.OAuthAccountNotFoundDTO;
+import com.watchwise.watchwise_api.user.dto.OAuthLoginDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
@@ -30,6 +34,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,6 +64,9 @@ class AuthControllerTest {
 
     @Mock
     private CsrfAuthenticationStrategy csrfAuthenticationStrategy;
+
+    @Mock
+    private GoogleTokenVerifier googleTokenVerifier;
 
     @InjectMocks
     private AuthController authController;
@@ -204,6 +212,70 @@ class AuthControllerTest {
 
         verify(cookieUtil).addCookie(response, accessCookie);
         verify(cookieUtil).addCookie(response, refreshCookie);
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return Ok With UserResponseDTO - When Account With Verified Email Exists")
+    void shouldReturnOkWithUserResponseDtoWhenAccountWithVerifiedEmailExists() {
+        setAnonymous();
+        OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
+        when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
+        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
+
+        ResponseEntity<Object> result = authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Set Access And Refresh Token Cookies - When Account With Verified Email Exists")
+    void shouldSetAccessAndRefreshTokenCookiesWhenAccountWithVerifiedEmailExists() {
+        setAnonymous();
+        OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
+        ResponseCookie accessCookie = ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build();
+        ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
+        when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
+        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
+        when(jwtService.generateToken(userResponseDTO.id(), userResponseDTO.email(), TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), userResponseDTO.email())).thenReturn("refresh-token");
+        when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
+        when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
+
+        authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
+
+        verify(cookieUtil).addCookie(response, accessCookie);
+        verify(cookieUtil).addCookie(response, refreshCookie);
+        verify(csrfAuthenticationStrategy).onAuthentication(eq(null), eq(request), eq(response));
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return NotFound With Confirmed Email - When No Local Account Has That Email")
+    void shouldReturnNotFoundWithConfirmedEmailWhenNoLocalAccountHasThatEmail() {
+        setAnonymous();
+        OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
+        when(googleTokenVerifier.verify("google-id-token")).thenReturn("unregistered@email.com");
+        when(userService.findByEmail("unregistered@email.com")).thenReturn(Optional.empty());
+
+        ResponseEntity<Object> result = authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(result.getBody()).isEqualTo(new OAuthAccountNotFoundDTO("unregistered@email.com"));
+        verify(cookieUtil, never()).addCookie(any(), any());
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Throw ConflictException And Not Verify Token - When Already Authenticated")
+    void shouldThrowConflictExceptionAndNotVerifyTokenWhenAlreadyAuthenticated() {
+        setAuthenticated();
+        OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
+
+        assertThatThrownBy(() -> authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Already authenticated");
+
+        verify(googleTokenVerifier, never()).verify(any());
+        verify(userService, never()).findByEmail(any());
     }
 
     @Test

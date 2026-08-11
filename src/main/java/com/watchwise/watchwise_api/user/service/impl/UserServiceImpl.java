@@ -26,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -204,6 +205,11 @@ public class UserServiceImpl implements UserService {
         }
 
         return userMapper.userToUserResponseDto(user);
+    }
+
+    @Override
+    public Optional<UserResponseDTO> findByEmail(String email) {
+        return userRepository.findByEmailIgnoreCase(email.trim()).map(userMapper::userToUserResponseDto);
     }
 
     @Override

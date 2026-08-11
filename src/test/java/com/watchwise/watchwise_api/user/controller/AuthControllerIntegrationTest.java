@@ -1,7 +1,9 @@
 package com.watchwise.watchwise_api.user.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +15,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -20,6 +23,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
@@ -50,6 +54,9 @@ class AuthControllerIntegrationTest {
 
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
+
+    @MockitoBean
+    private GoogleTokenVerifier googleTokenVerifier;
 
     @BeforeEach
     void setUp() {
@@ -113,6 +120,17 @@ class AuthControllerIntegrationTest {
                 .andExpect(status().isCreated());
 
         mockMvc.perform(registerRequest("duplicateuser", "second@email.com"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Username already in use"));
+    }
+
+    @Test
+    @DisplayName("[register] Should Return Conflict With Username Message - When Username Is Already Taken With Different Case")
+    void shouldReturnConflictWithUsernameMessageWhenUsernameIsAlreadyTakenWithDifferentCase() throws Exception {
+        mockMvc.perform(registerRequest("CaseUser", "casefirst@email.com"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(registerRequest("caseuser", "casesecond@email.com"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Username already in use"));
     }
@@ -199,6 +217,76 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(loginRequest("unknownuser"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Invalid credentials"));
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return Ok And Emit Access, Refresh And Csrf Cookies - When Local Account With That Email Exists")
+    void shouldReturnOkAndEmitCookiesWhenLocalAccountWithThatEmailExists() throws Exception {
+        mockMvc.perform(registerRequest("oauthuser", "oauthuser@email.com"))
+                .andExpect(status().isCreated());
+
+        when(googleTokenVerifier.verify("valid-google-token")).thenReturn("oauthuser@email.com");
+
+        mockMvc.perform(oauthLoginRequest("google", "valid-google-token"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("oauthuser@email.com"))
+                .andExpect(cookie().exists(CookieUtil.ACCESS_TOKEN_COOKIE))
+                .andExpect(cookie().exists(CookieUtil.REFRESH_TOKEN_COOKIE))
+                .andExpect(cookie().exists(CookieUtil.CSRF_TOKEN_COOKIE));
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return NotFound With Confirmed Email - When No Local Account Has That Email")
+    void shouldReturnNotFoundWithConfirmedEmailWhenNoLocalAccountHasThatEmail() throws Exception {
+        when(googleTokenVerifier.verify("valid-google-token")).thenReturn("unregistered@email.com");
+
+        mockMvc.perform(oauthLoginRequest("google", "valid-google-token"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.email").value("unregistered@email.com"));
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return Unauthorized - When Provider Email Is Not Verified")
+    void shouldReturnUnauthorizedWhenProviderEmailIsNotVerified() throws Exception {
+        when(googleTokenVerifier.verify("unverified-email-token"))
+                .thenThrow(new UnauthorizedException("Email not verified by provider"));
+
+        mockMvc.perform(oauthLoginRequest("google", "unverified-email-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Email not verified by provider"));
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return Unauthorized - When Provider Token Is Invalid Or Expired")
+    void shouldReturnUnauthorizedWhenProviderTokenIsInvalidOrExpired() throws Exception {
+        when(googleTokenVerifier.verify("bad-token"))
+                .thenThrow(new UnauthorizedException("Invalid or expired provider token"));
+
+        mockMvc.perform(oauthLoginRequest("google", "bad-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid or expired provider token"));
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return BadRequest - When Provider Is Not Supported")
+    void shouldReturnBadRequestWhenProviderIsNotSupported() throws Exception {
+        mockMvc.perform(oauthLoginRequest("facebook", "some-token"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Return Conflict - When Already Authenticated")
+    void shouldReturnConflictWhenOAuthLoginWhileAlreadyAuthenticated() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("alreadyauthoauthuser", "alreadyauthoauthuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+
+        mockMvc.perform(oauthLoginRequest("google", "valid-google-token").cookie(accessTokenCookie))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Already authenticated"));
     }
 
     @Test
@@ -290,6 +378,18 @@ class AuthControllerIntegrationTest {
                 """.formatted(identifier);
 
         return post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder oauthLoginRequest(String provider, String token) {
+        String body = """
+                {
+                    "token": "%s"
+                }
+                """.formatted(token);
+
+        return post("/auth/oauth/{provider}", provider)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }
