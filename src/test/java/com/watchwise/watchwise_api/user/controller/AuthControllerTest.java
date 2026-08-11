@@ -3,9 +3,12 @@ package com.watchwise.watchwise_api.user.controller;
 import com.watchwise.watchwise_api.auth.dto.RefreshedTokens;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
+import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
 import com.watchwise.watchwise_api.common.security.JwtService;
+import com.watchwise.watchwise_api.common.security.LoginRateLimiter;
 import com.watchwise.watchwise_api.common.security.OAuthProvider;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -41,6 +45,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -67,6 +73,9 @@ class AuthControllerTest {
 
     @Mock
     private GoogleTokenVerifier googleTokenVerifier;
+
+    @Mock
+    private LoginRateLimiter loginRateLimiter;
 
     @InjectMocks
     private AuthController authController;
@@ -216,6 +225,77 @@ class AuthControllerTest {
 
         verify(cookieUtil).addCookie(response, accessCookie);
         verify(cookieUtil).addCookie(response, refreshCookie);
+    }
+
+    @Test
+    @DisplayName("[login] Should Check Rate Limit Before Attempting Login - When Not Authenticated")
+    void shouldCheckRateLimitBeforeAttemptingLoginWhenNotAuthenticated() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
+        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+
+        authController.login(loginUserDTO, request, response);
+
+        InOrder order = inOrder(loginRateLimiter, userService);
+        order.verify(loginRateLimiter).checkAllowed(any());
+        order.verify(userService).login(loginUserDTO);
+    }
+
+    @Test
+    @DisplayName("[login] Should Build Rate Limit Key From Remote Addr And Identifier - When Called")
+    void shouldBuildRateLimitKeyFromRemoteAddrAndIdentifierWhenCalled() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("  John.Doe@Email.com  ", "Password123");
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+
+        authController.login(loginUserDTO, request, response);
+
+        verify(loginRateLimiter).checkAllowed("127.0.0.1|john.doe@email.com");
+    }
+
+    @Test
+    @DisplayName("[login] Should Throw TooManyRequestsException And Not Attempt Login - When Rate Limited")
+    void shouldThrowTooManyRequestsExceptionAndNotAttemptLoginWhenRateLimited() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
+        doThrow(new TooManyRequestsException("Too many login attempts. Try again later."))
+                .when(loginRateLimiter).checkAllowed(any());
+
+        assertThatThrownBy(() -> authController.login(loginUserDTO, request, response))
+                .isInstanceOf(TooManyRequestsException.class);
+
+        verify(userService, never()).login(any());
+        verify(cookieUtil, never()).addCookie(any(), any());
+    }
+
+    @Test
+    @DisplayName("[login] Should Record Failure And Rethrow - When Credentials Are Invalid")
+    void shouldRecordFailureAndRethrowWhenCredentialsAreInvalid() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "WrongPassword123");
+        when(userService.login(loginUserDTO)).thenThrow(new UnauthorizedException("Invalid credentials"));
+
+        assertThatThrownBy(() -> authController.login(loginUserDTO, request, response))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("Invalid credentials");
+
+        verify(loginRateLimiter).recordFailure(any());
+        verify(loginRateLimiter, never()).recordSuccess(any());
+        verify(cookieUtil, never()).addCookie(any(), any());
+    }
+
+    @Test
+    @DisplayName("[login] Should Record Success And Not Record Failure - When Login Succeeds")
+    void shouldRecordSuccessAndNotRecordFailureWhenLoginSucceeds() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
+        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+
+        authController.login(loginUserDTO, request, response);
+
+        verify(loginRateLimiter).recordSuccess(any());
+        verify(loginRateLimiter, never()).recordFailure(any());
     }
 
     @Test

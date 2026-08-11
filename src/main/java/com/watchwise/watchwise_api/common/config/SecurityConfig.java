@@ -24,9 +24,16 @@ import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.web.cors.CorsConfigurationSource;
 
+import java.time.Clock;
+
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
+    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {

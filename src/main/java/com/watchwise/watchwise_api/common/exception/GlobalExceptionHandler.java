@@ -102,6 +102,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 ));
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    ResponseEntity<ApiError> handleTooManyRequests(
+            TooManyRequestsException ex,
+            HttpServletRequest request
+    ){
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(new ApiError(
+                        LocalDateTime.now(),
+                        HttpStatus.TOO_MANY_REQUESTS.value(),
+                        "Too Many Requests",
+                        ex.getMessage(),
+                        request.getRequestURI()
+                ));
+    }
+
     @Override
     protected ResponseEntity<Object> handleMissingServletRequestParameter(
             MissingServletRequestParameterException ex,

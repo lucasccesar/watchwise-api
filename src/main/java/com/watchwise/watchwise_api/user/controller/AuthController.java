@@ -3,9 +3,11 @@ package com.watchwise.watchwise_api.user.controller;
 import com.watchwise.watchwise_api.auth.dto.RefreshedTokens;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
 import com.watchwise.watchwise_api.common.security.JwtService;
+import com.watchwise.watchwise_api.common.security.LoginRateLimiter;
 import com.watchwise.watchwise_api.common.security.OAuthProvider;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
@@ -47,6 +49,7 @@ public class AuthController {
     private final RefreshTokenService refreshTokenService;
     private final CsrfAuthenticationStrategy csrfAuthenticationStrategy;
     private final GoogleTokenVerifier googleTokenVerifier;
+    private final LoginRateLimiter loginRateLimiter;
 
     @PostMapping("/register")
     public ResponseEntity<UserResponseDTO> register(
@@ -77,7 +80,17 @@ public class AuthController {
             throw new ConflictException("Already authenticated");
         }
 
-        UserResponseDTO user = userService.login(loginUserDTO);
+        String rateLimitKey = buildRateLimitKey(request, loginUserDTO.identifier());
+        loginRateLimiter.checkAllowed(rateLimitKey);
+
+        UserResponseDTO user;
+        try {
+            user = userService.login(loginUserDTO);
+        } catch (UnauthorizedException e) {
+            loginRateLimiter.recordFailure(rateLimitKey);
+            throw e;
+        }
+        loginRateLimiter.recordSuccess(rateLimitKey);
 
         rotateCsrfToken(request, response);
         cookieUtil.addCookie(response, buildAccessTokenCookie(user));
@@ -151,6 +164,10 @@ public class AuthController {
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
 
         return ResponseEntity.noContent().build();
+    }
+
+    private String buildRateLimitKey(HttpServletRequest request, String identifier) {
+        return request.getRemoteAddr() + "|" + identifier.trim().toLowerCase();
     }
 
     private UUID getCurrentUserId() {

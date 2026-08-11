@@ -221,6 +221,61 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[login] Should Return TooManyRequests - When Failed Attempts Reach The Configured Max")
+    void shouldReturnTooManyRequestsWhenFailedAttemptsReachTheConfiguredMax() throws Exception {
+        mockMvc.perform(registerRequest("ratelimituser", "ratelimituser@email.com"))
+                .andExpect(status().isCreated());
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(wrongPasswordLoginRequest("ratelimituser"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(loginRequest("ratelimituser"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many login attempts. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[login] Should Not Block A Different Identifier - When Another Identifier Is Rate Limited")
+    void shouldNotBlockADifferentIdentifierWhenAnotherIdentifierIsRateLimited() throws Exception {
+        mockMvc.perform(registerRequest("ratelimituserA", "ratelimituserA@email.com"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("ratelimituserB", "ratelimituserB@email.com"))
+                .andExpect(status().isCreated());
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(wrongPasswordLoginRequest("ratelimituserA"))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(loginRequest("ratelimituserA"))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(loginRequest("ratelimituserB"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("[login] Should Not Block A Different Ip - When Another Ip Is Rate Limited")
+    void shouldNotBlockADifferentIpWhenAnotherIpIsRateLimited() throws Exception {
+        mockMvc.perform(registerRequest("ratelimitipuser", "ratelimitipuser@email.com"))
+                .andExpect(status().isCreated());
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(wrongPasswordLoginRequest("ratelimitipuser"))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(loginRequest("ratelimitipuser"))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(loginRequest("ratelimitipuser").with(req -> {
+                    req.setRemoteAddr("10.0.0.99");
+                    return req;
+                }))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("[oauthLogin] Should Return Ok And Emit Access, Refresh And Csrf Cookies - When Local Account With That Email Exists")
     void shouldReturnOkAndEmitCookiesWhenLocalAccountWithThatEmailExists() throws Exception {
         mockMvc.perform(registerRequest("oauthuser", "oauthuser@email.com"))
@@ -512,6 +567,19 @@ class AuthControllerIntegrationTest {
                 {
                     "identifier": "%s",
                     "password": "Password123"
+                }
+                """.formatted(identifier);
+
+        return post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder wrongPasswordLoginRequest(String identifier) {
+        String body = """
+                {
+                    "identifier": "%s",
+                    "password": "WrongPassword123"
                 }
                 """.formatted(identifier);
 
