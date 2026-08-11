@@ -45,6 +45,11 @@ public class User {
     @Builder.Default
     private Boolean isProfilePublic = true;
 
+    @Column(name = "is_email_verified", nullable = false)
+    @Setter
+    @Builder.Default
+    private Boolean isEmailVerified = true;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;

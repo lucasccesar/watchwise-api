@@ -156,6 +156,22 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[saveNewUser] Should Set IsEmailVerified True - When Registering Common Account")
+    void shouldSetIsEmailVerifiedTrueWhenRegisteringCommonAccount() {
+        when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
+        when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.saveNewUser(postUserDTO);
+
+        verify(userRepository).save(userCaptor.capture());
+        assertThat(userCaptor.getValue().getIsEmailVerified()).isTrue();
+    }
+
+    @Test
     @DisplayName("[saveNewUser] Should Throw ConflictException With Username Message - When Username Constraint Is Violated")
     void shouldThrowConflictExceptionWithUsernameMessageWhenUsernameConstraintIsViolated() {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
@@ -800,6 +816,37 @@ class UserServiceImplTest {
 
         assertThat(result).isEqualTo(userResponseDTO);
         verify(userRepository).findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail());
+    }
+
+    @Test
+    @DisplayName("[login] Should Return UserResponseDTO - When Email Is Verified")
+    void shouldReturnUserResponseDtoWhenEmailIsVerified() {
+        savedUser.setIsEmailVerified(true);
+        LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");
+        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
+                .thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        UserResponseDTO result = userService.login(loginUserDTO);
+
+        assertThat(result).isEqualTo(userResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[login] Should Throw ForbiddenException - When Email Is Not Verified")
+    void shouldThrowForbiddenExceptionWhenEmailIsNotVerified() {
+        savedUser.setIsEmailVerified(false);
+        LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");
+        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
+                .thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.login(loginUserDTO))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("Email not verified");
+
+        verifyNoInteractions(userMapper);
     }
 
     @Test

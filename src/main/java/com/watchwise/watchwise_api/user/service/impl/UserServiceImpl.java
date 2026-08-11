@@ -46,6 +46,7 @@ public class UserServiceImpl implements UserService {
         mapperUser.setPassword(passwordEncoder.encode(postUserDTO.password()));
         mapperUser.setEmail(postUserDTO.email().toLowerCase().trim());
         mapperUser.setUsername(postUserDTO.username().trim());
+        mapperUser.setIsEmailVerified(true);
 
         LocalDateTime now = LocalDateTime.now();
         mapperUser.setCreatedAt(now);
@@ -196,6 +197,10 @@ public class UserServiceImpl implements UserService {
 
         if (!passwordEncoder.matches(loginUserDTO.password(), user.getPassword())) {
             throw new UnauthorizedException("Invalid credentials");
+        }
+
+        if (!Boolean.TRUE.equals(user.getIsEmailVerified())) {
+            throw new ForbiddenException("Email not verified");
         }
 
         return userMapper.userToUserResponseDto(user);
