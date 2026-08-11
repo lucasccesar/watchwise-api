@@ -119,11 +119,74 @@ class RefreshTokenRepositoryTest {
         assertThat(refreshTokenRepository.findById(otherJti).orElseThrow().getRevoked()).isFalse();
     }
 
+    @Test
+    @DisplayName("[deleteExpiredOrRevoked] Should Delete Expired Tokens - When Called")
+    void shouldDeleteExpiredTokensWhenCalled() {
+        UUID expiredJti = UUID.randomUUID();
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(expiredJti, user, LocalDateTime.now().minusDays(1), false));
+        entityManager.clear();
+
+        int deleted = refreshTokenRepository.deleteExpiredOrRevoked(LocalDateTime.now());
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(refreshTokenRepository.findById(expiredJti)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[deleteExpiredOrRevoked] Should Delete Revoked Tokens - When Called")
+    void shouldDeleteRevokedTokensWhenCalled() {
+        UUID revokedJti = UUID.randomUUID();
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(revokedJti, user, LocalDateTime.now().plusDays(7), true));
+        entityManager.clear();
+
+        int deleted = refreshTokenRepository.deleteExpiredOrRevoked(LocalDateTime.now());
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(refreshTokenRepository.findById(revokedJti)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[deleteExpiredOrRevoked] Should Not Delete Valid Tokens - When Called")
+    void shouldNotDeleteValidTokensWhenCalled() {
+        UUID validJti = UUID.randomUUID();
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(validJti, user, LocalDateTime.now().plusDays(7), false));
+        entityManager.clear();
+
+        int deleted = refreshTokenRepository.deleteExpiredOrRevoked(LocalDateTime.now());
+
+        assertThat(deleted).isZero();
+        assertThat(refreshTokenRepository.findById(validJti)).isPresent();
+    }
+
+    @Test
+    @DisplayName("[deleteExpiredOrRevoked] Should Only Delete Expired Or Revoked Tokens - When Both Kinds Exist Alongside Valid Ones")
+    void shouldOnlyDeleteExpiredOrRevokedTokensWhenBothKindsExistAlongsideValidOnes() {
+        UUID expiredJti = UUID.randomUUID();
+        UUID revokedJti = UUID.randomUUID();
+        UUID validJti = UUID.randomUUID();
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(expiredJti, user, LocalDateTime.now().minusDays(1), false));
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(revokedJti, user, LocalDateTime.now().plusDays(7), true));
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(validJti, user, LocalDateTime.now().plusDays(7), false));
+        entityManager.clear();
+
+        int deleted = refreshTokenRepository.deleteExpiredOrRevoked(LocalDateTime.now());
+
+        assertThat(deleted).isEqualTo(2);
+        assertThat(refreshTokenRepository.findById(expiredJti)).isEmpty();
+        assertThat(refreshTokenRepository.findById(revokedJti)).isEmpty();
+        assertThat(refreshTokenRepository.findById(validJti)).isPresent();
+    }
+
     private RefreshToken buildRefreshToken(UUID id, User owner) {
+        return buildRefreshToken(id, owner, LocalDateTime.now().plusDays(7), false);
+    }
+
+    private RefreshToken buildRefreshToken(UUID id, User owner, LocalDateTime expiresAt, boolean revoked) {
         return RefreshToken.builder()
                 .id(id)
                 .user(owner)
-                .expiresAt(LocalDateTime.now().plusDays(7))
+                .expiresAt(expiresAt)
+                .revoked(revoked)
                 .createdAt(LocalDateTime.now())
                 .build();
     }

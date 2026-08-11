@@ -101,6 +101,12 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         requiresNewTransaction.executeWithoutResult(status -> refreshTokenRepository.revokeAllByUserId(userId));
     }
 
+    @Override
+    @Transactional
+    public int cleanupExpiredAndRevokedTokens() {
+        return refreshTokenRepository.deleteExpiredOrRevoked(LocalDateTime.now());
+    }
+
     private LocalDateTime toLocalDateTime(java.util.Date date) {
         return LocalDateTime.ofInstant(date.toInstant(), ZoneId.systemDefault());
     }

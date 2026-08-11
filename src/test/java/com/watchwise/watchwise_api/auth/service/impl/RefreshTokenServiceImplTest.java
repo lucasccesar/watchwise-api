@@ -22,12 +22,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -216,6 +218,19 @@ class RefreshTokenServiceImplTest {
         refreshTokenService.revokeAllRefreshTokens(userId);
 
         verify(refreshTokenRepository).revokeAllByUserId(userId);
+    }
+
+    @Test
+    @DisplayName("[cleanupExpiredAndRevokedTokens] Should Delegate To Repository With The Current Time - When Called")
+    void shouldDelegateToRepositoryWithTheCurrentTimeWhenCleanupExpiredAndRevokedTokensCalled() {
+        when(refreshTokenRepository.deleteExpiredOrRevoked(any(LocalDateTime.class))).thenReturn(3);
+
+        int result = refreshTokenService.cleanupExpiredAndRevokedTokens();
+
+        assertThat(result).isEqualTo(3);
+        ArgumentCaptor<LocalDateTime> nowCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(refreshTokenRepository).deleteExpiredOrRevoked(nowCaptor.capture());
+        assertThat(nowCaptor.getValue()).isCloseTo(LocalDateTime.now(), within(5, ChronoUnit.SECONDS));
     }
 
     @Test
