@@ -298,6 +298,31 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[refresh] Should Revoke Every Valid Refresh Token For The User - When A Revoked Refresh Token Is Reused")
+    void shouldRevokeEveryValidRefreshTokenForTheUserWhenARevokedRefreshTokenIsReused() throws Exception {
+        mockMvc.perform(registerRequest("reuseuser", "reuseuser@email.com"))
+                .andExpect(status().isCreated());
+
+        MvcResult loginResult = mockMvc.perform(loginRequest("reuseuser"))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie originalRefreshCookie = loginResult.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        assertThat(originalRefreshCookie).isNotNull();
+
+        MvcResult refreshResult = mockMvc.perform(post("/auth/refresh").cookie(originalRefreshCookie))
+                .andExpect(status().isNoContent())
+                .andReturn();
+        Cookie rotatedRefreshCookie = refreshResult.getResponse().getCookie(CookieUtil.REFRESH_TOKEN_COOKIE);
+        assertThat(rotatedRefreshCookie).isNotNull();
+
+        mockMvc.perform(post("/auth/refresh").cookie(originalRefreshCookie))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh").cookie(rotatedRefreshCookie))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("[refresh][logout] Should Rotate Refresh Token And Reject Reuse Of Old Token - When Full Auth Flow Is Executed")
     void shouldRotateRefreshTokenAndRejectReuseOfOldTokenWhenFullAuthFlowIsExecuted() throws Exception {
         mockMvc.perform(registerRequest("flowuser", "flowuser@email.com"))

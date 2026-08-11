@@ -86,6 +86,39 @@ class RefreshTokenRepositoryTest {
         assertThat(refreshTokenRepository.findById(jti)).isEmpty();
     }
 
+    @Test
+    @DisplayName("[revokeAllByUserId] Should Revoke All Non-Revoked Tokens For User - When Called")
+    void shouldRevokeAllNonRevokedTokensForUserWhenCalled() {
+        UUID firstJti = UUID.randomUUID();
+        UUID secondJti = UUID.randomUUID();
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(firstJti, user));
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(secondJti, user));
+        entityManager.clear();
+
+        refreshTokenRepository.revokeAllByUserId(user.getId());
+        entityManager.clear();
+
+        assertThat(refreshTokenRepository.findById(firstJti).orElseThrow().getRevoked()).isTrue();
+        assertThat(refreshTokenRepository.findById(secondJti).orElseThrow().getRevoked()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[revokeAllByUserId] Should Not Affect Tokens Belonging To A Different User - When Called")
+    void shouldNotAffectTokensBelongingToADifferentUserWhenCalled() {
+        User otherUser = userRepository.save(buildUser("marina", "marina@email.com"));
+        UUID ownJti = UUID.randomUUID();
+        UUID otherJti = UUID.randomUUID();
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(ownJti, user));
+        refreshTokenRepository.saveAndFlush(buildRefreshToken(otherJti, otherUser));
+        entityManager.clear();
+
+        refreshTokenRepository.revokeAllByUserId(user.getId());
+        entityManager.clear();
+
+        assertThat(refreshTokenRepository.findById(ownJti).orElseThrow().getRevoked()).isTrue();
+        assertThat(refreshTokenRepository.findById(otherJti).orElseThrow().getRevoked()).isFalse();
+    }
+
     private RefreshToken buildRefreshToken(UUID id, User owner) {
         return RefreshToken.builder()
                 .id(id)

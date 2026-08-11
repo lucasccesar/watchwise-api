@@ -18,6 +18,8 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 import java.time.LocalDateTime;
 import java.util.Date;
@@ -40,6 +42,9 @@ class RefreshTokenServiceImplTest {
 
     @Mock
     private JwtService jwtService;
+
+    @Mock
+    private PlatformTransactionManager transactionManager;
 
     @InjectMocks
     private RefreshTokenServiceImpl refreshTokenService;
@@ -146,6 +151,30 @@ class RefreshTokenServiceImplTest {
     }
 
     @Test
+    @DisplayName("[rotateRefreshToken] Should Revoke All Refresh Tokens For The Owner - When Stored Token Is Already Revoked")
+    void shouldRevokeAllRefreshTokensForTheOwnerWhenStoredTokenIsAlreadyRevoked() {
+        String token = "valid-token";
+        UUID jti = UUID.randomUUID();
+        RefreshToken storedToken = RefreshToken.builder()
+                .id(jti)
+                .user(user)
+                .revoked(true)
+                .expiresAt(LocalDateTime.now().plusDays(7))
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(true);
+        when(jwtService.extractJti(token)).thenReturn(jti);
+        when(refreshTokenRepository.findById(jti)).thenReturn(Optional.of(storedToken));
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+
+        assertThatThrownBy(() -> refreshTokenService.rotateRefreshToken(token))
+                .isInstanceOf(UnauthorizedException.class);
+
+        verify(refreshTokenRepository).revokeAllByUserId(userId);
+    }
+
+    @Test
     @DisplayName("[rotateRefreshToken] Should Revoke Old Token And Issue New Token Pair - When Token Is Valid And Not Revoked")
     void shouldRevokeOldTokenAndIssueNewTokenPairWhenTokenIsValidAndNotRevoked() {
         String oldToken = "old-refresh-token";
@@ -177,6 +206,16 @@ class RefreshTokenServiceImplTest {
         assertThat(result).isEqualTo(new RefreshedTokens(newAccessToken, newRefreshToken));
         assertThat(storedToken.getRevoked()).isTrue();
         verify(refreshTokenRepository, times(2)).save(any(RefreshToken.class));
+    }
+
+    @Test
+    @DisplayName("[revokeAllRefreshTokens] Should Delegate To Repository With Given User Id - When Called")
+    void shouldDelegateToRepositoryWithGivenUserIdWhenRevokeAllRefreshTokensCalled() {
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+
+        refreshTokenService.revokeAllRefreshTokens(userId);
+
+        verify(refreshTokenRepository).revokeAllByUserId(userId);
     }
 
     @Test
