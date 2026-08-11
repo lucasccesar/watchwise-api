@@ -18,7 +18,7 @@ class JwtServiceTest {
     void shouldGenerateTokenThatResolvesToSameUserIdWhenCalled() {
         UUID userId = UUID.randomUUID();
 
-        String token = jwtService.generateToken(userId, "user@email.com", TokenType.ACCESS);
+        String token = jwtService.generateToken(userId, TokenType.ACCESS);
 
         assertThat(jwtService.extractUserId(token)).isEqualTo(userId);
     }
@@ -26,8 +26,8 @@ class JwtServiceTest {
     @Test
     @DisplayName("[generateToken] Should Generate Token With Matching Type Claim - When Called")
     void shouldGenerateTokenWithMatchingTypeClaimWhenCalled() {
-        String accessToken = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.ACCESS);
-        String refreshToken = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.REFRESH);
+        String accessToken = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
+        String refreshToken = jwtService.generateToken(UUID.randomUUID(), TokenType.REFRESH);
 
         assertThat(jwtService.extractTokenType(accessToken)).isEqualTo(TokenType.ACCESS);
         assertThat(jwtService.extractTokenType(refreshToken)).isEqualTo(TokenType.REFRESH);
@@ -38,8 +38,8 @@ class JwtServiceTest {
     void shouldGenerateTokensWithUniqueJtiWhenCalledMultipleTimes() {
         UUID userId = UUID.randomUUID();
 
-        String firstToken = jwtService.generateToken(userId, "user@email.com", TokenType.ACCESS);
-        String secondToken = jwtService.generateToken(userId, "user@email.com", TokenType.ACCESS);
+        String firstToken = jwtService.generateToken(userId, TokenType.ACCESS);
+        String secondToken = jwtService.generateToken(userId, TokenType.ACCESS);
 
         assertThat(firstToken).isNotEqualTo(secondToken);
     }
@@ -47,7 +47,7 @@ class JwtServiceTest {
     @Test
     @DisplayName("[isTokenValid] Should Return True - When Token Type Matches Expected Type")
     void shouldReturnTrueWhenTokenTypeMatchesExpectedType() {
-        String token = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.ACCESS);
+        String token = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
 
         assertThat(jwtService.isTokenValid(token, TokenType.ACCESS)).isTrue();
     }
@@ -55,7 +55,7 @@ class JwtServiceTest {
     @Test
     @DisplayName("[isTokenValid] Should Return False - When Refresh Token Is Validated As Access Token")
     void shouldReturnFalseWhenRefreshTokenIsValidatedAsAccessToken() {
-        String refreshToken = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.REFRESH);
+        String refreshToken = jwtService.generateToken(UUID.randomUUID(), TokenType.REFRESH);
 
         assertThat(jwtService.isTokenValid(refreshToken, TokenType.ACCESS)).isFalse();
     }
@@ -72,7 +72,7 @@ class JwtServiceTest {
         String otherSecret = "other-secret-other-secret-other-secret-other-secret";
         JwtService otherJwtService = new JwtService(otherSecret, 60, 7);
 
-        String token = otherJwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.ACCESS);
+        String token = otherJwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
 
         assertThat(jwtService.isTokenValid(token, TokenType.ACCESS)).isFalse();
     }
@@ -80,7 +80,7 @@ class JwtServiceTest {
     @Test
     @DisplayName("[extractJti] Should Return Same Id Embedded At Generation - When Called")
     void shouldReturnSameIdEmbeddedAtGenerationWhenCalled() {
-        String token = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.REFRESH);
+        String token = jwtService.generateToken(UUID.randomUUID(), TokenType.REFRESH);
 
         assertThat(jwtService.extractJti(token)).isNotNull();
     }
@@ -88,8 +88,8 @@ class JwtServiceTest {
     @Test
     @DisplayName("[generateToken] Should Generate Refresh Token With Later Expiration Than Access Token - When Called")
     void shouldGenerateRefreshTokenWithLaterExpirationThanAccessTokenWhenCalled() {
-        String accessToken = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.ACCESS);
-        String refreshToken = jwtService.generateToken(UUID.randomUUID(), "user@email.com", TokenType.REFRESH);
+        String accessToken = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
+        String refreshToken = jwtService.generateToken(UUID.randomUUID(), TokenType.REFRESH);
 
         assertThat(jwtService.extractExpiration(refreshToken)).isAfter(jwtService.extractExpiration(accessToken));
     }

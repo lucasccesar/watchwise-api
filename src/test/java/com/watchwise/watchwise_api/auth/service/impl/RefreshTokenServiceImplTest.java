@@ -71,12 +71,12 @@ class RefreshTokenServiceImplTest {
         UUID jti = UUID.randomUUID();
         Date expiration = new Date(System.currentTimeMillis() + 60_000);
 
-        when(jwtService.generateToken(userId, user.getEmail(), TokenType.REFRESH)).thenReturn(token);
+        when(jwtService.generateToken(userId, TokenType.REFRESH)).thenReturn(token);
         when(jwtService.extractJti(token)).thenReturn(jti);
         when(jwtService.extractExpiration(token)).thenReturn(expiration);
         when(userRepository.getReferenceById(userId)).thenReturn(user);
 
-        String result = refreshTokenService.issueRefreshToken(userId, user.getEmail());
+        String result = refreshTokenService.issueRefreshToken(userId);
 
         verify(refreshTokenRepository).save(refreshTokenCaptor.capture());
         RefreshToken saved = refreshTokenCaptor.getValue();
@@ -166,8 +166,8 @@ class RefreshTokenServiceImplTest {
         when(jwtService.isTokenValid(oldToken, TokenType.REFRESH)).thenReturn(true);
         when(jwtService.extractJti(oldToken)).thenReturn(oldJti);
         when(refreshTokenRepository.findById(oldJti)).thenReturn(Optional.of(storedToken));
-        when(jwtService.generateToken(userId, user.getEmail(), TokenType.ACCESS)).thenReturn(newAccessToken);
-        when(jwtService.generateToken(userId, user.getEmail(), TokenType.REFRESH)).thenReturn(newRefreshToken);
+        when(jwtService.generateToken(userId, TokenType.ACCESS)).thenReturn(newAccessToken);
+        when(jwtService.generateToken(userId, TokenType.REFRESH)).thenReturn(newRefreshToken);
         when(jwtService.extractJti(newRefreshToken)).thenReturn(newJti);
         when(jwtService.extractExpiration(newRefreshToken)).thenReturn(newExpiration);
         when(userRepository.getReferenceById(userId)).thenReturn(user);

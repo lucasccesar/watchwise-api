@@ -6,7 +6,7 @@ import java.util.UUID;
 
 public interface RefreshTokenService {
 
-    String issueRefreshToken(UUID userId, String email);
+    String issueRefreshToken(UUID userId);
 
     RefreshedTokens rotateRefreshToken(String rawRefreshToken);
 

@@ -158,12 +158,12 @@ public class AuthController {
     }
 
     private ResponseCookie buildAccessTokenCookie(UserResponseDTO user) {
-        String token = jwtService.generateToken(user.id(), user.email(), TokenType.ACCESS);
+        String token = jwtService.generateToken(user.id(), TokenType.ACCESS);
         return cookieUtil.buildAccessTokenCookie(token);
     }
 
     private ResponseCookie buildRefreshTokenCookie(UserResponseDTO user) {
-        String token = refreshTokenService.issueRefreshToken(user.id(), user.email());
+        String token = refreshTokenService.issueRefreshToken(user.id());
         return cookieUtil.buildRefreshTokenCookie(token);
     }
 }

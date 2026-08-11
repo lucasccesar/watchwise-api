@@ -71,7 +71,7 @@ class SecurityConfigIntegrationTest {
     @Test
     @DisplayName("[securityFilterChain] Should Return Unauthorized - When Cookie Holds A Refresh Token Instead Of An Access Token")
     void shouldReturnUnauthorizedWhenCookieHoldsARefreshTokenInsteadOfAnAccessToken() throws Exception {
-        String refreshToken = jwtService.generateToken(UUID.randomUUID(), "someone@email.com", TokenType.REFRESH);
+        String refreshToken = jwtService.generateToken(UUID.randomUUID(), TokenType.REFRESH);
 
         mockMvc.perform(get(PROTECTED_ROUTE).cookie(new Cookie(CookieUtil.ACCESS_TOKEN_COOKIE, refreshToken)))
                 .andExpect(status().isUnauthorized());
@@ -80,7 +80,7 @@ class SecurityConfigIntegrationTest {
     @Test
     @DisplayName("[securityFilterChain] Should Let Request Reach Spring Mvc Routing - When Access Token Cookie Is Valid")
     void shouldLetRequestReachSpringMvcRoutingWhenAccessTokenCookieIsValid() throws Exception {
-        String accessToken = jwtService.generateToken(UUID.randomUUID(), "someone@email.com", TokenType.ACCESS);
+        String accessToken = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
 
         mockMvc.perform(get(PROTECTED_ROUTE).cookie(new Cookie(CookieUtil.ACCESS_TOKEN_COOKIE, accessToken)))
                 .andExpect(status().isNotFound());

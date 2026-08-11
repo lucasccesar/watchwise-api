@@ -28,8 +28,8 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     private final JwtService jwtService;
 
     @Override
-    public String issueRefreshToken(UUID userId, String email) {
-        String token = jwtService.generateToken(userId, email, TokenType.REFRESH);
+    public String issueRefreshToken(UUID userId) {
+        String token = jwtService.generateToken(userId, TokenType.REFRESH);
         UUID jti = jwtService.extractJti(token);
 
         RefreshToken refreshToken = RefreshToken.builder()
@@ -63,8 +63,8 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         refreshTokenRepository.save(storedToken);
 
         User user = storedToken.getUser();
-        String newAccessToken = jwtService.generateToken(user.getId(), user.getEmail(), TokenType.ACCESS);
-        String newRefreshToken = issueRefreshToken(user.getId(), user.getEmail());
+        String newAccessToken = jwtService.generateToken(user.getId(), TokenType.ACCESS);
+        String newRefreshToken = issueRefreshToken(user.getId());
 
         return new RefreshedTokens(newAccessToken, newRefreshToken);
     }

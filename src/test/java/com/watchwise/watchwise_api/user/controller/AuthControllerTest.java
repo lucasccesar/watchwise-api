@@ -114,8 +114,8 @@ class AuthControllerTest {
         setAnonymous();
         PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
         when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
-        when(jwtService.generateToken(userResponseDTO.id(), userResponseDTO.email(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), userResponseDTO.email())).thenReturn("refresh-token");
+        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
 
         ResponseEntity<UserResponseDTO> result = authController.register(postUserDTO, request, response);
 
@@ -145,8 +145,8 @@ class AuthControllerTest {
         ResponseCookie accessCookie = ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build();
         ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
         when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
-        when(jwtService.generateToken(userResponseDTO.id(), userResponseDTO.email(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), userResponseDTO.email())).thenReturn("refresh-token");
+        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
         when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
         when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
 
@@ -203,8 +203,8 @@ class AuthControllerTest {
         ResponseCookie accessCookie = ResponseCookie.from(CookieUtil.ACCESS_TOKEN_COOKIE, "access-token").build();
         ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
         when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
-        when(jwtService.generateToken(userResponseDTO.id(), userResponseDTO.email(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), userResponseDTO.email())).thenReturn("refresh-token");
+        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
         when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
         when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
 
@@ -237,8 +237,8 @@ class AuthControllerTest {
         ResponseCookie refreshCookie = ResponseCookie.from(CookieUtil.REFRESH_TOKEN_COOKIE, "refresh-token").build();
         when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
         when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
-        when(jwtService.generateToken(userResponseDTO.id(), userResponseDTO.email(), TokenType.ACCESS)).thenReturn("access-token");
-        when(refreshTokenService.issueRefreshToken(userResponseDTO.id(), userResponseDTO.email())).thenReturn("refresh-token");
+        when(jwtService.generateToken(userResponseDTO.id(), TokenType.ACCESS)).thenReturn("access-token");
+        when(refreshTokenService.issueRefreshToken(userResponseDTO.id())).thenReturn("refresh-token");
         when(cookieUtil.buildAccessTokenCookie("access-token")).thenReturn(accessCookie);
         when(cookieUtil.buildRefreshTokenCookie("refresh-token")).thenReturn(refreshCookie);
 

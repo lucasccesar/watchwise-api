@@ -33,7 +33,7 @@ public class JwtService {
         this.refreshTokenExpirationDays = refreshTokenExpirationDays;
     }
 
-    public String generateToken(UUID userId, String email, TokenType type) {
+    public String generateToken(UUID userId, TokenType type) {
         Instant now = Instant.now();
         Instant expiration = type == TokenType.REFRESH
                 ? now.plus(refreshTokenExpirationDays, ChronoUnit.DAYS)
@@ -42,7 +42,6 @@ public class JwtService {
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())
                 .subject(userId.toString())
-                .claim("email", email)
                 .claim(TYPE_CLAIM, type.name())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiration))
