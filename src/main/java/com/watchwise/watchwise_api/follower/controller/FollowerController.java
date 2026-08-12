@@ -1,0 +1,85 @@
+package com.watchwise.watchwise_api.follower.controller;
+
+import com.watchwise.watchwise_api.follower.dto.FollowStatusResponseDTO;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.service.FollowerService;
+import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/users")
+@RequiredArgsConstructor
+public class FollowerController {
+
+    private final FollowerService followerService;
+
+    @GetMapping("/{userId}/followers")
+    public ResponseEntity<List<PublicUserDTO>> getFollowers(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<PublicUserDTO> followers = followerService.getFollowers(getCurrentUserId(), userId, page, size);
+        return ResponseEntity.ok(followers.getContent());
+    }
+
+    @GetMapping("/{userId}/following")
+    public ResponseEntity<List<PublicUserDTO>> getFollowing(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<PublicUserDTO> following = followerService.getFollowing(getCurrentUserId(), userId, page, size);
+        return ResponseEntity.ok(following.getContent());
+    }
+
+    @PostMapping("/{userId}/follow")
+    public ResponseEntity<FollowStatusResponseDTO> followUser(@PathVariable UUID userId) {
+        FollowStatus status = followerService.followUser(getCurrentUserId(), userId);
+        return ResponseEntity.ok(new FollowStatusResponseDTO(status));
+    }
+
+    @DeleteMapping("/{userId}/follow")
+    public ResponseEntity<Void> unfollowUser(@PathVariable UUID userId) {
+        followerService.unfollowUser(getCurrentUserId(), userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/me/follow-requests")
+    public ResponseEntity<List<PublicUserDTO>> getPendingFollowRequests(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<PublicUserDTO> requests = followerService.getPendingFollowRequests(getCurrentUserId(), page, size);
+        return ResponseEntity.ok(requests.getContent());
+    }
+
+    @PostMapping("/me/follow-requests/{requesterId}/accept")
+    public ResponseEntity<Void> acceptFollowRequest(@PathVariable UUID requesterId) {
+        followerService.acceptFollowRequest(getCurrentUserId(), requesterId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/me/follow-requests/{requesterId}")
+    public ResponseEntity<Void> rejectFollowRequest(@PathVariable UUID requesterId) {
+        followerService.rejectFollowRequest(getCurrentUserId(), requesterId);
+        return ResponseEntity.noContent().build();
+    }
+
+    private UUID getCurrentUserId() {
+        return (UUID) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    }
+}
