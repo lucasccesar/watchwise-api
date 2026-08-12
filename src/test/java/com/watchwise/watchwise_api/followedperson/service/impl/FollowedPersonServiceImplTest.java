@@ -1,7 +1,12 @@
 package com.watchwise.watchwise_api.followedperson.service.impl;
 
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ForbiddenException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,8 +19,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -23,8 +32,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,11 +47,17 @@ class FollowedPersonServiceImplTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private FollowerRepository followerRepository;
+
     @InjectMocks
     private FollowedPersonServiceImpl followedPersonService;
 
     @Captor
     private ArgumentCaptor<FollowedPerson> followedPersonCaptor;
+
+    @Captor
+    private ArgumentCaptor<PageRequest> pageRequestCaptor;
 
     private UUID userId;
     private User user;
@@ -139,5 +156,207 @@ class FollowedPersonServiceImplTest {
         followedPersonService.unfollowPerson(userId, personTmdbId);
 
         verify(followedPersonRepository, never()).delete(any());
+    }
+
+    private FollowedPerson buildFollowedPerson(String followedPersonTmdbId) {
+        return FollowedPerson.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .personTmdbId(followedPersonTmdbId)
+                .createdAt(LocalDateTime.now())
+                .build();
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return Page Of PersonTmdbIds - When Target Profile Is Public")
+    void shouldReturnPageOfPersonTmdbIdsWhenTargetProfileIsPublic() {
+        user.setIsProfilePublic(true);
+        Page<FollowedPerson> page = new PageImpl<>(List.of(buildFollowedPerson("603")));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(followedPersonRepository.findByUserId(eq(userId), any(PageRequest.class))).thenReturn(page);
+
+        Page<String> result = followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 10);
+
+        assertThat(result.getContent()).containsExactly("603");
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return Empty Page - When Target Follows No One")
+    void shouldReturnEmptyPageWhenTargetFollowsNoOne() {
+        user.setIsProfilePublic(true);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(followedPersonRepository.findByUserId(eq(userId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        Page<String> result = followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 10);
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Throw NotFoundException - When Target User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenTargetUserDoesNotExist() {
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 10))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+
+        verifyNoInteractions(followedPersonRepository, followerRepository);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return Page - When Target Profile Is Private And Viewer Is An Accepted Follower")
+    void shouldReturnPageWhenTargetProfileIsPrivateAndViewerIsAnAcceptedFollower() {
+        user.setIsProfilePublic(false);
+        UUID viewerId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, userId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(followedPersonRepository.findByUserId(eq(userId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        assertThat(followedPersonService.getFollowedPeople(viewerId, userId, 1, 10).getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateAndViewerIsNotAnAcceptedFollower() {
+        user.setIsProfilePublic(false);
+        UUID viewerId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, userId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> followedPersonService.getFollowedPeople(viewerId, userId, 1, 10))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+
+        verify(followedPersonRepository, never()).findByUserId(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return Page - When Target Profile Is Private And Viewer Is The Target Themselves")
+    void shouldReturnPageWhenTargetProfileIsPrivateAndViewerIsTheTargetThemselves() {
+        user.setIsProfilePublic(false);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(followedPersonRepository.findByUserId(eq(userId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        assertThat(followedPersonService.getFollowedPeople(userId, userId, 1, 10).getContent()).isEmpty();
+        verifyNoInteractions(followerRepository);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Use Default Page - When Page Number Is Null")
+    void shouldUseDefaultPageWhenPageNumberIsNull() {
+        stubFollowedPeopleEmptyPage();
+
+        followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, null, 10);
+
+        verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Use Default Page - When Page Number Is Zero")
+    void shouldUseDefaultPageWhenPageNumberIsZero() {
+        stubFollowedPeopleEmptyPage();
+
+        followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 0, 10);
+
+        verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Use Page Number Minus One - When Page Number Is Positive")
+    void shouldUsePageNumberMinusOneWhenPageNumberIsPositive() {
+        stubFollowedPeopleEmptyPage();
+
+        followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 3, 10);
+
+        verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Throw BadRequestException - When Page Number Is Negative")
+    void shouldThrowBadRequestExceptionWhenPageNumberIsNegative() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, -1, 10))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(followedPersonRepository, never()).findByUserId(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Use Default Page Size - When Page Size Is Null")
+    void shouldUseDefaultPageSizeWhenPageSizeIsNull() {
+        stubFollowedPeopleEmptyPage();
+
+        followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, null);
+
+        verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Use Default Page Size - When Page Size Exceeds Limit")
+    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+        stubFollowedPeopleEmptyPage();
+
+        followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 1001);
+
+        verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Use Provided Page Size - When Page Size Is Valid")
+    void shouldUseProvidedPageSizeWhenPageSizeIsValid() {
+        stubFollowedPeopleEmptyPage();
+
+        followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 25);
+
+        verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(25);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Use Provided Page Size - When Page Size Is At Max Limit")
+    void shouldUseProvidedPageSizeWhenPageSizeIsAtMaxLimit() {
+        stubFollowedPeopleEmptyPage();
+
+        followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 1000);
+
+        verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(1000);
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Throw BadRequestException - When Page Size Is Negative")
+    void shouldThrowBadRequestExceptionWhenPageSizeIsNegative() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, -5))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(followedPersonRepository, never()).findByUserId(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Throw BadRequestException - When Page Size Is Zero")
+    void shouldThrowBadRequestExceptionWhenPageSizeIsZero() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 0))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(followedPersonRepository, never()).findByUserId(any(), any());
+    }
+
+    private void stubFollowedPeopleEmptyPage() {
+        user.setIsProfilePublic(true);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(followedPersonRepository.findByUserId(any(), any(PageRequest.class))).thenReturn(Page.empty());
     }
 }

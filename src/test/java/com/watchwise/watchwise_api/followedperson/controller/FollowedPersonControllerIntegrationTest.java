@@ -26,7 +26,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -68,7 +70,11 @@ class FollowedPersonControllerIntegrationTest {
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
-        MvcResult result = mockMvc.perform(registerRequest(username))
+        return registerUser(username, true);
+    }
+
+    private RegisteredUser registerUser(String username, boolean isProfilePublic) throws Exception {
+        MvcResult result = mockMvc.perform(registerRequest(username, isProfilePublic))
                 .andExpect(status().isCreated())
                 .andReturn();
 
@@ -81,15 +87,15 @@ class FollowedPersonControllerIntegrationTest {
         return new RegisteredUser(user.getId(), accessTokenCookie, csrfCookie);
     }
 
-    private MockHttpServletRequestBuilder registerRequest(String username) {
+    private MockHttpServletRequestBuilder registerRequest(String username, boolean isProfilePublic) {
         String body = """
                 {
                     "username": "%s",
                     "email": "%s@email.com",
                     "password": "Password123",
-                    "isProfilePublic": true
+                    "isProfilePublic": %s
                 }
-                """.formatted(username, username);
+                """.formatted(username, username, isProfilePublic);
 
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -192,5 +198,48 @@ class FollowedPersonControllerIntegrationTest {
 
         mockMvc.perform(delete("/users/me/follow-people/603").cookie(user.accessToken()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return Followed PersonTmdbIds - When Target Profile Is Public")
+    void shouldReturnFollowedPersonTmdbIdsWhenTargetProfileIsPublic() throws Exception {
+        RegisteredUser viewer = registerUser("followedpeopleviewer");
+        RegisteredUser target = registerUser("followedpeopletarget");
+        mockMvc.perform(followPersonRequest(target, "603")).andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/users/" + target.id() + "/follow-people").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0]").value("603"));
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return NotFound - When Target User Does Not Exist")
+    void shouldReturnNotFoundWhenFollowedPeopleTargetUserDoesNotExist() throws Exception {
+        RegisteredUser viewer = registerUser("followedpeoplenotfoundviewer");
+
+        mockMvc.perform(get("/users/" + UUID.randomUUID() + "/follow-people").cookie(viewer.accessToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return Forbidden - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldReturnForbiddenWhenFollowedPeopleTargetProfileIsPrivate() throws Exception {
+        RegisteredUser viewer = registerUser("followedpeopleforbiddenviewer");
+        RegisteredUser target = registerUser("followedpeopleforbiddentarget", false);
+
+        mockMvc.perform(get("/users/" + target.id() + "/follow-people").cookie(viewer.accessToken()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
+
+    @Test
+    @DisplayName("[getFollowedPeople] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForFollowedPeople() throws Exception {
+        RegisteredUser target = registerUser("followedpeoplenoauthtarget");
+
+        mockMvc.perform(get("/users/" + target.id() + "/follow-people"))
+                .andExpect(status().isUnauthorized());
     }
 }

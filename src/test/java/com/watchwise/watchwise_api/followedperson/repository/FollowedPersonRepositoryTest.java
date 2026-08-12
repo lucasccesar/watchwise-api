@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -141,6 +143,29 @@ class FollowedPersonRepositoryTest {
         userRepository.flush();
 
         assertThat(followedPersonRepository.findById(saved.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findByUserId] Should Return Only That User's Rows - When Multiple Users Follow People")
+    void shouldReturnOnlyThatUsersRowsWhenMultipleUsersFollowPeople() {
+        followedPersonRepository.saveAndFlush(buildFollowedPerson(lucas, "111"));
+        followedPersonRepository.saveAndFlush(buildFollowedPerson(lucas, "222"));
+        followedPersonRepository.saveAndFlush(buildFollowedPerson(marina, "333"));
+        entityManager.clear();
+
+        Page<FollowedPerson> result = followedPersonRepository.findByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent())
+                .extracting(FollowedPerson::getPersonTmdbId)
+                .containsExactlyInAnyOrder("111", "222");
+    }
+
+    @Test
+    @DisplayName("[findByUserId] Should Return Empty Page - When User Follows No One")
+    void shouldReturnEmptyPageWhenUserFollowsNoOne() {
+        Page<FollowedPerson> result = followedPersonRepository.findByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
     }
 
     private FollowedPerson buildFollowedPerson(User user, String personTmdbId) {
