@@ -9,7 +9,6 @@ import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.SpaCsrfTokenRequestHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -85,8 +84,6 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/logout-all").authenticated()
                         .requestMatchers("/auth/**", "/error").permitAll()
-                        .requestMatchers("/users/me").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/users", "/users/{userId}").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(jsonAuthenticationEntryPoint)

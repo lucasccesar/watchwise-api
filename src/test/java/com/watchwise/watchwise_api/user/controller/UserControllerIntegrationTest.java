@@ -406,8 +406,8 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserById] Should Return PublicUserDTO - When No Access Token Cookie Is Present")
-    void shouldReturnPublicUserDtoWhenNoAccessTokenCookieIsPresent() throws Exception {
+    @DisplayName("[getUserById] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetUserById() throws Exception {
         mockMvc.perform(registerRequest("targetnoauth", "targetnoauth@email.com"))
                 .andExpect(status().isCreated());
         User targetUser = userRepository
@@ -415,8 +415,7 @@ class UserControllerIntegrationTest {
                 .orElseThrow();
 
         mockMvc.perform(get("/users/" + targetUser.getId()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.username").value("targetnoauth"));
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -502,15 +501,13 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUsersByUsername] Should Return Matching Users - When No Access Token Cookie Is Present")
-    void shouldReturnMatchingUsersWhenNoAccessTokenCookieIsPresent() throws Exception {
+    @DisplayName("[getUsersByUsername] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForSearch() throws Exception {
         mockMvc.perform(registerRequest("noauthsearchtarget", "noauthsearchtarget@email.com"))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(get("/users").param("username", "noauthsearchtarget"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].username").value("noauthsearchtarget"));
+                .andExpect(status().isUnauthorized());
     }
 
     private Cookie registerAndGetAccessToken(String username, String email) throws Exception {
