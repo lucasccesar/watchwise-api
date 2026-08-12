@@ -1,6 +1,5 @@
 package com.watchwise.watchwise_api.followedperson.controller;
 
-import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.followedperson.service.FollowedPersonService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,9 +18,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class FollowedPersonControllerTest {
@@ -51,44 +48,20 @@ class FollowedPersonControllerTest {
     }
 
     @Test
-    @DisplayName("[followPerson] Should Return NoContent And Delegate To Service - When UserId Matches The Authenticated User")
-    void shouldReturnNoContentAndDelegateToServiceWhenUserIdMatchesTheAuthenticatedUserForFollow() {
-        ResponseEntity<Void> result = followedPersonController.followPerson(currentUserId, personTmdbId);
+    @DisplayName("[followPerson] Should Return NoContent And Delegate To Service - When Called")
+    void shouldReturnNoContentAndDelegateToServiceWhenCalledForFollow() {
+        ResponseEntity<Void> result = followedPersonController.followPerson(personTmdbId);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(followedPersonService).followPerson(currentUserId, personTmdbId);
     }
 
     @Test
-    @DisplayName("[followPerson] Should Throw ForbiddenException - When UserId Does Not Match The Authenticated User")
-    void shouldThrowForbiddenExceptionWhenUserIdDoesNotMatchTheAuthenticatedUserForFollow() {
-        UUID otherUserId = UUID.randomUUID();
-
-        assertThatThrownBy(() -> followedPersonController.followPerson(otherUserId, personTmdbId))
-                .isInstanceOf(ForbiddenException.class)
-                .hasMessage("Cannot manage another user's followed people");
-
-        verifyNoInteractions(followedPersonService);
-    }
-
-    @Test
-    @DisplayName("[unfollowPerson] Should Return NoContent And Delegate To Service - When UserId Matches The Authenticated User")
-    void shouldReturnNoContentAndDelegateToServiceWhenUserIdMatchesTheAuthenticatedUserForUnfollow() {
-        ResponseEntity<Void> result = followedPersonController.unfollowPerson(currentUserId, personTmdbId);
+    @DisplayName("[unfollowPerson] Should Return NoContent And Delegate To Service - When Called")
+    void shouldReturnNoContentAndDelegateToServiceWhenCalledForUnfollow() {
+        ResponseEntity<Void> result = followedPersonController.unfollowPerson(personTmdbId);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(followedPersonService).unfollowPerson(currentUserId, personTmdbId);
-    }
-
-    @Test
-    @DisplayName("[unfollowPerson] Should Throw ForbiddenException - When UserId Does Not Match The Authenticated User")
-    void shouldThrowForbiddenExceptionWhenUserIdDoesNotMatchTheAuthenticatedUserForUnfollow() {
-        UUID otherUserId = UUID.randomUUID();
-
-        assertThatThrownBy(() -> followedPersonController.unfollowPerson(otherUserId, personTmdbId))
-                .isInstanceOf(ForbiddenException.class)
-                .hasMessage("Cannot manage another user's followed people");
-
-        verifyNoInteractions(followedPersonService);
     }
 }

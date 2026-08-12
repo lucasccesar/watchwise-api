@@ -27,7 +27,6 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -97,14 +96,14 @@ class FollowedPersonControllerIntegrationTest {
                 .content(body);
     }
 
-    private MockHttpServletRequestBuilder followPersonRequest(RegisteredUser actor, UUID pathUserId, String personTmdbId) {
-        return post("/users/" + pathUserId + "/follow-people/" + personTmdbId)
+    private MockHttpServletRequestBuilder followPersonRequest(RegisteredUser actor, String personTmdbId) {
+        return post("/users/me/follow-people/" + personTmdbId)
                 .cookie(actor.accessToken(), actor.csrfToken())
                 .header("X-XSRF-TOKEN", actor.csrfToken().getValue());
     }
 
-    private MockHttpServletRequestBuilder unfollowPersonRequest(RegisteredUser actor, UUID pathUserId, String personTmdbId) {
-        return delete("/users/" + pathUserId + "/follow-people/" + personTmdbId)
+    private MockHttpServletRequestBuilder unfollowPersonRequest(RegisteredUser actor, String personTmdbId) {
+        return delete("/users/me/follow-people/" + personTmdbId)
                 .cookie(actor.accessToken(), actor.csrfToken())
                 .header("X-XSRF-TOKEN", actor.csrfToken().getValue());
     }
@@ -114,7 +113,7 @@ class FollowedPersonControllerIntegrationTest {
     void shouldReturnNoContentAndPersistRowWhenFollowingANewPerson() throws Exception {
         RegisteredUser user = registerUser("followpersonok");
 
-        mockMvc.perform(followPersonRequest(user, user.id(), "603"))
+        mockMvc.perform(followPersonRequest(user, "603"))
                 .andExpect(status().isNoContent());
 
         assertThat(followedPersonRepository.findByUserIdAndPersonTmdbId(user.id(), "603")).isPresent();
@@ -125,8 +124,8 @@ class FollowedPersonControllerIntegrationTest {
     void shouldReturnNoContentAndNotDuplicateWhenFollowingTheSamePersonTwice() throws Exception {
         RegisteredUser user = registerUser("followpersontwice");
 
-        mockMvc.perform(followPersonRequest(user, user.id(), "603")).andExpect(status().isNoContent());
-        mockMvc.perform(followPersonRequest(user, user.id(), "603")).andExpect(status().isNoContent());
+        mockMvc.perform(followPersonRequest(user, "603")).andExpect(status().isNoContent());
+        mockMvc.perform(followPersonRequest(user, "603")).andExpect(status().isNoContent());
 
         long count = followedPersonRepository.findAll().stream()
                 .filter(fp -> fp.getUser().getId().equals(user.id()) && fp.getPersonTmdbId().equals("603"))
@@ -135,24 +134,11 @@ class FollowedPersonControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[followPerson] Should Return Forbidden - When UserId In Path Is Not The Authenticated User")
-    void shouldReturnForbiddenWhenUserIdInPathIsNotTheAuthenticatedUserForFollow() throws Exception {
-        RegisteredUser actor = registerUser("followpersonforbiddenactor");
-        RegisteredUser other = registerUser("followpersonforbiddenother");
-
-        mockMvc.perform(followPersonRequest(actor, other.id(), "603"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message").value("Cannot manage another user's followed people"));
-
-        assertThat(followedPersonRepository.findByUserIdAndPersonTmdbId(other.id(), "603")).isEmpty();
-    }
-
-    @Test
     @DisplayName("[followPerson] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForFollow() throws Exception {
         RegisteredUser user = registerUser("followpersonnoauth");
 
-        mockMvc.perform(post("/users/" + user.id() + "/follow-people/603")
+        mockMvc.perform(post("/users/me/follow-people/603")
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
                 .andExpect(status().isUnauthorized());
@@ -163,7 +149,7 @@ class FollowedPersonControllerIntegrationTest {
     void shouldReturnForbiddenWhenCsrfTokenIsMissingForFollow() throws Exception {
         RegisteredUser user = registerUser("followpersonnocsrf");
 
-        mockMvc.perform(post("/users/" + user.id() + "/follow-people/603").cookie(user.accessToken()))
+        mockMvc.perform(post("/users/me/follow-people/603").cookie(user.accessToken()))
                 .andExpect(status().isForbidden());
     }
 
@@ -171,9 +157,9 @@ class FollowedPersonControllerIntegrationTest {
     @DisplayName("[unfollowPerson] Should Return NoContent And Remove Row - When Person Is Followed")
     void shouldReturnNoContentAndRemoveRowWhenPersonIsFollowed() throws Exception {
         RegisteredUser user = registerUser("unfollowpersonok");
-        mockMvc.perform(followPersonRequest(user, user.id(), "603")).andExpect(status().isNoContent());
+        mockMvc.perform(followPersonRequest(user, "603")).andExpect(status().isNoContent());
 
-        mockMvc.perform(unfollowPersonRequest(user, user.id(), "603"))
+        mockMvc.perform(unfollowPersonRequest(user, "603"))
                 .andExpect(status().isNoContent());
 
         assertThat(followedPersonRepository.findByUserIdAndPersonTmdbId(user.id(), "603")).isEmpty();
@@ -184,22 +170,8 @@ class FollowedPersonControllerIntegrationTest {
     void shouldReturnNoContentWhenPersonWasNotFollowed() throws Exception {
         RegisteredUser user = registerUser("unfollowpersonnotfollowed");
 
-        mockMvc.perform(unfollowPersonRequest(user, user.id(), "603"))
+        mockMvc.perform(unfollowPersonRequest(user, "603"))
                 .andExpect(status().isNoContent());
-    }
-
-    @Test
-    @DisplayName("[unfollowPerson] Should Return Forbidden - When UserId In Path Is Not The Authenticated User")
-    void shouldReturnForbiddenWhenUserIdInPathIsNotTheAuthenticatedUserForUnfollow() throws Exception {
-        RegisteredUser actor = registerUser("unfollowpersonforbiddenactor");
-        RegisteredUser other = registerUser("unfollowpersonforbiddenother");
-        mockMvc.perform(followPersonRequest(other, other.id(), "603")).andExpect(status().isNoContent());
-
-        mockMvc.perform(unfollowPersonRequest(actor, other.id(), "603"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message").value("Cannot manage another user's followed people"));
-
-        assertThat(followedPersonRepository.findByUserIdAndPersonTmdbId(other.id(), "603")).isPresent();
     }
 
     @Test
@@ -207,7 +179,7 @@ class FollowedPersonControllerIntegrationTest {
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForUnfollow() throws Exception {
         RegisteredUser user = registerUser("unfollowpersonnoauth");
 
-        mockMvc.perform(delete("/users/" + user.id() + "/follow-people/603")
+        mockMvc.perform(delete("/users/me/follow-people/603")
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
                 .andExpect(status().isUnauthorized());
@@ -218,7 +190,7 @@ class FollowedPersonControllerIntegrationTest {
     void shouldReturnForbiddenWhenCsrfTokenIsMissingForUnfollow() throws Exception {
         RegisteredUser user = registerUser("unfollowpersonnocsrf");
 
-        mockMvc.perform(delete("/users/" + user.id() + "/follow-people/603").cookie(user.accessToken()))
+        mockMvc.perform(delete("/users/me/follow-people/603").cookie(user.accessToken()))
                 .andExpect(status().isForbidden());
     }
 }
