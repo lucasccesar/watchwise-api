@@ -1,0 +1,48 @@
+package com.watchwise.watchwise_api.followedperson.service.impl;
+
+import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
+import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
+import com.watchwise.watchwise_api.followedperson.service.FollowedPersonService;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class FollowedPersonServiceImpl implements FollowedPersonService {
+
+    private final FollowedPersonRepository followedPersonRepository;
+    private final UserRepository userRepository;
+
+    @Override
+    public void followPerson(UUID userId, String personTmdbId) {
+        if (followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)) {
+            return;
+        }
+
+        FollowedPerson followedPerson = FollowedPerson.builder()
+                .user(userRepository.getReferenceById(userId))
+                .personTmdbId(personTmdbId)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        try {
+            followedPersonRepository.save(followedPerson);
+        } catch (DataIntegrityViolationException e) {
+            if (!followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)) {
+                throw e;
+            }
+        }
+    }
+
+    @Override
+    public void unfollowPerson(UUID userId, String personTmdbId) {
+        followedPersonRepository.findByUserIdAndPersonTmdbId(userId, personTmdbId)
+                .ifPresent(followedPersonRepository::delete);
+    }
+
+}
