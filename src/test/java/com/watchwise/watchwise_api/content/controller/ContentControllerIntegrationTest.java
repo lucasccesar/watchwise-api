@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -56,6 +58,9 @@ class ContentControllerIntegrationTest {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @Autowired
+    private RequestThrottler requestThrottler;
+
     private Cookie accessTokenCookie;
     private Cookie csrfCookie;
 
@@ -64,6 +69,7 @@ class ContentControllerIntegrationTest {
         contentRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
+        RequestThrottlerTestSupport.reset(requestThrottler);
 
         MvcResult registerResult = mockMvc.perform(registerRequest("contentuser", "contentuser@email.com"))
                 .andExpect(status().isCreated())
@@ -160,6 +166,19 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.id").value(existing.getId().toString()));
 
         assertThat(contentRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Return TooManyRequests - When Requests From The Same User Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
+        for (int i = 0; i < 60; i++) {
+            mockMvc.perform(referenceRequest("{ \"tmdbId\": \"550\", \"type\": \"MOVIE\" }"))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(referenceRequest("{ \"tmdbId\": \"550\", \"type\": \"MOVIE\" }"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
     }
 
     @Test

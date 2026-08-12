@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.user.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -62,10 +64,14 @@ class UserControllerIntegrationTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private RequestThrottler requestThrottler;
+
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
+        RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
     @Test
@@ -342,6 +348,56 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[updateCurrentUser] Should Return TooManyRequests - When Wrong CurrentPassword Attempts Reach The Configured Max")
+    void shouldReturnTooManyRequestsWhenPatchWrongCurrentPasswordAttemptsReachTheConfiguredMax() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("patchlockoutuser", "patchlockoutuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                            "{ \"password\": \"NewPassword123\", \"currentPassword\": \"WrongPassword123\" }"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many attempts. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Not Reset The Lockout Counter - When An Unrelated Successful Edit Happens Between Failed Password Attempts")
+    void shouldNotResetTheLockoutCounterWhenAnUnrelatedSuccessfulEditHappensBetweenFailedPasswordAttempts() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("interleaveuser", "interleaveuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        for (int i = 0; i < 4; i++) {
+            mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                            "{ \"password\": \"NewPassword123\", \"currentPassword\": \"WrongPassword123\" }"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"description\": \"Harmless bio edit\" }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"WrongPassword123\" }"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Return Forbidden - When Csrf Token Is Missing")
     void shouldReturnForbiddenWhenCsrfTokenIsMissing() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("nocsrfuser", "nocsrfuser@email.com"))
@@ -398,6 +454,30 @@ class UserControllerIntegrationTest {
         Optional<User> keptUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("keepuser", "keepuser");
         assertThat(keptUser).isPresent();
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Return TooManyRequests - When Wrong Password Attempts Reach The Configured Max")
+    void shouldReturnTooManyRequestsWhenDeleteWrongPasswordAttemptsReachTheConfiguredMax() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("deletelockoutuser", "deletelockoutuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"WrongPassword123\" }"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many attempts. Try again later."));
+
+        Optional<User> stillExists = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("deletelockoutuser", "deletelockoutuser");
+        assertThat(stillExists).isPresent();
     }
 
     @Test
@@ -620,6 +700,46 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").param("username", "noauthsearchtarget"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername][getUserById] Should Return TooManyRequests - When Combined Requests From The Same User Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenCombinedProfileRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("scanviewer", "scanviewer@email.com");
+        mockMvc.perform(registerRequest("scantarget", "scantarget@email.com")).andExpect(status().isCreated());
+        User targetUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("scantarget", "scantarget")
+                .orElseThrow();
+
+        for (int i = 0; i < 15; i++) {
+            mockMvc.perform(get("/users").param("username", "scantarget").cookie(viewerAccessToken))
+                    .andExpect(status().isOk());
+        }
+        for (int i = 0; i < 15; i++) {
+            mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Not Block A Different User - When Another User Is Rate Limited")
+    void shouldNotBlockADifferentUserWhenAnotherUserIsRateLimitedForProfileScan() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("scanviewerA", "scanviewerA@email.com");
+        Cookie otherViewerAccessToken = registerAndGetAccessToken("scanviewerB", "scanviewerB@email.com");
+
+        for (int i = 0; i < 30; i++) {
+            mockMvc.perform(get("/users").param("username", "nomatch").cookie(viewerAccessToken))
+                    .andExpect(status().isOk());
+        }
+        mockMvc.perform(get("/users").param("username", "nomatch").cookie(viewerAccessToken))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(get("/users").param("username", "nomatch").cookie(otherViewerAccessToken))
+                .andExpect(status().isOk());
     }
 
     private Cookie registerAndGetAccessToken(String username, String email) throws Exception {

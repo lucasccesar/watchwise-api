@@ -5,11 +5,12 @@ import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.common.security.AttemptLockout;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
 import com.watchwise.watchwise_api.common.security.JwtService;
-import com.watchwise.watchwise_api.common.security.LoginRateLimiter;
 import com.watchwise.watchwise_api.common.security.OAuthProvider;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.OAuthAccountNotFoundDTO;
@@ -44,6 +45,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -75,7 +77,10 @@ class AuthControllerTest {
     private GoogleTokenVerifier googleTokenVerifier;
 
     @Mock
-    private LoginRateLimiter loginRateLimiter;
+    private AttemptLockout attemptLockout;
+
+    @Mock
+    private RequestThrottler requestThrottler;
 
     @InjectMocks
     private AuthController authController;
@@ -182,6 +187,48 @@ class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("[register] Should Check Rate Limit Before Creating User - When Not Authenticated")
+    void shouldCheckRateLimitBeforeCreatingUserWhenNotAuthenticated() {
+        setAnonymous();
+        PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
+        when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
+
+        authController.register(postUserDTO, request, response);
+
+        InOrder order = inOrder(requestThrottler, userService);
+        order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
+        order.verify(userService).saveNewUser(postUserDTO);
+    }
+
+    @Test
+    @DisplayName("[register] Should Build Throttle Key From Action And Remote Addr - When Called")
+    void shouldBuildThrottleKeyFromActionAndRemoteAddrWhenRegisterCalled() {
+        setAnonymous();
+        PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(userService.saveNewUser(postUserDTO)).thenReturn(userResponseDTO);
+
+        authController.register(postUserDTO, request, response);
+
+        verify(requestThrottler).checkAllowed(eq("register|127.0.0.1"), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("[register] Should Throw TooManyRequestsException And Not Create User - When Rate Limited")
+    void shouldThrowTooManyRequestsExceptionAndNotCreateUserWhenRateLimited() {
+        setAnonymous();
+        PostUserDTO postUserDTO = new PostUserDTO("JohnDoe", "john.doe@email.com", "Password123", null, null, null);
+        doThrow(new TooManyRequestsException("Too many requests. Try again later."))
+                .when(requestThrottler).checkAllowed(any(), anyInt(), any());
+
+        assertThatThrownBy(() -> authController.register(postUserDTO, request, response))
+                .isInstanceOf(TooManyRequestsException.class);
+
+        verify(userService, never()).saveNewUser(any());
+        verify(cookieUtil, never()).addCookie(any(), any());
+    }
+
+    @Test
     @DisplayName("[login] Should Return Ok With UserResponseDTO - When Not Authenticated")
     void shouldReturnOkWithUserResponseDtoWhenNotAuthenticated() {
         setAnonymous();
@@ -236,14 +283,14 @@ class AuthControllerTest {
 
         authController.login(loginUserDTO, request, response);
 
-        InOrder order = inOrder(loginRateLimiter, userService);
-        order.verify(loginRateLimiter).checkAllowed(any());
+        InOrder order = inOrder(attemptLockout, userService);
+        order.verify(attemptLockout).checkAllowed(any());
         order.verify(userService).login(loginUserDTO);
     }
 
     @Test
-    @DisplayName("[login] Should Build Rate Limit Key From Remote Addr And Identifier - When Called")
-    void shouldBuildRateLimitKeyFromRemoteAddrAndIdentifierWhenCalled() {
+    @DisplayName("[login] Should Build Lockout Key From Remote Addr And Identifier - When Called")
+    void shouldBuildLockoutKeyFromRemoteAddrAndIdentifierWhenCalled() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("  John.Doe@Email.com  ", "Password123");
         when(request.getRemoteAddr()).thenReturn("127.0.0.1");
@@ -251,7 +298,7 @@ class AuthControllerTest {
 
         authController.login(loginUserDTO, request, response);
 
-        verify(loginRateLimiter).checkAllowed("127.0.0.1|john.doe@email.com");
+        verify(attemptLockout).checkAllowed("login|127.0.0.1|john.doe@email.com");
     }
 
     @Test
@@ -259,8 +306,8 @@ class AuthControllerTest {
     void shouldThrowTooManyRequestsExceptionAndNotAttemptLoginWhenRateLimited() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
-        doThrow(new TooManyRequestsException("Too many login attempts. Try again later."))
-                .when(loginRateLimiter).checkAllowed(any());
+        doThrow(new TooManyRequestsException("Too many attempts. Try again later."))
+                .when(attemptLockout).checkAllowed(any());
 
         assertThatThrownBy(() -> authController.login(loginUserDTO, request, response))
                 .isInstanceOf(TooManyRequestsException.class);
@@ -280,8 +327,8 @@ class AuthControllerTest {
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("Invalid credentials");
 
-        verify(loginRateLimiter).recordFailure(any());
-        verify(loginRateLimiter, never()).recordSuccess(any());
+        verify(attemptLockout).recordFailure(any(), anyInt(), any(), any());
+        verify(attemptLockout, never()).recordSuccess(any());
         verify(cookieUtil, never()).addCookie(any(), any());
     }
 
@@ -294,8 +341,8 @@ class AuthControllerTest {
 
         authController.login(loginUserDTO, request, response);
 
-        verify(loginRateLimiter).recordSuccess(any());
-        verify(loginRateLimiter, never()).recordFailure(any());
+        verify(attemptLockout).recordSuccess(any());
+        verify(attemptLockout, never()).recordFailure(any(), anyInt(), any(), any());
     }
 
     @Test
@@ -363,6 +410,50 @@ class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("[oauthLogin] Should Check Rate Limit Before Verifying Token - When Not Authenticated")
+    void shouldCheckRateLimitBeforeVerifyingTokenWhenNotAuthenticated() {
+        setAnonymous();
+        OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
+        when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
+        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
+
+        authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
+
+        InOrder order = inOrder(requestThrottler, googleTokenVerifier);
+        order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
+        order.verify(googleTokenVerifier).verify("google-id-token");
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Build Throttle Key From Action And Remote Addr - When Called")
+    void shouldBuildThrottleKeyFromActionAndRemoteAddrWhenOauthLoginCalled() {
+        setAnonymous();
+        OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(googleTokenVerifier.verify("google-id-token")).thenReturn(userResponseDTO.email());
+        when(userService.findByEmail(userResponseDTO.email())).thenReturn(Optional.of(userResponseDTO));
+
+        authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response);
+
+        verify(requestThrottler).checkAllowed(eq("oauth|127.0.0.1"), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("[oauthLogin] Should Throw TooManyRequestsException And Not Verify Token - When Rate Limited")
+    void shouldThrowTooManyRequestsExceptionAndNotVerifyTokenWhenRateLimited() {
+        setAnonymous();
+        OAuthLoginDTO oAuthLoginDTO = new OAuthLoginDTO("google-id-token");
+        doThrow(new TooManyRequestsException("Too many requests. Try again later."))
+                .when(requestThrottler).checkAllowed(any(), anyInt(), any());
+
+        assertThatThrownBy(() -> authController.oauthLogin(OAuthProvider.GOOGLE, oAuthLoginDTO, request, response))
+                .isInstanceOf(TooManyRequestsException.class);
+
+        verify(googleTokenVerifier, never()).verify(any());
+        verify(userService, never()).findByEmail(any());
+    }
+
+    @Test
     @DisplayName("[refresh] Should Return NoContent And Set New Cookies - When Refresh Token Is Valid")
     void shouldReturnNoContentAndSetNewCookiesWhenRefreshTokenIsValid() {
         RefreshedTokens tokens = new RefreshedTokens("new-access-token", "new-refresh-token");
@@ -372,7 +463,7 @@ class AuthControllerTest {
         when(cookieUtil.buildAccessTokenCookie("new-access-token")).thenReturn(accessCookie);
         when(cookieUtil.buildRefreshTokenCookie("new-refresh-token")).thenReturn(refreshCookie);
 
-        ResponseEntity<Void> result = authController.refresh("old-refresh-token", response);
+        ResponseEntity<Void> result = authController.refresh("old-refresh-token", request, response);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(cookieUtil).addCookie(response, accessCookie);
@@ -385,9 +476,47 @@ class AuthControllerTest {
         when(refreshTokenService.rotateRefreshToken("old-refresh-token"))
                 .thenReturn(new RefreshedTokens("new-access-token", "new-refresh-token"));
 
-        authController.refresh("old-refresh-token", response);
+        authController.refresh("old-refresh-token", request, response);
 
         verify(refreshTokenService).rotateRefreshToken("old-refresh-token");
+    }
+
+    @Test
+    @DisplayName("[refresh] Should Check Rate Limit Before Rotating Token - When Called")
+    void shouldCheckRateLimitBeforeRotatingTokenWhenCalled() {
+        when(refreshTokenService.rotateRefreshToken("old-refresh-token"))
+                .thenReturn(new RefreshedTokens("new-access-token", "new-refresh-token"));
+
+        authController.refresh("old-refresh-token", request, response);
+
+        InOrder order = inOrder(requestThrottler, refreshTokenService);
+        order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
+        order.verify(refreshTokenService).rotateRefreshToken("old-refresh-token");
+    }
+
+    @Test
+    @DisplayName("[refresh] Should Build Throttle Key From Action And Remote Addr - When Called")
+    void shouldBuildThrottleKeyFromActionAndRemoteAddrWhenRefreshCalled() {
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(refreshTokenService.rotateRefreshToken("old-refresh-token"))
+                .thenReturn(new RefreshedTokens("new-access-token", "new-refresh-token"));
+
+        authController.refresh("old-refresh-token", request, response);
+
+        verify(requestThrottler).checkAllowed(eq("refresh|127.0.0.1"), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("[refresh] Should Throw TooManyRequestsException And Not Rotate Token - When Rate Limited")
+    void shouldThrowTooManyRequestsExceptionAndNotRotateTokenWhenRateLimited() {
+        doThrow(new TooManyRequestsException("Too many requests. Try again later."))
+                .when(requestThrottler).checkAllowed(any(), anyInt(), any());
+
+        assertThatThrownBy(() -> authController.refresh("old-refresh-token", request, response))
+                .isInstanceOf(TooManyRequestsException.class);
+
+        verify(refreshTokenService, never()).rotateRefreshToken(any());
+        verify(cookieUtil, never()).addCookie(any(), any());
     }
 
     @Test

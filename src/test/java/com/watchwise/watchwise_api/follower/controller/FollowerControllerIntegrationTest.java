@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.follower.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -63,11 +65,15 @@ class FollowerControllerIntegrationTest {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @Autowired
+    private RequestThrottler requestThrottler;
+
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         followerRepository.deleteAll();
         userRepository.deleteAll();
+        RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
@@ -262,6 +268,40 @@ class FollowerControllerIntegrationTest {
 
         mockMvc.perform(delete("/users/" + target.id() + "/follow").cookie(follower.accessToken()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("[followUser][unfollowUser] Should Return TooManyRequests - When Combined Requests From The Same User Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenCombinedFollowActionRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
+        RegisteredUser follower = registerUser("throttlefollower", true);
+        RegisteredUser target = registerUser("throttletarget", true);
+
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(postFollowRequest(follower, target.id())).andExpect(status().isOk());
+            mockMvc.perform(deleteFollowRequest(follower, target.id())).andExpect(status().isNoContent());
+        }
+
+        mockMvc.perform(postFollowRequest(follower, target.id()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[followUser] Should Not Block A Different User - When Another User Is Rate Limited")
+    void shouldNotBlockADifferentUserWhenAnotherUserIsRateLimitedForFollowAction() throws Exception {
+        RegisteredUser followerA = registerUser("followactionuserA", true);
+        RegisteredUser followerB = registerUser("followactionuserB", true);
+        RegisteredUser target = registerUser("followactiontarget", true);
+
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(postFollowRequest(followerA, target.id())).andExpect(status().isOk());
+            mockMvc.perform(deleteFollowRequest(followerA, target.id())).andExpect(status().isNoContent());
+        }
+        mockMvc.perform(postFollowRequest(followerA, target.id()))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(postFollowRequest(followerB, target.id()))
+                .andExpect(status().isOk());
     }
 
     @Test

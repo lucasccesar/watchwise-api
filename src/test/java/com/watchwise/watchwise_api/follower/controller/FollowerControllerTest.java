@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.follower.controller;
 
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.follower.dto.FollowStatusResponseDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
@@ -32,6 +33,9 @@ class FollowerControllerTest {
 
     @Mock
     private FollowerService followerService;
+
+    @Mock
+    private RequestThrottler requestThrottler;
 
     @InjectMocks
     private FollowerController followerController;

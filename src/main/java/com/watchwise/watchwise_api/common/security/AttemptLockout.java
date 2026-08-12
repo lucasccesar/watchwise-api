@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.common.security;
 
 import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -11,47 +10,37 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
-public class LoginRateLimiter {
+public class AttemptLockout {
 
-    private final int maxAttempts;
-    private final Duration window;
-    private final Duration blockDuration;
     private final Clock clock;
     private final Map<String, Attempt> attempts = new ConcurrentHashMap<>();
 
-    public LoginRateLimiter(
-            @Value("${app.rate-limit.login.max-attempts}") int maxAttempts,
-            @Value("${app.rate-limit.login.window-minutes}") long windowMinutes,
-            @Value("${app.rate-limit.login.block-minutes}") long blockMinutes,
-            Clock clock
-    ) {
-        this.maxAttempts = maxAttempts;
-        this.window = Duration.ofMinutes(windowMinutes);
-        this.blockDuration = Duration.ofMinutes(blockMinutes);
+    public AttemptLockout(Clock clock) {
         this.clock = clock;
     }
 
     public void checkAllowed(String key) {
         Attempt attempt = attempts.get(key);
         if (attempt != null && attempt.blockedUntil() != null && clock.instant().isBefore(attempt.blockedUntil())) {
-            throw new TooManyRequestsException("Too many login attempts. Try again later.");
+            throw new TooManyRequestsException("Too many attempts. Try again later.");
         }
     }
 
-    public void recordFailure(String key) {
+    public void recordFailure(String key, int maxAttempts, Duration window, Duration blockDuration) {
         Instant now = clock.instant();
         attempts.compute(key, (k, existing) -> {
             boolean expired = existing == null
-                    || now.isAfter(existing.windowStart().plus(window))
+                    || now.isAfter(existing.windowStart().plus(existing.window()))
                     || (existing.blockedUntil() != null && !now.isBefore(existing.blockedUntil()));
 
             if (expired) {
-                return new Attempt(1, now, null);
+                Instant blockedUntil = 1 >= maxAttempts ? now.plus(blockDuration) : null;
+                return new Attempt(1, now, blockedUntil, window);
             }
 
             int count = existing.count() + 1;
             Instant blockedUntil = count >= maxAttempts ? now.plus(blockDuration) : null;
-            return new Attempt(count, existing.windowStart(), blockedUntil);
+            return new Attempt(count, existing.windowStart(), blockedUntil, existing.window());
         });
     }
 
@@ -59,6 +48,20 @@ public class LoginRateLimiter {
         attempts.remove(key);
     }
 
-    private record Attempt(int count, Instant windowStart, Instant blockedUntil) {
+    public void cleanupExpired() {
+        Instant now = clock.instant();
+        attempts.entrySet().removeIf(entry -> {
+            Attempt attempt = entry.getValue();
+            boolean stillBlocked = attempt.blockedUntil() != null && now.isBefore(attempt.blockedUntil());
+            boolean windowStillOpen = now.isBefore(attempt.windowStart().plus(attempt.window()));
+            return !stillBlocked && !windowStillOpen;
+        });
+    }
+
+    int size() {
+        return attempts.size();
+    }
+
+    private record Attempt(int count, Instant windowStart, Instant blockedUntil, Duration window) {
     }
 }

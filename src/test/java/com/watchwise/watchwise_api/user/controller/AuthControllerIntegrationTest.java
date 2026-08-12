@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.GoogleTokenVerifier;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,10 +61,14 @@ class AuthControllerIntegrationTest {
     @MockitoBean
     private GoogleTokenVerifier googleTokenVerifier;
 
+    @Autowired
+    private RequestThrottler requestThrottler;
+
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
+        RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
     @Test
@@ -163,6 +169,36 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[register] Should Return TooManyRequests - When Requests From Same Ip Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenRegisterRequestsFromSameIpExceedTheConfiguredMax() throws Exception {
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(registerRequest("throttleuser" + i, "throttleuser" + i + "@email.com"))
+                    .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(registerRequest("throttleuser10", "throttleuser10@email.com"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[register] Should Not Block A Different Ip - When Another Ip Is Rate Limited")
+    void shouldNotBlockADifferentIpWhenAnotherIpIsRateLimitedForRegister() throws Exception {
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(registerRequest("ipthrottleuser" + i, "ipthrottleuser" + i + "@email.com"))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(registerRequest("ipthrottleuser10", "ipthrottleuser10@email.com"))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(registerRequest("ipthrottleuser11", "ipthrottleuser11@email.com").with(req -> {
+                    req.setRemoteAddr("10.0.0.99");
+                    return req;
+                }))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     @DisplayName("[login] Should Return Conflict - When Already Authenticated")
     void shouldReturnConflictWhenLoggingInWhileAlreadyAuthenticated() throws Exception {
         mockMvc.perform(registerRequest("alreadyauthloginuser", "alreadyauthloginuser@email.com"))
@@ -233,7 +269,7 @@ class AuthControllerIntegrationTest {
 
         mockMvc.perform(loginRequest("ratelimituser"))
                 .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.message").value("Too many login attempts. Try again later."));
+                .andExpect(jsonPath("$.message").value("Too many attempts. Try again later."));
     }
 
     @Test
@@ -356,11 +392,39 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[oauthLogin] Should Return TooManyRequests - When Requests From Same Ip Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenOauthRequestsFromSameIpExceedTheConfiguredMax() throws Exception {
+        when(googleTokenVerifier.verify("valid-google-token")).thenReturn("unregistered@email.com");
+
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(oauthLoginRequest("google", "valid-google-token"))
+                    .andExpect(status().isNotFound());
+        }
+
+        mockMvc.perform(oauthLoginRequest("google", "valid-google-token"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
     @DisplayName("[refresh] Should Return Unauthorized - When No Refresh Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoRefreshTokenCookieIsPresent() throws Exception {
         mockMvc.perform(post("/auth/refresh"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.message").value("Invalid refresh token"));
+    }
+
+    @Test
+    @DisplayName("[refresh] Should Return TooManyRequests - When Requests From Same Ip Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenRefreshRequestsFromSameIpExceedTheConfiguredMax() throws Exception {
+        for (int i = 0; i < 30; i++) {
+            mockMvc.perform(post("/auth/refresh"))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(post("/auth/refresh"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
     }
 
     @Test

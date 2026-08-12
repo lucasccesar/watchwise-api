@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.followedperson.controller;
 
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.followedperson.service.FollowedPersonService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +29,9 @@ class FollowedPersonControllerTest {
 
     @Mock
     private FollowedPersonService followedPersonService;
+
+    @Mock
+    private RequestThrottler requestThrottler;
 
     @InjectMocks
     private FollowedPersonController followedPersonController;

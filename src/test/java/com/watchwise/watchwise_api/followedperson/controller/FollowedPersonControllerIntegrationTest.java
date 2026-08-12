@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.followedperson.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -59,11 +61,15 @@ class FollowedPersonControllerIntegrationTest {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @Autowired
+    private RequestThrottler requestThrottler;
+
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         followedPersonRepository.deleteAll();
         userRepository.deleteAll();
+        RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
@@ -198,6 +204,38 @@ class FollowedPersonControllerIntegrationTest {
 
         mockMvc.perform(delete("/users/me/follow-people/603").cookie(user.accessToken()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("[followPerson][unfollowPerson] Should Return TooManyRequests - When Combined Requests From The Same User Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenCombinedFollowPeopleActionRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
+        RegisteredUser user = registerUser("throttlefollowperson");
+
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(followPersonRequest(user, "603")).andExpect(status().isNoContent());
+            mockMvc.perform(unfollowPersonRequest(user, "603")).andExpect(status().isNoContent());
+        }
+
+        mockMvc.perform(followPersonRequest(user, "603"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Not Block A Different User - When Another User Is Rate Limited")
+    void shouldNotBlockADifferentUserWhenAnotherUserIsRateLimitedForFollowPeopleAction() throws Exception {
+        RegisteredUser userA = registerUser("followpeopleactionuserA");
+        RegisteredUser userB = registerUser("followpeopleactionuserB");
+
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(followPersonRequest(userA, "603")).andExpect(status().isNoContent());
+            mockMvc.perform(unfollowPersonRequest(userA, "603")).andExpect(status().isNoContent());
+        }
+        mockMvc.perform(followPersonRequest(userA, "603"))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(followPersonRequest(userB, "603"))
+                .andExpect(status().isNoContent());
     }
 
     @Test
