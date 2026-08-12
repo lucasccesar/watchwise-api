@@ -551,7 +551,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Throw NotFoundException - When Updating A User That Does Not Exist")
     void shouldThrowNotFoundExceptionWhenUpdatingUserThatDoesNotExist() {
         UUID id = UUID.randomUUID();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.updateUser(id, patchUserDTO))
@@ -565,7 +565,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Change Any Field - When All Patch Fields Are Null")
     void shouldNotChangeAnyFieldWhenAllPatchFieldsAreNull() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -590,7 +590,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update Username Trimmed - When A Different Value Is Provided")
     void shouldUpdateUsernameTrimmedWhenDifferentValueProvided() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO("  NewUsername  ", null, null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO("  NewUsername  ", null, null, null, null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -607,7 +607,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Change Username - When The Same Value Is Provided")
     void shouldNotChangeUsernameWhenSameValueProvided() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO("  " + savedUser.getUsername() + "  ", null, null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO("  " + savedUser.getUsername() + "  ", null, null, null, null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -624,8 +624,9 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update Email Normalized - When A Different Value Is Provided")
     void shouldUpdateEmailNormalizedWhenDifferentValueProvided() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  NEW.EMAIL@EMAIL.COM  ", null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  NEW.EMAIL@EMAIL.COM  ", null, null, null, null, "Password123");
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
@@ -641,7 +642,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Change Email - When The Same Value Is Provided")
     void shouldNotChangeEmailWhenSameValueProvided() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  " + savedUser.getEmail().toUpperCase() + "  ", null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  " + savedUser.getEmail().toUpperCase() + "  ", null, null, null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -658,7 +659,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Re-Encode Password - When Provided Password Matches Current Hash")
     void shouldNotReEncodePasswordWhenProvidedPasswordMatchesCurrentHash() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "SamePassword123", null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "SamePassword123", null, null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("SamePassword123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
@@ -677,9 +678,10 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Encode And Update Password - When Provided Password Differs From Current Hash")
     void shouldEncodeAndUpdatePasswordWhenProvidedPasswordDiffersFromCurrentHash() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "Password123");
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(passwordEncoder.encode("NewPassword123")).thenReturn("newHashedPassword");
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -696,7 +698,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update Description - When A Different Value Is Provided")
     void shouldUpdateDescriptionWhenDifferentValueProvided() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New description", null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New description", null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -713,7 +715,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update ProfilePicture - When A Different Value Is Provided")
     void shouldUpdateProfilePictureWhenDifferentValueProvided() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, "https://new-picture.com/pic.png", null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, "https://new-picture.com/pic.png", null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -730,7 +732,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update IsProfilePublic - When A Different Value Is Provided")
     void shouldUpdateIsProfilePublicWhenDifferentValueProvided() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, false);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, false, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
@@ -747,7 +749,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Throw ConflictException With Username Message - When Update Violates Username Constraint")
     void shouldThrowConflictExceptionWithUsernameMessageWhenUpdateViolatesUsernameConstraint() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO("TakenUsername", null, null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO("TakenUsername", null, null, null, null, null, null);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userRepository.save(any(User.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_users_username"));
@@ -763,8 +765,9 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Throw ConflictException With Email Message - When Update Violates Email Constraint")
     void shouldThrowConflictExceptionWithEmailMessageWhenUpdateViolatesEmailConstraint() {
         UUID id = savedUser.getId();
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "taken@email.com", null, null, null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "taken@email.com", null, null, null, null, "Password123");
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.save(any(User.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_users_email"));
 
@@ -773,6 +776,66 @@ class UserServiceImplTest {
                 .hasMessage("Email already in use");
 
         verify(userMapper, never()).userToUserResponseDto(any());
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Throw BadRequestException - When Changing Password Without CurrentPassword")
+    void shouldThrowBadRequestExceptionWhenChangingPasswordWithoutCurrentPassword() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.updateUser(id, patchUserDTO))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("currentPassword must be provided to change password or email");
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Throw UnauthorizedException - When Changing Password With Wrong CurrentPassword")
+    void shouldThrowUnauthorizedExceptionWhenChangingPasswordWithWrongCurrentPassword() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "WrongCurrentPass1");
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
+        when(passwordEncoder.matches("WrongCurrentPass1", savedUser.getPassword())).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.updateUser(id, patchUserDTO))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("Invalid password");
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Throw BadRequestException - When Changing Email Without CurrentPassword")
+    void shouldThrowBadRequestExceptionWhenChangingEmailWithoutCurrentPassword() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+
+        assertThatThrownBy(() -> userService.updateUser(id, patchUserDTO))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("currentPassword must be provided to change password or email");
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Throw UnauthorizedException - When Changing Email With Wrong CurrentPassword")
+    void shouldThrowUnauthorizedExceptionWhenChangingEmailWithWrongCurrentPassword() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null, "WrongCurrentPass1");
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("WrongCurrentPass1", savedUser.getPassword())).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.updateUser(id, patchUserDTO))
+                .isInstanceOf(UnauthorizedException.class)
+                .hasMessage("Invalid password");
+
+        verify(userRepository, never()).save(any());
     }
 
     @Test

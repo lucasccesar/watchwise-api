@@ -17,6 +17,7 @@ public record PatchUserDTO(
         String password,
         @Size(max=280) String description,
         @Size(max=2048) @URL String profilePicture,
-        Boolean isProfilePublic
+        Boolean isProfilePublic,
+        String currentPassword
 ) {
 }

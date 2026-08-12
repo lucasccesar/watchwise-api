@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -57,6 +58,9 @@ class UserControllerIntegrationTest {
 
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @BeforeEach
     void setUp() {
@@ -227,6 +231,114 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"email\": \"not-an-email\" }"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Update Password - When CurrentPassword Is Correct")
+    void shouldUpdatePasswordWhenCurrentPasswordIsCorrect() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("passwordchangeuser", "passwordchangeuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isOk());
+
+        User updatedUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("passwordchangeuser", "passwordchangeuser")
+                .orElseThrow();
+        assertThat(passwordEncoder.matches("NewPassword123", updatedUser.getPassword())).isTrue();
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Return BadRequest - When Changing Password Without CurrentPassword")
+    void shouldReturnBadRequestWhenChangingPasswordWithoutCurrentPassword() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("nopwconfirmuser", "nopwconfirmuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"NewPassword123\" }"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("currentPassword must be provided to change password or email"));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Return Unauthorized - When Changing Password With Wrong CurrentPassword")
+    void shouldReturnUnauthorizedWhenChangingPasswordWithWrongCurrentPassword() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("wrongpwconfirmuser", "wrongpwconfirmuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"WrongPassword123\" }"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid password"));
+
+        User untouchedUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("wrongpwconfirmuser", "wrongpwconfirmuser")
+                .orElseThrow();
+        assertThat(passwordEncoder.matches("Password123", untouchedUser.getPassword())).isTrue();
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Update Email - When CurrentPassword Is Correct")
+    void shouldUpdateEmailWhenCurrentPasswordIsCorrect() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("emailchangeuser", "emailchangeuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"email\": \"newemail@email.com\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("newemail@email.com"));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Return BadRequest - When Changing Email Without CurrentPassword")
+    void shouldReturnBadRequestWhenChangingEmailWithoutCurrentPassword() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("noemailconfirmuser", "noemailconfirmuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"email\": \"newemail2@email.com\" }"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("currentPassword must be provided to change password or email"));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Return Unauthorized - When Changing Email With Wrong CurrentPassword")
+    void shouldReturnUnauthorizedWhenChangingEmailWithWrongCurrentPassword() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("wrongemailconfirmuser", "wrongemailconfirmuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"email\": \"newemail3@email.com\", \"currentPassword\": \"WrongPassword123\" }"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Invalid password"));
+
+        User untouchedUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("wrongemailconfirmuser", "wrongemailconfirmuser")
+                .orElseThrow();
+        assertThat(untouchedUser.getEmail()).isEqualTo("wrongemailconfirmuser@email.com");
     }
 
     @Test

@@ -140,7 +140,7 @@ class UserControllerTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Return UserResponseDTO Of The Authenticated User - When Called")
     void shouldReturnUserResponseDtoOfTheAuthenticatedUserWhenUpdateCalled() {
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null, null);
         when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
 
         ResponseEntity<UserResponseDTO> result = userController.updateCurrentUser(patchUserDTO);
@@ -152,7 +152,7 @@ class UserControllerTest {
     @Test
     @DisplayName("[updateCurrentUser] Should Resolve Id From The Security Context - When Called")
     void shouldResolveIdFromTheSecurityContextWhenUpdateCalled() {
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null, null);
         when(userService.updateUser(any(UUID.class), any(PatchUserDTO.class))).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);

@@ -75,6 +75,15 @@ public class UserServiceImpl implements UserService {
     }
 
     private void applyPatch(User user, PatchUserDTO patchUserDTO) {
+        String newEmail = patchUserDTO.email() != null ? patchUserDTO.email().trim().toLowerCase() : null;
+        boolean changesEmail = newEmail != null && !newEmail.equals(user.getEmail());
+        boolean changesPassword = patchUserDTO.password() != null
+                && !passwordEncoder.matches(patchUserDTO.password(), user.getPassword());
+
+        if (changesEmail || changesPassword) {
+            requireCurrentPassword(user, patchUserDTO.currentPassword());
+        }
+
         if (patchUserDTO.username() != null) {
             String newUsername = patchUserDTO.username().trim();
             if (!newUsername.equals(user.getUsername())) {
@@ -82,14 +91,11 @@ public class UserServiceImpl implements UserService {
             }
         }
 
-        if (patchUserDTO.email() != null) {
-            String newEmail = patchUserDTO.email().trim().toLowerCase();
-            if (!newEmail.equals(user.getEmail())) {
-                user.setEmail(newEmail);
-            }
+        if (changesEmail) {
+            user.setEmail(newEmail);
         }
 
-        if (patchUserDTO.password() != null && !passwordEncoder.matches(patchUserDTO.password(), user.getPassword())) {
+        if (changesPassword) {
             user.setPassword(passwordEncoder.encode(patchUserDTO.password()));
         }
 
@@ -103,6 +109,15 @@ public class UserServiceImpl implements UserService {
 
         if (patchUserDTO.isProfilePublic() != null && !patchUserDTO.isProfilePublic().equals(user.getIsProfilePublic())) {
             user.setIsProfilePublic(patchUserDTO.isProfilePublic());
+        }
+    }
+
+    private void requireCurrentPassword(User user, String currentPassword) {
+        if (StringUtils.isEmpty(currentPassword)) {
+            throw new BadRequestException("currentPassword must be provided to change password or email");
+        }
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new UnauthorizedException("Invalid password");
         }
     }
 
