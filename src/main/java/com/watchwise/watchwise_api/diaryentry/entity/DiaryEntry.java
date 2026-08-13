@@ -1,0 +1,65 @@
+package com.watchwise.watchwise_api.diaryentry.entity;
+
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.user.entity.User;
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Entity
+@Table(name = "diary_entries")
+@Getter
+@Builder
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor
+public class DiaryEntry {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @Setter
+    private UUID id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "content_id", nullable = false)
+    private Content content;
+
+    @Column
+    @Setter
+    private Integer score;
+
+    @Column(columnDefinition = "TEXT")
+    @Setter
+    private String comment;
+
+    @Column(name = "watched_date")
+    @Setter
+    private LocalDate watchedDate;
+
+    @Column(name = "is_rewatch", nullable = false)
+    @Setter
+    @Builder.Default
+    private Boolean isRewatch = false;
+
+    @Column(name = "watched_in_theater")
+    @Setter
+    private Boolean watchedInTheater;
+
+    @Column(name = "custom_poster_url", length = 2048)
+    @Setter
+    private String customPosterUrl;
+
+    @Column(name = "created_at", nullable = false)
+    @Setter
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    @Setter
+    private LocalDateTime updatedAt;
+}
