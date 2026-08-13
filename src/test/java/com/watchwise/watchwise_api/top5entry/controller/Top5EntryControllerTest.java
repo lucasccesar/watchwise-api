@@ -1,6 +1,5 @@
 package com.watchwise.watchwise_api.top5entry.controller;
 
-import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
@@ -79,7 +78,7 @@ class Top5EntryControllerTest {
     @Test
     @DisplayName("[insertEntry] Should Return Created With The Service Result - When Called")
     void shouldReturnCreatedWithTheServiceResultWhenInsertingEntry() {
-        Top5EntryCreationDTO creationDTO = new Top5EntryCreationDTO(buildContentRefCreationDto(), 1);
+        Top5EntryCreationDTO creationDTO = new Top5EntryCreationDTO("550", 1);
         Top5EntryResponseDTO dto = buildResponseDto();
         when(top5EntryService.insertEntry(currentUserId, ContentType.MOVIE, creationDTO)).thenReturn(dto);
 
@@ -92,7 +91,7 @@ class Top5EntryControllerTest {
     @Test
     @DisplayName("[insertEntry] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenInsertingEntry() {
-        Top5EntryCreationDTO creationDTO = new Top5EntryCreationDTO(buildContentRefCreationDto(), 1);
+        Top5EntryCreationDTO creationDTO = new Top5EntryCreationDTO("550", 1);
         when(top5EntryService.insertEntry(currentUserId, ContentType.MOVIE, creationDTO)).thenReturn(buildResponseDto());
 
         top5EntryController.insertEntry(ContentType.MOVIE, creationDTO);
@@ -118,10 +117,6 @@ class Top5EntryControllerTest {
         top5EntryController.removeEntry(ContentType.MOVIE, top5EntryId);
 
         verify(top5EntryService).removeEntry(currentUserId, ContentType.MOVIE, top5EntryId);
-    }
-
-    private ContentRefCreationDTO buildContentRefCreationDto() {
-        return new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null);
     }
 
     private Top5EntryResponseDTO buildResponseDto() {

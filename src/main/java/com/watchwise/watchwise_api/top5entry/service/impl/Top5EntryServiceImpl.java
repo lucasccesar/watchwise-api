@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -74,11 +75,9 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     public Top5EntryResponseDTO insertEntry(UUID userId, ContentType type, Top5EntryCreationDTO top5EntryCreationDTO) {
         validateType(type);
 
-        if (top5EntryCreationDTO.content().type() != type) {
-            throw new BadRequestException("Content type must match the requested top 5 type");
-        }
-
-        ContentRefDTO contentRef = contentService.getOrCreateReference(top5EntryCreationDTO.content());
+        ContentRefCreationDTO contentRefCreation = new ContentRefCreationDTO(
+                top5EntryCreationDTO.tmdbId(), type, null, null, null);
+        ContentRefDTO contentRef = contentService.getOrCreateReference(contentRefCreation);
 
         List<Top5Entry> existing = top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type);
         int finalPosition = resolvePosition(top5EntryCreationDTO.position(), existing.size());

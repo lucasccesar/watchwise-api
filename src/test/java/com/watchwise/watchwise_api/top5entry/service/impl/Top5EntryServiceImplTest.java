@@ -68,6 +68,9 @@ class Top5EntryServiceImplTest {
     @Captor
     private ArgumentCaptor<Top5Entry> entryCaptor;
 
+    @Captor
+    private ArgumentCaptor<ContentRefCreationDTO> contentRefCreationCaptor;
+
     private UUID lucasId;
     private UUID marinaId;
     private User lucas;
@@ -221,13 +224,16 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(expectedDto);
 
         Top5EntryResponseDTO result = top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), null));
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(fightClub.getTmdbId(), null));
 
         assertThat(result).isEqualTo(expectedDto);
         verify(top5EntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getPosition()).isEqualTo(1);
         verify(top5EntryRepository, never()).delete(any());
         verify(top5EntryRepository, times(1)).flush();
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        assertThat(contentRefCreationCaptor.getValue())
+                .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null));
     }
 
     @Test
@@ -246,7 +252,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(thirdMovie), null));
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(thirdMovie.getTmdbId(), null));
 
         verify(top5EntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getPosition()).isEqualTo(3);
@@ -269,7 +275,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(newContent), 1));
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(newContent.getTmdbId(), 1));
 
         verify(top5EntryRepository, times(3)).save(entryCaptor.capture());
         List<Top5Entry> saved = entryCaptor.getAllValues();
@@ -301,7 +307,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(newContent), 2));
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(newContent.getTmdbId(), 2));
 
         verify(top5EntryRepository).delete(pos5);
         verify(top5EntryRepository, times(4)).save(entryCaptor.capture());
@@ -336,7 +342,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(newContent), 5));
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(newContent.getTmdbId(), 5));
 
         verify(top5EntryRepository).delete(pos5);
         verify(top5EntryRepository, never()).delete(pos1);
@@ -363,7 +369,7 @@ class Top5EntryServiceImplTest {
                 .thenReturn(fullList);
 
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(newContent), null)))
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(newContent.getTmdbId(), null)))
                 .isInstanceOf(BadRequestException.class);
 
         verify(top5EntryRepository, never()).save(any());
@@ -374,7 +380,7 @@ class Top5EntryServiceImplTest {
     @DisplayName("[insertEntry] Should Throw BadRequestException - When Type Is Season")
     void shouldThrowBadRequestExceptionWhenTypeIsSeasonOnInsert() {
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.SEASON, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), 1)))
+                lucasId, ContentType.SEASON, new Top5EntryCreationDTO(fightClub.getTmdbId(), 1)))
                 .isInstanceOf(BadRequestException.class);
 
         verifyNoInteractions(top5EntryRepository, contentService, userRepository, contentRepository);
@@ -384,20 +390,10 @@ class Top5EntryServiceImplTest {
     @DisplayName("[insertEntry] Should Throw BadRequestException - When Type Is Episode")
     void shouldThrowBadRequestExceptionWhenTypeIsEpisodeOnInsert() {
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.EPISODE, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), 1)))
+                lucasId, ContentType.EPISODE, new Top5EntryCreationDTO(fightClub.getTmdbId(), 1)))
                 .isInstanceOf(BadRequestException.class);
 
         verifyNoInteractions(top5EntryRepository, contentService, userRepository, contentRepository);
-    }
-
-    @Test
-    @DisplayName("[insertEntry] Should Throw BadRequestException - When Content Type Does Not Match Requested Type")
-    void shouldThrowBadRequestExceptionWhenContentTypeDoesNotMatchRequestedType() {
-        assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(breakingBad), 1)))
-                .isInstanceOf(BadRequestException.class);
-
-        verifyNoInteractions(contentService, top5EntryRepository);
     }
 
     @Test
@@ -412,7 +408,7 @@ class Top5EntryServiceImplTest {
                 .thenThrow(buildDataIntegrityViolationException("uq_top5_entries_user_id_type_content_id"));
 
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), null)))
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(fightClub.getTmdbId(), null)))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("This content is already in your top 5");
     }
@@ -429,7 +425,7 @@ class Top5EntryServiceImplTest {
                 .thenThrow(buildDataIntegrityViolationException("uq_top5_entries_user_id_type_position"));
 
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), 1)))
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(fightClub.getTmdbId(), 1)))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("This position is already taken");
     }
@@ -446,7 +442,7 @@ class Top5EntryServiceImplTest {
                 .thenThrow(buildDataIntegrityViolationException("uq_some_other_constraint"));
 
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), 1)))
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(fightClub.getTmdbId(), 1)))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Unable to insert this content into your top 5");
     }
@@ -464,7 +460,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.save(any(Top5Entry.class))).thenThrow(exception);
 
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), 1)))
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(fightClub.getTmdbId(), 1)))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Unable to insert this content into your top 5");
     }
@@ -481,7 +477,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.save(any(Top5Entry.class))).thenThrow(exception);
 
         assertThatThrownBy(() -> top5EntryService.insertEntry(
-                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(buildContentRefCreationDto(fightClub), 1)))
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(fightClub.getTmdbId(), 1)))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Unable to insert this content into your top 5");
     }
@@ -582,10 +578,6 @@ class Top5EntryServiceImplTest {
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
                 .thenReturn(new ContentRefDTO(content.getId(), content.getTmdbId(), type, null, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
-    }
-
-    private ContentRefCreationDTO buildContentRefCreationDto(Content content) {
-        return new ContentRefCreationDTO(content.getTmdbId(), content.getType(), null, null, null);
     }
 
     private Top5Entry buildEntry(User user, Content content, ContentType type, Integer position) {

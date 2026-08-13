@@ -151,13 +151,13 @@ class Top5EntryControllerIntegrationTest {
         return get("/users/" + targetUserId + "/top5/" + type).cookie(viewer.accessToken());
     }
 
-    private String contentBody(String tmdbId, ContentType type, Integer position) {
-        String positionField = position == null ? "" : ("\"position\": " + position);
+    private String contentBody(String tmdbId, Integer position) {
+        String positionField = position == null ? "" : (", \"position\": " + position);
         return """
                 {
-                    "content": { "tmdbId": "%s", "type": "%s" }%s
+                    "tmdbId": "%s"%s
                 }
-                """.formatted(tmdbId, type, positionField.isEmpty() ? "" : ", " + positionField);
+                """.formatted(tmdbId, positionField);
     }
 
     private Top5Entry persistEntry(User user, Content content, ContentType type, int position) {
@@ -299,7 +299,7 @@ class Top5EntryControllerIntegrationTest {
     void shouldReturnCreatedAndPersistAtPositionOneWhenListIsEmpty() throws Exception {
         RegisteredUser user = registerUser("inserttop5empty");
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", ContentType.MOVIE, null)))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.position").value(1))
                 .andExpect(jsonPath("$.type").value("MOVIE"))
@@ -318,7 +318,7 @@ class Top5EntryControllerIntegrationTest {
         Content fightClub = persistContent("550", ContentType.MOVIE);
         persistEntry(entity, fightClub, ContentType.MOVIE, 1);
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("680", ContentType.MOVIE, 1)))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("680", 1)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.position").value(1))
                 .andExpect(jsonPath("$.content.tmdbId").value("680"));
@@ -346,7 +346,7 @@ class Top5EntryControllerIntegrationTest {
             }
         }
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("newmovie", ContentType.MOVIE, 1)))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("newmovie", 1)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.position").value(1));
 
@@ -360,21 +360,12 @@ class Top5EntryControllerIntegrationTest {
     void shouldReturnConflictWhenContentIsAlreadyInTheTop5() throws Exception {
         RegisteredUser user = registerUser("inserttop5conflict");
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", ContentType.MOVIE, null)))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null)))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", ContentType.MOVIE, null)))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("This content is already in your top 5"));
-    }
-
-    @Test
-    @DisplayName("[insertEntry] Should Return BadRequest - When Content Type Does Not Match Path Type")
-    void shouldReturnBadRequestWhenContentTypeDoesNotMatchPathType() throws Exception {
-        RegisteredUser user = registerUser("inserttop5typemismatch");
-
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("1396", ContentType.SERIES, null)))
-                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -382,7 +373,7 @@ class Top5EntryControllerIntegrationTest {
     void shouldReturnBadRequestWhenInsertingWithTypeSeason() throws Exception {
         RegisteredUser user = registerUser("inserttop5season");
 
-        mockMvc.perform(insertRequest(user, ContentType.SEASON, contentBody("550", ContentType.MOVIE, null)))
+        mockMvc.perform(insertRequest(user, ContentType.SEASON, contentBody("550", null)))
                 .andExpect(status().isBadRequest());
     }
 
@@ -395,13 +386,13 @@ class Top5EntryControllerIntegrationTest {
             persistEntry(entity, persistContent("movie" + i, ContentType.MOVIE), ContentType.MOVIE, i);
         }
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("newmovie", ContentType.MOVIE, null)))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("newmovie", null)))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    @DisplayName("[insertEntry] Should Return BadRequest And Not Persist - When Content Field Is Missing")
-    void shouldReturnBadRequestAndNotPersistWhenContentFieldIsMissing() throws Exception {
+    @DisplayName("[insertEntry] Should Return BadRequest And Not Persist - When TmdbId Field Is Missing")
+    void shouldReturnBadRequestAndNotPersistWhenTmdbIdFieldIsMissing() throws Exception {
         RegisteredUser user = registerUser("inserttop5missingcontent");
 
         mockMvc.perform(insertRequest(user, ContentType.MOVIE, "{ \"position\": 1 }"))
@@ -420,7 +411,7 @@ class Top5EntryControllerIntegrationTest {
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(contentBody("550", ContentType.MOVIE, null)))
+                        .content(contentBody("550", null)))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -432,7 +423,7 @@ class Top5EntryControllerIntegrationTest {
         mockMvc.perform(post("/users/me/top5/MOVIE")
                         .cookie(user.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(contentBody("550", ContentType.MOVIE, null)))
+                        .content(contentBody("550", null)))
                 .andExpect(status().isForbidden());
     }
 
