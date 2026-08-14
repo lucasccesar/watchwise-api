@@ -23,6 +23,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -74,22 +75,73 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserId] Should Return Only Entries Of That User - When Multiple Users Have Entries")
+    @DisplayName("[findByUserIdOrderByCreatedAtDesc] Should Return Only Entries Of That User - When Multiple Users Have Entries")
     void shouldReturnOnlyEntriesOfThatUserWhenMultipleUsersHaveEntries() {
         diaryEntryRepository.save(buildEntry(lucas, fightClub));
         diaryEntryRepository.saveAndFlush(buildEntry(marina, pulpFiction));
         entityManager.clear();
 
-        Page<DiaryEntry> result = diaryEntryRepository.findByUserId(lucas.getId(), PageRequest.of(0, 10));
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(lucas.getId(), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
                 .containsExactly(fightClub.getId());
     }
 
     @Test
-    @DisplayName("[findByUserId] Should Return Empty Page - When User Has No Entries")
+    @DisplayName("[findByUserIdOrderByCreatedAtDesc] Should Return Empty Page - When User Has No Entries")
     void shouldReturnEmptyPageWhenUserHasNoEntries() {
-        Page<DiaryEntry> result = diaryEntryRepository.findByUserId(lucas.getId(), PageRequest.of(0, 10));
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findByUserIdOrderByCreatedAtDesc] Should Return Entries Most Recently Created First - When Multiple Entries Exist")
+    void shouldReturnEntriesMostRecentlyCreatedFirstWhenMultipleEntriesExist() {
+        LocalDateTime earlier = LocalDateTime.now().minusDays(1);
+        LocalDateTime later = LocalDateTime.now();
+        DiaryEntry olderEntry = buildEntry(lucas, fightClub);
+        olderEntry.setCreatedAt(earlier);
+        olderEntry.setUpdatedAt(earlier);
+        diaryEntryRepository.save(olderEntry);
+        DiaryEntry newerEntry = buildEntry(lucas, pulpFiction);
+        newerEntry.setCreatedAt(later);
+        newerEntry.setUpdatedAt(later);
+        diaryEntryRepository.saveAndFlush(newerEntry);
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
+                .containsExactly(pulpFiction.getId(), fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc] Should Return Only Entries Watched In That Year")
+    void shouldReturnOnlyEntriesWatchedInThatYear() {
+        DiaryEntry watchedIn2024 = buildEntry(lucas, fightClub);
+        watchedIn2024.setWatchedDate(LocalDate.of(2024, 6, 1));
+        diaryEntryRepository.save(watchedIn2024);
+        DiaryEntry watchedIn2025 = buildEntry(lucas, pulpFiction);
+        watchedIn2025.setWatchedDate(LocalDate.of(2025, 1, 1));
+        diaryEntryRepository.saveAndFlush(watchedIn2025);
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
+                lucas.getId(), LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
+                .containsExactly(fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc] Should Exclude Entries With No Watched Date")
+    void shouldExcludeEntriesWithNoWatchedDate() {
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
+                lucas.getId(), LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
     }

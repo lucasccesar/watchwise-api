@@ -1,0 +1,22 @@
+package com.watchwise.watchwise_api.diaryentry.dto;
+
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+public record DiaryEntryResponseDTO(
+        UUID id,
+        UUID userId,
+        ContentRefDTO content,
+        String comment,
+        Integer score,
+        LocalDate watchedDate,
+        Boolean isRewatch,
+        Boolean watchedInTheater,
+        String customPosterUrl,
+        LocalDateTime createdAt,
+        LocalDateTime updatedAt
+) {
+}
