@@ -458,6 +458,29 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Not Clear Previous Series Finale - When New Season Is Earlier Than The Current Finale")
+    void shouldNotClearPreviousSeriesFinaleWhenNewSeasonIsEarlierThanTheCurrentFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 3, null, null, true);
+        Content laterFinale = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(6).type(ContentType.SEASON).isSeriesFinale(true).build();
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(3).type(ContentType.SEASON).isSeriesFinale(true).build();
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 3, null, ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("200", ContentType.SEASON))
+                .thenReturn(Optional.of(laterFinale));
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped))
+                .thenThrow(buildDataIntegrityViolationException("uq_contents_series_finale"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Another season is already marked as this series' finale");
+
+        verify(contentRepository, never()).saveAndFlush(laterFinale);
+        assertThat(laterFinale.getIsSeriesFinale()).isTrue();
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Not Look Up Previous Series Finale - When New Season Is Not Marked As The Series Finale")
     void shouldNotLookUpPreviousSeriesFinaleWhenNewSeasonIsNotMarkedAsTheSeriesFinale() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 6, null, null, null);

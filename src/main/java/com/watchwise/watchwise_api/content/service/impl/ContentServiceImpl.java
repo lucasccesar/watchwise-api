@@ -68,7 +68,7 @@ public class ContentServiceImpl implements ContentService {
 
     private void clearPreviousSeriesFinale(String seriesTmdbId, Integer newSeasonNumber) {
         contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON)
-                .filter(previous -> !previous.getSeasonNumber().equals(newSeasonNumber))
+                .filter(previous -> previous.getSeasonNumber() < newSeasonNumber)
                 .ifPresent(previous -> {
                     previous.setIsSeriesFinale(false);
                     contentRepository.saveAndFlush(previous);
