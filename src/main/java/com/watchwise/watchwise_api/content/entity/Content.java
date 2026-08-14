@@ -40,6 +40,14 @@ public class Content {
     @Setter
     private Integer episodeNumber;
 
+    @Column(name = "is_season_finale")
+    @Setter
+    private Boolean isSeasonFinale;
+
+    @Column(name = "is_series_finale")
+    @Setter
+    private Boolean isSeriesFinale;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;
