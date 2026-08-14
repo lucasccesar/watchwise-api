@@ -1,0 +1,170 @@
+package com.watchwise.watchwise_api.diaryentry.controller;
+
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class DiaryEntryControllerTest {
+
+    @Mock
+    private DiaryEntryService diaryEntryService;
+
+    @Mock
+    private RequestThrottler requestThrottler;
+
+    @InjectMocks
+    private DiaryEntryController diaryEntryController;
+
+    private UUID currentUserId;
+
+    @BeforeEach
+    void setUp() {
+        currentUserId = UUID.randomUUID();
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(currentUserId, null, List.of())
+        );
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenGettingDiaryEntries() {
+        UUID targetUserId = UUID.randomUUID();
+        DiaryEntryResponseDTO dto = buildResponseDto();
+        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, 2024, 1, 10))
+                .thenReturn(new PageImpl<>(List.of(dto)));
+
+        ResponseEntity<List<DiaryEntryResponseDTO>> result =
+                diaryEntryController.getDiaryEntries(targetUserId, 2024, 1, 10);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).containsExactly(dto);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingDiaryEntries() {
+        UUID targetUserId = UUID.randomUUID();
+        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, null, null, null))
+                .thenReturn(Page.empty());
+
+        diaryEntryController.getDiaryEntries(targetUserId, null, null, null);
+
+        verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, null, null);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Return Created With The Service Result - When Called")
+    void shouldReturnCreatedWithTheServiceResultWhenCreatingDiaryEntry() {
+        DiaryEntryCreationDTO creationDTO = minimalCreationDto();
+        DiaryEntryResponseDTO dto = buildResponseDto();
+        when(diaryEntryService.createDiaryEntry(currentUserId, creationDTO)).thenReturn(dto);
+
+        ResponseEntity<DiaryEntryResponseDTO> result = diaryEntryController.createDiaryEntry(creationDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenCreatingDiaryEntry() {
+        DiaryEntryCreationDTO creationDTO = minimalCreationDto();
+        when(diaryEntryService.createDiaryEntry(currentUserId, creationDTO)).thenReturn(buildResponseDto());
+
+        diaryEntryController.createDiaryEntry(creationDTO);
+
+        verify(diaryEntryService).createDiaryEntry(currentUserId, creationDTO);
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenUpdatingDiaryEntry() {
+        UUID diaryEntryId = UUID.randomUUID();
+        DiaryEntryCreationDTO creationDTO = minimalCreationDto();
+        DiaryEntryResponseDTO dto = buildResponseDto();
+        when(diaryEntryService.updateDiaryEntry(currentUserId, diaryEntryId, creationDTO)).thenReturn(dto);
+
+        ResponseEntity<DiaryEntryResponseDTO> result = diaryEntryController.updateDiaryEntry(diaryEntryId, creationDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenUpdatingDiaryEntry() {
+        UUID diaryEntryId = UUID.randomUUID();
+        DiaryEntryCreationDTO creationDTO = minimalCreationDto();
+        when(diaryEntryService.updateDiaryEntry(currentUserId, diaryEntryId, creationDTO)).thenReturn(buildResponseDto());
+
+        diaryEntryController.updateDiaryEntry(diaryEntryId, creationDTO);
+
+        verify(diaryEntryService).updateDiaryEntry(currentUserId, diaryEntryId, creationDTO);
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Return NoContent - When Called")
+    void shouldReturnNoContentWhenDeletingDiaryEntry() {
+        UUID diaryEntryId = UUID.randomUUID();
+
+        ResponseEntity<Void> result = diaryEntryController.deleteDiaryEntry(diaryEntryId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenDeletingDiaryEntry() {
+        UUID diaryEntryId = UUID.randomUUID();
+
+        diaryEntryController.deleteDiaryEntry(diaryEntryId);
+
+        verify(diaryEntryService).deleteDiaryEntry(currentUserId, diaryEntryId);
+    }
+
+    private DiaryEntryCreationDTO minimalCreationDto() {
+        return new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null),
+                null, null, null, null, null, null);
+    }
+
+    private DiaryEntryResponseDTO buildResponseDto() {
+        LocalDateTime now = LocalDateTime.now();
+        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, now, now);
+        return new DiaryEntryResponseDTO(
+                UUID.randomUUID(), currentUserId, content, null, null, null, false, null, null, now, now);
+    }
+}
