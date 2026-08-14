@@ -76,7 +76,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
         validateType(type);
 
         ContentRefCreationDTO contentRefCreation = new ContentRefCreationDTO(
-                top5EntryCreationDTO.tmdbId(), type, null, null, null);
+                top5EntryCreationDTO.tmdbId(), type, null, null, null, null, null);
         ContentRefDTO contentRef = contentService.getOrCreateReference(contentRefCreation);
 
         List<Top5Entry> existing = top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type);

@@ -51,7 +51,9 @@ public class ContentServiceImpl implements ContentService {
                 dto.type(),
                 trimOrNull(dto.seriesTmdbId()),
                 dto.seasonNumber(),
-                dto.episodeNumber()
+                dto.episodeNumber(),
+                dto.isSeasonFinale(),
+                dto.isSeriesFinale()
         );
     }
 
@@ -84,6 +86,9 @@ public class ContentServiceImpl implements ContentService {
                 if (dto.seriesTmdbId() != null || dto.seasonNumber() != null || dto.episodeNumber() != null) {
                     throw new BadRequestException("seriesTmdbId, seasonNumber and episodeNumber must not be provided when type is MOVIE or SERIES");
                 }
+                if (dto.isSeasonFinale() != null || dto.isSeriesFinale() != null) {
+                    throw new BadRequestException("isSeasonFinale and isSeriesFinale must not be provided when type is MOVIE or SERIES");
+                }
             }
             case SEASON -> {
                 if (StringUtils.isEmpty(dto.seriesTmdbId()) || dto.seasonNumber() == null) {
@@ -91,6 +96,9 @@ public class ContentServiceImpl implements ContentService {
                 }
                 if (dto.tmdbId() != null || dto.episodeNumber() != null) {
                     throw new BadRequestException("tmdbId and episodeNumber must not be provided when type is SEASON");
+                }
+                if (dto.isSeasonFinale() != null) {
+                    throw new BadRequestException("isSeasonFinale must not be provided when type is SEASON");
                 }
             }
             case EPISODE -> {

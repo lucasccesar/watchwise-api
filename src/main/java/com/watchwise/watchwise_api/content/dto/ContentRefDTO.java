@@ -12,6 +12,8 @@ public record ContentRefDTO(
         String seriesTmdbId,
         Integer seasonNumber,
         Integer episodeNumber,
+        Boolean isSeasonFinale,
+        Boolean isSeriesFinale,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {

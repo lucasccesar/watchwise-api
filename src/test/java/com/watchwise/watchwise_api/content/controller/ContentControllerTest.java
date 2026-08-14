@@ -53,9 +53,9 @@ class ContentControllerTest {
     @Test
     @DisplayName("[getOrCreateReference] Should Return Ok With ContentRefDTO - When Service Resolves The Reference")
     void shouldReturnOkWithContentRefDtoWhenServiceResolvesTheReference() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null);
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null, null, null);
         ContentRefDTO responseDto = new ContentRefDTO(
-                UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, LocalDateTime.now(), LocalDateTime.now()
+                UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null, LocalDateTime.now(), LocalDateTime.now()
         );
         when(contentService.getOrCreateReference(dto)).thenReturn(responseDto);
 
@@ -68,9 +68,9 @@ class ContentControllerTest {
     @Test
     @DisplayName("[getOrCreateReference] Should Delegate To Service With The Same DTO - When Called")
     void shouldDelegateToServiceWithTheSameDtoWhenCalled() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null);
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null);
         ContentRefDTO responseDto = new ContentRefDTO(
-                UUID.randomUUID(), null, ContentType.SEASON, "1399", 1, null, LocalDateTime.now(), LocalDateTime.now()
+                UUID.randomUUID(), null, ContentType.SEASON, "1399", 1, null, null, null, LocalDateTime.now(), LocalDateTime.now()
         );
         when(contentService.getOrCreateReference(dto)).thenReturn(responseDto);
 

@@ -364,7 +364,7 @@ class DiaryEntryServiceImplTest {
         LocalDate watchedDate = LocalDate.of(2024, 5, 1);
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
                 "Great movie", 9, watchedDate, true, false, "https://example.com/poster.png");
 
         DiaryEntryResponseDTO result = diaryEntryService.createDiaryEntry(lucasId, dto);
@@ -382,7 +382,7 @@ class DiaryEntryServiceImplTest {
         assertThat(captured.getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
         assertThat(contentRefCreationCaptor.getValue())
-                .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null));
+                .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null));
     }
 
     @Test
@@ -396,7 +396,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
                 null, null, null, null, null, null);
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
@@ -418,7 +418,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
                 null, null, null, false, null, null);
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
@@ -434,7 +434,7 @@ class DiaryEntryServiceImplTest {
         stubContentResolution(theOffice);
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(theOffice.getTmdbId(), ContentType.SERIES, null, null, null),
+                new ContentRefCreationDTO(theOffice.getTmdbId(), ContentType.SERIES, null, null, null, null, null),
                 null, null, null, null, true, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
@@ -675,12 +675,12 @@ class DiaryEntryServiceImplTest {
     private void stubContentResolution(Content content) {
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
                 .thenReturn(new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
-                        LocalDateTime.now(), LocalDateTime.now()));
+                        null, null, LocalDateTime.now(), LocalDateTime.now()));
     }
 
     private DiaryEntryCreationDTO minimalCreationDto() {
         return new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
                 null, null, null, null, null, null);
     }
 

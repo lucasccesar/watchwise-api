@@ -121,7 +121,7 @@ class Top5EntryControllerTest {
 
     private Top5EntryResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
-        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, now, now);
+        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null, now, now);
         return new Top5EntryResponseDTO(UUID.randomUUID(), ContentType.MOVIE, content, 1, now, now);
     }
 }

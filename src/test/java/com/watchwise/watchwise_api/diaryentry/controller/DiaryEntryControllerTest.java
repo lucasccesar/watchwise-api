@@ -163,7 +163,7 @@ class DiaryEntryControllerTest {
 
     private DiaryEntryCreationDTO minimalCreationDto() {
         return new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null),
+                new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null, null, null),
                 null, null, null, null, null, null);
     }
 
@@ -173,7 +173,7 @@ class DiaryEntryControllerTest {
 
     private DiaryEntryResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
-        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, now, now);
+        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null, now, now);
         return new DiaryEntryResponseDTO(
                 UUID.randomUUID(), currentUserId, content, null, null, null, false, null, null, now, now);
     }

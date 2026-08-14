@@ -233,7 +233,7 @@ class Top5EntryServiceImplTest {
         verify(top5EntryRepository, times(1)).flush();
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
         assertThat(contentRefCreationCaptor.getValue())
-                .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null));
+                .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null));
     }
 
     @Test
@@ -577,7 +577,7 @@ class Top5EntryServiceImplTest {
     private void stubContentResolution(Content content, ContentType type) {
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
                 .thenReturn(new ContentRefDTO(content.getId(), content.getTmdbId(), type, null, null, null,
-                        LocalDateTime.now(), LocalDateTime.now()));
+                        null, null, LocalDateTime.now(), LocalDateTime.now()));
     }
 
     private Top5Entry buildEntry(User user, Content content, ContentType type, Integer position) {

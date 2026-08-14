@@ -8,6 +8,8 @@ public record ContentRefCreationDTO(
         @NotNull ContentType type,
         String seriesTmdbId,
         Integer seasonNumber,
-        Integer episodeNumber
+        Integer episodeNumber,
+        Boolean isSeasonFinale,
+        Boolean isSeriesFinale
 ) {
 }

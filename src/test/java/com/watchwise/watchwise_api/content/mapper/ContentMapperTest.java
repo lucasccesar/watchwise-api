@@ -26,7 +26,7 @@ class ContentMapperTest {
     @Test
     @DisplayName("[contentRefCreationDtoToContent] Should Map All Fields - When Type Is Movie")
     void shouldMapAllFieldsWhenTypeIsMovie() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null);
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null, null, null);
 
         Content result = contentMapper.contentRefCreationDtoToContent(dto);
 
@@ -40,7 +40,7 @@ class ContentMapperTest {
     @Test
     @DisplayName("[contentRefCreationDtoToContent] Should Map All Fields - When Type Is Episode")
     void shouldMapAllFieldsWhenTypeIsEpisode() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 3);
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 3, null, null);
 
         Content result = contentMapper.contentRefCreationDtoToContent(dto);
 
@@ -54,7 +54,7 @@ class ContentMapperTest {
     @Test
     @DisplayName("[contentRefCreationDtoToContent] Should Ignore Id, CreatedAt And UpdatedAt - When Mapping ContentRefCreationDTO To Content")
     void shouldIgnoreIdCreatedAtAndUpdatedAtWhenMappingContentRefCreationDtoToContent() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null);
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null, null, null);
 
         Content result = contentMapper.contentRefCreationDtoToContent(dto);
 
@@ -91,5 +91,37 @@ class ContentMapperTest {
         assertThat(result.episodeNumber()).isNull();
         assertThat(result.createdAt()).isEqualTo(createdAt);
         assertThat(result.updatedAt()).isEqualTo(updatedAt);
+    }
+
+    @Test
+    @DisplayName("[contentRefCreationDtoToContent] Should Map IsSeasonFinale And IsSeriesFinale - When Present")
+    void shouldMapIsSeasonFinaleAndIsSeriesFinaleWhenPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 3, true, false);
+
+        Content result = contentMapper.contentRefCreationDtoToContent(dto);
+
+        assertThat(result.getIsSeasonFinale()).isTrue();
+        assertThat(result.getIsSeriesFinale()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[contentToContentRefDto] Should Map IsSeasonFinale And IsSeriesFinale - When Present")
+    void shouldMapIsSeasonFinaleAndIsSeriesFinaleToContentRefDtoWhenPresent() {
+        Content content = Content.builder()
+                .id(UUID.randomUUID())
+                .type(ContentType.EPISODE)
+                .seriesTmdbId("1399")
+                .seasonNumber(1)
+                .episodeNumber(3)
+                .isSeasonFinale(true)
+                .isSeriesFinale(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        ContentRefDTO result = contentMapper.contentToContentRefDto(content);
+
+        assertThat(result.isSeasonFinale()).isTrue();
+        assertThat(result.isSeriesFinale()).isFalse();
     }
 }
