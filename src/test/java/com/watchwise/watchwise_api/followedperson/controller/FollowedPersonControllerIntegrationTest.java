@@ -247,8 +247,10 @@ class FollowedPersonControllerIntegrationTest {
 
         mockMvc.perform(get("/users/" + target.id() + "/follow-people").cookie(viewer.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0]").value("603"));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0]").value("603"))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.followedperson.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.followedperson.service.FollowedPersonService;
 import org.junit.jupiter.api.AfterEach;
@@ -12,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -73,28 +75,31 @@ class FollowedPersonControllerTest {
     }
 
     @Test
-    @DisplayName("[getFollowedPeople] Should Return List Of PersonTmdbIds - When Service Returns Results")
-    void shouldReturnListOfPersonTmdbIdsWhenServiceReturnsResults() {
+    @DisplayName("[getFollowedPeople] Should Return Page Envelope With Content And Metadata - When Service Returns Results")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenServiceReturnsResults() {
         UUID targetUserId = UUID.randomUUID();
-        Page<String> page = new PageImpl<>(List.of(personTmdbId));
+        Page<String> page = new PageImpl<>(List.of(personTmdbId), PageRequest.of(0, 10), 1);
         when(followedPersonService.getFollowedPeople(currentUserId, targetUserId, 1, 10)).thenReturn(page);
 
-        ResponseEntity<List<String>> result = followedPersonController.getFollowedPeople(targetUserId, 1, 10);
+        ResponseEntity<PageResponseDTO<String>> result = followedPersonController.getFollowedPeople(targetUserId, 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).containsExactly(personTmdbId);
+        assertThat(result.getBody().content()).containsExactly(personTmdbId);
+        assertThat(result.getBody().page()).isEqualTo(1);
+        assertThat(result.getBody().totalElements()).isEqualTo(1);
+        assertThat(result.getBody().hasNext()).isFalse();
     }
 
     @Test
-    @DisplayName("[getFollowedPeople] Should Return Empty List - When Service Returns No Results")
-    void shouldReturnEmptyListWhenServiceReturnsNoResults() {
+    @DisplayName("[getFollowedPeople] Should Return Empty Content - When Service Returns No Results")
+    void shouldReturnEmptyContentWhenServiceReturnsNoResults() {
         UUID targetUserId = UUID.randomUUID();
         when(followedPersonService.getFollowedPeople(currentUserId, targetUserId, null, null)).thenReturn(Page.empty());
 
-        ResponseEntity<List<String>> result = followedPersonController.getFollowedPeople(targetUserId, null, null);
+        ResponseEntity<PageResponseDTO<String>> result = followedPersonController.getFollowedPeople(targetUserId, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isEmpty();
+        assertThat(result.getBody().content()).isEmpty();
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.follower.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.follower.dto.FollowStatusResponseDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -15,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -68,26 +70,29 @@ class FollowerControllerTest {
     }
 
     @Test
-    @DisplayName("[getFollowers] Should Return List Of PublicUserDTO - When Service Returns Results")
-    void shouldReturnListOfPublicUserDtoWhenServiceReturnsFollowers() {
-        Page<PublicUserDTO> page = new PageImpl<>(List.of(publicUserDTO));
+    @DisplayName("[getFollowers] Should Return Page Envelope With Content And Metadata - When Service Returns Results")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenServiceReturnsFollowers() {
+        Page<PublicUserDTO> page = new PageImpl<>(List.of(publicUserDTO), PageRequest.of(0, 10), 1);
         when(followerService.getFollowers(currentUserId, targetUserId, 1, 10)).thenReturn(page);
 
-        ResponseEntity<List<PublicUserDTO>> result = followerController.getFollowers(targetUserId, 1, 10);
+        ResponseEntity<PageResponseDTO<PublicUserDTO>> result = followerController.getFollowers(targetUserId, 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).containsExactly(publicUserDTO);
+        assertThat(result.getBody().content()).containsExactly(publicUserDTO);
+        assertThat(result.getBody().page()).isEqualTo(1);
+        assertThat(result.getBody().totalElements()).isEqualTo(1);
+        assertThat(result.getBody().hasNext()).isFalse();
     }
 
     @Test
-    @DisplayName("[getFollowers] Should Return Empty List - When Service Returns No Followers")
-    void shouldReturnEmptyListWhenServiceReturnsNoFollowers() {
+    @DisplayName("[getFollowers] Should Return Empty Content - When Service Returns No Followers")
+    void shouldReturnEmptyContentWhenServiceReturnsNoFollowers() {
         when(followerService.getFollowers(currentUserId, targetUserId, null, null)).thenReturn(Page.empty());
 
-        ResponseEntity<List<PublicUserDTO>> result = followerController.getFollowers(targetUserId, null, null);
+        ResponseEntity<PageResponseDTO<PublicUserDTO>> result = followerController.getFollowers(targetUserId, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isEmpty();
+        assertThat(result.getBody().content()).isEmpty();
     }
 
     @Test
@@ -101,26 +106,29 @@ class FollowerControllerTest {
     }
 
     @Test
-    @DisplayName("[getFollowing] Should Return List Of PublicUserDTO - When Service Returns Results")
-    void shouldReturnListOfPublicUserDtoWhenServiceReturnsFollowing() {
-        Page<PublicUserDTO> page = new PageImpl<>(List.of(publicUserDTO));
+    @DisplayName("[getFollowing] Should Return Page Envelope With Content And Metadata - When Service Returns Results")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenServiceReturnsFollowing() {
+        Page<PublicUserDTO> page = new PageImpl<>(List.of(publicUserDTO), PageRequest.of(0, 10), 1);
         when(followerService.getFollowing(currentUserId, targetUserId, 1, 10)).thenReturn(page);
 
-        ResponseEntity<List<PublicUserDTO>> result = followerController.getFollowing(targetUserId, 1, 10);
+        ResponseEntity<PageResponseDTO<PublicUserDTO>> result = followerController.getFollowing(targetUserId, 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).containsExactly(publicUserDTO);
+        assertThat(result.getBody().content()).containsExactly(publicUserDTO);
+        assertThat(result.getBody().page()).isEqualTo(1);
+        assertThat(result.getBody().totalElements()).isEqualTo(1);
+        assertThat(result.getBody().hasNext()).isFalse();
     }
 
     @Test
-    @DisplayName("[getFollowing] Should Return Empty List - When Service Returns No Following")
-    void shouldReturnEmptyListWhenServiceReturnsNoFollowing() {
+    @DisplayName("[getFollowing] Should Return Empty Content - When Service Returns No Following")
+    void shouldReturnEmptyContentWhenServiceReturnsNoFollowing() {
         when(followerService.getFollowing(currentUserId, targetUserId, null, null)).thenReturn(Page.empty());
 
-        ResponseEntity<List<PublicUserDTO>> result = followerController.getFollowing(targetUserId, null, null);
+        ResponseEntity<PageResponseDTO<PublicUserDTO>> result = followerController.getFollowing(targetUserId, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isEmpty();
+        assertThat(result.getBody().content()).isEmpty();
     }
 
     @Test
@@ -182,26 +190,29 @@ class FollowerControllerTest {
     }
 
     @Test
-    @DisplayName("[getPendingFollowRequests] Should Return List Of PublicUserDTO - When Pending Requests Exist")
-    void shouldReturnListOfPublicUserDtoWhenPendingRequestsExist() {
-        Page<PublicUserDTO> page = new PageImpl<>(List.of(publicUserDTO));
+    @DisplayName("[getPendingFollowRequests] Should Return Page Envelope With Content And Metadata - When Pending Requests Exist")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenPendingRequestsExist() {
+        Page<PublicUserDTO> page = new PageImpl<>(List.of(publicUserDTO), PageRequest.of(0, 10), 1);
         when(followerService.getPendingFollowRequests(currentUserId, 1, 10)).thenReturn(page);
 
-        ResponseEntity<List<PublicUserDTO>> result = followerController.getPendingFollowRequests(1, 10);
+        ResponseEntity<PageResponseDTO<PublicUserDTO>> result = followerController.getPendingFollowRequests(1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).containsExactly(publicUserDTO);
+        assertThat(result.getBody().content()).containsExactly(publicUserDTO);
+        assertThat(result.getBody().page()).isEqualTo(1);
+        assertThat(result.getBody().totalElements()).isEqualTo(1);
+        assertThat(result.getBody().hasNext()).isFalse();
     }
 
     @Test
-    @DisplayName("[getPendingFollowRequests] Should Return Empty List - When No Pending Requests Exist")
-    void shouldReturnEmptyListWhenNoPendingRequestsExist() {
+    @DisplayName("[getPendingFollowRequests] Should Return Empty Content - When No Pending Requests Exist")
+    void shouldReturnEmptyContentWhenNoPendingRequestsExist() {
         when(followerService.getPendingFollowRequests(currentUserId, null, null)).thenReturn(Page.empty());
 
-        ResponseEntity<List<PublicUserDTO>> result = followerController.getPendingFollowRequests(null, null);
+        ResponseEntity<PageResponseDTO<PublicUserDTO>> result = followerController.getPendingFollowRequests(null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isEmpty();
+        assertThat(result.getBody().content()).isEmpty();
     }
 
     @Test

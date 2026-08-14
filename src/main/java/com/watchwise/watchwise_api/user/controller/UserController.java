@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.AttemptLockout;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
@@ -27,7 +28,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -60,7 +60,7 @@ public class UserController {
     private long profileScanWindowMinutes;
 
     @GetMapping
-    public ResponseEntity<List<UserPreviewDTO>> getUsersByUsername(
+    public ResponseEntity<PageResponseDTO<UserPreviewDTO>> getUsersByUsername(
             @RequestParam String username,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
@@ -68,7 +68,7 @@ public class UserController {
         requestThrottler.checkAllowed(profileScanKey(), profileScanMaxRequests, Duration.ofMinutes(profileScanWindowMinutes));
 
         Page<UserPreviewDTO> users = userService.getUsersByUsername(username, page, size, null);
-        return ResponseEntity.ok(users.getContent());
+        return ResponseEntity.ok(PageResponseDTO.of(users));
     }
 
     @GetMapping("/me")

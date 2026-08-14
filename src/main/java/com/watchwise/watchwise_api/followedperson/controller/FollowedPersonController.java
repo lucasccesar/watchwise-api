@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.followedperson.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.followedperson.service.FollowedPersonService;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -49,13 +49,13 @@ public class FollowedPersonController {
     }
 
     @GetMapping("/{userId}/follow-people")
-    public ResponseEntity<List<String>> getFollowedPeople(
+    public ResponseEntity<PageResponseDTO<String>> getFollowedPeople(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
         Page<String> followedPeople = followedPersonService.getFollowedPeople(getCurrentUserId(), userId, page, size);
-        return ResponseEntity.ok(followedPeople.getContent());
+        return ResponseEntity.ok(PageResponseDTO.of(followedPeople));
     }
 
     private String followPeopleActionKey() {

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.follower.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.follower.dto.FollowStatusResponseDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -19,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -36,23 +36,23 @@ public class FollowerController {
     private long followActionWindowMinutes;
 
     @GetMapping("/{userId}/followers")
-    public ResponseEntity<List<PublicUserDTO>> getFollowers(
+    public ResponseEntity<PageResponseDTO<PublicUserDTO>> getFollowers(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
         Page<PublicUserDTO> followers = followerService.getFollowers(getCurrentUserId(), userId, page, size);
-        return ResponseEntity.ok(followers.getContent());
+        return ResponseEntity.ok(PageResponseDTO.of(followers));
     }
 
     @GetMapping("/{userId}/following")
-    public ResponseEntity<List<PublicUserDTO>> getFollowing(
+    public ResponseEntity<PageResponseDTO<PublicUserDTO>> getFollowing(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
         Page<PublicUserDTO> following = followerService.getFollowing(getCurrentUserId(), userId, page, size);
-        return ResponseEntity.ok(following.getContent());
+        return ResponseEntity.ok(PageResponseDTO.of(following));
     }
 
     @PostMapping("/{userId}/follow")
@@ -72,12 +72,12 @@ public class FollowerController {
     }
 
     @GetMapping("/me/follow-requests")
-    public ResponseEntity<List<PublicUserDTO>> getPendingFollowRequests(
+    public ResponseEntity<PageResponseDTO<PublicUserDTO>> getPendingFollowRequests(
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
         Page<PublicUserDTO> requests = followerService.getPendingFollowRequests(getCurrentUserId(), page, size);
-        return ResponseEntity.ok(requests.getContent());
+        return ResponseEntity.ok(PageResponseDTO.of(requests));
     }
 
     @PostMapping("/me/follow-requests/{requesterId}/accept")

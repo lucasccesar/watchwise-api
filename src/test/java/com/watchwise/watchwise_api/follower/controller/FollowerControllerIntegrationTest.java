@@ -315,8 +315,10 @@ class FollowerControllerIntegrationTest {
 
         mockMvc.perform(get("/users/" + target.id() + "/followers").cookie(viewer.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].username").value("followersfollower"));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].username").value("followersfollower"))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test
@@ -359,8 +361,10 @@ class FollowerControllerIntegrationTest {
 
         mockMvc.perform(get("/users/" + target.id() + "/following").cookie(viewer.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].username").value("followingfollowed"));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].username").value("followingfollowed"))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test
@@ -402,18 +406,20 @@ class FollowerControllerIntegrationTest {
 
         mockMvc.perform(get("/users/me/follow-requests").cookie(target.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].username").value("pendingrequester"));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].username").value("pendingrequester"))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test
-    @DisplayName("[getPendingFollowRequests] Should Return Empty List - When No Pending Requests Exist")
-    void shouldReturnEmptyListWhenNoPendingRequestsExist() throws Exception {
+    @DisplayName("[getPendingFollowRequests] Should Return Empty Content - When No Pending Requests Exist")
+    void shouldReturnEmptyContentWhenNoPendingRequestsExist() throws Exception {
         RegisteredUser target = registerUser("pendingemptytarget", true);
 
         mockMvc.perform(get("/users/me/follow-requests").cookie(target.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(0));
     }
 
     @Test

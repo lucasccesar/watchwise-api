@@ -620,10 +620,13 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").param("username", "searchuser").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].username").value("searchuser1"))
-                .andExpect(jsonPath("$[1].username").value("searchuser2"))
-                .andExpect(jsonPath("$[0].email").doesNotExist());
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].username").value("searchuser1"))
+                .andExpect(jsonPath("$.content[1].username").value("searchuser2"))
+                .andExpect(jsonPath("$.content[0].email").doesNotExist())
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test
@@ -635,9 +638,9 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").param("username", "privatesearchtarget").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].username").value("privatesearchtarget"))
-                .andExpect(jsonPath("$[0].isProfilePublic").value(false));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].username").value("privatesearchtarget"))
+                .andExpect(jsonPath("$.content[0].isProfilePublic").value(false));
     }
 
     @Test
@@ -650,7 +653,11 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").param("username", "sizeuser").param("size", "2").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.hasNext").value(true));
     }
 
     @Test
@@ -663,13 +670,18 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").param("username", "pageuser").param("page", "1").param("size", "1").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].username").value("pageuser1"));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].username").value("pageuser1"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.totalPages").value(3))
+                .andExpect(jsonPath("$.hasNext").value(true));
 
         mockMvc.perform(get("/users").param("username", "pageuser").param("page", "2").param("size", "1").cookie(viewerAccessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].username").value("pageuser2"));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].username").value("pageuser2"))
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.hasNext").value(true));
     }
 
     @Test

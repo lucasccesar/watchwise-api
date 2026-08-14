@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.AttemptLockout;
@@ -23,6 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -95,32 +97,39 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("[getUsersByUsername] Should Return List Of UserPreviewDTO - When Service Returns Results")
-    void shouldReturnListOfUserPreviewDtoWhenServiceReturnsResults() {
+    @DisplayName("[getUsersByUsername] Should Return Page Envelope With Content And Metadata - When Service Returns Results")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenServiceReturnsResults() {
         UserPreviewDTO previewDTO = new UserPreviewDTO(
                 UUID.randomUUID(),
                 "JaneDoe",
                 "https://picture.com/pic.png",
                 true
         );
-        Page<UserPreviewDTO> page = new PageImpl<>(List.of(previewDTO));
+        Page<UserPreviewDTO> page = new PageImpl<>(List.of(previewDTO), PageRequest.of(0, 10), 1);
         when(userService.getUsersByUsername("jane", 1, 10, null)).thenReturn(page);
 
-        ResponseEntity<List<UserPreviewDTO>> result = userController.getUsersByUsername("jane", 1, 10);
+        ResponseEntity<PageResponseDTO<UserPreviewDTO>> result = userController.getUsersByUsername("jane", 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).containsExactly(previewDTO);
+        assertThat(result.getBody()).isNotNull();
+        assertThat(result.getBody().content()).containsExactly(previewDTO);
+        assertThat(result.getBody().page()).isEqualTo(1);
+        assertThat(result.getBody().size()).isEqualTo(10);
+        assertThat(result.getBody().totalElements()).isEqualTo(1);
+        assertThat(result.getBody().totalPages()).isEqualTo(1);
+        assertThat(result.getBody().hasNext()).isFalse();
     }
 
     @Test
-    @DisplayName("[getUsersByUsername] Should Return Empty List - When Service Returns No Results")
-    void shouldReturnEmptyListWhenServiceReturnsNoResults() {
+    @DisplayName("[getUsersByUsername] Should Return Empty Content - When Service Returns No Results")
+    void shouldReturnEmptyContentWhenServiceReturnsNoResults() {
         when(userService.getUsersByUsername("nobody", null, null, null)).thenReturn(Page.empty());
 
-        ResponseEntity<List<UserPreviewDTO>> result = userController.getUsersByUsername("nobody", null, null);
+        ResponseEntity<PageResponseDTO<UserPreviewDTO>> result = userController.getUsersByUsername("nobody", null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).isEmpty();
+        assertThat(result.getBody().content()).isEmpty();
+        assertThat(result.getBody().totalElements()).isZero();
     }
 
     @Test
