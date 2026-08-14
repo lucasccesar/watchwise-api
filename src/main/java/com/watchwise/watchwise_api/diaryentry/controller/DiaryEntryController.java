@@ -1,8 +1,10 @@
 package com.watchwise.watchwise_api.diaryentry.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +16,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -30,14 +31,14 @@ public class DiaryEntryController {
     private long diaryActionWindowMinutes;
 
     @GetMapping("/users/{userId}/diary")
-    public ResponseEntity<List<DiaryEntryResponseDTO>> getDiaryEntries(
+    public ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> getDiaryEntries(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
         Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(getCurrentUserId(), userId, year, page, size);
-        return ResponseEntity.ok(entries.getContent());
+        return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 
     @PostMapping("/diary")
@@ -51,11 +52,11 @@ public class DiaryEntryController {
     @PatchMapping("/diary/{diaryEntryId}")
     public ResponseEntity<DiaryEntryResponseDTO> updateDiaryEntry(
             @PathVariable UUID diaryEntryId,
-            @Valid @RequestBody DiaryEntryCreationDTO diaryEntryCreationDTO
+            @Valid @RequestBody DiaryEntryUpdateDTO diaryEntryUpdateDTO
     ) {
         requestThrottler.checkAllowed(diaryActionKey(), diaryActionMaxRequests, Duration.ofMinutes(diaryActionWindowMinutes));
 
-        DiaryEntryResponseDTO updated = diaryEntryService.updateDiaryEntry(getCurrentUserId(), diaryEntryId, diaryEntryCreationDTO);
+        DiaryEntryResponseDTO updated = diaryEntryService.updateDiaryEntry(getCurrentUserId(), diaryEntryId, diaryEntryUpdateDTO);
         return ResponseEntity.ok(updated);
     }
 

@@ -5,10 +5,12 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -93,13 +95,19 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         Content content = contentRepository.getReferenceById(contentRef.id());
         LocalDateTime now = LocalDateTime.now();
 
+        boolean alreadyLogged = diaryEntryRepository
+                .findFirstByUserIdAndContentIdOrderByCreatedAtDesc(userId, contentRef.id())
+                .isPresent();
+
+        assertWatchedInTheaterAllowed(contentRef.type(), diaryEntryCreationDTO.watchedInTheater());
+
         DiaryEntry entry = DiaryEntry.builder()
                 .user(user)
                 .content(content)
                 .comment(diaryEntryCreationDTO.comment())
                 .score(diaryEntryCreationDTO.score())
                 .watchedDate(diaryEntryCreationDTO.watchedDate())
-                .isRewatch(Boolean.TRUE.equals(diaryEntryCreationDTO.isRewatch()))
+                .isRewatch(alreadyLogged || Boolean.TRUE.equals(diaryEntryCreationDTO.isRewatch()))
                 .watchedInTheater(diaryEntryCreationDTO.watchedInTheater())
                 .customPosterUrl(diaryEntryCreationDTO.customPosterUrl())
                 .createdAt(now)
@@ -111,34 +119,38 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     @Override
     @Transactional
-    public DiaryEntryResponseDTO updateDiaryEntry(UUID userId, UUID diaryEntryId, DiaryEntryCreationDTO diaryEntryCreationDTO) {
+    public DiaryEntryResponseDTO updateDiaryEntry(UUID userId, UUID diaryEntryId, DiaryEntryUpdateDTO diaryEntryUpdateDTO) {
         DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
 
-        ContentRefDTO contentRef = contentService.getOrCreateReference(diaryEntryCreationDTO.content());
-        entry.setContent(contentRepository.getReferenceById(contentRef.id()));
-
-        if (diaryEntryCreationDTO.comment() != null) {
-            entry.setComment(diaryEntryCreationDTO.comment());
+        if (diaryEntryUpdateDTO.comment() != null) {
+            entry.setComment(diaryEntryUpdateDTO.comment());
         }
-        if (diaryEntryCreationDTO.score() != null) {
-            entry.setScore(diaryEntryCreationDTO.score());
+        if (diaryEntryUpdateDTO.score() != null) {
+            entry.setScore(diaryEntryUpdateDTO.score());
         }
-        if (diaryEntryCreationDTO.watchedDate() != null) {
-            entry.setWatchedDate(diaryEntryCreationDTO.watchedDate());
+        if (diaryEntryUpdateDTO.watchedDate() != null) {
+            entry.setWatchedDate(diaryEntryUpdateDTO.watchedDate());
         }
-        if (diaryEntryCreationDTO.isRewatch() != null) {
-            entry.setIsRewatch(diaryEntryCreationDTO.isRewatch());
+        if (diaryEntryUpdateDTO.isRewatch() != null) {
+            entry.setIsRewatch(diaryEntryUpdateDTO.isRewatch());
         }
-        if (diaryEntryCreationDTO.watchedInTheater() != null) {
-            entry.setWatchedInTheater(diaryEntryCreationDTO.watchedInTheater());
+        if (diaryEntryUpdateDTO.watchedInTheater() != null) {
+            assertWatchedInTheaterAllowed(entry.getContent().getType(), diaryEntryUpdateDTO.watchedInTheater());
+            entry.setWatchedInTheater(diaryEntryUpdateDTO.watchedInTheater());
         }
-        if (diaryEntryCreationDTO.customPosterUrl() != null) {
-            entry.setCustomPosterUrl(diaryEntryCreationDTO.customPosterUrl());
+        if (diaryEntryUpdateDTO.customPosterUrl() != null) {
+            entry.setCustomPosterUrl(diaryEntryUpdateDTO.customPosterUrl());
         }
 
         entry.setUpdatedAt(LocalDateTime.now());
 
         return diaryEntryMapper.diaryEntryToResponseDto(diaryEntryRepository.save(entry));
+    }
+
+    private void assertWatchedInTheaterAllowed(ContentType contentType, Boolean watchedInTheater) {
+        if (watchedInTheater != null && contentType != ContentType.MOVIE) {
+            throw new BadRequestException("watchedInTheater can only be set for content of type MOVIE");
+        }
     }
 
     @Override

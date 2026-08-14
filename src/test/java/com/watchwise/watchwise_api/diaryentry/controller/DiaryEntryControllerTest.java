@@ -1,11 +1,13 @@
 package com.watchwise.watchwise_api.diaryentry.controller;
 
+import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -59,18 +62,21 @@ class DiaryEntryControllerTest {
     }
 
     @Test
-    @DisplayName("[getDiaryEntries] Should Return Ok With The Service Result - When Called")
-    void shouldReturnOkWithTheServiceResultWhenGettingDiaryEntries() {
+    @DisplayName("[getDiaryEntries] Should Return Page Envelope With Content And Metadata - When Called")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingDiaryEntries() {
         UUID targetUserId = UUID.randomUUID();
         DiaryEntryResponseDTO dto = buildResponseDto();
         when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, 2024, 1, 10))
-                .thenReturn(new PageImpl<>(List.of(dto)));
+                .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
 
-        ResponseEntity<List<DiaryEntryResponseDTO>> result =
+        ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> result =
                 diaryEntryController.getDiaryEntries(targetUserId, 2024, 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody()).containsExactly(dto);
+        assertThat(result.getBody().content()).containsExactly(dto);
+        assertThat(result.getBody().page()).isEqualTo(1);
+        assertThat(result.getBody().totalElements()).isEqualTo(1);
+        assertThat(result.getBody().hasNext()).isFalse();
     }
 
     @Test
@@ -113,11 +119,11 @@ class DiaryEntryControllerTest {
     @DisplayName("[updateDiaryEntry] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenUpdatingDiaryEntry() {
         UUID diaryEntryId = UUID.randomUUID();
-        DiaryEntryCreationDTO creationDTO = minimalCreationDto();
+        DiaryEntryUpdateDTO updateDTO = minimalUpdateDto();
         DiaryEntryResponseDTO dto = buildResponseDto();
-        when(diaryEntryService.updateDiaryEntry(currentUserId, diaryEntryId, creationDTO)).thenReturn(dto);
+        when(diaryEntryService.updateDiaryEntry(currentUserId, diaryEntryId, updateDTO)).thenReturn(dto);
 
-        ResponseEntity<DiaryEntryResponseDTO> result = diaryEntryController.updateDiaryEntry(diaryEntryId, creationDTO);
+        ResponseEntity<DiaryEntryResponseDTO> result = diaryEntryController.updateDiaryEntry(diaryEntryId, updateDTO);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -127,12 +133,12 @@ class DiaryEntryControllerTest {
     @DisplayName("[updateDiaryEntry] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenUpdatingDiaryEntry() {
         UUID diaryEntryId = UUID.randomUUID();
-        DiaryEntryCreationDTO creationDTO = minimalCreationDto();
-        when(diaryEntryService.updateDiaryEntry(currentUserId, diaryEntryId, creationDTO)).thenReturn(buildResponseDto());
+        DiaryEntryUpdateDTO updateDTO = minimalUpdateDto();
+        when(diaryEntryService.updateDiaryEntry(currentUserId, diaryEntryId, updateDTO)).thenReturn(buildResponseDto());
 
-        diaryEntryController.updateDiaryEntry(diaryEntryId, creationDTO);
+        diaryEntryController.updateDiaryEntry(diaryEntryId, updateDTO);
 
-        verify(diaryEntryService).updateDiaryEntry(currentUserId, diaryEntryId, creationDTO);
+        verify(diaryEntryService).updateDiaryEntry(currentUserId, diaryEntryId, updateDTO);
     }
 
     @Test
@@ -159,6 +165,10 @@ class DiaryEntryControllerTest {
         return new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null),
                 null, null, null, null, null, null);
+    }
+
+    private DiaryEntryUpdateDTO minimalUpdateDto() {
+        return new DiaryEntryUpdateDTO(null, null, null, null, null, null);
     }
 
     private DiaryEntryResponseDTO buildResponseDto() {

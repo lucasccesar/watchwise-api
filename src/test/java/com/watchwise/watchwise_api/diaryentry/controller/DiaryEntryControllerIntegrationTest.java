@@ -171,6 +171,32 @@ class DiaryEntryControllerIntegrationTest {
                 """.formatted(tmdbId, scoreField);
     }
 
+    private String creationBody(String tmdbId, String type, Boolean watchedInTheater) {
+        return """
+                {
+                    "content": { "tmdbId": "%s", "type": "%s" },
+                    "watchedInTheater": %s
+                }
+                """.formatted(tmdbId, type, watchedInTheater);
+    }
+
+    private String updateBody(Integer score) {
+        return """
+                {
+                    "score": %s
+                }
+                """.formatted(score);
+    }
+
+    private String updateBody(String field, Object value) {
+        String formattedValue = value instanceof String stringValue ? "\"" + stringValue + "\"" : String.valueOf(value);
+        return """
+                {
+                    "%s": %s
+                }
+                """.formatted(field, formattedValue);
+    }
+
     private DiaryEntry persistEntry(User user, Content content) {
         LocalDateTime now = LocalDateTime.now();
         return diaryEntryRepository.save(DiaryEntry.builder()
@@ -208,19 +234,23 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(getDiaryRequest(user, user.id()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0].content.tmdbId").value("680"))
-                .andExpect(jsonPath("$[1].content.tmdbId").value("550"));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].content.tmdbId").value("680"))
+                .andExpect(jsonPath("$.content[1].content.tmdbId").value("550"))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test
-    @DisplayName("[getDiaryEntries] Should Return Empty List - When User Has No Entries")
-    void shouldReturnEmptyListWhenUserHasNoEntries() throws Exception {
+    @DisplayName("[getDiaryEntries] Should Return Empty Content - When User Has No Entries")
+    void shouldReturnEmptyContentWhenUserHasNoEntries() throws Exception {
         RegisteredUser user = registerUser("getdiaryempty");
 
         mockMvc.perform(getDiaryRequest(user, user.id()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.totalElements").value(0));
     }
 
     @Test
@@ -239,8 +269,8 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(getDiaryRequest(user, user.id()).param("year", "2024"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].content.tmdbId").value("680"));
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].content.tmdbId").value("680"));
     }
 
     @Test
@@ -343,6 +373,32 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When WatchedInTheater Is Set And Content Type Is Not Movie")
+    void shouldReturnBadRequestAndNotPersistWhenWatchedInTheaterIsSetAndContentTypeIsNotMovie() throws Exception {
+        RegisteredUser user = registerUser("creatediarywatchedintheaternotmovie");
+
+        mockMvc.perform(createRequest(user, creationBody("2316", "SERIES", true)))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Force IsRewatch To True And Persist - When User Already Logged This Content")
+    void shouldForceIsRewatchToTrueAndPersistWhenUserAlreadyLoggedThisContent() throws Exception {
+        RegisteredUser user = registerUser("creatediaryrewatch");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistEntry(entity, persistContent("550", ContentType.MOVIE));
+
+        mockMvc.perform(createRequest(user, creationBody("550", null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.isRewatch").value(true));
+
+        assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
+                .hasSize(2);
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Return TooManyRequests - When Requests From The Same User Exceed The Configured Max")
     void shouldReturnTooManyRequestsWhenRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
         RegisteredUser user = registerUser("creatediaryratelimit");
@@ -391,7 +447,7 @@ class DiaryEntryControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         DiaryEntry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE));
 
-        mockMvc.perform(updateRequest(user, entry.getId(), creationBody("550", 9)))
+        mockMvc.perform(updateRequest(user, entry.getId(), updateBody(9)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.score").value(9));
 
@@ -403,7 +459,7 @@ class DiaryEntryControllerIntegrationTest {
     void shouldReturnNotFoundWhenEntryDoesNotExist() throws Exception {
         RegisteredUser user = registerUser("updatediarynotfound");
 
-        mockMvc.perform(updateRequest(user, UUID.randomUUID(), creationBody("550", 9)))
+        mockMvc.perform(updateRequest(user, UUID.randomUUID(), updateBody(9)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Diary entry not found"));
     }
@@ -416,7 +472,7 @@ class DiaryEntryControllerIntegrationTest {
         User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
         DiaryEntry entry = persistEntry(ownerEntity, persistContent("550", ContentType.MOVIE));
 
-        mockMvc.perform(updateRequest(intruder, entry.getId(), creationBody("550", 9)))
+        mockMvc.perform(updateRequest(intruder, entry.getId(), updateBody(9)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Diary entry not found"));
 
@@ -430,10 +486,23 @@ class DiaryEntryControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         DiaryEntry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE));
 
-        mockMvc.perform(updateRequest(user, entry.getId(), creationBody("550", 11)))
+        mockMvc.perform(updateRequest(user, entry.getId(), updateBody(11)))
                 .andExpect(status().isBadRequest());
 
         assertThat(diaryEntryRepository.findById(entry.getId()).orElseThrow().getScore()).isNull();
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Return BadRequest And Not Persist - When WatchedInTheater Is Set And Content Type Is Not Movie")
+    void shouldReturnBadRequestAndNotPersistWhenWatchedInTheaterIsSetAndContentTypeIsNotMovieOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatediarywatchedintheaternotmovie");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        DiaryEntry entry = persistEntry(entity, persistContent("2316", ContentType.SERIES));
+
+        mockMvc.perform(updateRequest(user, entry.getId(), updateBody("watchedInTheater", true)))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findById(entry.getId()).orElseThrow().getWatchedInTheater()).isNull();
     }
 
     @Test
@@ -445,7 +514,7 @@ class DiaryEntryControllerIntegrationTest {
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(creationBody("550", null)))
+                        .content(updateBody(9)))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -457,7 +526,7 @@ class DiaryEntryControllerIntegrationTest {
         mockMvc.perform(patch("/diary/" + UUID.randomUUID())
                         .cookie(user.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(creationBody("550", null)))
+                        .content(updateBody(9)))
                 .andExpect(status().isForbidden());
     }
 

@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -404,6 +405,45 @@ class DiaryEntryServiceImplTest {
         assertThat(entryCaptor.getValue().getIsRewatch()).isFalse();
     }
 
+    @Test
+    @DisplayName("[createDiaryEntry] Should Force IsRewatch To True - When User Already Logged This Content")
+    void shouldForceIsRewatchToTrueWhenUserAlreadyLoggedThisContent() {
+        stubContentResolution(fightClub);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, fightClub.getId()))
+                .thenReturn(Optional.of(buildEntry(lucas, fightClub)));
+        DiaryEntry savedEntry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+                null, null, null, false, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(diaryEntryRepository).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getIsRewatch()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Throw BadRequestException - When WatchedInTheater Is Set And Content Type Is Not Movie")
+    void shouldThrowBadRequestExceptionWhenWatchedInTheaterIsSetAndContentTypeIsNotMovieOnCreate() {
+        Content theOffice = buildContent("2316", ContentType.SERIES);
+        stubContentResolution(theOffice);
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(theOffice.getTmdbId(), ContentType.SERIES, null, null, null),
+                null, null, null, null, true, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedInTheater can only be set for content of type MOVIE");
+
+        verify(diaryEntryRepository, never()).save(any());
+    }
+
     // ---------- updateDiaryEntry ----------
 
     @Test
@@ -412,7 +452,7 @@ class DiaryEntryServiceImplTest {
         UUID missingId = UUID.randomUUID();
         when(diaryEntryRepository.findById(missingId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, missingId, minimalCreationDto()))
+        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, missingId, minimalUpdateDto()))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Diary entry not found");
 
@@ -425,7 +465,7 @@ class DiaryEntryServiceImplTest {
         DiaryEntry marinasEntry = buildEntry(marina, fightClub);
         when(diaryEntryRepository.findById(marinasEntry.getId())).thenReturn(Optional.of(marinasEntry));
 
-        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, marinasEntry.getId(), minimalCreationDto()))
+        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, marinasEntry.getId(), minimalUpdateDto()))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Diary entry not found");
 
@@ -433,18 +473,16 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[updateDiaryEntry] Should Always Resolve And Set Content - When Content Is Unchanged")
-    void shouldAlwaysResolveAndSetContentWhenContentIsUnchanged() {
+    @DisplayName("[updateDiaryEntry] Should Not Touch Content - When Called")
+    void shouldNotTouchContentWhenCalled() {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalCreationDto());
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalUpdateDto());
 
-        verify(contentService).getOrCreateReference(any(ContentRefCreationDTO.class));
+        verifyNoInteractions(contentService, contentRepository);
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getContent()).isEqualTo(fightClub);
     }
@@ -460,12 +498,10 @@ class DiaryEntryServiceImplTest {
         entry.setWatchedInTheater(true);
         entry.setCustomPosterUrl("https://example.com/original.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalCreationDto());
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalUpdateDto());
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         DiaryEntry saved = entryCaptor.getValue();
@@ -483,13 +519,10 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         entry.setComment("Old comment");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 "New comment", null, null, null, null, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
@@ -502,13 +535,10 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         entry.setScore(5);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, 10, null, null, null, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
@@ -521,14 +551,11 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         entry.setWatchedDate(LocalDate.of(2023, 1, 1));
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
         LocalDate newDate = LocalDate.of(2024, 3, 15);
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, null, newDate, null, null, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
@@ -541,13 +568,10 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         entry.setIsRewatch(false);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, null, null, true, null, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
@@ -560,17 +584,29 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         entry.setWatchedInTheater(false);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, null, null, null, true, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getWatchedInTheater()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Throw BadRequestException - When WatchedInTheater Is Set And Content Type Is Not Movie")
+    void shouldThrowBadRequestExceptionWhenWatchedInTheaterIsSetAndContentTypeIsNotMovieOnUpdate() {
+        Content theOffice = buildContent("2316", ContentType.SERIES);
+        DiaryEntry entry = buildEntry(lucas, theOffice);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
+                null, null, null, null, true, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedInTheater can only be set for content of type MOVIE");
+
+        verify(diaryEntryRepository, never()).save(any());
     }
 
     @Test
@@ -579,13 +615,10 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         entry.setCustomPosterUrl("https://example.com/old.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        stubContentResolution(fightClub);
-        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
-        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryCreationDTO(
-                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, null, null, null, null, "https://example.com/new.png"));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
@@ -649,6 +682,10 @@ class DiaryEntryServiceImplTest {
         return new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null),
                 null, null, null, null, null, null);
+    }
+
+    private DiaryEntryUpdateDTO minimalUpdateDto() {
+        return new DiaryEntryUpdateDTO(null, null, null, null, null, null);
     }
 
     private DiaryEntry buildEntry(User user, Content content) {
