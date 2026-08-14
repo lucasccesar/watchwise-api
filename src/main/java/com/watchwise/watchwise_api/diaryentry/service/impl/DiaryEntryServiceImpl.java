@@ -102,7 +102,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 diaryEntryCreationDTO.isRewatch(), diaryEntryCreationDTO.watchedInTheater(),
                 diaryEntryCreationDTO.customPosterUrl(), false);
 
-        triggerCompletionCascade(userId, content, entry.getWatchedDate(), diaryEntryCreationDTO.content().isSeriesFinale());
+        triggerCompletionCascade(userId, content, entry.getWatchedDate());
 
         return diaryEntryMapper.diaryEntryToResponseDto(entry);
     }
@@ -215,15 +215,15 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return PageRequest.of(queryPageNumber, queryPageSize);
     }
 
-    private void triggerCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate, Boolean isSeriesFinaleForSeason) {
+    private void triggerCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate) {
         if (loggedContent.getType() == ContentType.EPISODE) {
-            maybeCompleteSeason(userId, loggedContent.getSeriesTmdbId(), loggedContent.getSeasonNumber(), watchedDate, isSeriesFinaleForSeason);
+            maybeCompleteSeason(userId, loggedContent.getSeriesTmdbId(), loggedContent.getSeasonNumber(), watchedDate);
         } else if (loggedContent.getType() == ContentType.SEASON) {
             maybeCompleteSeries(userId, loggedContent.getSeriesTmdbId(), watchedDate);
         }
     }
 
-    private void maybeCompleteSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, LocalDate watchedDate, Boolean isSeriesFinale) {
+    private void maybeCompleteSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, LocalDate watchedDate) {
         Optional<Content> seasonFinaleEpisode = contentRepository
                 .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
         if (seasonFinaleEpisode.isEmpty()) {
@@ -236,7 +236,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         ContentRefDTO seasonRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
-                null, ContentType.SEASON, seriesTmdbId, seasonNumber, null, null, isSeriesFinale));
+                null, ContentType.SEASON, seriesTmdbId, seasonNumber, null, null, seasonFinaleEpisode.get().getIsSeriesFinale()));
 
         if (diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(userId, seasonRef.id()).isPresent()) {
             return;
@@ -247,7 +247,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         DiaryEntry seasonEntry = persistDiaryEntry(user, seasonContent, null, null, watchedDate, null, null, null, true);
 
-        triggerCompletionCascade(userId, seasonContent, seasonEntry.getWatchedDate(), null);
+        triggerCompletionCascade(userId, seasonContent, seasonEntry.getWatchedDate());
     }
 
     private void maybeCompleteSeries(UUID userId, String seriesTmdbId, LocalDate watchedDate) {
