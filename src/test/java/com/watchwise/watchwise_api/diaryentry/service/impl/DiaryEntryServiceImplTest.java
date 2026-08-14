@@ -432,6 +432,8 @@ class DiaryEntryServiceImplTest {
     void shouldThrowBadRequestExceptionWhenWatchedInTheaterIsSetAndContentTypeIsNotMovieOnCreate() {
         Content theOffice = buildContent("2316", ContentType.SERIES);
         stubContentResolution(theOffice);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(theOffice.getId())).thenReturn(theOffice);
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(theOffice.getTmdbId(), ContentType.SERIES, null, null, null, null, null),
