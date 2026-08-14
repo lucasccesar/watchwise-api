@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -62,7 +63,22 @@ public class ContentServiceImpl implements ContentService {
     }
 
     private Content resolveConcurrentCreation(ContentRefCreationDTO dto, DataIntegrityViolationException e) {
+        String constraintName = extractConstraintName(e);
+        if ("uq_contents_season_finale".equals(constraintName)) {
+            throw new ConflictException("Another episode is already marked as this season's finale");
+        }
+        if ("uq_contents_series_finale".equals(constraintName)) {
+            throw new ConflictException("Another season is already marked as this series' finale");
+        }
         return findExisting(dto).orElseThrow(() -> e);
+    }
+
+    private String extractConstraintName(DataIntegrityViolationException e) {
+        Throwable cause = e.getCause();
+        if (cause instanceof org.hibernate.exception.ConstraintViolationException cve) {
+            return cve.getConstraintName();
+        }
+        return null;
     }
 
     private Optional<Content> findExisting(ContentRefCreationDTO dto) {

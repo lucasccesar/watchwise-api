@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -486,6 +487,44 @@ class ContentServiceImplTest {
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Another Episode Is Already Marked As The Season Finale")
+    void shouldThrowConflictExceptionWhenAnotherEpisodeIsAlreadyMarkedAsTheSeasonFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 5, true, null);
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(1).episodeNumber(5).type(ContentType.EPISODE).isSeasonFinale(true).build();
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 5, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.save(mapped))
+                .thenThrow(buildDataIntegrityViolationException("uq_contents_season_finale"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Another episode is already marked as this season's finale");
+
+        verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Another Season Is Already Marked As The Series Finale")
+    void shouldThrowConflictExceptionWhenAnotherSeasonIsAlreadyMarkedAsTheSeriesFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 4, null, null, true);
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(4).type(ContentType.SEASON).isSeriesFinale(true).build();
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 4, null, ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.save(mapped))
+                .thenThrow(buildDataIntegrityViolationException("uq_contents_series_finale"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Another season is already marked as this series' finale");
+
+        verify(contentMapper, never()).contentToContentRefDto(any());
     }
 
     @Test

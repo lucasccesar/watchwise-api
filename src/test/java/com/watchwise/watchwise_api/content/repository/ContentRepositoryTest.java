@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -18,6 +19,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -167,6 +169,24 @@ class ContentRepositoryTest {
                 .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When A Second Episode Is Marked As The Same Season's Finale")
+    void shouldThrowDataIntegrityViolationExceptionWhenASecondEpisodeIsMarkedAsTheSameSeasonsFinale() {
+        contentRepository.saveAndFlush(buildFinaleEpisode("1399", 1, 8));
+
+        assertThatThrownBy(() -> contentRepository.saveAndFlush(buildFinaleEpisode("1399", 1, 9)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When A Second Season Is Marked As The Series Finale")
+    void shouldThrowDataIntegrityViolationExceptionWhenASecondSeasonIsMarkedAsTheSeriesFinale() {
+        contentRepository.saveAndFlush(buildFinaleSeason("1399", 3));
+
+        assertThatThrownBy(() -> contentRepository.saveAndFlush(buildFinaleSeason("1399", 4)))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private Content buildMovie(String tmdbId) {
