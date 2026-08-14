@@ -169,6 +169,42 @@ class ContentControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Transfer IsSeriesFinale To New Season - When A Previous Season Already Had It")
+    void shouldTransferIsSeriesFinaleToNewSeasonWhenAPreviousSeasonAlreadyHadIt() throws Exception {
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"SEASON\", \"seasonNumber\": 5, \"isSeriesFinale\": true }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"SEASON\", \"seasonNumber\": 6, \"isSeriesFinale\": true }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSeriesFinale").value(true));
+
+        Content oldSeason = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 5, null, ContentType.SEASON)
+                .orElseThrow();
+        Content newSeason = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 6, null, ContentType.SEASON)
+                .orElseThrow();
+
+        assertThat(oldSeason.getIsSeriesFinale()).isFalse();
+        assertThat(newSeason.getIsSeriesFinale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Return Conflict - When Another Episode Is Already Marked As The Season Finale")
+    void shouldReturnConflictWhenAnotherEpisodeIsAlreadyMarkedAsTheSeasonFinale() throws Exception {
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 8, \"isSeasonFinale\": true }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 9, \"isSeasonFinale\": true }"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("Another episode is already marked as this season's finale"));
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Return TooManyRequests - When Requests From The Same User Exceed The Configured Max")
     void shouldReturnTooManyRequestsWhenRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
         for (int i = 0; i < 60; i++) {

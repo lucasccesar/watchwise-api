@@ -34,13 +34,17 @@ public class ContentServiceImpl implements ContentService {
             return contentMapper.contentToContentRefDto(existing.get());
         }
 
+        if (normalized.type() == ContentType.SEASON && Boolean.TRUE.equals(normalized.isSeriesFinale())) {
+            clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
+        }
+
         Content content = contentMapper.contentRefCreationDtoToContent(normalized);
         LocalDateTime now = LocalDateTime.now();
         content.setCreatedAt(now);
         content.setUpdatedAt(now);
 
         try {
-            return contentMapper.contentToContentRefDto(contentRepository.save(content));
+            return contentMapper.contentToContentRefDto(contentRepository.saveAndFlush(content));
         } catch (DataIntegrityViolationException e) {
             return contentMapper.contentToContentRefDto(resolveConcurrentCreation(normalized, e));
         }
@@ -60,6 +64,15 @@ public class ContentServiceImpl implements ContentService {
 
     private String trimOrNull(String value) {
         return value == null ? null : value.trim();
+    }
+
+    private void clearPreviousSeriesFinale(String seriesTmdbId, Integer newSeasonNumber) {
+        contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON)
+                .filter(previous -> !previous.getSeasonNumber().equals(newSeasonNumber))
+                .ifPresent(previous -> {
+                    previous.setIsSeriesFinale(false);
+                    contentRepository.saveAndFlush(previous);
+                });
     }
 
     private Content resolveConcurrentCreation(ContentRefCreationDTO dto, DataIntegrityViolationException e) {

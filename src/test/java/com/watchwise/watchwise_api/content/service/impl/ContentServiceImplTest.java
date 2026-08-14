@@ -234,7 +234,7 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
@@ -253,7 +253,7 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 3, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
@@ -274,7 +274,7 @@ class ContentServiceImplTest {
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository, never()).save(any());
+        verify(contentRepository, never()).saveAndFlush(any());
         verify(contentMapper, never()).contentRefCreationDtoToContent(any());
     }
 
@@ -288,13 +288,13 @@ class ContentServiceImplTest {
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository).save(mapped);
+        verify(contentRepository).saveAndFlush(mapped);
     }
 
     @Test
@@ -308,7 +308,7 @@ class ContentServiceImplTest {
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(normalizedDto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
@@ -329,7 +329,7 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(normalizedDto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
@@ -347,7 +347,7 @@ class ContentServiceImplTest {
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(mapped);
         when(contentMapper.contentToContentRefDto(mapped)).thenReturn(
                 new ContentRefDTO(null, "100", ContentType.MOVIE, null, null, null, null, null, null, null));
 
@@ -355,7 +355,7 @@ class ContentServiceImplTest {
 
         contentService.getOrCreateReference(dto);
 
-        verify(contentRepository).save(captor.capture());
+        verify(contentRepository).saveAndFlush(captor.capture());
         assertThat(captor.getValue().getCreatedAt()).isNotNull();
         assertThat(captor.getValue().getUpdatedAt()).isNotNull();
     }
@@ -373,7 +373,7 @@ class ContentServiceImplTest {
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository, never()).save(any());
+        verify(contentRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -390,7 +390,7 @@ class ContentServiceImplTest {
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository, never()).save(any());
+        verify(contentRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -402,7 +402,7 @@ class ContentServiceImplTest {
                 eq("200"), eq(1), isNull(), eq(ContentType.SEASON)))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(Content.builder().build());
-        when(contentRepository.save(any())).thenReturn(Content.builder().build());
+        when(contentRepository.saveAndFlush(any())).thenReturn(Content.builder().build());
         when(contentMapper.contentToContentRefDto(any())).thenReturn(
                 new ContentRefDTO(null, null, ContentType.SEASON, "200", 1, null, null, null, null, null));
 
@@ -423,13 +423,57 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository).save(mapped);
+        verify(contentRepository).saveAndFlush(mapped);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Clear Previous Series Finale - When Creating A New Season Marked As The Series Finale")
+    void shouldClearPreviousSeriesFinaleWhenCreatingANewSeasonMarkedAsTheSeriesFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 6, null, null, true);
+        Content previousFinale = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(5).type(ContentType.SEASON).isSeriesFinale(true).build();
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(6).type(ContentType.SEASON).isSeriesFinale(true).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(6).type(ContentType.SEASON).isSeriesFinale(true).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), null, ContentType.SEASON, "200", 6, null, null, true, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 6, null, ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("200", ContentType.SEASON))
+                .thenReturn(Optional.of(previousFinale));
+        when(contentRepository.saveAndFlush(previousFinale)).thenReturn(previousFinale);
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(previousFinale.getIsSeriesFinale()).isFalse();
+        verify(contentRepository).saveAndFlush(previousFinale);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Not Look Up Previous Series Finale - When New Season Is Not Marked As The Series Finale")
+    void shouldNotLookUpPreviousSeriesFinaleWhenNewSeasonIsNotMarkedAsTheSeriesFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 6, null, null, null);
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(6).type(ContentType.SEASON).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(6).type(ContentType.SEASON).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), null, ContentType.SEASON, "200", 6, null, null, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 6, null, ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        contentService.getOrCreateReference(dto);
+
+        verify(contentRepository, never()).findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(any(), any());
     }
 
     @Test
@@ -446,7 +490,7 @@ class ContentServiceImplTest {
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository, never()).save(any());
+        verify(contentRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -460,13 +504,13 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 3, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenReturn(saved);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        verify(contentRepository).save(mapped);
+        verify(contentRepository).saveAndFlush(mapped);
     }
 
     @Test
@@ -480,7 +524,7 @@ class ContentServiceImplTest {
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE))
                 .thenReturn(Optional.empty(), Optional.of(existing));
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped))
+        when(contentRepository.saveAndFlush(mapped))
                 .thenThrow(buildDataIntegrityViolationException("uq_contents_tmdb_id_type"));
         when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
 
@@ -498,7 +542,7 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 5, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped))
+        when(contentRepository.saveAndFlush(mapped))
                 .thenThrow(buildDataIntegrityViolationException("uq_contents_season_finale"));
 
         assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
@@ -517,7 +561,7 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 4, null, ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped))
+        when(contentRepository.saveAndFlush(mapped))
                 .thenThrow(buildDataIntegrityViolationException("uq_contents_series_finale"));
 
         assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
@@ -536,7 +580,7 @@ class ContentServiceImplTest {
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
-        when(contentRepository.save(mapped)).thenThrow(exception);
+        when(contentRepository.saveAndFlush(mapped)).thenThrow(exception);
 
         assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
                 .isSameAs(exception);
