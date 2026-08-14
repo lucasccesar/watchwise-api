@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.diaryentry.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -28,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -99,6 +101,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 diaryEntryCreationDTO.comment(), diaryEntryCreationDTO.score(), diaryEntryCreationDTO.watchedDate(),
                 diaryEntryCreationDTO.isRewatch(), diaryEntryCreationDTO.watchedInTheater(),
                 diaryEntryCreationDTO.customPosterUrl(), false);
+
+        triggerCompletionCascade(userId, content, entry.getWatchedDate(), diaryEntryCreationDTO.content().isSeriesFinale());
 
         return diaryEntryMapper.diaryEntryToResponseDto(entry);
     }
@@ -209,5 +213,65 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         return PageRequest.of(queryPageNumber, queryPageSize);
+    }
+
+    private void triggerCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate, Boolean isSeriesFinaleForSeason) {
+        if (loggedContent.getType() == ContentType.EPISODE) {
+            maybeCompleteSeason(userId, loggedContent.getSeriesTmdbId(), loggedContent.getSeasonNumber(), watchedDate, isSeriesFinaleForSeason);
+        } else if (loggedContent.getType() == ContentType.SEASON) {
+            maybeCompleteSeries(userId, loggedContent.getSeriesTmdbId(), watchedDate);
+        }
+    }
+
+    private void maybeCompleteSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, LocalDate watchedDate, Boolean isSeriesFinale) {
+        Optional<Content> seasonFinaleEpisode = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
+        if (seasonFinaleEpisode.isEmpty()) {
+            return;
+        }
+
+        long watchedEpisodes = diaryEntryRepository.countDistinctWatchedEpisodesInSeason(userId, seriesTmdbId, seasonNumber);
+        if (watchedEpisodes < seasonFinaleEpisode.get().getEpisodeNumber()) {
+            return;
+        }
+
+        ContentRefDTO seasonRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
+                null, ContentType.SEASON, seriesTmdbId, seasonNumber, null, null, isSeriesFinale));
+
+        if (diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(userId, seasonRef.id()).isPresent()) {
+            return;
+        }
+
+        User user = userRepository.getReferenceById(userId);
+        Content seasonContent = contentRepository.getReferenceById(seasonRef.id());
+
+        DiaryEntry seasonEntry = persistDiaryEntry(user, seasonContent, null, null, watchedDate, null, null, null, true);
+
+        triggerCompletionCascade(userId, seasonContent, seasonEntry.getWatchedDate(), null);
+    }
+
+    private void maybeCompleteSeries(UUID userId, String seriesTmdbId, LocalDate watchedDate) {
+        Optional<Content> seriesFinaleSeason = contentRepository
+                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON);
+        if (seriesFinaleSeason.isEmpty()) {
+            return;
+        }
+
+        long watchedSeasons = diaryEntryRepository.countDistinctWatchedSeasonsInSeries(userId, seriesTmdbId);
+        if (watchedSeasons < seriesFinaleSeason.get().getSeasonNumber()) {
+            return;
+        }
+
+        ContentRefDTO seriesRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
+                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
+
+        if (diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(userId, seriesRef.id()).isPresent()) {
+            return;
+        }
+
+        User user = userRepository.getReferenceById(userId);
+        Content seriesContent = contentRepository.getReferenceById(seriesRef.id());
+
+        persistDiaryEntry(user, seriesContent, null, null, watchedDate, null, null, null, true);
     }
 }
