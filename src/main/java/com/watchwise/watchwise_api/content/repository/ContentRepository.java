@@ -14,4 +14,9 @@ public interface ContentRepository extends JpaRepository<Content, UUID> {
     Optional<Content> findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
             String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, ContentType type);
 
+    Optional<Content> findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(
+            String seriesTmdbId, Integer seasonNumber, ContentType type);
+
+    Optional<Content> findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(String seriesTmdbId, ContentType type);
+
 }

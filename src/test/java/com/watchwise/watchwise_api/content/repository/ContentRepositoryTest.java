@@ -119,6 +119,56 @@ class ContentRepositoryTest {
         assertThat(result).isEmpty();
     }
 
+    @Test
+    @DisplayName("[findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue] Should Return The Finale Episode - When It Exists")
+    void shouldReturnTheFinaleEpisodeWhenItExists() {
+        contentRepository.save(buildEpisode("1399", 1, 1));
+        Content finale = contentRepository.save(buildFinaleEpisode("1399", 1, 8));
+
+        Optional<Content> result = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getId()).isEqualTo(finale.getId());
+        assertThat(result.get().getEpisodeNumber()).isEqualTo(8);
+    }
+
+    @Test
+    @DisplayName("[findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue] Should Return Empty - When No Episode Is Flagged As The Finale")
+    void shouldReturnEmptyWhenNoEpisodeIsFlaggedAsTheFinale() {
+        contentRepository.save(buildEpisode("1399", 1, 1));
+
+        Optional<Content> result = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue] Should Return The Finale Season - When It Exists")
+    void shouldReturnTheFinaleSeasonWhenItExists() {
+        contentRepository.save(buildSeason("1399", 1));
+        Content finaleSeason = contentRepository.save(buildFinaleSeason("1399", 3));
+
+        Optional<Content> result = contentRepository
+                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getId()).isEqualTo(finaleSeason.getId());
+        assertThat(result.get().getSeasonNumber()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("[findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue] Should Return Empty - When No Season Is Flagged As The Series Finale")
+    void shouldReturnEmptyWhenNoSeasonIsFlaggedAsTheSeriesFinale() {
+        contentRepository.save(buildSeason("1399", 1));
+
+        Optional<Content> result = contentRepository
+                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON);
+
+        assertThat(result).isEmpty();
+    }
+
     private Content buildMovie(String tmdbId) {
         LocalDateTime now = LocalDateTime.now();
         return Content.builder()
@@ -147,6 +197,31 @@ class ContentRepositoryTest {
                 .seasonNumber(seasonNumber)
                 .episodeNumber(episodeNumber)
                 .type(ContentType.EPISODE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildFinaleEpisode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .type(ContentType.EPISODE)
+                .isSeasonFinale(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildFinaleSeason(String seriesTmdbId, Integer seasonNumber) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .type(ContentType.SEASON)
+                .isSeriesFinale(true)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
