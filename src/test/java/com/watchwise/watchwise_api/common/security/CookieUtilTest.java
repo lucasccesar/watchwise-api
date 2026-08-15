@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CookieUtilTest {
 
-    private final CookieUtil cookieUtil = new CookieUtil(60, 7, true);
+    private final CookieUtil cookieUtil = new CookieUtil(60, 7, true, "/api/v1");
 
     @Test
     @DisplayName("[buildAccessTokenCookie] Should Build HttpOnly Cookie Scoped To Root Path - When Called")
@@ -26,15 +26,25 @@ class CookieUtilTest {
     }
 
     @Test
-    @DisplayName("[buildRefreshTokenCookie] Should Build Cookie Scoped To Refresh Path With Seven Day MaxAge - When Called")
-    void shouldBuildCookieScopedToRefreshPathWithSevenDayMaxAgeWhenCalled() {
+    @DisplayName("[buildRefreshTokenCookie] Should Build Cookie Scoped To Refresh Path Prefixed With Context Path - When Called")
+    void shouldBuildCookieScopedToRefreshPathPrefixedWithContextPathWhenCalled() {
         ResponseCookie cookie = cookieUtil.buildRefreshTokenCookie("refresh-token-value");
 
         assertThat(cookie.getName()).isEqualTo(CookieUtil.REFRESH_TOKEN_COOKIE);
         assertThat(cookie.getValue()).isEqualTo("refresh-token-value");
         assertThat(cookie.isHttpOnly()).isTrue();
-        assertThat(cookie.getPath()).isEqualTo(CookieUtil.REFRESH_TOKEN_PATH);
+        assertThat(cookie.getPath()).isEqualTo("/api/v1/auth/refresh");
         assertThat(cookie.getMaxAge()).isEqualTo(Duration.ofDays(7));
+    }
+
+    @Test
+    @DisplayName("[buildRefreshTokenCookie] Should Build Cookie Scoped To Bare Refresh Path - When Context Path Is Blank")
+    void shouldBuildCookieScopedToBareRefreshPathWhenContextPathIsBlank() {
+        CookieUtil noContextPathCookieUtil = new CookieUtil(60, 7, true, "");
+
+        ResponseCookie cookie = noContextPathCookieUtil.buildRefreshTokenCookie("refresh-token-value");
+
+        assertThat(cookie.getPath()).isEqualTo("/auth/refresh");
     }
 
     @Test

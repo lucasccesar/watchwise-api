@@ -15,20 +15,26 @@ public class CookieUtil {
     public static final String ACCESS_TOKEN_COOKIE = "access_token";
     public static final String REFRESH_TOKEN_COOKIE = "refresh_token";
     public static final String CSRF_TOKEN_COOKIE = "XSRF-TOKEN";
-    public static final String REFRESH_TOKEN_PATH = "/auth/refresh";
 
     private final long accessTokenExpirationMinutes;
     private final long refreshTokenExpirationDays;
     private final boolean secureCookies;
+    private final String refreshTokenPath;
 
     public CookieUtil(
             @Value("${app.jwt.expiration-minutes}") long accessTokenExpirationMinutes,
             @Value("${app.jwt.refresh-expiration-days}") long refreshTokenExpirationDays,
-            @Value("${app.cookies.secure:true}") boolean secureCookies
+            @Value("${app.cookies.secure:true}") boolean secureCookies,
+            @Value("${server.servlet.context-path:}") String contextPath
     ) {
         this.accessTokenExpirationMinutes = accessTokenExpirationMinutes;
         this.refreshTokenExpirationDays = refreshTokenExpirationDays;
         this.secureCookies = secureCookies;
+        this.refreshTokenPath = contextPath + "/auth/refresh";
+    }
+
+    public String getRefreshTokenPath() {
+        return refreshTokenPath;
     }
 
     public ResponseCookie buildAccessTokenCookie(String token) {
@@ -45,7 +51,7 @@ public class CookieUtil {
         return ResponseCookie.from(REFRESH_TOKEN_COOKIE, token)
                 .httpOnly(true)
                 .secure(secureCookies)
-                .path(REFRESH_TOKEN_PATH)
+                .path(refreshTokenPath)
                 .sameSite("Lax")
                 .maxAge(Duration.ofDays(refreshTokenExpirationDays))
                 .build();

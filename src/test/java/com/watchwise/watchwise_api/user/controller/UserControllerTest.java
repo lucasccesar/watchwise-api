@@ -374,12 +374,13 @@ class UserControllerTest {
         DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
         HttpServletResponse response = mock(HttpServletResponse.class);
         ResponseCookie clearedCookie = ResponseCookie.from("cleared", "").build();
+        when(cookieUtil.getRefreshTokenPath()).thenReturn("/api/v1/auth/refresh");
         when(cookieUtil.clearCookie(anyString(), anyString())).thenReturn(clearedCookie);
 
         userController.deleteCurrentUser(deleteAccountDTO, response);
 
         verify(cookieUtil).clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
-        verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH);
+        verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, "/api/v1/auth/refresh");
         verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
         verify(cookieUtil, times(3)).addCookie(eq(response), eq(clearedCookie));
     }

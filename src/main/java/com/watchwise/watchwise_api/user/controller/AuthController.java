@@ -182,7 +182,7 @@ public class AuthController {
         refreshTokenService.revokeRefreshToken(refreshToken);
 
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
-        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, cookieUtil.getRefreshTokenPath()));
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
 
         return ResponseEntity.noContent().build();
@@ -193,7 +193,7 @@ public class AuthController {
         refreshTokenService.revokeAllRefreshTokens(getCurrentUserId());
 
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
-        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, CookieUtil.REFRESH_TOKEN_PATH));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, cookieUtil.getRefreshTokenPath()));
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
 
         return ResponseEntity.noContent().build();
