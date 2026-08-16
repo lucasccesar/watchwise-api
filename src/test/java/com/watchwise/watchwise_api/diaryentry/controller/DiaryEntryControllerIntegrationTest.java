@@ -871,51 +871,29 @@ class DiaryEntryControllerIntegrationTest {
     @Test
     @DisplayName("[getDeletionImpact] Should List The Season Entry With HasReview True - When It Was Manually Edited With A Comment")
     void shouldListTheSeasonEntryWithHasReviewTrueWhenItWasManuallyEditedWithAComment() throws Exception {
-        RegisteredUser user = registerUser("testuser");
+        RegisteredUser user = registerUser("deletionimpactuser");
 
-        String bulkCreateBody = """
-                {
-                    "content": { "type": "SEASON", "seriesTmdbId": "901", "seasonNumber": 1 },
-                    "watchedDate": "2025-03-12",
-                    "finaleEpisodeNumber": 2
-                }
-                """;
+        mockMvc.perform(createRequest(user, episodeBody("2001", 1, 1, true, false)))
+                .andExpect(status().isCreated());
 
-        mockMvc.perform(post("/diary/bulk")
-                        .cookie(user.accessToken(), user.csrfToken())
-                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(bulkCreateBody))
-                .andExpect(status().isCreated())
+        MvcResult diaryResult = mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
                 .andReturn();
 
-        java.util.UUID seasonEntryId = null;
-        java.util.UUID episodeEntryId = null;
+        List<String> seasonEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SEASON')].id");
+        String seasonEntryId = seasonEntryIds.get(0);
 
-        List<DiaryEntry> allEntries = diaryEntryRepository.findAll();
-        for (DiaryEntry entry : allEntries) {
-            ContentType contentType = entry.getContent().getType();
-            if (contentType == ContentType.SEASON) {
-                seasonEntryId = entry.getId();
-            } else if (contentType == ContentType.EPISODE && episodeEntryId == null) {
-                episodeEntryId = entry.getId();
-            }
-        }
+        List<String> episodeEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'EPISODE')].id");
+        String episodeEntryId = episodeEntryIds.get(0);
 
-        assertThat(seasonEntryId).isNotNull();
-        assertThat(episodeEntryId).isNotNull();
-
-        String updateBody = """
+        String patchBody = """
                 {
                     "comment": "Great season!"
                 }
                 """;
 
-        mockMvc.perform(patch("/diary/" + seasonEntryId)
-                        .cookie(user.accessToken(), user.csrfToken())
-                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(updateBody))
+        mockMvc.perform(updateRequest(user, UUID.fromString(seasonEntryId), patchBody))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/diary/" + episodeEntryId + "/deletion-impact")
