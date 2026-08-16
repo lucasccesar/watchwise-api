@@ -810,6 +810,69 @@ class DiaryEntryControllerIntegrationTest {
         assertThat(seasonWatchNumbers).containsExactlyInAnyOrder(1, 2);
     }
 
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Remove A Manually-Edited Season Entry - When OverrideProtectedEntries Is True")
+    void shouldRemoveAManuallyEditedSeasonEntryWhenOverrideProtectedEntriesIsTrue() throws Exception {
+        RegisteredUser user = registerUser("overridedeleteseason");
+
+        mockMvc.perform(createRequest(user, episodeBody("2500", 1, 1, true, false)))
+                .andExpect(status().isCreated());
+
+        MvcResult diaryResult = mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andReturn();
+
+        List<String> seasonEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SEASON')].id");
+        String seasonEntryId = seasonEntryIds.get(0);
+
+        List<String> episodeEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'EPISODE')].id");
+        String episodeEntryId = episodeEntryIds.get(0);
+
+        mockMvc.perform(updateRequest(user, UUID.fromString(seasonEntryId), updateBody("comment", "Great season!")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(delete("/diary/" + episodeEntryId + "?overrideProtectedEntries=true")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Preserve A Manually-Edited Season Entry - When OverrideProtectedEntries Is Absent")
+    void shouldPreserveAManuallyEditedSeasonEntryWhenOverrideProtectedEntriesIsAbsent() throws Exception {
+        RegisteredUser user = registerUser("preservedeleteseason");
+
+        mockMvc.perform(createRequest(user, episodeBody("2600", 1, 1, true, false)))
+                .andExpect(status().isCreated());
+
+        MvcResult diaryResult = mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andReturn();
+
+        List<String> seasonEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SEASON')].id");
+        String seasonEntryId = seasonEntryIds.get(0);
+
+        List<String> episodeEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'EPISODE')].id");
+        String episodeEntryId = episodeEntryIds.get(0);
+
+        mockMvc.perform(updateRequest(user, UUID.fromString(seasonEntryId), updateBody("comment", "Great season!")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(deleteRequest(user, UUID.fromString(episodeEntryId)))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].content.type").value("SEASON"));
+    }
+
     // ---------- POST /diary/bulk ----------
 
     @Test

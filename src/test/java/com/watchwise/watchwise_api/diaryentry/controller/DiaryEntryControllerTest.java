@@ -153,7 +153,7 @@ class DiaryEntryControllerTest {
     void shouldReturnNoContentWhenDeletingDiaryEntry() {
         UUID diaryEntryId = UUID.randomUUID();
 
-        ResponseEntity<Void> result = diaryEntryController.deleteDiaryEntry(diaryEntryId);
+        ResponseEntity<Void> result = diaryEntryController.deleteDiaryEntry(diaryEntryId, false);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
     }
@@ -163,9 +163,29 @@ class DiaryEntryControllerTest {
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenDeletingDiaryEntry() {
         UUID diaryEntryId = UUID.randomUUID();
 
-        diaryEntryController.deleteDiaryEntry(diaryEntryId);
+        diaryEntryController.deleteDiaryEntry(diaryEntryId, false);
 
         verify(diaryEntryService).deleteDiaryEntry(currentUserId, diaryEntryId, false);
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Pass OverrideProtectedEntries True To The Service - When The Query Param Is True")
+    void shouldPassOverrideProtectedEntriesTrueToTheServiceWhenTheQueryParamIsTrue() {
+        UUID entryId = UUID.randomUUID();
+
+        diaryEntryController.deleteDiaryEntry(entryId, true);
+
+        verify(diaryEntryService).deleteDiaryEntry(currentUserId, entryId, true);
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Default OverrideProtectedEntries To False - When The Query Param Is Absent")
+    void shouldDefaultOverrideProtectedEntriesToFalseWhenTheQueryParamIsAbsent() {
+        UUID entryId = UUID.randomUUID();
+
+        diaryEntryController.deleteDiaryEntry(entryId, false);
+
+        verify(diaryEntryService).deleteDiaryEntry(currentUserId, entryId, false);
     }
 
     @Test
