@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
@@ -50,10 +51,10 @@ public class DiaryEntryController {
     }
 
     @PostMapping("/diary")
-    public ResponseEntity<DiaryEntryResponseDTO> createDiaryEntry(@Valid @RequestBody DiaryEntryCreationDTO diaryEntryCreationDTO) {
+    public ResponseEntity<DiaryEntryCreationResultDTO> createDiaryEntry(@Valid @RequestBody DiaryEntryCreationDTO diaryEntryCreationDTO) {
         requestThrottler.checkAllowed(diaryActionKey(), diaryActionMaxRequests, Duration.ofMinutes(diaryActionWindowMinutes));
 
-        DiaryEntryResponseDTO created = diaryEntryService.createDiaryEntry(getCurrentUserId(), diaryEntryCreationDTO);
+        DiaryEntryCreationResultDTO created = diaryEntryService.createDiaryEntry(getCurrentUserId(), diaryEntryCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 

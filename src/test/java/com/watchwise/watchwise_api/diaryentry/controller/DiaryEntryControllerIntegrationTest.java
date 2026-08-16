@@ -365,9 +365,9 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(createRequest(user, creationBody("550", 8)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.score").value(8))
-                .andExpect(jsonPath("$.content.tmdbId").value("550"))
-                .andExpect(jsonPath("$.watchNumber").value(1));
+                .andExpect(jsonPath("$.entry.score").value(8))
+                .andExpect(jsonPath("$.entry.content.tmdbId").value("550"))
+                .andExpect(jsonPath("$.entry.watchNumber").value(1));
 
         User entity = userRepository.findById(user.id()).orElseThrow();
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
@@ -416,7 +416,7 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(createRequest(user, creationBody("550", null)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.watchNumber").value(2));
+                .andExpect(jsonPath("$.entry.watchNumber").value(2));
 
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
                 .hasSize(2);
@@ -492,6 +492,29 @@ class DiaryEntryControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(creationBody("550", null)))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Include CompletedSeason In The Response - When Logging The Finale Episode Completes The Season")
+    void shouldIncludeCompletedSeasonInTheResponseWhenLoggingTheFinaleEpisodeCompletesTheSeason() throws Exception {
+        RegisteredUser user = registerUser("completionsignaluser");
+
+        mockMvc.perform(createRequest(user, episodeBody("902", 1, 1, true, null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.entry.id").exists())
+                .andExpect(jsonPath("$.completedSeason.watchNumber").value(1))
+                .andExpect(jsonPath("$.completedSeries").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Omit CompletedSeason And CompletedSeries - When Logging The Episode Does Not Complete Anything")
+    void shouldOmitCompletedSeasonAndCompletedSeriesWhenLoggingTheEpisodeDoesNotCompleteAnything() throws Exception {
+        RegisteredUser user = registerUser("nocompletionsignaluser");
+
+        mockMvc.perform(createRequest(user, episodeBody("903", 1, 2, false, null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.completedSeason").doesNotExist())
+                .andExpect(jsonPath("$.completedSeries").doesNotExist());
     }
 
     // ---------- PATCH /diary/{diaryEntryId} ----------
@@ -591,7 +614,7 @@ class DiaryEntryControllerIntegrationTest {
     void shouldIgnoreIsRewatchAndReturnWatchNumberWhenSentInTheUpdateRequestBody() throws Exception {
         RegisteredUser user = registerUser("patchisrewatchrejected");
         MvcResult created = mockMvc.perform(createRequest(user, creationBody("550", null))).andReturn();
-        UUID entryId = UUID.fromString(JsonPath.read(created.getResponse().getContentAsString(), "$.id"));
+        UUID entryId = UUID.fromString(JsonPath.read(created.getResponse().getContentAsString(), "$.entry.id"));
 
         mockMvc.perform(updateRequest(user, entryId, "{ \"isRewatch\": true }"))
                 .andExpect(status().isOk())
@@ -750,7 +773,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(3));
 
-        String secondEpisodeId = JsonPath.read(secondEpisode.getResponse().getContentAsString(), "$.id");
+        String secondEpisodeId = JsonPath.read(secondEpisode.getResponse().getContentAsString(), "$.entry.id");
 
         mockMvc.perform(deleteRequest(user, UUID.fromString(secondEpisodeId)))
                 .andExpect(status().isNoContent());
@@ -776,7 +799,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(4));
 
-        String secondWatchId = JsonPath.read(secondWatch.getResponse().getContentAsString(), "$.id");
+        String secondWatchId = JsonPath.read(secondWatch.getResponse().getContentAsString(), "$.entry.id");
 
         mockMvc.perform(deleteRequest(user, UUID.fromString(secondWatchId)))
                 .andExpect(status().isNoContent());
@@ -1023,7 +1046,7 @@ class DiaryEntryControllerIntegrationTest {
         MvcResult rewatch = mockMvc.perform(createRequest(user, episodeBody("3001", 1, 1, false, false)))
                 .andExpect(status().isCreated())
                 .andReturn();
-        String rewatchEntryId = JsonPath.read(rewatch.getResponse().getContentAsString(), "$.id");
+        String rewatchEntryId = JsonPath.read(rewatch.getResponse().getContentAsString(), "$.entry.id");
 
         mockMvc.perform(getDiaryRequest(user, user.id()))
                 .andExpect(status().isOk())
@@ -1059,7 +1082,7 @@ class DiaryEntryControllerIntegrationTest {
                 diaryBeforePreview.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SEASON')].id");
         String seasonEntryId = seasonEntryIdsBefore.get(0);
 
-        String bottleneckEpisodeId = JsonPath.read(secondEpisode.getResponse().getContentAsString(), "$.id");
+        String bottleneckEpisodeId = JsonPath.read(secondEpisode.getResponse().getContentAsString(), "$.entry.id");
 
         mockMvc.perform(get("/diary/" + bottleneckEpisodeId + "/deletion-impact")
                         .cookie(user.accessToken()))

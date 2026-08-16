@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
@@ -104,7 +105,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     @Override
     @Transactional
-    public DiaryEntryResponseDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO) {
+    public DiaryEntryCreationResultDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO) {
         ContentRefDTO contentRef = contentService.getOrCreateReference(diaryEntryCreationDTO.content());
 
         User user = userRepository.getReferenceById(userId);
@@ -123,7 +124,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         CompletionSignal completion = triggerCompletionCascade(userId, content, entry.getWatchedDate());
 
-        return diaryEntryMapper.diaryEntryToResponseDto(entry);
+        return new DiaryEntryCreationResultDTO(
+                diaryEntryMapper.diaryEntryToResponseDto(entry),
+                completion.completedSeason() != null ? diaryEntryMapper.diaryEntryToResponseDto(completion.completedSeason()) : null,
+                completion.completedSeries() != null ? diaryEntryMapper.diaryEntryToResponseDto(completion.completedSeries()) : null);
     }
 
     private ConflictException mapWatchNumberConflict(DataIntegrityViolationException e) {

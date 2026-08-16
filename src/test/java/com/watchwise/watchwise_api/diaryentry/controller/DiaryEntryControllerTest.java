@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
@@ -102,10 +103,10 @@ class DiaryEntryControllerTest {
     @DisplayName("[createDiaryEntry] Should Return Created With The Service Result - When Called")
     void shouldReturnCreatedWithTheServiceResultWhenCreatingDiaryEntry() {
         DiaryEntryCreationDTO creationDTO = minimalCreationDto();
-        DiaryEntryResponseDTO dto = buildResponseDto();
+        DiaryEntryCreationResultDTO dto = buildCreationResultDto();
         when(diaryEntryService.createDiaryEntry(currentUserId, creationDTO)).thenReturn(dto);
 
-        ResponseEntity<DiaryEntryResponseDTO> result = diaryEntryController.createDiaryEntry(creationDTO);
+        ResponseEntity<DiaryEntryCreationResultDTO> result = diaryEntryController.createDiaryEntry(creationDTO);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -115,7 +116,7 @@ class DiaryEntryControllerTest {
     @DisplayName("[createDiaryEntry] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenCreatingDiaryEntry() {
         DiaryEntryCreationDTO creationDTO = minimalCreationDto();
-        when(diaryEntryService.createDiaryEntry(currentUserId, creationDTO)).thenReturn(buildResponseDto());
+        when(diaryEntryService.createDiaryEntry(currentUserId, creationDTO)).thenReturn(buildCreationResultDto());
 
         diaryEntryController.createDiaryEntry(creationDTO);
 
@@ -231,6 +232,10 @@ class DiaryEntryControllerTest {
         ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null, now, now);
         return new DiaryEntryResponseDTO(
                 UUID.randomUUID(), currentUserId, content, null, null, null, 1, null, null, false, now, now);
+    }
+
+    private DiaryEntryCreationResultDTO buildCreationResultDto() {
+        return new DiaryEntryCreationResultDTO(buildResponseDto(), null, null);
     }
 
     @Test
