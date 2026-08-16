@@ -554,7 +554,20 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private List<DiaryEntry> computeEpisodeDeletionImpact(UUID userId, String seriesTmdbId, Integer seasonNumber) {
-        List<DiaryEntry> seasonCandidates = computeSeasonRetractionCandidates(userId, seriesTmdbId, seasonNumber);
+        Optional<Content> seasonFinaleEpisode = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
+        if (seasonFinaleEpisode.isEmpty()) {
+            return List.of();
+        }
+
+        int simulatedMinCount = minEpisodeWatchCount(userId, seriesTmdbId, seasonNumber, seasonFinaleEpisode.get().getEpisodeNumber()) - 1;
+
+        Optional<Content> seasonContent = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(seriesTmdbId, seasonNumber, null, ContentType.SEASON);
+        List<DiaryEntry> seasonCandidates = seasonContent.isPresent()
+                ? diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(userId, seasonContent.get().getId(), simulatedMinCount)
+                : List.of();
+
         if (seasonCandidates.isEmpty()) {
             return List.of();
         }
