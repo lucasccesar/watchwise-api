@@ -42,4 +42,11 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("userId") UUID userId,
             @Param("seriesTmdbId") String seriesTmdbId);
 
+    @Query("""
+            SELECT COALESCE(MAX(de.watchNumber), 0) FROM DiaryEntry de
+            WHERE de.user.id = :userId
+            AND de.content.id = :contentId
+            """)
+    int findMaxWatchNumber(@Param("userId") UUID userId, @Param("contentId") UUID contentId);
+
 }

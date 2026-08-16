@@ -43,10 +43,9 @@ public class DiaryEntry {
     @Setter
     private LocalDate watchedDate;
 
-    @Column(name = "is_rewatch", nullable = false)
+    @Column(name = "watch_number", nullable = false)
     @Setter
-    @Builder.Default
-    private Boolean isRewatch = false;
+    private Integer watchNumber;
 
     @Column(name = "watched_in_theater")
     @Setter
