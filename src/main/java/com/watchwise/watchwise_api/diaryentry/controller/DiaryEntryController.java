@@ -77,7 +77,7 @@ public class DiaryEntryController {
 
     @DeleteMapping("/diary/{diaryEntryId}")
     public ResponseEntity<Void> deleteDiaryEntry(@PathVariable UUID diaryEntryId) {
-        diaryEntryService.deleteDiaryEntry(getCurrentUserId(), diaryEntryId);
+        diaryEntryService.deleteDiaryEntry(getCurrentUserId(), diaryEntryId, false);
         return ResponseEntity.noContent().build();
     }
 

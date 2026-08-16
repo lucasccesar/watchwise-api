@@ -19,6 +19,6 @@ public interface DiaryEntryService {
 
     DiaryEntryResponseDTO updateDiaryEntry(UUID userId, UUID diaryEntryId, DiaryEntryUpdateDTO diaryEntryUpdateDTO);
 
-    void deleteDiaryEntry(UUID userId, UUID diaryEntryId);
+    void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries);
 
 }

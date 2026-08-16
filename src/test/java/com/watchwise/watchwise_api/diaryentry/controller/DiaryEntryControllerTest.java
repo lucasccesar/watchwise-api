@@ -164,7 +164,7 @@ class DiaryEntryControllerTest {
 
         diaryEntryController.deleteDiaryEntry(diaryEntryId);
 
-        verify(diaryEntryService).deleteDiaryEntry(currentUserId, diaryEntryId);
+        verify(diaryEntryService).deleteDiaryEntry(currentUserId, diaryEntryId, false);
     }
 
     @Test
