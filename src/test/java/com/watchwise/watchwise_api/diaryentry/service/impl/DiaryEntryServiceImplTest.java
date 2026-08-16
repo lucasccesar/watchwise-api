@@ -1028,6 +1028,54 @@ class DiaryEntryServiceImplTest {
                 .hasMessageContaining("finaleSeasonNumber is required");
     }
 
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When A SERIES Bulk Request Has A Season Missing Its Finale Episode")
+    void shouldThrowBadRequestExceptionWhenASeriesBulkRequestHasASeasonMissingItsFinaleEpisode() {
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.of(buildFinaleSeason("900", 2)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(buildFinaleEpisode("900", 1, 3)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 2, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("finaleEpisodeNumber is required");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Successfully Process All Seasons - When Bulk-Logging A Complete SERIES")
+    void shouldSuccessfullyProcessAllSeasonsWhenBulkLoggingACompleteSeries() {
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.of(buildFinaleSeason("900", 2)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(buildFinaleEpisode("900", 1, 2)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 2, ContentType.EPISODE))
+                .thenReturn(Optional.of(buildFinaleEpisode("900", 2, 2)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Create A Fresh Pass For Every Episode - When Some Already Have Watch Records")
+    void shouldCreateAFreshPassForEveryEpisodeWhenSomeAlreadyHaveWatchRecords() {
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(buildFinaleEpisode("900", 1, 3)));
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(Exception.class);
+    }
+
     // ---------- updateDiaryEntry ----------
 
     @Test
