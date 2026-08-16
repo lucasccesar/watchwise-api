@@ -289,6 +289,50 @@ class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("[login] Should Check Ip Rate Limit Before Checking Lockout - When Not Authenticated")
+    void shouldCheckIpRateLimitBeforeCheckingLockoutWhenNotAuthenticated() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
+        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+
+        authController.login(loginUserDTO, request, response);
+
+        InOrder order = inOrder(requestThrottler, attemptLockout, userService);
+        order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
+        order.verify(attemptLockout).checkAllowed(any());
+        order.verify(userService).login(loginUserDTO);
+    }
+
+    @Test
+    @DisplayName("[login] Should Build Ip Throttle Key From Action And Remote Addr - When Called")
+    void shouldBuildIpThrottleKeyFromActionAndRemoteAddrWhenLoginCalled() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
+
+        authController.login(loginUserDTO, request, response);
+
+        verify(requestThrottler).checkAllowed(eq("login|127.0.0.1"), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("[login] Should Throw TooManyRequestsException And Not Check Lockout - When Ip Rate Limited")
+    void shouldThrowTooManyRequestsExceptionAndNotCheckLockoutWhenIpRateLimited() {
+        setAnonymous();
+        LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
+        doThrow(new TooManyRequestsException("Too many requests. Try again later."))
+                .when(requestThrottler).checkAllowed(any(), anyInt(), any());
+
+        assertThatThrownBy(() -> authController.login(loginUserDTO, request, response))
+                .isInstanceOf(TooManyRequestsException.class);
+
+        verify(attemptLockout, never()).checkAllowed(any());
+        verify(userService, never()).login(any());
+        verify(cookieUtil, never()).addCookie(any(), any());
+    }
+
+    @Test
     @DisplayName("[login] Should Build Lockout Key From Remote Addr And Identifier - When Called")
     void shouldBuildLockoutKeyFromRemoteAddrAndIdentifierWhenCalled() {
         setAnonymous();

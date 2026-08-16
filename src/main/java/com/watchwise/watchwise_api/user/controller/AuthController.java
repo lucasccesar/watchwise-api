@@ -62,6 +62,11 @@ public class AuthController {
     @Value("${app.rate-limit.login.block-minutes}")
     private long loginBlockMinutes;
 
+    @Value("${app.rate-limit.login-ip.max-requests}")
+    private int loginIpMaxRequests;
+    @Value("${app.rate-limit.login-ip.window-minutes}")
+    private long loginIpWindowMinutes;
+
     @Value("${app.rate-limit.register.max-requests}")
     private int registerMaxRequests;
     @Value("${app.rate-limit.register.window-minutes}")
@@ -107,6 +112,8 @@ public class AuthController {
         if (isAuthenticated()) {
             throw new ConflictException("Already authenticated");
         }
+
+        requestThrottler.checkAllowed(throttleKey("login", request), loginIpMaxRequests, Duration.ofMinutes(loginIpWindowMinutes));
 
         String lockoutKey = buildLockoutKey(request, loginUserDTO.identifier());
         attemptLockout.checkAllowed(lockoutKey);
