@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -25,11 +27,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -159,6 +165,34 @@ class DiaryEntryControllerTest {
         diaryEntryController.deleteDiaryEntry(diaryEntryId);
 
         verify(diaryEntryService).deleteDiaryEntry(currentUserId, diaryEntryId);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return Created With The List From The Service - When Called")
+    void shouldReturnCreatedWithTheListFromTheServiceWhenCalled() {
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "901", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null);
+        DiaryEntryResponseDTO entryResponseDTO = buildResponseDto();
+        when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto)).thenReturn(List.of(entryResponseDTO));
+
+        ResponseEntity<List<DiaryEntryResponseDTO>> result = diaryEntryController.createDiaryEntriesInBulk(dto);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(result.getBody()).containsExactly(entryResponseDTO);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Check Rate Limit Before Calling Service - When Called")
+    void shouldCheckRateLimitBeforeCallingServiceWhenBulkCreateCalled() {
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "901", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null);
+        when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto)).thenReturn(List.of());
+
+        diaryEntryController.createDiaryEntriesInBulk(dto);
+
+        InOrder order = inOrder(requestThrottler, diaryEntryService);
+        order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
+        order.verify(diaryEntryService).createDiaryEntriesInBulk(currentUserId, dto);
     }
 
     private DiaryEntryCreationDTO minimalCreationDto() {

@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.diaryentry.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
@@ -16,6 +17,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -29,6 +31,11 @@ public class DiaryEntryController {
     private int diaryActionMaxRequests;
     @Value("${app.rate-limit.diary-action.window-minutes}")
     private long diaryActionWindowMinutes;
+
+    @Value("${app.rate-limit.diary-bulk-action.max-requests}")
+    private int diaryBulkActionMaxRequests;
+    @Value("${app.rate-limit.diary-bulk-action.window-minutes}")
+    private long diaryBulkActionWindowMinutes;
 
     @GetMapping("/users/{userId}/diary")
     public ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> getDiaryEntries(
@@ -46,6 +53,14 @@ public class DiaryEntryController {
         requestThrottler.checkAllowed(diaryActionKey(), diaryActionMaxRequests, Duration.ofMinutes(diaryActionWindowMinutes));
 
         DiaryEntryResponseDTO created = diaryEntryService.createDiaryEntry(getCurrentUserId(), diaryEntryCreationDTO);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    @PostMapping("/diary/bulk")
+    public ResponseEntity<List<DiaryEntryResponseDTO>> createDiaryEntriesInBulk(@Valid @RequestBody DiaryEntryBulkCreationDTO diaryEntryBulkCreationDTO) {
+        requestThrottler.checkAllowed(diaryBulkActionKey(), diaryBulkActionMaxRequests, Duration.ofMinutes(diaryBulkActionWindowMinutes));
+
+        List<DiaryEntryResponseDTO> created = diaryEntryService.createDiaryEntriesInBulk(getCurrentUserId(), diaryEntryBulkCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
@@ -68,6 +83,10 @@ public class DiaryEntryController {
 
     private String diaryActionKey() {
         return "diary-action|" + getCurrentUserId();
+    }
+
+    private String diaryBulkActionKey() {
+        return "diary-bulk-action|" + getCurrentUserId();
     }
 
     private UUID getCurrentUserId() {

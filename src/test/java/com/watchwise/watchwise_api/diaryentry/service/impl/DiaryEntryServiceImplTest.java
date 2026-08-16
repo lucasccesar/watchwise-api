@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
@@ -47,6 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -969,6 +971,61 @@ class DiaryEntryServiceImplTest {
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
                 .isSameAs(exception);
+    }
+
+    // ---------- createDiaryEntriesInBulk ----------
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When Content Type Is Not SEASON Or SERIES")
+    void shouldThrowBadRequestExceptionWhenContentTypeIsNotSeasonOrSeries() {
+        ContentRefCreationDTO movieRef = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(movieRef, LocalDate.now(), null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Bulk logging only supports content of type SEASON or SERIES");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When SEASON Has No Existing Finale And No FinaleEpisodeNumber Is Provided")
+    void shouldThrowBadRequestExceptionWhenSeasonHasNoExistingFinaleAndNoFinaleEpisodeNumberIsProvided() {
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("finaleEpisodeNumber is required");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When The Season Exceeds The Bulk Episode Limit")
+    void shouldThrowBadRequestExceptionWhenTheSeasonExceedsTheBulkEpisodeLimit() {
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 101, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("exceeding the bulk log limit");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When A SERIES Bulk Request Requires Explicit FinaleSeasonNumber")
+    void shouldThrowBadRequestExceptionWhenSeriesBulkRequestRequiresFinaleSeasonNumber() {
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("finaleSeasonNumber is required");
     }
 
     // ---------- updateDiaryEntry ----------

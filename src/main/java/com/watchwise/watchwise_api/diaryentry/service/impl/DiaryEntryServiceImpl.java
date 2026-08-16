@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
@@ -32,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -154,6 +156,25 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .build();
 
         return diaryEntryRepository.saveAndFlush(entry);
+    }
+
+    @Override
+    @Transactional
+    public List<DiaryEntryResponseDTO> createDiaryEntriesInBulk(UUID userId, DiaryEntryBulkCreationDTO dto) {
+        ContentRefCreationDTO content = dto.content();
+        if (content.type() != ContentType.SEASON && content.type() != ContentType.SERIES) {
+            throw new BadRequestException("Bulk logging only supports content of type SEASON or SERIES");
+        }
+
+        List<DiaryEntry> created = new ArrayList<>();
+        if (content.type() == ContentType.SEASON) {
+            bulkLogSeason(userId, content.seriesTmdbId(), content.seasonNumber(), content.isSeriesFinale(),
+                    dto.finaleEpisodeNumber(), dto.watchedDate(), created);
+        } else {
+            bulkLogSeries(userId, content.tmdbId(), dto.finaleSeasonNumber(), dto.watchedDate(), created);
+        }
+
+        return created.stream().map(diaryEntryMapper::diaryEntryToResponseDto).toList();
     }
 
     @Override
@@ -287,6 +308,85 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         return diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(userId, seriesContent.get().getId(), minMax);
+    }
+
+    static final int MAX_BULK_EPISODES = 100;
+
+    private void bulkLogSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, Boolean isSeriesFinale,
+            Integer explicitFinaleEpisodeNumber, LocalDate watchedDate, List<DiaryEntry> created) {
+        int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, explicitFinaleEpisodeNumber);
+        if (finaleEpisodeNumber > MAX_BULK_EPISODES) {
+            throw new BadRequestException("Season has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
+        }
+
+        for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
+            created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
+                    episodeNumber == finaleEpisodeNumber, isSeriesFinale, watchedDate));
+        }
+    }
+
+    private int resolveSeasonFinaleEpisodeNumber(String seriesTmdbId, Integer seasonNumber, Integer explicitFinaleEpisodeNumber) {
+        Optional<Content> existingFinale = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
+        if (existingFinale.isPresent()) {
+            return existingFinale.get().getEpisodeNumber();
+        }
+        if (explicitFinaleEpisodeNumber == null) {
+            throw new BadRequestException("finaleEpisodeNumber is required when season " + seasonNumber + " has no known finale episode yet");
+        }
+        return explicitFinaleEpisodeNumber;
+    }
+
+    private DiaryEntry bulkLogEpisode(UUID userId, String seriesTmdbId, Integer seasonNumber, int episodeNumber,
+            boolean isSeasonFinale, Boolean isSeriesFinale, LocalDate watchedDate) {
+        ContentRefDTO episodeRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
+                null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber,
+                isSeasonFinale, isSeasonFinale ? isSeriesFinale : null));
+
+        User user = userRepository.getReferenceById(userId);
+        Content episodeContent = contentRepository.getReferenceById(episodeRef.id());
+
+        DiaryEntry entry;
+        try {
+            entry = persistDiaryEntry(user, episodeContent, null, null, watchedDate, null, null, null, false);
+        } catch (DataIntegrityViolationException e) {
+            throw mapWatchNumberConflict(e);
+        }
+
+        triggerCompletionCascade(userId, episodeContent, watchedDate);
+        return entry;
+    }
+
+    private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber, LocalDate watchedDate, List<DiaryEntry> created) {
+        int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber);
+
+        int totalEpisodes = 0;
+        for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
+            totalEpisodes += resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, null);
+        }
+        if (totalEpisodes > MAX_BULK_EPISODES) {
+            throw new BadRequestException("Series has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
+        }
+
+        for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
+            boolean isSeriesFinaleSeason = seasonNumber == finaleSeasonNumber;
+            int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, null);
+            for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
+                created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
+                        episodeNumber == finaleEpisodeNumber, isSeriesFinaleSeason, watchedDate));
+            }
+        }
+    }
+
+    private int resolveSeriesFinaleSeasonNumber(String seriesTmdbId, Integer explicitFinaleSeasonNumber) {
+        Optional<Content> existingFinale = contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON);
+        if (existingFinale.isPresent()) {
+            return existingFinale.get().getSeasonNumber();
+        }
+        if (explicitFinaleSeasonNumber == null) {
+            throw new BadRequestException("finaleSeasonNumber is required when the series has no known finale season yet");
+        }
+        return explicitFinaleSeasonNumber;
     }
 
     private DiaryEntry findOwnedEntry(UUID userId, UUID diaryEntryId) {

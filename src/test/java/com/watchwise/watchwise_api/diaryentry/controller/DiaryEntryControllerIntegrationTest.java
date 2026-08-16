@@ -10,6 +10,8 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+
+import static com.watchwise.watchwise_api.content.entity.ContentType.*;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -808,5 +810,63 @@ class DiaryEntryControllerIntegrationTest {
         List<Integer> seasonWatchNumbers = JsonPath.read(
                 result.getResponse().getContentAsString(), "$.content[?(@.content.type=='SEASON')].watchNumber");
         assertThat(seasonWatchNumbers).containsExactlyInAnyOrder(1, 2);
+    }
+
+    // ---------- POST /diary/bulk ----------
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Create Every Episode And The Season Entry - When Bulk-Logging A Complete Season")
+    void shouldCreateEveryEpisodeAndTheSeasonEntryWhenBulkLoggingACompleteSeason() throws Exception {
+        RegisteredUser user = registerUser("bulkseasonuser");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "901", "seasonNumber": 1 },
+                    "watchedDate": "2025-03-12",
+                    "finaleEpisodeNumber": 3
+                }
+                """;
+
+        mockMvc.perform(post("/diary/bulk")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(3));
+
+        // The endpoint returns the 3 explicitly logged episodes. The auto-generated season entry
+        // is created in the database via triggerCompletionCascade but is not included in the response.
+        List<DiaryEntry> allEntries = diaryEntryRepository.findAll();
+        assertThat(allEntries).hasSize(4);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return TooManyRequests - When The Bulk Rate Limit Is Exceeded")
+    void shouldReturnTooManyRequestsWhenTheBulkRateLimitIsExceeded() throws Exception {
+        RegisteredUser user = registerUser("bulkratelimit");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "901", "seasonNumber": 1 },
+                    "watchedDate": "2025-03-12",
+                    "finaleEpisodeNumber": 3
+                }
+                """;
+
+        for (int i = 0; i < 10; i++) {
+            mockMvc.perform(post("/diary/bulk")
+                            .cookie(user.accessToken(), user.csrfToken())
+                            .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body.replace("901", "90" + i)))
+                    .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(post("/diary/bulk")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
     }
 }
