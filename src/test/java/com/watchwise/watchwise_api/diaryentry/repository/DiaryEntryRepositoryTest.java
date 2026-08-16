@@ -181,64 +181,29 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[countDistinctWatchedEpisodesInSeason] Should Count Distinct Episodes Of That Season - When User Logged Several")
-    void shouldCountDistinctEpisodesOfThatSeasonWhenUserLoggedSeveral() {
-        Content episode1 = contentRepository.save(buildEpisode("1399", 1, 1));
-        Content episode2 = contentRepository.save(buildEpisode("1399", 1, 2));
-        Content otherSeasonEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
-        diaryEntryRepository.save(buildEntry(lucas, episode1));
-        diaryEntryRepository.save(buildEntry(lucas, episode2));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeasonEpisode));
+    @DisplayName("[findByUserIdAndContentIdAndWatchNumberGreaterThan] Should Return Only Entries Above The Threshold - When User Has Multiple Watches")
+    void shouldReturnOnlyEntriesAboveTheThresholdWhenUserHasMultipleWatches() {
+        DiaryEntry firstWatch = diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+        DiaryEntry secondWatch = diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, 2));
         entityManager.clear();
 
-        long result = diaryEntryRepository.countDistinctWatchedEpisodesInSeason(lucas.getId(), "1399", 1);
+        java.util.List<DiaryEntry> result = diaryEntryRepository
+                .findByUserIdAndContentIdAndWatchNumberGreaterThan(lucas.getId(), fightClub.getId(), 1);
 
-        assertThat(result).isEqualTo(2);
+        assertThat(result).extracting(DiaryEntry::getId).containsExactly(secondWatch.getId());
+        assertThat(firstWatch.getWatchNumber()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("[countDistinctWatchedEpisodesInSeason] Should Not Double Count - When User Rewatched The Same Episode")
-    void shouldNotDoubleCountWhenUserRewatchedTheSameEpisode() {
-        Content episode1 = contentRepository.save(buildEpisode("1399", 1, 1));
-        diaryEntryRepository.save(buildEntry(lucas, episode1));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode1, 2));
+    @DisplayName("[findByUserIdAndContentIdAndWatchNumberGreaterThan] Should Return Empty - When No Entry Exceeds The Threshold")
+    void shouldReturnEmptyWhenNoEntryExceedsTheThreshold() {
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
         entityManager.clear();
 
-        long result = diaryEntryRepository.countDistinctWatchedEpisodesInSeason(lucas.getId(), "1399", 1);
+        java.util.List<DiaryEntry> result = diaryEntryRepository
+                .findByUserIdAndContentIdAndWatchNumberGreaterThan(lucas.getId(), fightClub.getId(), 1);
 
-        assertThat(result).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("[countDistinctWatchedEpisodesInSeason] Should Return Zero - When User Has No Entries For That Season")
-    void shouldReturnZeroWhenUserHasNoEntriesForThatSeason() {
-        long result = diaryEntryRepository.countDistinctWatchedEpisodesInSeason(lucas.getId(), "1399", 1);
-
-        assertThat(result).isZero();
-    }
-
-    @Test
-    @DisplayName("[countDistinctWatchedSeasonsInSeries] Should Count Distinct Seasons Of That Series - When User Logged Several")
-    void shouldCountDistinctSeasonsOfThatSeriesWhenUserLoggedSeveral() {
-        Content season1 = contentRepository.save(buildSeason("1399", 1));
-        Content season2 = contentRepository.save(buildSeason("1399", 2));
-        Content otherSeriesSeason = contentRepository.save(buildSeason("2000", 1));
-        diaryEntryRepository.save(buildEntry(lucas, season1));
-        diaryEntryRepository.save(buildEntry(lucas, season2));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeriesSeason));
-        entityManager.clear();
-
-        long result = diaryEntryRepository.countDistinctWatchedSeasonsInSeries(lucas.getId(), "1399");
-
-        assertThat(result).isEqualTo(2);
-    }
-
-    @Test
-    @DisplayName("[countDistinctWatchedSeasonsInSeries] Should Return Zero - When User Has No Entries For That Series")
-    void shouldReturnZeroWhenUserHasNoEntriesForThatSeries() {
-        long result = diaryEntryRepository.countDistinctWatchedSeasonsInSeries(lucas.getId(), "1399");
-
-        assertThat(result).isZero();
+        assertThat(result).isEmpty();
     }
 
     @Test

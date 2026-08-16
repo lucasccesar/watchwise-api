@@ -1201,16 +1201,17 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findById(episodeEntry.getId())).thenReturn(Optional.of(episodeEntry));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
                 .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L)));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.of(season));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, season.getId()))
-                .thenReturn(Optional.of(seasonEntry));
-        when(diaryEntryRepository.countDistinctWatchedEpisodesInSeason(lucasId, "1399", 1)).thenReturn(1L);
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 0))
+                .thenReturn(List.of(seasonEntry));
 
         diaryEntryService.deleteDiaryEntry(lucasId, episodeEntry.getId());
 
         verify(diaryEntryRepository).delete(episodeEntry);
-        verify(diaryEntryRepository).delete(seasonEntry);
+        verify(diaryEntryRepository).deleteAll(List.of(seasonEntry));
     }
 
     @Test
@@ -1224,15 +1225,17 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findById(episodeEntry.getId())).thenReturn(Optional.of(episodeEntry));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
                 .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L)));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.of(season));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, season.getId()))
-                .thenReturn(Optional.of(seasonEntry));
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 0))
+                .thenReturn(List.of(seasonEntry));
 
         diaryEntryService.deleteDiaryEntry(lucasId, episodeEntry.getId());
 
         verify(diaryEntryRepository).delete(episodeEntry);
-        verify(diaryEntryRepository, never()).delete(seasonEntry);
+        verify(diaryEntryRepository, never()).deleteAll(any());
     }
 
     @Test
@@ -1248,16 +1251,17 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findById(episodeEntry.getId())).thenReturn(Optional.of(episodeEntry));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
                 .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L), episodeWatchCount(2, 1L)));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.of(season));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, season.getId()))
-                .thenReturn(Optional.of(seasonEntry));
-        when(diaryEntryRepository.countDistinctWatchedEpisodesInSeason(lucasId, "1399", 1)).thenReturn(2L);
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 1))
+                .thenReturn(List.of());
 
         diaryEntryService.deleteDiaryEntry(lucasId, episodeEntry.getId());
 
         verify(diaryEntryRepository).delete(episodeEntry);
-        verify(diaryEntryRepository, never()).delete(seasonEntry);
+        verify(diaryEntryRepository, never()).deleteAll(any());
     }
 
     @Test
@@ -1276,23 +1280,25 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findById(episodeEntry.getId())).thenReturn(Optional.of(episodeEntry));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
                 .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of());
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.of(season));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, season.getId()))
-                .thenReturn(Optional.of(seasonEntry));
-        when(diaryEntryRepository.countDistinctWatchedEpisodesInSeason(lucasId, "1399", 1)).thenReturn(0L);
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 0))
+                .thenReturn(List.of(seasonEntry));
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(finaleSeason));
+        when(diaryEntryRepository.maxWatchNumberBySeasonInSeries(lucasId, "1399"))
+                .thenReturn(List.of());
         when(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).thenReturn(Optional.of(series));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, series.getId()))
-                .thenReturn(Optional.of(seriesEntry));
-        when(diaryEntryRepository.countDistinctWatchedSeasonsInSeries(lucasId, "1399")).thenReturn(0L);
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, series.getId(), 0))
+                .thenReturn(List.of(seriesEntry));
 
         diaryEntryService.deleteDiaryEntry(lucasId, episodeEntry.getId());
 
         verify(diaryEntryRepository).delete(episodeEntry);
-        verify(diaryEntryRepository).delete(seasonEntry);
-        verify(diaryEntryRepository).delete(seriesEntry);
+        verify(diaryEntryRepository).deleteAll(List.of(seasonEntry));
+        verify(diaryEntryRepository).deleteAll(List.of(seriesEntry));
     }
 
     @Test
@@ -1306,14 +1312,16 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findById(seasonEntry.getId())).thenReturn(Optional.of(seasonEntry));
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(finaleSeason));
+        when(diaryEntryRepository.maxWatchNumberBySeasonInSeries(lucasId, "1399"))
+                .thenReturn(List.of());
         when(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).thenReturn(Optional.of(series));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, series.getId()))
-                .thenReturn(Optional.of(seriesEntry));
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, series.getId(), 0))
+                .thenReturn(List.of(seriesEntry));
 
         diaryEntryService.deleteDiaryEntry(lucasId, seasonEntry.getId());
 
         verify(diaryEntryRepository).delete(seasonEntry);
-        verify(diaryEntryRepository, never()).delete(seriesEntry);
+        verify(diaryEntryRepository, never()).deleteAll(any());
     }
 
     @Test
@@ -1329,15 +1337,93 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findById(seasonEntry.getId())).thenReturn(Optional.of(seasonEntry));
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(finaleSeason));
+        when(diaryEntryRepository.maxWatchNumberBySeasonInSeries(lucasId, "1399"))
+                .thenReturn(List.of(seasonWatchMax(1, 1), seasonWatchMax(2, 1)));
         when(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).thenReturn(Optional.of(series));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucasId, series.getId()))
-                .thenReturn(Optional.of(seriesEntry));
-        when(diaryEntryRepository.countDistinctWatchedSeasonsInSeries(lucasId, "1399")).thenReturn(2L);
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, series.getId(), 1))
+                .thenReturn(List.of());
 
         diaryEntryService.deleteDiaryEntry(lucasId, seasonEntry.getId());
 
         verify(diaryEntryRepository).delete(seasonEntry);
-        verify(diaryEntryRepository, never()).delete(seriesEntry);
+        verify(diaryEntryRepository, never()).deleteAll(any());
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Not Retract A Newer Complete Pass - When An Episode From An Older Pass Is Deleted")
+    void shouldNotRetractANewerCompletePassWhenAnEpisodeFromAnOlderPassIsDeleted() {
+        Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
+        Content season = buildSeason("1399", 1);
+        DiaryEntry episodeEntry = buildEntry(lucas, finaleEpisode);
+        episodeEntry.setWatchNumber(1);
+
+        when(diaryEntryRepository.findById(episodeEntry.getId())).thenReturn(Optional.of(episodeEntry));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, null, ContentType.SEASON))
+                .thenReturn(Optional.of(season));
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 1))
+                .thenReturn(List.of());
+
+        diaryEntryService.deleteDiaryEntry(lucasId, episodeEntry.getId());
+
+        verify(diaryEntryRepository, never()).deleteAll(any());
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Retract Only The Pass That Lost Support - When Deleting The Episode That Sustained The Most Recent Pass")
+    void shouldRetractOnlyThePassThatLostSupportWhenDeletingTheEpisodeThatSustainedTheMostRecentPass() {
+        Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
+        Content season = buildSeason("1399", 1);
+        DiaryEntry episodeEntry = buildEntry(lucas, finaleEpisode);
+        episodeEntry.setWatchNumber(2);
+        DiaryEntry seasonEntryWatchNumber2 = buildEntry(lucas, season);
+        seasonEntryWatchNumber2.setWatchNumber(2);
+        seasonEntryWatchNumber2.setAutoGenerated(true);
+
+        when(diaryEntryRepository.findById(episodeEntry.getId())).thenReturn(Optional.of(episodeEntry));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, null, ContentType.SEASON))
+                .thenReturn(Optional.of(season));
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 1))
+                .thenReturn(List.of(seasonEntryWatchNumber2));
+
+        diaryEntryService.deleteDiaryEntry(lucasId, episodeEntry.getId());
+
+        verify(diaryEntryRepository).deleteAll(List.of(seasonEntryWatchNumber2));
+        verify(contentRepository).findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON);
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Preserve A Manually-Edited Entry Above The Threshold - When Retracting")
+    void shouldPreserveAManuallyEditedEntryAboveTheThresholdWhenRetracting() {
+        Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
+        Content season = buildSeason("1399", 1);
+        DiaryEntry episodeEntry = buildEntry(lucas, finaleEpisode);
+        episodeEntry.setWatchNumber(2);
+        DiaryEntry seasonEntryWatchNumber2 = buildEntry(lucas, season);
+        seasonEntryWatchNumber2.setWatchNumber(2);
+        seasonEntryWatchNumber2.setAutoGenerated(false);
+
+        when(diaryEntryRepository.findById(episodeEntry.getId())).thenReturn(Optional.of(episodeEntry));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, null, ContentType.SEASON))
+                .thenReturn(Optional.of(season));
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 1))
+                .thenReturn(List.of(seasonEntryWatchNumber2));
+
+        diaryEntryService.deleteDiaryEntry(lucasId, episodeEntry.getId());
+
+        verify(diaryEntryRepository, never()).deleteAll(any());
+        verify(contentRepository, never()).findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(any(), any());
     }
 
     @Test
