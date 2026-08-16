@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -48,5 +49,41 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             AND de.content.id = :contentId
             """)
     int findMaxWatchNumber(@Param("userId") UUID userId, @Param("contentId") UUID contentId);
+
+    Optional<DiaryEntry> findFirstByUserIdAndContentIdAndWatchNumber(UUID userId, UUID contentId, Integer watchNumber);
+
+    @Query("""
+            SELECT de.content.episodeNumber AS episodeNumber, COUNT(de) AS count FROM DiaryEntry de
+            WHERE de.user.id = :userId
+            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND de.content.seriesTmdbId = :seriesTmdbId
+            AND de.content.seasonNumber = :seasonNumber
+            GROUP BY de.content.episodeNumber
+            """)
+    List<EpisodeWatchCount> countEntriesByEpisodeNumberInSeason(
+            @Param("userId") UUID userId,
+            @Param("seriesTmdbId") String seriesTmdbId,
+            @Param("seasonNumber") Integer seasonNumber);
+
+    @Query("""
+            SELECT de.content.seasonNumber AS seasonNumber, MAX(de.watchNumber) AS maxWatchNumber FROM DiaryEntry de
+            WHERE de.user.id = :userId
+            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SEASON
+            AND de.content.seriesTmdbId = :seriesTmdbId
+            GROUP BY de.content.seasonNumber
+            """)
+    List<SeasonWatchMax> maxWatchNumberBySeasonInSeries(
+            @Param("userId") UUID userId,
+            @Param("seriesTmdbId") String seriesTmdbId);
+
+    interface EpisodeWatchCount {
+        Integer getEpisodeNumber();
+        Long getCount();
+    }
+
+    interface SeasonWatchMax {
+        Integer getSeasonNumber();
+        Integer getMaxWatchNumber();
+    }
 
 }
