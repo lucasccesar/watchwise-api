@@ -157,7 +157,7 @@ class DiaryEntryRepositoryTest {
         firstWatch.setUpdatedAt(earlier);
         diaryEntryRepository.saveAndFlush(firstWatch);
 
-        DiaryEntry rewatch = buildEntry(lucas, fightClub);
+        DiaryEntry rewatch = buildEntry(lucas, fightClub, 2);
         rewatch.setScore(9);
         rewatch.setCreatedAt(later);
         rewatch.setUpdatedAt(later);
@@ -201,7 +201,7 @@ class DiaryEntryRepositoryTest {
     void shouldNotDoubleCountWhenUserRewatchedTheSameEpisode() {
         Content episode1 = contentRepository.save(buildEpisode("1399", 1, 1));
         diaryEntryRepository.save(buildEntry(lucas, episode1));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode1, 2));
         entityManager.clear();
 
         long result = diaryEntryRepository.countDistinctWatchedEpisodesInSeason(lucas.getId(), "1399", 1);
@@ -254,7 +254,7 @@ class DiaryEntryRepositoryTest {
         assertThat(found.getWatchedDate()).isNull();
         assertThat(found.getWatchedInTheater()).isNull();
         assertThat(found.getCustomPosterUrl()).isNull();
-        assertThat(found.getIsRewatch()).isFalse();
+        assertThat(found.getWatchNumber()).isEqualTo(1);
     }
 
     @Test
@@ -263,7 +263,7 @@ class DiaryEntryRepositoryTest {
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
         entityManager.clear();
 
-        DiaryEntry saved = diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+        DiaryEntry saved = diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, 2));
 
         assertThat(saved.getId()).isNotNull();
         assertThat(diaryEntryRepository.findAll()).hasSize(2);
@@ -314,11 +314,15 @@ class DiaryEntryRepositoryTest {
     }
 
     private DiaryEntry buildEntry(User user, Content content) {
+        return buildEntry(user, content, 1);
+    }
+
+    private DiaryEntry buildEntry(User user, Content content, int watchNumber) {
         LocalDateTime now = LocalDateTime.now();
         return DiaryEntry.builder()
                 .user(user)
                 .content(content)
-                .isRewatch(false)
+                .watchNumber(watchNumber)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

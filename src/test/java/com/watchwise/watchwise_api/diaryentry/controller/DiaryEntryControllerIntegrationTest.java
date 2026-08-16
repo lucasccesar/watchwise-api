@@ -225,7 +225,7 @@ class DiaryEntryControllerIntegrationTest {
         return diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
                 .content(content)
-                .isRewatch(false)
+                .watchNumber(1)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -366,7 +366,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.score").value(8))
                 .andExpect(jsonPath("$.content.tmdbId").value("550"))
-                .andExpect(jsonPath("$.isRewatch").value(false));
+                .andExpect(jsonPath("$.watchNumber").value(1));
 
         User entity = userRepository.findById(user.id()).orElseThrow();
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
@@ -407,15 +407,15 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Force IsRewatch To True And Persist - When User Already Logged This Content")
-    void shouldForceIsRewatchToTrueAndPersistWhenUserAlreadyLoggedThisContent() throws Exception {
+    @DisplayName("[createDiaryEntry] Should Set WatchNumber To 2 And Persist - When User Already Logged This Content")
+    void shouldSetWatchNumberToTwoAndPersistWhenUserAlreadyLoggedThisContent() throws Exception {
         RegisteredUser user = registerUser("creatediaryrewatch");
         User entity = userRepository.findById(user.id()).orElseThrow();
         persistEntry(entity, persistContent("550", ContentType.MOVIE));
 
         mockMvc.perform(createRequest(user, creationBody("550", null)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.isRewatch").value(true));
+                .andExpect(jsonPath("$.watchNumber").value(2));
 
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
                 .hasSize(2);
