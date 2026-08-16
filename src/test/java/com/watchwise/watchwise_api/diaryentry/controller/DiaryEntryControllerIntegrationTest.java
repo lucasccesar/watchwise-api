@@ -673,7 +673,8 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(3))
                 .andReturn();
 
-        String seriesEntryId = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SERIES')].id[0]");
+        List<String> seriesEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SERIES')].id");
+        String seriesEntryId = seriesEntryIds.get(0);
 
         mockMvc.perform(deleteRequest(user, UUID.fromString(seriesEntryId)))
                 .andExpect(status().isNoContent());
