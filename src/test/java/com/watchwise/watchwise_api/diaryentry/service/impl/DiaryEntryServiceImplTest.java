@@ -31,6 +31,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.hibernate.exception.ConstraintViolationException;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -51,6 +52,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -1894,8 +1897,49 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[computeDeletionImpact] Should Return Empty WouldDelete - When Deleting The Episode Does Not Break Any Completion")
-    void shouldReturnEmptyWouldDeleteWhenDeletingTheEpisodeDoesNotBreakAnyCompletion() {
+    @DisplayName("[computeDeletionImpact] Should Throw NotFoundException - When Entry Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenEntryDoesNotExistOnComputeDeletionImpact() {
+        UUID missingId = UUID.randomUUID();
+        when(diaryEntryRepository.findById(missingId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> diaryEntryService.computeDeletionImpact(lucasId, missingId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Diary entry not found");
+
+        verify(diaryEntryRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("[computeDeletionImpact] Should Throw NotFoundException - When Entry Belongs To A Different User")
+    void shouldThrowNotFoundExceptionWhenEntryBelongsToADifferentUserOnComputeDeletionImpact() {
+        DiaryEntry marinasEntry = buildEntry(marina, fightClub);
+        when(diaryEntryRepository.findById(marinasEntry.getId())).thenReturn(Optional.of(marinasEntry));
+
+        assertThatThrownBy(() -> diaryEntryService.computeDeletionImpact(lucasId, marinasEntry.getId()))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Diary entry not found");
+
+        verify(diaryEntryRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("[computeDeletionImpact] Should Delete And Flush But Return Empty - When Content Type Is Movie")
+    void shouldDeleteAndFlushButReturnEmptyWhenContentTypeIsMovie() {
+        DiaryEntry entry = buildDiaryEntry(lucas, fightClub, 1);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        DeletionImpactDTO result = diaryEntryService.computeDeletionImpact(lucasId, entry.getId());
+
+        assertThat(result.wouldDelete()).isEmpty();
+        verify(diaryEntryRepository).delete(entry);
+        verify(diaryEntryRepository).flush();
+        verify(contentRepository, never())
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[computeDeletionImpact] Should Delete And Flush Before Querying Season Candidates - When Content Type Is Episode")
+    void shouldDeleteAndFlushBeforeQueryingSeasonCandidatesWhenContentTypeIsEpisode() {
         Content episodeContent = buildEpisode("tt1", 1, 1);
         DiaryEntry entry = buildDiaryEntry(lucas, episodeContent, 1);
 
@@ -1906,6 +1950,86 @@ class DiaryEntryServiceImplTest {
         DeletionImpactDTO result = diaryEntryService.computeDeletionImpact(lucasId, entry.getId());
 
         assertThat(result.wouldDelete()).isEmpty();
+
+        InOrder inOrder = inOrder(diaryEntryRepository, contentRepository);
+        inOrder.verify(diaryEntryRepository).delete(entry);
+        inOrder.verify(diaryEntryRepository).flush();
+        inOrder.verify(contentRepository)
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("tt1", 1, ContentType.EPISODE);
+    }
+
+    @Test
+    @DisplayName("[computeDeletionImpact] Should Delete And Flush Before Querying Series Candidates - When Content Type Is Season")
+    void shouldDeleteAndFlushBeforeQueryingSeriesCandidatesWhenContentTypeIsSeason() {
+        Content finaleSeason = buildFinaleSeason("tt3", 1);
+        DiaryEntry seasonEntry = buildDiaryEntry(lucas, finaleSeason, 1);
+
+        when(diaryEntryRepository.findById(seasonEntry.getId())).thenReturn(Optional.of(seasonEntry));
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("tt3", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+
+        DeletionImpactDTO result = diaryEntryService.computeDeletionImpact(lucasId, seasonEntry.getId());
+
+        assertThat(result.wouldDelete()).isEmpty();
+
+        InOrder inOrder = inOrder(diaryEntryRepository, contentRepository);
+        inOrder.verify(diaryEntryRepository).delete(seasonEntry);
+        inOrder.verify(diaryEntryRepository).flush();
+        inOrder.verify(contentRepository)
+                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("tt3", ContentType.SEASON);
+    }
+
+    @Test
+    @DisplayName("[computeDeletionImpact] Should Return Empty WouldDelete - When Deleting An Episode Entry That Is Not The Bottleneck")
+    void shouldReturnEmptyWouldDeleteWhenDeletingAnEpisodeEntryThatIsNotTheBottleneck() {
+        Content finaleEpisode = buildFinaleEpisode("tt2", 1, 2);
+        Content nonFinaleEpisode = buildEpisode("tt2", 1, 1);
+        Content season = buildSeason("tt2", 1);
+        DiaryEntry entry = buildDiaryEntry(lucas, nonFinaleEpisode, 2);
+        DiaryEntry staleSeasonCandidate = buildDiaryEntry(lucas, season, 1);
+
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("tt2", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "tt2", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L), episodeWatchCount(2, 1L)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("tt2", 1, null, ContentType.SEASON))
+                .thenReturn(Optional.of(season));
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 1))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 0))
+                .thenReturn(List.of(staleSeasonCandidate));
+
+        DeletionImpactDTO result = diaryEntryService.computeDeletionImpact(lucasId, entry.getId());
+
+        assertThat(result.wouldDelete()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[computeDeletionImpact] Should Include Season Candidate - When Deleting The Bottleneck Episode Entry")
+    void shouldIncludeSeasonCandidateWhenDeletingTheBottleneckEpisodeEntry() {
+        Content finaleEpisode = buildFinaleEpisode("tt2", 1, 2);
+        Content season = buildSeason("tt2", 1);
+        DiaryEntry entry = buildDiaryEntry(lucas, finaleEpisode, 1);
+        DiaryEntry seasonEntry = buildDiaryEntry(lucas, season, 1);
+
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("tt2", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "tt2", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L), episodeWatchCount(2, 0L)));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("tt2", 1, null, ContentType.SEASON))
+                .thenReturn(Optional.of(season));
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, season.getId(), 0))
+                .thenReturn(List.of(seasonEntry));
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("tt2", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+
+        DeletionImpactDTO result = diaryEntryService.computeDeletionImpact(lucasId, entry.getId());
+
+        assertThat(result.wouldDelete())
+                .containsExactly(new DeletionImpactItemDTO(
+                        ContentType.SEASON, seasonEntry.getWatchedDate(), seasonEntry.getWatchNumber(), false));
     }
 
     @Test
@@ -1931,7 +2055,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of());
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("tt1", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.of(seasonContent));
-        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, seasonContent.getId(), -1))
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, seasonContent.getId(), 0))
                 .thenReturn(List.of(seasonCandidate));
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("tt1", ContentType.SEASON))
                 .thenReturn(Optional.of(seasonContent));
@@ -1984,5 +2108,10 @@ class DiaryEntryServiceImplTest {
         assertThat(result.wouldDelete().get(0).hasReview()).isTrue();
         assertThat(result.wouldDelete().get(1).hasReview()).isTrue();
         assertThat(result.wouldDelete().get(2).hasReview()).isFalse();
+
+        InOrder inOrder = inOrder(diaryEntryRepository);
+        inOrder.verify(diaryEntryRepository).delete(queryEntry);
+        inOrder.verify(diaryEntryRepository).flush();
+        inOrder.verify(diaryEntryRepository).findAllEpisodeEntriesInSeries(lucasId, "tt1");
     }
 }
