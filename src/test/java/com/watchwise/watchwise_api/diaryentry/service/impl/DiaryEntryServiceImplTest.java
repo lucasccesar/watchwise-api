@@ -1049,31 +1049,121 @@ class DiaryEntryServiceImplTest {
     @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Successfully Process All Seasons - When Bulk-Logging A Complete SERIES")
     void shouldSuccessfullyProcessAllSeasonsWhenBulkLoggingACompleteSeries() {
+        // Setup: Series with 2 seasons (S1: 2 episodes, S2: 2 episodes)
+        Content s1e1 = buildFinaleEpisode("900", 1, 2);
+        Content s1e2 = buildEpisode("900", 1, 1);
+        Content s2e1 = buildFinaleEpisode("900", 2, 2);
+        Content s2e2 = buildEpisode("900", 2, 1);
+
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
                 .thenReturn(Optional.of(buildFinaleSeason("900", 2)));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
-                .thenReturn(Optional.of(buildFinaleEpisode("900", 1, 2)));
+                .thenReturn(Optional.of(s1e1));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 2, ContentType.EPISODE))
-                .thenReturn(Optional.of(buildFinaleEpisode("900", 2, 2)));
+                .thenReturn(Optional.of(s2e1));
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+
+        // Mock contentService and contentRepository to work together
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO dto = inv.getArgument(0);
+                    Content content;
+                    if (dto.episodeNumber() == 1 && dto.seasonNumber() == 1) content = s1e1;
+                    else if (dto.episodeNumber() == 2 && dto.seasonNumber() == 1) content = s1e2;
+                    else if (dto.episodeNumber() == 1 && dto.seasonNumber() == 2) content = s2e1;
+                    else content = s2e2;
+                    return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
+                            null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(inv -> {
+                    UUID id = inv.getArgument(0);
+                    if (id.equals(s1e1.getId())) return s1e1;
+                    if (id.equals(s1e2.getId())) return s1e2;
+                    if (id.equals(s2e1.getId())) return s2e1;
+                    if (id.equals(s2e2.getId())) return s2e2;
+                    return null;
+                });
+
+        // Mock repository save
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        // Mock mapper to return DTOs
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class)))
+                .thenAnswer(inv -> {
+                    DiaryEntry entry = inv.getArgument(0);
+                    return buildResponseDto(entry);
+                });
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2);
 
-        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
-                .isInstanceOf(Exception.class);
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        // Should return 4 episodes (2 per season, not the season entries)
+        assertThat(result).hasSize(4);
+        assertThat(result).allMatch(entry -> entry.watchNumber() == 1);
     }
 
     @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Create A Fresh Pass For Every Episode - When Some Already Have Watch Records")
     void shouldCreateAFreshPassForEveryEpisodeWhenSomeAlreadyHaveWatchRecords() {
+        Content e1 = buildFinaleEpisode("900", 1, 3);
+        Content e2 = buildEpisode("900", 1, 2);
+        Content e3 = buildEpisode("900", 1, 1);
+
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
-                .thenReturn(Optional.of(buildFinaleEpisode("900", 1, 3)));
+                .thenReturn(Optional.of(e1));
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, e1.getId())).thenReturn(2);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, e2.getId())).thenReturn(0);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, e3.getId())).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+
+        // Mock contentService for each episode
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO dto = inv.getArgument(0);
+                    Content content;
+                    if (dto.episodeNumber() == 3) content = e1;
+                    else if (dto.episodeNumber() == 2) content = e2;
+                    else content = e3;
+                    return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
+                            null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(inv -> {
+                    UUID id = inv.getArgument(0);
+                    if (id.equals(e1.getId())) return e1;
+                    if (id.equals(e2.getId())) return e2;
+                    if (id.equals(e3.getId())) return e3;
+                    return null;
+                });
+
+        // Mock repository save
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        // Mock mapper
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class)))
+                .thenAnswer(inv -> {
+                    DiaryEntry entry = inv.getArgument(0);
+                    return buildResponseDto(entry);
+                });
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null);
 
-        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
-                .isInstanceOf(Exception.class);
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        // Should return 3 episodes with fresh watchNumbers
+        assertThat(result).hasSize(3);
+        // Episodes should have incremented watchNumbers: 3 (2+1), 1 (0+1), 1 (0+1)
+        DiaryEntryResponseDTO episodeWith2Watches = result.stream().filter(e -> e.watchNumber() == 3).findFirst().orElse(null);
+        assertThat(episodeWith2Watches).isNotNull();
     }
 
     // ---------- updateDiaryEntry ----------
