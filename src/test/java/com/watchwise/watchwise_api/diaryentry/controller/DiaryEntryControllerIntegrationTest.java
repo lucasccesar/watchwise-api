@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -36,6 +37,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -412,6 +419,38 @@ class DiaryEntryControllerIntegrationTest {
 
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
                 .hasSize(2);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Succeed For Both Requests - When Two Users Concurrently Log The Same Not-Yet-Existing Content")
+    void shouldSucceedForBothRequestsWhenTwoUsersConcurrentlyLogTheSameNotYetExistingContent() throws Exception {
+        RegisteredUser userA = registerUser("racecontentusera");
+        RegisteredUser userB = registerUser("racecontentuserb");
+        String body = creationBody("999999", null);
+
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        Callable<Integer> callA = () -> {
+            barrier.await();
+            return mockMvc.perform(createRequest(userA, body)).andReturn().getResponse().getStatus();
+        };
+        Callable<Integer> callB = () -> {
+            barrier.await();
+            return mockMvc.perform(createRequest(userB, body)).andReturn().getResponse().getStatus();
+        };
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Integer> futureA = executor.submit(callA);
+            Future<Integer> futureB = executor.submit(callB);
+
+            assertThat(futureA.get(10, TimeUnit.SECONDS)).isEqualTo(HttpStatus.CREATED.value());
+            assertThat(futureB.get(10, TimeUnit.SECONDS)).isEqualTo(HttpStatus.CREATED.value());
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(contentRepository.findByTmdbIdAndType("999999", ContentType.MOVIE)).isPresent();
+        assertThat(diaryEntryRepository.findAll()).hasSize(2);
     }
 
     @Test

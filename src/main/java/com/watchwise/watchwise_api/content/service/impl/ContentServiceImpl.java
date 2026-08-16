@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -23,6 +24,7 @@ public class ContentServiceImpl implements ContentService {
 
     private final ContentMapper contentMapper;
     private final ContentRepository contentRepository;
+    private final NewTransactionExecutor newTransactionExecutor;
 
     @Override
     public ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO) {
@@ -38,13 +40,15 @@ public class ContentServiceImpl implements ContentService {
             clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
         }
 
-        Content content = contentMapper.contentRefCreationDtoToContent(normalized);
-        LocalDateTime now = LocalDateTime.now();
-        content.setCreatedAt(now);
-        content.setUpdatedAt(now);
-
         try {
-            return contentMapper.contentToContentRefDto(contentRepository.saveAndFlush(content));
+            Content saved = newTransactionExecutor.runInNewTransaction(() -> {
+                Content content = contentMapper.contentRefCreationDtoToContent(normalized);
+                LocalDateTime now = LocalDateTime.now();
+                content.setCreatedAt(now);
+                content.setUpdatedAt(now);
+                return contentRepository.saveAndFlush(content);
+            });
+            return contentMapper.contentToContentRefDto(saved);
         } catch (DataIntegrityViolationException e) {
             return contentMapper.contentToContentRefDto(resolveConcurrentCreation(normalized, e));
         }

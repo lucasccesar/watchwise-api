@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.followedperson.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
 import com.watchwise.watchwise_api.followedperson.service.FollowedPersonService;
@@ -26,6 +27,7 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
     private final FollowedPersonRepository followedPersonRepository;
     private final UserRepository userRepository;
     private final FollowerRepository followerRepository;
+    private final NewTransactionExecutor newTransactionExecutor;
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
@@ -36,14 +38,15 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
             return;
         }
 
-        FollowedPerson followedPerson = FollowedPerson.builder()
-                .user(userRepository.getReferenceById(userId))
-                .personTmdbId(personTmdbId)
-                .createdAt(LocalDateTime.now())
-                .build();
-
         try {
-            followedPersonRepository.save(followedPerson);
+            newTransactionExecutor.runInNewTransaction(() -> {
+                FollowedPerson followedPerson = FollowedPerson.builder()
+                        .user(userRepository.getReferenceById(userId))
+                        .personTmdbId(personTmdbId)
+                        .createdAt(LocalDateTime.now())
+                        .build();
+                return followedPersonRepository.saveAndFlush(followedPerson);
+            });
         } catch (DataIntegrityViolationException e) {
             if (!followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)) {
                 throw e;

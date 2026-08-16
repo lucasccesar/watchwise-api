@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -9,6 +10,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import org.hibernate.exception.ConstraintViolationException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,12 +22,14 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -40,8 +44,17 @@ class ContentServiceImplTest {
     @Mock
     private ContentRepository contentRepository;
 
+    @Mock
+    private NewTransactionExecutor newTransactionExecutor;
+
     @InjectMocks
     private ContentServiceImpl contentService;
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(newTransactionExecutor.runInNewTransaction(any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+    }
 
     @Test
     @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Null")
@@ -295,6 +308,24 @@ class ContentServiceImplTest {
 
         assertThat(result).isEqualTo(responseDto);
         verify(contentRepository).saveAndFlush(mapped);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Attempt Save In A New Transaction - When Reference Does Not Exist")
+    void shouldAttemptSaveInANewTransactionWhenReferenceDoesNotExist() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        Content mapped = Content.builder().tmdbId("100").type(ContentType.MOVIE).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null);
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        contentService.getOrCreateReference(dto);
+
+        verify(newTransactionExecutor).runInNewTransaction(any());
     }
 
     @Test

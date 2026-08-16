@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.followedperson.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -27,12 +28,14 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -49,6 +52,9 @@ class FollowedPersonServiceImplTest {
 
     @Mock
     private FollowerRepository followerRepository;
+
+    @Mock
+    private NewTransactionExecutor newTransactionExecutor;
 
     @InjectMocks
     private FollowedPersonServiceImpl followedPersonService;
@@ -77,6 +83,9 @@ class FollowedPersonServiceImplTest {
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+
+        lenient().when(newTransactionExecutor.runInNewTransaction(any()))
+                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
     }
 
     @Test
@@ -87,10 +96,21 @@ class FollowedPersonServiceImplTest {
 
         followedPersonService.followPerson(userId, personTmdbId);
 
-        verify(followedPersonRepository).save(followedPersonCaptor.capture());
+        verify(followedPersonRepository).saveAndFlush(followedPersonCaptor.capture());
         assertThat(followedPersonCaptor.getValue().getUser()).isEqualTo(user);
         assertThat(followedPersonCaptor.getValue().getPersonTmdbId()).isEqualTo(personTmdbId);
         assertThat(followedPersonCaptor.getValue().getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Attempt Save In A New Transaction - When Not Already Following")
+    void shouldAttemptSaveInANewTransactionWhenNotAlreadyFollowing() {
+        when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
+        when(userRepository.getReferenceById(userId)).thenReturn(user);
+
+        followedPersonService.followPerson(userId, personTmdbId);
+
+        verify(newTransactionExecutor).runInNewTransaction(any());
     }
 
     @Test
@@ -100,7 +120,7 @@ class FollowedPersonServiceImplTest {
 
         followedPersonService.followPerson(userId, personTmdbId);
 
-        verify(followedPersonRepository, never()).save(any());
+        verify(followedPersonRepository, never()).saveAndFlush(any());
         verify(userRepository, never()).getReferenceById(any());
     }
 
@@ -111,7 +131,7 @@ class FollowedPersonServiceImplTest {
                 .thenReturn(false)
                 .thenReturn(true);
         when(userRepository.getReferenceById(userId)).thenReturn(user);
-        when(followedPersonRepository.save(any(FollowedPerson.class)))
+        when(followedPersonRepository.saveAndFlush(any(FollowedPerson.class)))
                 .thenThrow(new DataIntegrityViolationException("duplicate"));
 
         assertThatCode(() -> followedPersonService.followPerson(userId, personTmdbId))
@@ -124,7 +144,7 @@ class FollowedPersonServiceImplTest {
         when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
         when(userRepository.getReferenceById(userId)).thenReturn(user);
         DataIntegrityViolationException exception = new DataIntegrityViolationException("unexpected db error");
-        when(followedPersonRepository.save(any(FollowedPerson.class))).thenThrow(exception);
+        when(followedPersonRepository.saveAndFlush(any(FollowedPerson.class))).thenThrow(exception);
 
         assertThatThrownBy(() -> followedPersonService.followPerson(userId, personTmdbId))
                 .isSameAs(exception);
