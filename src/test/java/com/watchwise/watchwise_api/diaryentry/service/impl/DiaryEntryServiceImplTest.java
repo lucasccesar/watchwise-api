@@ -1931,7 +1931,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of());
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("tt1", 1, null, ContentType.SEASON))
                 .thenReturn(Optional.of(seasonContent));
-        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, seasonContent.getId(), 0))
+        when(diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(lucasId, seasonContent.getId(), -1))
                 .thenReturn(List.of(seasonCandidate));
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("tt1", ContentType.SEASON))
                 .thenReturn(Optional.of(seasonContent));
