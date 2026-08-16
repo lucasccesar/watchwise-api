@@ -586,6 +586,19 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Ignore IsRewatch And Return WatchNumber - When IsRewatch Is Sent In The Request Body")
+    void shouldIgnoreIsRewatchAndReturnWatchNumberWhenSentInTheUpdateRequestBody() throws Exception {
+        RegisteredUser user = registerUser("patchisrewatchrejected");
+        MvcResult created = mockMvc.perform(createRequest(user, creationBody("550", null))).andReturn();
+        UUID entryId = UUID.fromString(JsonPath.read(created.getResponse().getContentAsString(), "$.id"));
+
+        mockMvc.perform(updateRequest(user, entryId, "{ \"isRewatch\": true }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isRewatch").doesNotExist())
+                .andExpect(jsonPath("$.watchNumber").value(1));
+    }
+
     // ---------- DELETE /diary/{diaryEntryId} ----------
 
     @Test

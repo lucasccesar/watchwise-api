@@ -11,7 +11,6 @@ public record DiaryEntryUpdateDTO(
         String comment,
         @Min(1) @Max(10) Integer score,
         LocalDate watchedDate,
-        Boolean isRewatch,
         Boolean watchedInTheater,
         @Size(max = 2048) @URL String customPosterUrl
 ) {

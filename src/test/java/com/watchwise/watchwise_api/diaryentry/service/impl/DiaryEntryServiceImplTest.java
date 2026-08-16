@@ -1064,7 +1064,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                "New comment", null, null, null, null, null));
+                "New comment", null, null, null, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getComment()).isEqualTo("New comment");
@@ -1080,7 +1080,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                null, 10, null, null, null, null));
+                null, 10, null, null, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getScore()).isEqualTo(10);
@@ -1097,7 +1097,7 @@ class DiaryEntryServiceImplTest {
         LocalDate newDate = LocalDate.of(2024, 3, 15);
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                null, null, newDate, null, null, null));
+                null, null, newDate, null, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getWatchedDate()).isEqualTo(newDate);
@@ -1113,7 +1113,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                null, null, null, null, true, null));
+                null, null, null, true, null));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getWatchedInTheater()).isTrue();
@@ -1127,7 +1127,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
 
         assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                null, null, null, null, true, null)))
+                null, null, null, true, null)))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("watchedInTheater can only be set for content of type MOVIE");
 
@@ -1144,7 +1144,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                null, null, null, null, null, "https://example.com/new.png"));
+                null, null, null, null, "https://example.com/new.png"));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/new.png");
@@ -1553,7 +1553,7 @@ class DiaryEntryServiceImplTest {
     }
 
     private DiaryEntryUpdateDTO minimalUpdateDto() {
-        return new DiaryEntryUpdateDTO(null, null, null, null, null, null);
+        return new DiaryEntryUpdateDTO(null, null, null, null, null);
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {

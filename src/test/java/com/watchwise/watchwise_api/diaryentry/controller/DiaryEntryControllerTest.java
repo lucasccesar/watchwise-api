@@ -168,7 +168,7 @@ class DiaryEntryControllerTest {
     }
 
     private DiaryEntryUpdateDTO minimalUpdateDto() {
-        return new DiaryEntryUpdateDTO(null, null, null, null, null, null);
+        return new DiaryEntryUpdateDTO(null, null, null, null, null);
     }
 
     private DiaryEntryResponseDTO buildResponseDto() {
