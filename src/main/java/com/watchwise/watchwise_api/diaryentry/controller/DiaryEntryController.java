@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -79,6 +80,11 @@ public class DiaryEntryController {
     public ResponseEntity<Void> deleteDiaryEntry(@PathVariable UUID diaryEntryId) {
         diaryEntryService.deleteDiaryEntry(getCurrentUserId(), diaryEntryId, false);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/diary/{diaryEntryId}/deletion-impact")
+    public ResponseEntity<DeletionImpactDTO> getDeletionImpact(@PathVariable UUID diaryEntryId) {
+        return ResponseEntity.ok(diaryEntryService.computeDeletionImpact(getCurrentUserId(), diaryEntryId));
     }
 
     private String diaryActionKey() {

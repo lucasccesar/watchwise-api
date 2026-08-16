@@ -15,6 +15,8 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -528,5 +530,37 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             minMax = Math.min(minMax, maxBySeason.getOrDefault(season, 0));
         }
         return minMax;
+    }
+
+    @Override
+    public DeletionImpactDTO computeDeletionImpact(UUID userId, UUID diaryEntryId) {
+        DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
+        Content content = entry.getContent();
+
+        List<DiaryEntry> impacted = switch (content.getType()) {
+            case EPISODE -> computeEpisodeDeletionImpact(userId, content.getSeriesTmdbId(), content.getSeasonNumber());
+            case SEASON -> computeSeriesRetractionCandidates(userId, content.getSeriesTmdbId());
+            case SERIES -> computeSeriesWipeCandidates(userId, content.getTmdbId());
+            case MOVIE -> List.of();
+        };
+
+        return new DeletionImpactDTO(impacted.stream()
+                .map(candidate -> new DeletionImpactItemDTO(
+                        candidate.getContent().getType(),
+                        candidate.getWatchedDate(),
+                        candidate.getWatchNumber(),
+                        candidate.getComment() != null || candidate.getScore() != null))
+                .toList());
+    }
+
+    private List<DiaryEntry> computeEpisodeDeletionImpact(UUID userId, String seriesTmdbId, Integer seasonNumber) {
+        List<DiaryEntry> seasonCandidates = computeSeasonRetractionCandidates(userId, seriesTmdbId, seasonNumber);
+        if (seasonCandidates.isEmpty()) {
+            return List.of();
+        }
+
+        List<DiaryEntry> impact = new ArrayList<>(seasonCandidates);
+        impact.addAll(computeSeriesRetractionCandidates(userId, seriesTmdbId));
+        return impact;
     }
 }

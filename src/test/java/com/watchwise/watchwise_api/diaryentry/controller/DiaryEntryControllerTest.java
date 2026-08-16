@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -210,5 +211,19 @@ class DiaryEntryControllerTest {
         ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null, now, now);
         return new DiaryEntryResponseDTO(
                 UUID.randomUUID(), currentUserId, content, null, null, null, 1, null, null, false, now, now);
+    }
+
+    @Test
+    @DisplayName("[getDeletionImpact] Should Return DeletionImpactDTO - When Called With Valid Entry ID")
+    void shouldReturnDeletionImpactDtoWhenCalledWithValidEntryId() {
+        UUID diaryEntryId = UUID.randomUUID();
+        DeletionImpactDTO expectedResult = new DeletionImpactDTO(List.of());
+        when(diaryEntryService.computeDeletionImpact(currentUserId, diaryEntryId)).thenReturn(expectedResult);
+
+        ResponseEntity<DeletionImpactDTO> response = diaryEntryController.getDeletionImpact(diaryEntryId);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isEqualTo(expectedResult);
+        verify(diaryEntryService).computeDeletionImpact(currentUserId, diaryEntryId);
     }
 }
