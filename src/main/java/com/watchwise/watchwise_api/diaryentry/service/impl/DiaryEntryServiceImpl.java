@@ -31,6 +31,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -533,9 +535,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     @Override
+    @Transactional
     public DeletionImpactDTO computeDeletionImpact(UUID userId, UUID diaryEntryId) {
         DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
         Content content = entry.getContent();
+
+        diaryEntryRepository.delete(entry);
+        diaryEntryRepository.flush();
 
         List<DiaryEntry> impacted = switch (content.getType()) {
             case EPISODE -> computeEpisodeDeletionImpact(userId, content.getSeriesTmdbId(), content.getSeasonNumber());
@@ -543,6 +549,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             case SERIES -> computeSeriesWipeCandidates(userId, content.getTmdbId());
             case MOVIE -> List.of();
         };
+
+        markCurrentTransactionRollbackOnly();
 
         return new DeletionImpactDTO(impacted.stream()
                 .map(candidate -> new DeletionImpactItemDTO(
@@ -553,21 +561,14 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .toList());
     }
 
-    private List<DiaryEntry> computeEpisodeDeletionImpact(UUID userId, String seriesTmdbId, Integer seasonNumber) {
-        Optional<Content> seasonFinaleEpisode = contentRepository
-                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
-        if (seasonFinaleEpisode.isEmpty()) {
-            return List.of();
+    private void markCurrentTransactionRollbackOnly() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
         }
+    }
 
-        int simulatedMinCount = minEpisodeWatchCount(userId, seriesTmdbId, seasonNumber, seasonFinaleEpisode.get().getEpisodeNumber()) - 1;
-
-        Optional<Content> seasonContent = contentRepository
-                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(seriesTmdbId, seasonNumber, null, ContentType.SEASON);
-        List<DiaryEntry> seasonCandidates = seasonContent.isPresent()
-                ? diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(userId, seasonContent.get().getId(), simulatedMinCount)
-                : List.of();
-
+    private List<DiaryEntry> computeEpisodeDeletionImpact(UUID userId, String seriesTmdbId, Integer seasonNumber) {
+        List<DiaryEntry> seasonCandidates = computeSeasonRetractionCandidates(userId, seriesTmdbId, seasonNumber);
         if (seasonCandidates.isEmpty()) {
             return List.of();
         }
