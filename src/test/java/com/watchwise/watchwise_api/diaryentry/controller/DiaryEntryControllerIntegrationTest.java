@@ -36,6 +36,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
@@ -675,7 +676,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isCreated());
 
         User entity = userRepository.findById(user.id()).orElseThrow();
-        java.util.List<DiaryEntry> entries = diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)).getContent();
+        List<DiaryEntry> entries = diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)).getContent();
 
         assertThat(entries).hasSize(1);
     }
@@ -745,7 +746,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn();
 
-        java.util.List<Integer> seasonWatchNumbers = JsonPath.read(
+        List<Integer> seasonWatchNumbers = JsonPath.read(
                 result.getResponse().getContentAsString(), "$.content[?(@.content.type=='SEASON')].watchNumber");
         assertThat(seasonWatchNumbers).containsExactly(1);
     }
@@ -765,7 +766,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(4))
                 .andReturn();
 
-        java.util.List<Integer> seasonWatchNumbers = JsonPath.read(
+        List<Integer> seasonWatchNumbers = JsonPath.read(
                 result.getResponse().getContentAsString(), "$.content[?(@.content.type=='SEASON')].watchNumber");
         assertThat(seasonWatchNumbers).containsExactlyInAnyOrder(1, 2);
     }

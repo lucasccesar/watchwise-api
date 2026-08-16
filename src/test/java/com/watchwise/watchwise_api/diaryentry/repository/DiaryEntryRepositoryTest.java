@@ -25,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -187,7 +188,7 @@ class DiaryEntryRepositoryTest {
         DiaryEntry secondWatch = diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, 2));
         entityManager.clear();
 
-        java.util.List<DiaryEntry> result = diaryEntryRepository
+        List<DiaryEntry> result = diaryEntryRepository
                 .findByUserIdAndContentIdAndWatchNumberGreaterThan(lucas.getId(), fightClub.getId(), 1);
 
         assertThat(result).extracting(DiaryEntry::getId).containsExactly(secondWatch.getId());
@@ -200,7 +201,7 @@ class DiaryEntryRepositoryTest {
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
         entityManager.clear();
 
-        java.util.List<DiaryEntry> result = diaryEntryRepository
+        List<DiaryEntry> result = diaryEntryRepository
                 .findByUserIdAndContentIdAndWatchNumberGreaterThan(lucas.getId(), fightClub.getId(), 1);
 
         assertThat(result).isEmpty();
