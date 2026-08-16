@@ -24,6 +24,8 @@ public interface UserService {
 
     UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO);
 
+    boolean willChangeCredentials(UUID id, PatchUserDTO patchUserDTO);
+
     UserResponseDTO login(LoginUserDTO loginUserDTO);
 
     Optional<UserResponseDTO> findByEmail(String email);

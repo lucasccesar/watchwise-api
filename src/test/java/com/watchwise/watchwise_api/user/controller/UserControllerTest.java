@@ -214,6 +214,7 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Not Interact With AttemptLockout - When Patch Does Not Touch Password Or Email")
     void shouldNotInteractWithAttemptLockoutWhenPatchDoesNotTouchPasswordOrEmail() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null, null);
+        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(false);
         when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
@@ -222,9 +223,22 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("[updateCurrentUser] Should Check Lockout Before Updating - When Password Is Provided")
-    void shouldCheckLockoutBeforeUpdatingWhenPasswordIsProvided() {
+    @DisplayName("[updateCurrentUser] Should Not Interact With AttemptLockout - When Email Is Provided But Unchanged")
+    void shouldNotInteractWithAttemptLockoutWhenEmailIsProvidedButUnchanged() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "john.doe@email.com", null, null, null, null, null);
+        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(false);
+        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+
+        userController.updateCurrentUser(patchUserDTO);
+
+        verifyNoInteractions(attemptLockout);
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Check Lockout Before Updating - When Credentials Will Change")
+    void shouldCheckLockoutBeforeUpdatingWhenCredentialsWillChange() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "CurrentPass1");
+        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
         when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
@@ -236,23 +250,10 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("[updateCurrentUser] Should Check Lockout Before Updating - When Email Is Provided")
-    void shouldCheckLockoutBeforeUpdatingWhenEmailIsProvided() {
-        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new@email.com", null, null, null, null, "CurrentPass1");
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
-
-        userController.updateCurrentUser(patchUserDTO);
-
-        InOrder order = inOrder(attemptLockout, userService);
-        order.verify(attemptLockout).checkAllowed(any());
-        order.verify(userService).updateUser(currentUserId, patchUserDTO);
-        verify(attemptLockout).recordSuccess(any());
-    }
-
-    @Test
-    @DisplayName("[updateCurrentUser] Should Build Lockout Key From Action And UserId - When Password Is Provided")
-    void shouldBuildLockoutKeyFromActionAndUserIdWhenPasswordIsProvided() {
+    @DisplayName("[updateCurrentUser] Should Build Lockout Key From Action And UserId - When Credentials Will Change")
+    void shouldBuildLockoutKeyFromActionAndUserIdWhenCredentialsWillChange() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "CurrentPass1");
+        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
         when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
@@ -261,9 +262,10 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("[updateCurrentUser] Should Record Failure And Rethrow - When Password Provided And Service Throws UnauthorizedException")
-    void shouldRecordFailureAndRethrowWhenPasswordProvidedAndServiceThrowsUnauthorizedException() {
+    @DisplayName("[updateCurrentUser] Should Record Failure And Rethrow - When Credentials Will Change And Service Throws UnauthorizedException")
+    void shouldRecordFailureAndRethrowWhenCredentialsWillChangeAndServiceThrowsUnauthorizedException() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "WrongCurrentPass1");
+        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
         when(userService.updateUser(currentUserId, patchUserDTO)).thenThrow(new UnauthorizedException("Invalid password"));
 
         assertThatThrownBy(() -> userController.updateCurrentUser(patchUserDTO))
@@ -274,9 +276,22 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("[updateCurrentUser] Should Throw TooManyRequestsException And Not Call Service - When Password Provided And Rate Limited")
-    void shouldThrowTooManyRequestsExceptionAndNotCallServiceWhenPasswordProvidedAndRateLimited() {
+    @DisplayName("[updateCurrentUser] Should Not Record Success - When Email Is Provided But Unchanged")
+    void shouldNotRecordSuccessWhenEmailIsProvidedButUnchanged() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "john.doe@email.com", null, null, null, null, null);
+        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(false);
+        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+
+        userController.updateCurrentUser(patchUserDTO);
+
+        verify(attemptLockout, never()).recordSuccess(any());
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Throw TooManyRequestsException And Not Call Service - When Credentials Will Change And Rate Limited")
+    void shouldThrowTooManyRequestsExceptionAndNotCallServiceWhenCredentialsWillChangeAndRateLimited() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "CurrentPass1");
+        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
         doThrow(new TooManyRequestsException("Too many attempts. Try again later."))
                 .when(attemptLockout).checkAllowed(any());
 

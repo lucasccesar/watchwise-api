@@ -74,13 +74,16 @@ public class UserServiceImpl implements UserService {
         }
     }
 
-    private void applyPatch(User user, PatchUserDTO patchUserDTO) {
-        String newEmail = patchUserDTO.email() != null ? patchUserDTO.email().trim().toLowerCase() : null;
-        boolean changesEmail = newEmail != null && !newEmail.equals(user.getEmail());
-        boolean changesPassword = patchUserDTO.password() != null
-                && !passwordEncoder.matches(patchUserDTO.password(), user.getPassword());
+    @Override
+    public boolean willChangeCredentials(UUID id, PatchUserDTO patchUserDTO) {
+        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
+        return resolveCredentialChanges(user, patchUserDTO).touchesCredentials();
+    }
 
-        if (changesEmail || changesPassword) {
+    private void applyPatch(User user, PatchUserDTO patchUserDTO) {
+        CredentialChanges credentialChanges = resolveCredentialChanges(user, patchUserDTO);
+
+        if (credentialChanges.touchesCredentials()) {
             requireCurrentPassword(user, patchUserDTO.currentPassword());
         }
 
@@ -91,11 +94,11 @@ public class UserServiceImpl implements UserService {
             }
         }
 
-        if (changesEmail) {
-            user.setEmail(newEmail);
+        if (credentialChanges.changesEmail()) {
+            user.setEmail(credentialChanges.newEmail());
         }
 
-        if (changesPassword) {
+        if (credentialChanges.changesPassword()) {
             user.setPassword(passwordEncoder.encode(patchUserDTO.password()));
         }
 
@@ -118,6 +121,20 @@ public class UserServiceImpl implements UserService {
         }
         if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
             throw new UnauthorizedException("Invalid password");
+        }
+    }
+
+    private CredentialChanges resolveCredentialChanges(User user, PatchUserDTO patchUserDTO) {
+        String newEmail = patchUserDTO.email() != null ? patchUserDTO.email().trim().toLowerCase() : null;
+        boolean changesEmail = newEmail != null && !newEmail.equals(user.getEmail());
+        boolean changesPassword = patchUserDTO.password() != null
+                && !passwordEncoder.matches(patchUserDTO.password(), user.getPassword());
+        return new CredentialChanges(newEmail, changesEmail, changesPassword);
+    }
+
+    private record CredentialChanges(String newEmail, boolean changesEmail, boolean changesPassword) {
+        boolean touchesCredentials() {
+            return changesEmail || changesPassword;
         }
     }
 

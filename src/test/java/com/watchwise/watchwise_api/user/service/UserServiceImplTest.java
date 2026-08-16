@@ -839,6 +839,80 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[willChangeCredentials] Should Throw NotFoundException - When User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenCheckingCredentialChangesForUserThatDoesNotExist() {
+        UUID id = UUID.randomUUID();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.willChangeCredentials(id, patchUserDTO))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+    }
+
+    @Test
+    @DisplayName("[willChangeCredentials] Should Return False - When No Field Is Provided")
+    void shouldReturnFalseWhenCheckingCredentialChangesWithNoFieldProvided() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+
+        boolean result = userService.willChangeCredentials(id, patchUserDTO);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    @DisplayName("[willChangeCredentials] Should Return False - When Provided Email Matches Current Email")
+    void shouldReturnFalseWhenCheckingCredentialChangesWithEmailMatchingCurrentEmail() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  " + savedUser.getEmail().toUpperCase() + "  ", null, null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+
+        boolean result = userService.willChangeCredentials(id, patchUserDTO);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    @DisplayName("[willChangeCredentials] Should Return True - When Provided Email Differs From Current Email")
+    void shouldReturnTrueWhenCheckingCredentialChangesWithEmailDifferentFromCurrentEmail() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+
+        boolean result = userService.willChangeCredentials(id, patchUserDTO);
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    @DisplayName("[willChangeCredentials] Should Return False - When Provided Password Matches Current Hash")
+    void shouldReturnFalseWhenCheckingCredentialChangesWithPasswordMatchingCurrentHash() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "SamePassword123", null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("SamePassword123", savedUser.getPassword())).thenReturn(true);
+
+        boolean result = userService.willChangeCredentials(id, patchUserDTO);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    @DisplayName("[willChangeCredentials] Should Return True - When Provided Password Differs From Current Hash")
+    void shouldReturnTrueWhenCheckingCredentialChangesWithPasswordDifferentFromCurrentHash() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
+
+        boolean result = userService.willChangeCredentials(id, patchUserDTO);
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
     @DisplayName("[login] Should Return UserResponseDTO - When Credentials Are Valid Using Email")
     void shouldReturnUserResponseDtoWhenCredentialsAreValidUsingEmail() {
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");

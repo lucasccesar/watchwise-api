@@ -80,7 +80,7 @@ public class UserController {
     @PatchMapping("/me")
     public ResponseEntity<UserResponseDTO> updateCurrentUser(@Valid @RequestBody PatchUserDTO patchUserDTO) {
         UUID currentUserId = getCurrentUserId();
-        boolean touchesCredentials = patchUserDTO.password() != null || patchUserDTO.email() != null;
+        boolean touchesCredentials = userService.willChangeCredentials(currentUserId, patchUserDTO);
         String lockoutKey = lockoutKey("patch-account", currentUserId);
 
         if (touchesCredentials) {

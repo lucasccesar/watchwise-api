@@ -398,6 +398,35 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[updateCurrentUser] Should Not Reset The Lockout Counter - When The Same Current Email Is Resent Between Failed Password Attempts")
+    void shouldNotResetTheLockoutCounterWhenTheSameCurrentEmailIsResentBetweenFailedPasswordAttempts() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("resendemailuser", "resendemailuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        for (int i = 0; i < 4; i++) {
+            mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                            "{ \"password\": \"NewPassword123\", \"currentPassword\": \"WrongPassword123\" }"))
+                    .andExpect(status().isUnauthorized());
+
+            mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                            "{ \"email\": \"resendemailuser@email.com\" }"))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"WrongPassword123\" }"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Return Forbidden - When Csrf Token Is Missing")
     void shouldReturnForbiddenWhenCsrfTokenIsMissing() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("nocsrfuser", "nocsrfuser@email.com"))
