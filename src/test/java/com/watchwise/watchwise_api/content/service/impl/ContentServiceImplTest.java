@@ -563,6 +563,74 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Clear Previous Season Finale - When Creating A New Episode Marked As The Season Finale")
+    void shouldClearPreviousSeasonFinaleWhenCreatingANewEpisodeMarkedAsTheSeasonFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 11, true, null);
+        Content previousFinale = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(10).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(1).episodeNumber(11).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(11).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), null, ContentType.EPISODE, "200", 1, 11, true, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 11, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("200", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(previousFinale));
+        when(contentRepository.saveAndFlush(previousFinale)).thenReturn(previousFinale);
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(previousFinale.getIsSeasonFinale()).isFalse();
+        assertThat(previousFinale.getUpdatedAt()).isNotNull();
+        verify(contentRepository).saveAndFlush(previousFinale);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Not Clear Previous Season Finale - When New Episode Is Earlier Than The Current Finale")
+    void shouldNotClearPreviousSeasonFinaleWhenNewEpisodeIsEarlierThanTheCurrentFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 5, true, null);
+        Content laterFinale = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(10).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(1).episodeNumber(5).type(ContentType.EPISODE).isSeasonFinale(true).build();
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 5, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("200", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(laterFinale));
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped))
+                .thenThrow(buildDataIntegrityViolationException("uq_contents_season_finale"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Another episode is already marked as this season's finale");
+
+        verify(contentRepository, never()).saveAndFlush(laterFinale);
+        assertThat(laterFinale.getIsSeasonFinale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Not Look Up Previous Season Finale - When New Episode Is Not Marked As The Season Finale")
+    void shouldNotLookUpPreviousSeasonFinaleWhenNewEpisodeIsNotMarkedAsTheSeasonFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 5, null, null);
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(1).episodeNumber(5).type(ContentType.EPISODE).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(5).type(ContentType.EPISODE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), null, ContentType.EPISODE, "200", 1, 5, null, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 5, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        contentService.getOrCreateReference(dto);
+
+        verify(contentRepository, never()).findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(any(), any(), any());
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Return Existing ContentRefDTO - When Episode Reference Already Exists")
     void shouldReturnExistingContentRefDtoWhenEpisodeReferenceAlreadyExists() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 3, null, null);

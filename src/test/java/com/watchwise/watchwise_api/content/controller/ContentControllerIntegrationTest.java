@@ -192,16 +192,39 @@ class ContentControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getOrCreateReference] Should Return Conflict - When Another Episode Is Already Marked As The Season Finale")
-    void shouldReturnConflictWhenAnotherEpisodeIsAlreadyMarkedAsTheSeasonFinale() throws Exception {
+    @DisplayName("[getOrCreateReference] Should Return Conflict - When Another Episode Is Already Marked As The Season Finale And The New One Is Not Later")
+    void shouldReturnConflictWhenAnotherEpisodeIsAlreadyMarkedAsTheSeasonFinaleAndTheNewOneIsNotLater() throws Exception {
         mockMvc.perform(referenceRequest(
                         "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 8, \"isSeasonFinale\": true }"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(referenceRequest(
-                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 9, \"isSeasonFinale\": true }"))
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 5, \"isSeasonFinale\": true }"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("Another episode is already marked as this season's finale"));
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Transfer IsSeasonFinale To New Episode - When A Previous Episode Already Had It")
+    void shouldTransferIsSeasonFinaleToNewEpisodeWhenAPreviousEpisodeAlreadyHadIt() throws Exception {
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 8, \"isSeasonFinale\": true }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 11, \"isSeasonFinale\": true }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSeasonFinale").value(true));
+
+        Content oldEpisode = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, 8, ContentType.EPISODE)
+                .orElseThrow();
+        Content newEpisode = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, 11, ContentType.EPISODE)
+                .orElseThrow();
+
+        assertThat(oldEpisode.getIsSeasonFinale()).isFalse();
+        assertThat(newEpisode.getIsSeasonFinale()).isTrue();
     }
 
     @Test

@@ -41,6 +41,9 @@ public class ContentServiceImpl implements ContentService {
                 if (normalized.type() == ContentType.SEASON && Boolean.TRUE.equals(normalized.isSeriesFinale())) {
                     clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
                 }
+                if (normalized.type() == ContentType.EPISODE && Boolean.TRUE.equals(normalized.isSeasonFinale())) {
+                    clearPreviousSeasonFinale(normalized.seriesTmdbId(), normalized.seasonNumber(), normalized.episodeNumber());
+                }
 
                 Content content = contentMapper.contentRefCreationDtoToContent(normalized);
                 LocalDateTime now = LocalDateTime.now();
@@ -75,6 +78,16 @@ public class ContentServiceImpl implements ContentService {
                 .filter(previous -> previous.getSeasonNumber() < newSeasonNumber)
                 .ifPresent(previous -> {
                     previous.setIsSeriesFinale(false);
+                    previous.setUpdatedAt(LocalDateTime.now());
+                    contentRepository.saveAndFlush(previous);
+                });
+    }
+
+    private void clearPreviousSeasonFinale(String seriesTmdbId, Integer seasonNumber, Integer newEpisodeNumber) {
+        contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE)
+                .filter(previous -> previous.getEpisodeNumber() < newEpisodeNumber)
+                .ifPresent(previous -> {
+                    previous.setIsSeasonFinale(false);
                     previous.setUpdatedAt(LocalDateTime.now());
                     contentRepository.saveAndFlush(previous);
                 });
