@@ -83,7 +83,22 @@ class SecurityConfigIntegrationTest {
         String accessToken = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
 
         mockMvc.perform(get(PROTECTED_ROUTE).cookie(new Cookie(CookieUtil.ACCESS_TOKEN_COOKIE, accessToken)))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.path").value(PROTECTED_ROUTE));
+    }
+
+    @Test
+    @DisplayName("[globalExceptionHandler] Should Return ApiError Body - When Request Method Is Not Supported For The Path")
+    void shouldReturnApiErrorBodyWhenRequestMethodIsNotSupportedForThePath() throws Exception {
+        mockMvc.perform(get("/auth/logout"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(405))
+                .andExpect(jsonPath("$.error").value("Method Not Allowed"))
+                .andExpect(jsonPath("$.path").value("/auth/logout"));
     }
 
     @Test
