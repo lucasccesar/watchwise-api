@@ -513,6 +513,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         int minCount = Integer.MAX_VALUE;
         for (int episode = 1; episode <= finaleEpisodeNumber; episode++) {
             minCount = Math.min(minCount, countsByEpisode.getOrDefault(episode, 0L).intValue());
+            if (minCount == 0) {
+                break;
+            }
         }
         return minCount;
     }
@@ -559,6 +562,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         int minMax = Integer.MAX_VALUE;
         for (int season = 1; season <= finaleSeasonNumber; season++) {
             minMax = Math.min(minMax, maxBySeason.getOrDefault(season, 0));
+            if (minMax == 0) {
+                break;
+            }
         }
         return minMax;
     }
