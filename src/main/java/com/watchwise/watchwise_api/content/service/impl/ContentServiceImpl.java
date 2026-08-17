@@ -36,12 +36,12 @@ public class ContentServiceImpl implements ContentService {
             return contentMapper.contentToContentRefDto(existing.get());
         }
 
-        if (normalized.type() == ContentType.SEASON && Boolean.TRUE.equals(normalized.isSeriesFinale())) {
-            clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
-        }
-
         try {
             Content saved = newTransactionExecutor.runInNewTransaction(() -> {
+                if (normalized.type() == ContentType.SEASON && Boolean.TRUE.equals(normalized.isSeriesFinale())) {
+                    clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
+                }
+
                 Content content = contentMapper.contentRefCreationDtoToContent(normalized);
                 LocalDateTime now = LocalDateTime.now();
                 content.setCreatedAt(now);

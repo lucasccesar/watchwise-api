@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -486,6 +487,36 @@ class ContentServiceImplTest {
         assertThat(result).isEqualTo(responseDto);
         assertThat(previousFinale.getIsSeriesFinale()).isFalse();
         assertThat(previousFinale.getUpdatedAt()).isNotNull();
+        verify(contentRepository).saveAndFlush(previousFinale);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Defer Clearing The Previous Series Finale Until The Same REQUIRES_NEW Transaction As The New Content - When Creating A New Season Marked As The Series Finale")
+    void shouldDeferClearingThePreviousSeriesFinaleUntilTheSameTransactionAsTheNewContentWhenCreatingANewSeasonMarkedAsTheSeriesFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 6, null, null, true);
+        Content previousFinale = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(5).type(ContentType.SEASON).isSeriesFinale(true).build();
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(6).type(ContentType.SEASON).isSeriesFinale(true).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(6).type(ContentType.SEASON).isSeriesFinale(true).build();
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 6, null, ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("200", ContentType.SEASON))
+                .thenReturn(Optional.of(previousFinale));
+        when(contentRepository.saveAndFlush(previousFinale)).thenReturn(previousFinale);
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+
+        ArgumentCaptor<Supplier<Content>> supplierCaptor = ArgumentCaptor.forClass(Supplier.class);
+        doReturn(saved).when(newTransactionExecutor).runInNewTransaction(supplierCaptor.capture());
+
+        contentService.getOrCreateReference(dto);
+
+        assertThat(previousFinale.getIsSeriesFinale()).isTrue();
+        verify(contentRepository, never()).saveAndFlush(previousFinale);
+
+        supplierCaptor.getValue().get();
+
+        assertThat(previousFinale.getIsSeriesFinale()).isFalse();
         verify(contentRepository).saveAndFlush(previousFinale);
     }
 
