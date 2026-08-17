@@ -12,7 +12,7 @@ public class RefreshTokenCleanupJob {
     private final RefreshTokenService refreshTokenService;
 
     @Scheduled(cron = "${app.refresh-token-cleanup.cron}")
-    public void cleanupExpiredAndRevokedTokens() {
-        refreshTokenService.cleanupExpiredAndRevokedTokens();
+    public void cleanupExpiredTokens() {
+        refreshTokenService.cleanupExpiredTokens();
     }
 }

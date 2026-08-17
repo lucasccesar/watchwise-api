@@ -20,10 +20,10 @@ class RefreshTokenCleanupJobTest {
     private RefreshTokenCleanupJob refreshTokenCleanupJob;
 
     @Test
-    @DisplayName("[cleanupExpiredAndRevokedTokens] Should Delegate To RefreshTokenService - When Called")
+    @DisplayName("[cleanupExpiredTokens] Should Delegate To RefreshTokenService - When Called")
     void shouldDelegateToRefreshTokenServiceWhenCalled() {
-        refreshTokenCleanupJob.cleanupExpiredAndRevokedTokens();
+        refreshTokenCleanupJob.cleanupExpiredTokens();
 
-        verify(refreshTokenService).cleanupExpiredAndRevokedTokens();
+        verify(refreshTokenService).cleanupExpiredTokens();
     }
 }

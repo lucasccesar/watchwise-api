@@ -34,6 +34,9 @@ public class RefreshToken implements Persistable<UUID> {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Version
+    private Long version;
+
     @Transient
     @Builder.Default
     private boolean isNew = true;

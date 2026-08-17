@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -149,7 +150,7 @@ class RefreshTokenServiceImplTest {
         assertThatThrownBy(() -> refreshTokenService.rotateRefreshToken(token))
                 .isInstanceOf(UnauthorizedException.class);
 
-        verify(refreshTokenRepository, never()).save(any());
+        verify(refreshTokenRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -207,7 +208,35 @@ class RefreshTokenServiceImplTest {
 
         assertThat(result).isEqualTo(new RefreshedTokens(newAccessToken, newRefreshToken));
         assertThat(storedToken.getRevoked()).isTrue();
-        verify(refreshTokenRepository, times(2)).save(any(RefreshToken.class));
+        verify(refreshTokenRepository).saveAndFlush(storedToken);
+        verify(refreshTokenRepository).save(any(RefreshToken.class));
+    }
+
+    @Test
+    @DisplayName("[rotateRefreshToken] Should Revoke All Refresh Tokens For The Owner And Throw UnauthorizedException - When The Same Token Is Rotated Concurrently")
+    void shouldRevokeAllRefreshTokensForTheOwnerAndThrowUnauthorizedExceptionWhenTheSameTokenIsRotatedConcurrently() {
+        String token = "valid-token";
+        UUID jti = UUID.randomUUID();
+        RefreshToken storedToken = RefreshToken.builder()
+                .id(jti)
+                .user(user)
+                .revoked(false)
+                .expiresAt(LocalDateTime.now().plusDays(7))
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(true);
+        when(jwtService.extractJti(token)).thenReturn(jti);
+        when(refreshTokenRepository.findById(jti)).thenReturn(Optional.of(storedToken));
+        when(refreshTokenRepository.saveAndFlush(storedToken))
+                .thenThrow(new org.springframework.orm.ObjectOptimisticLockingFailureException(RefreshToken.class, jti));
+        when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
+
+        assertThatThrownBy(() -> refreshTokenService.rotateRefreshToken(token))
+                .isInstanceOf(UnauthorizedException.class);
+
+        verify(refreshTokenRepository).revokeAllByUserId(userId);
+        verify(jwtService, never()).generateToken(any(), eq(TokenType.ACCESS));
     }
 
     @Test
@@ -221,15 +250,15 @@ class RefreshTokenServiceImplTest {
     }
 
     @Test
-    @DisplayName("[cleanupExpiredAndRevokedTokens] Should Delegate To Repository With The Current Time - When Called")
-    void shouldDelegateToRepositoryWithTheCurrentTimeWhenCleanupExpiredAndRevokedTokensCalled() {
-        when(refreshTokenRepository.deleteExpiredOrRevoked(any(LocalDateTime.class))).thenReturn(3);
+    @DisplayName("[cleanupExpiredTokens] Should Delegate To Repository With The Current Time - When Called")
+    void shouldDelegateToRepositoryWithTheCurrentTimeWhenCleanupExpiredTokensCalled() {
+        when(refreshTokenRepository.deleteExpired(any(LocalDateTime.class))).thenReturn(3);
 
-        int result = refreshTokenService.cleanupExpiredAndRevokedTokens();
+        int result = refreshTokenService.cleanupExpiredTokens();
 
         assertThat(result).isEqualTo(3);
         ArgumentCaptor<LocalDateTime> nowCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
-        verify(refreshTokenRepository).deleteExpiredOrRevoked(nowCaptor.capture());
+        verify(refreshTokenRepository).deleteExpired(nowCaptor.capture());
         assertThat(nowCaptor.getValue()).isCloseTo(LocalDateTime.now(), within(5, ChronoUnit.SECONDS));
     }
 

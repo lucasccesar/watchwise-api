@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -65,7 +66,12 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         }
 
         storedToken.setRevoked(true);
-        refreshTokenRepository.save(storedToken);
+        try {
+            refreshTokenRepository.saveAndFlush(storedToken);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            revokeAllRefreshTokens(storedToken.getUser().getId());
+            throw new UnauthorizedException("Invalid refresh token");
+        }
 
         User user = storedToken.getUser();
         String newAccessToken = jwtService.generateToken(user.getId(), TokenType.ACCESS);
@@ -95,7 +101,6 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     public void revokeAllRefreshTokens(UUID userId) {
-        // REQUIRES_NEW so this survives rotateRefreshToken's later rollback-and-throw on reuse detection.
         TransactionTemplate requiresNewTransaction = new TransactionTemplate(transactionManager);
         requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         requiresNewTransaction.executeWithoutResult(status -> refreshTokenRepository.revokeAllByUserId(userId));
@@ -103,8 +108,8 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     @Transactional
-    public int cleanupExpiredAndRevokedTokens() {
-        return refreshTokenRepository.deleteExpiredOrRevoked(LocalDateTime.now());
+    public int cleanupExpiredTokens() {
+        return refreshTokenRepository.deleteExpired(LocalDateTime.now());
     }
 
     private LocalDateTime toLocalDateTime(java.util.Date date) {

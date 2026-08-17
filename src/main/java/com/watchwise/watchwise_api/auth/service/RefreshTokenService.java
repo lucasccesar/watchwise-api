@@ -14,6 +14,6 @@ public interface RefreshTokenService {
 
     void revokeAllRefreshTokens(UUID userId);
 
-    int cleanupExpiredAndRevokedTokens();
+    int cleanupExpiredTokens();
 
 }
