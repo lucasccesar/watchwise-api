@@ -171,6 +171,14 @@ class DiaryEntryControllerIntegrationTest {
                 .header("X-XSRF-TOKEN", actor.csrfToken().getValue());
     }
 
+    private MockHttpServletRequestBuilder bulkRequest(RegisteredUser actor, String body) {
+        return post("/diary/bulk")
+                .cookie(actor.accessToken(), actor.csrfToken())
+                .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
     private String creationBody(String tmdbId, Integer score) {
         String scoreField = score == null ? "" : (", \"score\": " + score);
         return """
@@ -492,6 +500,30 @@ class DiaryEntryControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(creationBody("550", null)))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When EpisodeNumber Is Zero")
+    void shouldReturnBadRequestAndNotPersistWhenEpisodeNumberIsZero() throws Exception {
+        RegisteredUser user = registerUser("creatediaryepisodezero");
+
+        mockMvc.perform(createRequest(user, episodeBody("999", 1, 0, true, null)))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+        assertThat(contentRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When SeasonNumber Is Negative")
+    void shouldReturnBadRequestAndNotPersistWhenSeasonNumberIsNegative() throws Exception {
+        RegisteredUser user = registerUser("creatediaryseasonnegative");
+
+        mockMvc.perform(createRequest(user, episodeBody("999", -1, 1, true, null)))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+        assertThat(contentRepository.findAll()).isEmpty();
     }
 
     @Test
@@ -962,8 +994,126 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getDeletionImpact] Should List The Season Entry With HasReview True - When It Was Manually Edited With A Comment")
-    void shouldListTheSeasonEntryWithHasReviewTrueWhenItWasManuallyEditedWithAComment() throws Exception {
+    @DisplayName("[createDiaryEntriesInBulk] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForBulk() throws Exception {
+        RegisteredUser user = registerUser("bulknoauth");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "910", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 2
+                }
+                """;
+
+        mockMvc.perform(post("/diary/bulk")
+                        .cookie(user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingForBulk() throws Exception {
+        RegisteredUser user = registerUser("bulknocsrf");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "911", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 2
+                }
+                """;
+
+        mockMvc.perform(post("/diary/bulk")
+                        .cookie(user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isForbidden());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When The Season Has No Known Finale And FinaleEpisodeNumber Is Absent")
+    void shouldReturnBadRequestAndNotPersistWhenTheSeasonHasNoKnownFinaleAndFinaleEpisodeNumberIsAbsent() throws Exception {
+        RegisteredUser user = registerUser("bulkmissingfinale");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "912", "seasonNumber": 1 }
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value("finaleEpisodeNumber is required when season 1 has no known finale episode yet"));
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When FinaleEpisodeNumber Is Zero")
+    void shouldReturnBadRequestAndNotPersistWhenFinaleEpisodeNumberIsZero() throws Exception {
+        RegisteredUser user = registerUser("bulkfinalezero");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "913", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 0
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When The Content Type Is MOVIE")
+    void shouldReturnBadRequestAndNotPersistWhenTheContentTypeIsMovieOnBulk() throws Exception {
+        RegisteredUser user = registerUser("bulkmovietype");
+        String body = """
+                {
+                    "content": { "type": "MOVIE", "tmdbId": "550" }
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Bulk logging only supports content of type SEASON or SERIES"));
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getDeletionImpact] Should Return Empty WouldDelete - When The Only Impacted Entry Was Manually Edited And OverrideProtectedEntries Is Absent")
+    void shouldReturnEmptyWouldDeleteWhenTheOnlyImpactedEntryWasManuallyEditedAndOverrideProtectedEntriesIsAbsent() throws Exception {
+        RegisteredUser user = registerUser("deletionimpactdefault");
+
+        mockMvc.perform(createRequest(user, episodeBody("2001", 1, 1, true, false)))
+                .andExpect(status().isCreated());
+
+        MvcResult diaryResult = mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andReturn();
+
+        List<String> seasonEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SEASON')].id");
+        List<String> episodeEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'EPISODE')].id");
+
+        mockMvc.perform(updateRequest(user, UUID.fromString(seasonEntryIds.get(0)), updateBody("comment", "Great season!")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/diary/" + episodeEntryIds.get(0) + "/deletion-impact")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.wouldDelete.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getDeletionImpact] Should List The Season Entry With HasReview True And AutoGenerated False - When It Was Manually Edited And OverrideProtectedEntries Is True")
+    void shouldListTheSeasonEntryWithHasReviewTrueAndAutoGeneratedFalseWhenItWasManuallyEditedAndOverrideProtectedEntriesIsTrue() throws Exception {
         RegisteredUser user = registerUser("deletionimpactuser");
 
         mockMvc.perform(createRequest(user, episodeBody("2001", 1, 1, true, false)))
@@ -980,21 +1130,19 @@ class DiaryEntryControllerIntegrationTest {
         List<String> episodeEntryIds = JsonPath.read(diaryResult.getResponse().getContentAsString(), "$.content[?(@.content.type == 'EPISODE')].id");
         String episodeEntryId = episodeEntryIds.get(0);
 
-        String patchBody = """
-                {
-                    "comment": "Great season!"
-                }
-                """;
-
-        mockMvc.perform(updateRequest(user, UUID.fromString(seasonEntryId), patchBody))
+        mockMvc.perform(updateRequest(user, UUID.fromString(seasonEntryId), updateBody("comment", "Great season!")))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/diary/" + episodeEntryId + "/deletion-impact")
+        mockMvc.perform(get("/diary/" + episodeEntryId + "/deletion-impact?overrideProtectedEntries=true")
                         .cookie(user.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.wouldDelete.length()").value(1))
+                .andExpect(jsonPath("$.wouldDelete[0].id").value(seasonEntryId))
                 .andExpect(jsonPath("$.wouldDelete[0].type").value("SEASON"))
+                .andExpect(jsonPath("$.wouldDelete[0].autoGenerated").value(false))
                 .andExpect(jsonPath("$.wouldDelete[0].hasReview").value(true));
+
+        assertThat(diaryEntryRepository.findById(UUID.fromString(seasonEntryId))).isPresent();
     }
 
     @Test
@@ -1130,5 +1278,79 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(5));
         assertThat(diaryEntryRepository.findById(UUID.fromString(seasonTwoEntryId))).isPresent();
         assertThat(diaryEntryRepository.findById(UUID.fromString(seriesEntryId))).isPresent();
+    }
+
+    @Test
+    @DisplayName("[getDeletionImpact] Should Include Both The Season And The Series Entry - When Previewing The Deletion Of The Episode That Sustains Both")
+    void shouldIncludeBothTheSeasonAndTheSeriesEntryWhenPreviewingTheDeletionOfTheEpisodeThatSustainsBoth() throws Exception {
+        RegisteredUser user = registerUser("episodeseriespreview");
+
+        mockMvc.perform(createRequest(user, episodeBody("3020", 1, 1, true, false)))
+                .andExpect(status().isCreated());
+        MvcResult seasonTwoEpisode = mockMvc.perform(createRequest(user, episodeBody("3020", 2, 1, true, true)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String seasonTwoEpisodeId = JsonPath.read(seasonTwoEpisode.getResponse().getContentAsString(), "$.entry.id");
+
+        MvcResult diaryBeforePreview = mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(5))
+                .andReturn();
+
+        List<String> seasonTwoEntryIds = JsonPath.read(diaryBeforePreview.getResponse().getContentAsString(),
+                "$.content[?(@.content.type == 'SEASON' && @.content.seasonNumber == 2)].id");
+        List<String> seriesEntryIds = JsonPath.read(
+                diaryBeforePreview.getResponse().getContentAsString(), "$.content[?(@.content.type == 'SERIES')].id");
+
+        mockMvc.perform(get("/diary/" + seasonTwoEpisodeId + "/deletion-impact")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.wouldDelete.length()").value(2))
+                .andExpect(jsonPath("$.wouldDelete[0].id").value(seasonTwoEntryIds.get(0)))
+                .andExpect(jsonPath("$.wouldDelete[0].type").value("SEASON"))
+                .andExpect(jsonPath("$.wouldDelete[0].autoGenerated").value(true))
+                .andExpect(jsonPath("$.wouldDelete[1].id").value(seriesEntryIds.get(0)))
+                .andExpect(jsonPath("$.wouldDelete[1].type").value("SERIES"))
+                .andExpect(jsonPath("$.wouldDelete[1].autoGenerated").value(true));
+
+        mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(5));
+    }
+
+    @Test
+    @DisplayName("[deleteDiaryEntry] Should Remove Exactly The Entries The Preview Listed - When The Previewed Episode Is Actually Deleted")
+    void shouldRemoveExactlyTheEntriesThePreviewListedWhenThePreviewedEpisodeIsActuallyDeleted() throws Exception {
+        RegisteredUser user = registerUser("previewmatchesdelete");
+
+        mockMvc.perform(createRequest(user, episodeBody("3030", 1, 1, true, false)))
+                .andExpect(status().isCreated());
+        MvcResult seasonTwoEpisode = mockMvc.perform(createRequest(user, episodeBody("3030", 2, 1, true, true)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String seasonTwoEpisodeId = JsonPath.read(seasonTwoEpisode.getResponse().getContentAsString(), "$.entry.id");
+
+        MvcResult preview = mockMvc.perform(get("/diary/" + seasonTwoEpisodeId + "/deletion-impact")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<String> previewedIds = JsonPath.read(preview.getResponse().getContentAsString(), "$.wouldDelete[*].id");
+
+        mockMvc.perform(deleteRequest(user, UUID.fromString(seasonTwoEpisodeId)))
+                .andExpect(status().isNoContent());
+
+        assertThat(previewedIds).hasSize(2);
+        for (String previewedId : previewedIds) {
+            assertThat(diaryEntryRepository.findById(UUID.fromString(previewedId))).isEmpty();
+        }
+
+        MvcResult diaryAfterDelete = mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andReturn();
+        List<String> remainingTypes = JsonPath.read(diaryAfterDelete.getResponse().getContentAsString(), "$.content[*].content.type");
+        assertThat(remainingTypes).containsExactlyInAnyOrder("EPISODE", "SEASON");
     }
 }
