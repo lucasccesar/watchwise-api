@@ -151,6 +151,33 @@ class FollowedPersonServiceImplTest {
     }
 
     @Test
+    @DisplayName("[followPerson] Should Throw BadRequestException - When PersonTmdbId Is Not Numeric")
+    void shouldThrowBadRequestExceptionWhenPersonTmdbIdIsNotNumericOnFollow() {
+        assertThatThrownBy(() -> followedPersonService.followPerson(userId, "abc"))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(followedPersonRepository, userRepository);
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Throw BadRequestException - When PersonTmdbId Exceeds 20 Digits")
+    void shouldThrowBadRequestExceptionWhenPersonTmdbIdExceedsTwentyDigitsOnFollow() {
+        assertThatThrownBy(() -> followedPersonService.followPerson(userId, "123456789012345678901"))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(followedPersonRepository, userRepository);
+    }
+
+    @Test
+    @DisplayName("[unfollowPerson] Should Throw BadRequestException - When PersonTmdbId Is Not Numeric")
+    void shouldThrowBadRequestExceptionWhenPersonTmdbIdIsNotNumericOnUnfollow() {
+        assertThatThrownBy(() -> followedPersonService.unfollowPerson(userId, "abc"))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(followedPersonRepository);
+    }
+
+    @Test
     @DisplayName("[unfollowPerson] Should Delete The Row - When It Exists")
     void shouldDeleteTheRowWhenItExists() {
         FollowedPerson followedPerson = FollowedPerson.builder()

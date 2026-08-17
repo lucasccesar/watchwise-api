@@ -146,6 +146,15 @@ class FollowedPersonControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[followPerson] Should Return BadRequest - When PersonTmdbId Is Not Numeric")
+    void shouldReturnBadRequestWhenPersonTmdbIdIsNotNumeric() throws Exception {
+        RegisteredUser user = registerUser("followpersonbadid");
+
+        mockMvc.perform(followPersonRequest(user, "not-a-number"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("[followPerson] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForFollow() throws Exception {
         RegisteredUser user = registerUser("followpersonnoauth");

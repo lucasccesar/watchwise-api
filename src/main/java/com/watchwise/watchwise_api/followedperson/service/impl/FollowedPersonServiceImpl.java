@@ -34,6 +34,8 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
 
     @Override
     public void followPerson(UUID userId, String personTmdbId) {
+        validatePersonTmdbId(personTmdbId);
+
         if (followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)) {
             return;
         }
@@ -56,8 +58,16 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
 
     @Override
     public void unfollowPerson(UUID userId, String personTmdbId) {
+        validatePersonTmdbId(personTmdbId);
+
         followedPersonRepository.findByUserIdAndPersonTmdbId(userId, personTmdbId)
                 .ifPresent(followedPersonRepository::delete);
+    }
+
+    private void validatePersonTmdbId(String personTmdbId) {
+        if (personTmdbId == null || !personTmdbId.matches("\\d{1,20}")) {
+            throw new BadRequestException("personTmdbId must be a numeric TMDB id up to 20 digits");
+        }
     }
 
     @Override
