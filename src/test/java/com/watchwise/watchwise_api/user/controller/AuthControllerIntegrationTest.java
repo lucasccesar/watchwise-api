@@ -257,6 +257,19 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[login] Should Resolve To The Username Match - When A Username Collides With A Different User's Email")
+    void shouldResolveToTheUsernameMatchWhenAUsernameCollidesWithADifferentUsersEmail() throws Exception {
+        mockMvc.perform(registerRequest("emailowner", "collision@email.com"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(registerRequest("collision@email.com", "usernameowner@email.com"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(loginRequest("collision@email.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("collision@email.com"));
+    }
+
+    @Test
     @DisplayName("[login] Should Return TooManyRequests - When Failed Attempts Reach The Configured Max")
     void shouldReturnTooManyRequestsWhenFailedAttemptsReachTheConfiguredMax() throws Exception {
         mockMvc.perform(registerRequest("ratelimituser", "ratelimituser@email.com"))

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.service.impl;
 
+import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
@@ -53,6 +54,9 @@ class UserServiceImplTest {
 
     @Mock
     private PasswordEncoder passwordEncoder;
+
+    @Mock
+    private RefreshTokenService refreshTokenService;
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -344,14 +348,35 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Username Is Only Whitespace")
+    void shouldThrowExceptionWhenUsernameIsOnlyWhitespace() {
+        assertThrows(BadRequestException.class,
+                () -> userService.getUsersByUsername("   ", 1, 10, true));
+
+        verifyNoInteractions(userRepository, userMapper);
+    }
+
+    @Test
     @DisplayName("[getUsersByUsername] Should Trim Username Before Query - When Username Has Surrounding Whitespace")
     void shouldTrimUsernameBeforeQueryWhenUsernameHasSurroundingWhitespace() {
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("john"), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("john"), anyString(), anyBoolean(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         userService.getUsersByUsername("  john  ", 1, 10, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq("john"), anyBoolean(), any(PageRequest.class));
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq("john"), anyString(), anyBoolean(), any(PageRequest.class));
+    }
+
+    @Test
+    @DisplayName("[getUsersByUsername] Should Escape LIKE Wildcards - When Username Contains Percent Or Underscore")
+    void shouldEscapeLikeWildcardsWhenUsernameContainsPercentOrUnderscore() {
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("50%_off"), anyString(), anyBoolean(), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        userService.getUsersByUsername("50%_off", 1, 10, true);
+
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(
+                eq("50%_off"), eq("50\\%\\_off"), anyBoolean(), any(PageRequest.class));
     }
 
     @Test
@@ -366,7 +391,7 @@ class UserServiceImplTest {
                 savedUser.getIsProfilePublic()
         );
 
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), anyBoolean(), any(PageRequest.class)))
                 .thenReturn(userPage);
         when(userMapper.userToUserPreviewDto(savedUser)).thenReturn(dto);
 
@@ -382,7 +407,7 @@ class UserServiceImplTest {
     void shouldReturnEmptyPage_whenNoUsersFound() {
         String username = "john";
 
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), anyBoolean(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         Page<UserPreviewDTO> result = userService.getUsersByUsername(username, 1, 10, true);
@@ -395,40 +420,40 @@ class UserServiceImplTest {
     @DisplayName("[getUsersByUsername] Should Set OnlyPublic True - When IsProfilePublic Is True")
     void shouldSetOnlyPublicTrue_whenIsProfilePublicIsTrue() {
         String username = "john";
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), eq(true), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(true), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         userService.getUsersByUsername(username, 1, 10, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), eq(true), any(PageRequest.class));
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(true), any(PageRequest.class));
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Set OnlyPublic False - When IsProfilePublic Is False")
     void shouldSetOnlyPublicFalse_whenIsProfilePublicIsFalse() {
         String username = "john";
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), eq(false), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         userService.getUsersByUsername(username, 1, 10, false);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), eq(false), any(PageRequest.class));
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class));
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Set OnlyPublic False - When IsProfilePublic Is Null")
     void shouldSetOnlyPublicFalse_whenIsProfilePublicIsNull() {
         String username = "john";
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), eq(false), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         userService.getUsersByUsername(username, 1, 10, null);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), eq(false), any(PageRequest.class));
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class));
     }
 
     private void stubRepositoryReturningEmptyPage() {
-        when(userRepository.findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
     }
 
@@ -439,7 +464,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", null, 10, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
     }
 
@@ -450,7 +475,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", 0, 10, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
     }
 
@@ -461,7 +486,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", 3, 10, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertEquals(2, pageRequestCaptor.getValue().getPageNumber());
     }
 
@@ -481,7 +506,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", 1, null, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
     }
 
@@ -492,7 +517,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", 1, 1001, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
     }
 
@@ -503,7 +528,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", 1, 25, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertEquals(25, pageRequestCaptor.getValue().getPageSize());
     }
 
@@ -514,7 +539,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", 1, 1000, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertEquals(1000, pageRequestCaptor.getValue().getPageSize());
     }
 
@@ -543,7 +568,7 @@ class UserServiceImplTest {
 
         userService.getUsersByUsername("john", 1, 10, true);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
         assertTrue(pageRequestCaptor.getValue().getSort().isUnsorted());
     }
 
@@ -692,6 +717,52 @@ class UserServiceImplTest {
 
         verify(userRepository).save(userCaptor.capture());
         assertThat(userCaptor.getValue().getPassword()).isEqualTo("newHashedPassword");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Revoke All Refresh Tokens - When Password Changes")
+    void shouldRevokeAllRefreshTokensWhenPasswordChanges() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "Password123");
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(passwordEncoder.encode("NewPassword123")).thenReturn("newHashedPassword");
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(refreshTokenService).revokeAllRefreshTokens(id);
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Revoke All Refresh Tokens - When Email Changes")
+    void shouldRevokeAllRefreshTokensWhenEmailChanges() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null, "Password123");
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(refreshTokenService).revokeAllRefreshTokens(id);
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Not Revoke Any Refresh Token - When Neither Password Nor Email Changes")
+    void shouldNotRevokeAnyRefreshTokenWhenNeitherPasswordNorEmailChanges() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New bio", null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verifyNoInteractions(refreshTokenService);
     }
 
     @Test
@@ -916,8 +987,8 @@ class UserServiceImplTest {
     @DisplayName("[login] Should Return UserResponseDTO - When Credentials Are Valid Using Email")
     void shouldReturnUserResponseDtoWhenCredentialsAreValidUsingEmail() {
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");
-        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
-                .thenReturn(Optional.of(savedUser));
+        when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
@@ -930,29 +1001,29 @@ class UserServiceImplTest {
     @DisplayName("[login] Should Return UserResponseDTO - When Credentials Are Valid Using Username")
     void shouldReturnUserResponseDtoWhenCredentialsAreValidUsingUsername() {
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getUsername(), "Password123");
-        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getUsername(), savedUser.getUsername()))
-                .thenReturn(Optional.of(savedUser));
+        when(userRepository.findByUsernameIgnoreCase(savedUser.getUsername())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.login(loginUserDTO);
 
         assertThat(result).isEqualTo(userResponseDTO);
+        verify(userRepository, never()).findByEmailIgnoreCase(any());
     }
 
     @Test
     @DisplayName("[login] Should Trim Identifier Before Lookup - When Identifier Has Surrounding Whitespace")
     void shouldTrimIdentifierBeforeLookupWhenIdentifierHasSurroundingWhitespace() {
         LoginUserDTO loginUserDTO = new LoginUserDTO("  " + savedUser.getEmail() + "  ", "Password123");
-        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
-                .thenReturn(Optional.of(savedUser));
+        when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.login(loginUserDTO);
 
         assertThat(result).isEqualTo(userResponseDTO);
-        verify(userRepository).findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail());
+        verify(userRepository).findByEmailIgnoreCase(savedUser.getEmail());
     }
 
     @Test
@@ -960,8 +1031,8 @@ class UserServiceImplTest {
     void shouldReturnUserResponseDtoWhenEmailIsVerified() {
         savedUser.setIsEmailVerified(true);
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");
-        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
-                .thenReturn(Optional.of(savedUser));
+        when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
@@ -975,8 +1046,8 @@ class UserServiceImplTest {
     void shouldThrowForbiddenExceptionWhenEmailIsNotVerified() {
         savedUser.setIsEmailVerified(false);
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "Password123");
-        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
-                .thenReturn(Optional.of(savedUser));
+        when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
 
         assertThatThrownBy(() -> userService.login(loginUserDTO))
@@ -990,8 +1061,8 @@ class UserServiceImplTest {
     @DisplayName("[login] Should Throw UnauthorizedException - When Identifier Does Not Match Any User")
     void shouldThrowUnauthorizedExceptionWhenIdentifierDoesNotMatchAnyUser() {
         LoginUserDTO loginUserDTO = new LoginUserDTO("unknown@email.com", "Password123");
-        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("unknown@email.com", "unknown@email.com"))
-                .thenReturn(Optional.empty());
+        when(userRepository.findByUsernameIgnoreCase("unknown@email.com")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("unknown@email.com")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.login(loginUserDTO))
                 .isInstanceOf(UnauthorizedException.class)
@@ -1004,8 +1075,8 @@ class UserServiceImplTest {
     @DisplayName("[login] Should Throw UnauthorizedException - When Password Does Not Match")
     void shouldThrowUnauthorizedExceptionWhenPasswordDoesNotMatch() {
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getEmail(), "WrongPassword123");
-        when(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(savedUser.getEmail(), savedUser.getEmail()))
-                .thenReturn(Optional.of(savedUser));
+        when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("WrongPassword123", savedUser.getPassword())).thenReturn(false);
 
         assertThatThrownBy(() -> userService.login(loginUserDTO))

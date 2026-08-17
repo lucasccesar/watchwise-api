@@ -12,9 +12,7 @@ import java.util.UUID;
 
 public interface UserRepository extends JpaRepository<User, UUID> {
 
-    Boolean existsByUsername(String username);
-
-    Boolean existsByEmail(String email);
+    Optional<User> findByUsernameIgnoreCase(String username);
 
     Optional<User> findByUsernameIgnoreCaseOrEmailIgnoreCase(String username, String email);
 
@@ -23,7 +21,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query(
             value = """
         SELECT u FROM User u
-        WHERE LOWER(u.username) LIKE LOWER(CONCAT(:username, '%'))
+        WHERE LOWER(u.username) LIKE LOWER(CONCAT(:escapedUsername, '%')) ESCAPE '\\'
         AND (:onlyPublic = FALSE OR u.isProfilePublic = TRUE)
         ORDER BY
             CASE WHEN LOWER(u.username) = LOWER(:username) THEN 0 ELSE 1 END,
@@ -31,12 +29,13 @@ public interface UserRepository extends JpaRepository<User, UUID> {
         """,
             countQuery = """
         SELECT COUNT(u) FROM User u
-        WHERE LOWER(u.username) LIKE LOWER(CONCAT(:username, '%'))
+        WHERE LOWER(u.username) LIKE LOWER(CONCAT(:escapedUsername, '%')) ESCAPE '\\'
         AND (:onlyPublic = FALSE OR u.isProfilePublic = TRUE)
         """
     )
     Page<User> findByUsernameStartingWithIgnoreCase(
             @Param("username") String username,
+            @Param("escapedUsername") String escapedUsername,
             @Param("onlyPublic") boolean onlyPublic,
             Pageable pageable
     );

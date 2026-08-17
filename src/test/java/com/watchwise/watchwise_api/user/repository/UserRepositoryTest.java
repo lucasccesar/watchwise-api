@@ -52,7 +52,7 @@ class UserRepositoryTest {
     @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Public And Private Users - When OnlyPublic Is False")
     void shouldReturnPublicAndPrivateUsersWhenOnlyPublicIsFalse() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
-                "lucas", false, PageRequest.of(0, 10));
+                "lucas", "lucas", false, PageRequest.of(0, 10));
 
         assertThat(result.getContent())
                 .extracting(User::getUsername)
@@ -63,7 +63,7 @@ class UserRepositoryTest {
     @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Only Public Users - When OnlyPublic Is True")
     void shouldReturnOnlyPublicUsersWhenOnlyPublicIsTrue() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
-                "lucas", true, PageRequest.of(0, 10));
+                "lucas", "lucas", true, PageRequest.of(0, 10));
 
         assertThat(result.getContent())
                 .extracting(User::getUsername)
@@ -74,7 +74,7 @@ class UserRepositoryTest {
     @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Exact Match First - When Username Matches Exactly")
     void shouldReturnExactMatchFirst() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
-                "lucas", false, PageRequest.of(0, 10));
+                "lucas", "lucas", false, PageRequest.of(0, 10));
 
         assertThat(result.getContent().get(0).getUsername()).isEqualTo("lucas");
     }
@@ -83,7 +83,7 @@ class UserRepositoryTest {
     @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Match Regardless Of Case - When Username Prefix Has A Different Case")
     void shouldBeCaseInsensitive() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
-                "LUCAS", false, PageRequest.of(0, 10));
+                "LUCAS", "LUCAS", false, PageRequest.of(0, 10));
 
         assertThat(result.getContent())
                 .extracting(User::getUsername)
@@ -94,7 +94,7 @@ class UserRepositoryTest {
     @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Return Empty Page - When No Username Matches Prefix")
     void shouldReturnEmptyPageWhenNoUsernameMatchesPrefix() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
-                "zzz", false, PageRequest.of(0, 10));
+                "zzz", "zzz", false, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
         assertThat(result.getTotalElements()).isZero();
@@ -106,7 +106,7 @@ class UserRepositoryTest {
         userRepository.save(buildUser("xlucas", "xlucas@email.com", true));
 
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
-                "lucas", false, PageRequest.of(0, 10));
+                "lucas", "lucas", false, PageRequest.of(0, 10));
 
         assertThat(result.getContent())
                 .extracting(User::getUsername)
@@ -117,11 +117,29 @@ class UserRepositoryTest {
     @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Respect Page Size - When Page Size Is Provided")
     void shouldRespectPageSize() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
-                "lucas", false, PageRequest.of(0, 2));
+                "lucas", "lucas", false, PageRequest.of(0, 2));
 
         assertThat(result.getContent()).hasSize(2);
         assertThat(result.getTotalElements()).isEqualTo(3);
         assertThat(result.getTotalPages()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Match Nothing - When Escaped Username Is A Literal Percent Wildcard")
+    void shouldMatchNothingWhenEscapedUsernameIsALiteralPercentWildcard() {
+        Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
+                "%", "\\%", false, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Match Nothing - When Escaped Username Is A Literal Underscore Wildcard")
+    void shouldMatchNothingWhenEscapedUsernameIsALiteralUnderscoreWildcard() {
+        Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(
+                "_", "\\_", false, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
     }
 
     @Test

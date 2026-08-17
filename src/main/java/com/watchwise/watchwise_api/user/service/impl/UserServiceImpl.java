@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
@@ -36,6 +37,7 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final RefreshTokenService refreshTokenService;
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
@@ -64,14 +66,21 @@ public class UserServiceImpl implements UserService {
     public UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO) {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
 
-        applyPatch(user, patchUserDTO);
+        boolean touchesCredentials = applyPatch(user, patchUserDTO);
         user.setUpdatedAt(LocalDateTime.now());
 
+        UserResponseDTO response;
         try {
-            return userMapper.userToUserResponseDto(userRepository.save(user));
+            response = userMapper.userToUserResponseDto(userRepository.save(user));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
+
+        if (touchesCredentials) {
+            refreshTokenService.revokeAllRefreshTokens(id);
+        }
+
+        return response;
     }
 
     @Override
@@ -80,7 +89,7 @@ public class UserServiceImpl implements UserService {
         return resolveCredentialChanges(user, patchUserDTO).touchesCredentials();
     }
 
-    private void applyPatch(User user, PatchUserDTO patchUserDTO) {
+    private boolean applyPatch(User user, PatchUserDTO patchUserDTO) {
         CredentialChanges credentialChanges = resolveCredentialChanges(user, patchUserDTO);
 
         if (credentialChanges.touchesCredentials()) {
@@ -113,6 +122,8 @@ public class UserServiceImpl implements UserService {
         if (patchUserDTO.isProfilePublic() != null && !patchUserDTO.isProfilePublic().equals(user.getIsProfilePublic())) {
             user.setIsProfilePublic(patchUserDTO.isProfilePublic());
         }
+
+        return credentialChanges.touchesCredentials();
     }
 
     private void requireCurrentPassword(User user, String currentPassword) {
@@ -171,7 +182,8 @@ public class UserServiceImpl implements UserService {
     @Override
     public Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic) {
 
-        if (StringUtils.isEmpty(username)) {
+        String trimmedUsername = username == null ? null : username.trim();
+        if (StringUtils.isEmpty(trimmedUsername)) {
             throw new BadRequestException("Username must be provided");
         }
 
@@ -180,8 +192,12 @@ public class UserServiceImpl implements UserService {
         boolean onlyPublic = Boolean.TRUE.equals(isProfilePublic);
 
         return userRepository
-                .findByUsernameStartingWithIgnoreCase(username.trim(), onlyPublic, pageRequest)
+                .findByUsernameStartingWithIgnoreCase(trimmedUsername, escapeLikeWildcards(trimmedUsername), onlyPublic, pageRequest)
                 .map(userMapper::userToUserPreviewDto);
+    }
+
+    private String escapeLikeWildcards(String value) {
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize, String sortBy, String sortDirection) {
@@ -224,8 +240,8 @@ public class UserServiceImpl implements UserService {
     @Override
     public UserResponseDTO login(LoginUserDTO loginUserDTO) {
         String identifier = loginUserDTO.identifier().trim();
-        User user = userRepository
-                .findByUsernameIgnoreCaseOrEmailIgnoreCase(identifier, identifier)
+        User user = userRepository.findByUsernameIgnoreCase(identifier)
+                .or(() -> userRepository.findByEmailIgnoreCase(identifier))
                 .orElseThrow(() -> new UnauthorizedException("Invalid credentials"));
 
         if (!passwordEncoder.matches(loginUserDTO.password(), user.getPassword())) {
