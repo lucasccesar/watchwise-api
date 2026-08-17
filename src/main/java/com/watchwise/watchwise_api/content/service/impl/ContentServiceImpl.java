@@ -81,6 +81,11 @@ public class ContentServiceImpl implements ContentService {
     }
 
     private Content resolveConcurrentCreation(ContentRefCreationDTO dto, DataIntegrityViolationException e) {
+        Optional<Content> existing = findExisting(dto);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+
         String constraintName = extractConstraintName(e);
         if ("uq_contents_season_finale".equals(constraintName)) {
             throw new ConflictException("Another episode is already marked as this season's finale");
@@ -88,7 +93,7 @@ public class ContentServiceImpl implements ContentService {
         if ("uq_contents_series_finale".equals(constraintName)) {
             throw new ConflictException("Another season is already marked as this series' finale");
         }
-        return findExisting(dto).orElseThrow(() -> e);
+        throw e;
     }
 
     private String extractConstraintName(DataIntegrityViolationException e) {

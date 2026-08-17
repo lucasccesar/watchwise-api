@@ -589,6 +589,26 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Return Existing ContentRefDTO - When Save Fails With Season Finale Constraint But The Same Episode Already Exists")
+    void shouldReturnExistingContentRefDtoWhenSaveFailsWithSeasonFinaleConstraintButTheSameEpisodeAlreadyExists() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 5, true, null);
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(1).episodeNumber(5).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        Content existing = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(5).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existing.getId(), null, ContentType.EPISODE, "200", 1, 5, true, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 5, ContentType.EPISODE))
+                .thenReturn(Optional.empty(), Optional.of(existing));
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped))
+                .thenThrow(buildDataIntegrityViolationException("uq_contents_season_finale"));
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Another Episode Is Already Marked As The Season Finale")
     void shouldThrowConflictExceptionWhenAnotherEpisodeIsAlreadyMarkedAsTheSeasonFinale() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 5, true, null);
