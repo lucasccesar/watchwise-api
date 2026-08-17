@@ -205,6 +205,19 @@ class ContentControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Return Conflict - When Resending An Existing Episode With A Different IsSeasonFinale Value")
+    void shouldReturnConflictWhenResendingAnExistingEpisodeWithADifferentIsSeasonFinaleValue() throws Exception {
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 3, \"isSeasonFinale\": false }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 3, \"isSeasonFinale\": true }"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("This content is already registered with a different isSeasonFinale value"));
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Transfer IsSeasonFinale To New Episode - When A Previous Episode Already Had It")
     void shouldTransferIsSeasonFinaleToNewEpisodeWhenAPreviousEpisodeAlreadyHadIt() throws Exception {
         mockMvc.perform(referenceRequest(

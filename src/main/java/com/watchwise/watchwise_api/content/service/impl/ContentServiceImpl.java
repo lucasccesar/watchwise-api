@@ -33,6 +33,7 @@ public class ContentServiceImpl implements ContentService {
 
         Optional<Content> existing = findExisting(normalized);
         if (existing.isPresent()) {
+            assertNoFinaleMismatch(existing.get(), normalized);
             return contentMapper.contentToContentRefDto(existing.get());
         }
 
@@ -93,9 +94,19 @@ public class ContentServiceImpl implements ContentService {
                 });
     }
 
+    private void assertNoFinaleMismatch(Content existing, ContentRefCreationDTO normalized) {
+        if (normalized.isSeasonFinale() != null && !normalized.isSeasonFinale().equals(existing.getIsSeasonFinale())) {
+            throw new ConflictException("This content is already registered with a different isSeasonFinale value");
+        }
+        if (normalized.isSeriesFinale() != null && !normalized.isSeriesFinale().equals(existing.getIsSeriesFinale())) {
+            throw new ConflictException("This content is already registered with a different isSeriesFinale value");
+        }
+    }
+
     private Content resolveConcurrentCreation(ContentRefCreationDTO dto, DataIntegrityViolationException e) {
         Optional<Content> existing = findExisting(dto);
         if (existing.isPresent()) {
+            assertNoFinaleMismatch(existing.get(), dto);
             return existing.get();
         }
 
