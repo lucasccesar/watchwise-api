@@ -769,10 +769,10 @@ class DiaryEntryControllerIntegrationTest {
         mockMvc.perform(createRequest(user, episodeBody("1399", 1, 2, true, false)))
                 .andExpect(status().isCreated());
 
-        User entity = userRepository.findById(user.id()).orElseThrow();
-        List<DiaryEntry> entries = diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)).getContent();
-
-        assertThat(entries).hasSize(1);
+        mockMvc.perform(getDiaryRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].content.type").value("EPISODE"));
     }
 
     @Test
