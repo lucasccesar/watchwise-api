@@ -214,6 +214,58 @@ class ContentRepositoryTest {
         assertThat(specials.getSeasonNumber()).isZero();
     }
 
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When A Movie Is Saved With IsSeasonFinale Set")
+    void shouldThrowDataIntegrityViolationExceptionWhenAMovieIsSavedWithIsSeasonFinaleSet() {
+        LocalDateTime now = LocalDateTime.now();
+        Content movie = Content.builder()
+                .tmdbId("550")
+                .type(ContentType.MOVIE)
+                .isSeasonFinale(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+
+        assertThatThrownBy(() -> contentRepository.saveAndFlush(movie))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_contents_finale_flags_by_type");
+    }
+
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When A Series Is Saved With IsSeriesFinale Set")
+    void shouldThrowDataIntegrityViolationExceptionWhenASeriesIsSavedWithIsSeriesFinaleSet() {
+        LocalDateTime now = LocalDateTime.now();
+        Content series = Content.builder()
+                .tmdbId("1399")
+                .type(ContentType.SERIES)
+                .isSeriesFinale(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+
+        assertThatThrownBy(() -> contentRepository.saveAndFlush(series))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_contents_finale_flags_by_type");
+    }
+
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When A Season Is Saved With IsSeasonFinale Set")
+    void shouldThrowDataIntegrityViolationExceptionWhenASeasonIsSavedWithIsSeasonFinaleSet() {
+        LocalDateTime now = LocalDateTime.now();
+        Content season = Content.builder()
+                .seriesTmdbId("1399")
+                .seasonNumber(1)
+                .type(ContentType.SEASON)
+                .isSeasonFinale(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+
+        assertThatThrownBy(() -> contentRepository.saveAndFlush(season))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_contents_finale_flags_by_type");
+    }
+
     private Content buildMovie(String tmdbId) {
         LocalDateTime now = LocalDateTime.now();
         return Content.builder()
