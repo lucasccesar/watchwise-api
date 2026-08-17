@@ -189,6 +189,31 @@ class ContentRepositoryTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When An Episode Is Saved With EpisodeNumber Zero")
+    void shouldThrowDataIntegrityViolationExceptionWhenAnEpisodeIsSavedWithEpisodeNumberZero() {
+        assertThatThrownBy(() -> contentRepository.saveAndFlush(buildEpisode("1399", 1, 0)))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_contents_episode_number");
+    }
+
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When A Season Is Saved With A Negative SeasonNumber")
+    void shouldThrowDataIntegrityViolationExceptionWhenASeasonIsSavedWithANegativeSeasonNumber() {
+        assertThatThrownBy(() -> contentRepository.saveAndFlush(buildSeason("1399", -1)))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_contents_season_number");
+    }
+
+    @Test
+    @DisplayName("[save] Should Persist The Season - When SeasonNumber Is Zero")
+    void shouldPersistTheSeasonWhenSeasonNumberIsZero() {
+        Content specials = contentRepository.saveAndFlush(buildSeason("1399", 0));
+
+        assertThat(contentRepository.findById(specials.getId())).isPresent();
+        assertThat(specials.getSeasonNumber()).isZero();
+    }
+
     private Content buildMovie(String tmdbId) {
         LocalDateTime now = LocalDateTime.now();
         return Content.builder()
