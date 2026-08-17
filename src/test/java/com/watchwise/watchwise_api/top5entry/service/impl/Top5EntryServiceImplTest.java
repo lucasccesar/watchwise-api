@@ -377,6 +377,24 @@ class Top5EntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[insertEntry] Should Throw BadRequestException - When Position Is Greater Than The Next Available Position")
+    void shouldThrowBadRequestExceptionWhenPositionIsGreaterThanTheNextAvailablePosition() {
+        Top5Entry existing1 = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        Content newContent = buildContent("999", ContentType.MOVIE);
+        stubContentResolution(newContent, ContentType.MOVIE);
+        when(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of(existing1));
+
+        assertThatThrownBy(() -> top5EntryService.insertEntry(
+                lucasId, ContentType.MOVIE, new Top5EntryCreationDTO(newContent.getTmdbId(), 5)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("position cannot be greater than 2, the next available position");
+
+        verify(top5EntryRepository, never()).save(any());
+        verify(top5EntryRepository, never()).delete(any());
+    }
+
+    @Test
     @DisplayName("[insertEntry] Should Throw BadRequestException - When Type Is Season")
     void shouldThrowBadRequestExceptionWhenTypeIsSeasonOnInsert() {
         assertThatThrownBy(() -> top5EntryService.insertEntry(

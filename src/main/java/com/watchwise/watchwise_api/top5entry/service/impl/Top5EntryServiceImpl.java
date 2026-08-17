@@ -132,13 +132,16 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     }
 
     private int resolvePosition(Integer requestedPosition, int currentCount) {
-        if (requestedPosition != null) {
-            return requestedPosition;
+        if (requestedPosition == null) {
+            if (currentCount >= MAX_ENTRIES) {
+                throw new BadRequestException("position is required when top 5 already has " + MAX_ENTRIES + " entries");
+            }
+            return currentCount + 1;
         }
-        if (currentCount >= MAX_ENTRIES) {
-            throw new BadRequestException("position is required when top 5 already has " + MAX_ENTRIES + " entries");
+        if (requestedPosition > currentCount + 1) {
+            throw new BadRequestException("position cannot be greater than " + (currentCount + 1) + ", the next available position");
         }
-        return currentCount + 1;
+        return requestedPosition;
     }
 
     private void shiftUpFrom(List<Top5Entry> existing, int fromPosition) {
