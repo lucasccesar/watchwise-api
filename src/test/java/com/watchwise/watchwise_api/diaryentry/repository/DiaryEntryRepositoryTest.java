@@ -26,7 +26,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -145,40 +144,6 @@ class DiaryEntryRepositoryTest {
                 lucas.getId(), LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
-    }
-
-    @Test
-    @DisplayName("[findFirstByUserIdAndContentIdOrderByCreatedAtDesc] Should Return Most Recently Created Entry - When User Rewatched The Same Content")
-    void shouldReturnMostRecentlyCreatedEntryWhenUserRewatchedTheSameContent() {
-        LocalDateTime earlier = LocalDateTime.now().minusDays(1);
-        LocalDateTime later = LocalDateTime.now();
-        DiaryEntry firstWatch = buildEntry(lucas, fightClub);
-        firstWatch.setScore(6);
-        firstWatch.setCreatedAt(earlier);
-        firstWatch.setUpdatedAt(earlier);
-        diaryEntryRepository.saveAndFlush(firstWatch);
-
-        DiaryEntry rewatch = buildEntry(lucas, fightClub, 2);
-        rewatch.setScore(9);
-        rewatch.setCreatedAt(later);
-        rewatch.setUpdatedAt(later);
-        diaryEntryRepository.saveAndFlush(rewatch);
-        entityManager.clear();
-
-        Optional<DiaryEntry> result = diaryEntryRepository
-                .findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucas.getId(), fightClub.getId());
-
-        assertThat(result).isPresent();
-        assertThat(result.get().getScore()).isEqualTo(9);
-    }
-
-    @Test
-    @DisplayName("[findFirstByUserIdAndContentIdOrderByCreatedAtDesc] Should Return Empty - When User Never Logged That Content")
-    void shouldReturnEmptyWhenUserNeverLoggedThatContent() {
-        Optional<DiaryEntry> result = diaryEntryRepository
-                .findFirstByUserIdAndContentIdOrderByCreatedAtDesc(lucas.getId(), fightClub.getId());
-
-        assertThat(result).isEmpty();
     }
 
     @Test

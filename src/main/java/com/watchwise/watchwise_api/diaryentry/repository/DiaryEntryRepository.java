@@ -19,8 +19,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     Page<DiaryEntry> findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
             UUID userId, LocalDate watchedDateStart, LocalDate watchedDateEnd, Pageable pageable);
 
-    Optional<DiaryEntry> findFirstByUserIdAndContentIdOrderByCreatedAtDesc(UUID userId, UUID contentId);
-
     List<DiaryEntry> findByUserIdAndContentIdAndWatchNumberGreaterThan(UUID userId, UUID contentId, Integer watchNumber);
 
     @Query("""

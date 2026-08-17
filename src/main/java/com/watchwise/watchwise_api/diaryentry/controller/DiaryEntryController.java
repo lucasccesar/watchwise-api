@@ -2,12 +2,12 @@ package com.watchwise.watchwise_api.diaryentry.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
-import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -87,8 +87,11 @@ public class DiaryEntryController {
     }
 
     @GetMapping("/diary/{diaryEntryId}/deletion-impact")
-    public ResponseEntity<DeletionImpactDTO> getDeletionImpact(@PathVariable UUID diaryEntryId) {
-        return ResponseEntity.ok(diaryEntryService.computeDeletionImpact(getCurrentUserId(), diaryEntryId));
+    public ResponseEntity<DeletionImpactDTO> getDeletionImpact(
+            @PathVariable UUID diaryEntryId,
+            @RequestParam(required = false, defaultValue = "false") boolean overrideProtectedEntries
+    ) {
+        return ResponseEntity.ok(diaryEntryService.computeDeletionImpact(getCurrentUserId(), diaryEntryId, overrideProtectedEntries));
     }
 
     private String diaryActionKey() {

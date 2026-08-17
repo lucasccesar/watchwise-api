@@ -5,12 +5,12 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
-import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -243,12 +243,26 @@ class DiaryEntryControllerTest {
     void shouldReturnDeletionImpactDtoWhenCalledWithValidEntryId() {
         UUID diaryEntryId = UUID.randomUUID();
         DeletionImpactDTO expectedResult = new DeletionImpactDTO(List.of());
-        when(diaryEntryService.computeDeletionImpact(currentUserId, diaryEntryId)).thenReturn(expectedResult);
+        when(diaryEntryService.computeDeletionImpact(currentUserId, diaryEntryId, false)).thenReturn(expectedResult);
 
-        ResponseEntity<DeletionImpactDTO> response = diaryEntryController.getDeletionImpact(diaryEntryId);
+        ResponseEntity<DeletionImpactDTO> response = diaryEntryController.getDeletionImpact(diaryEntryId, false);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isEqualTo(expectedResult);
-        verify(diaryEntryService).computeDeletionImpact(currentUserId, diaryEntryId);
+        verify(diaryEntryService).computeDeletionImpact(currentUserId, diaryEntryId, false);
+    }
+
+    @Test
+    @DisplayName("[getDeletionImpact] Should Forward OverrideProtectedEntries - When The Query Parameter Is True")
+    void shouldForwardOverrideProtectedEntriesWhenTheQueryParameterIsTrue() {
+        UUID diaryEntryId = UUID.randomUUID();
+        DeletionImpactDTO expectedResult = new DeletionImpactDTO(List.of());
+        when(diaryEntryService.computeDeletionImpact(currentUserId, diaryEntryId, true)).thenReturn(expectedResult);
+
+        ResponseEntity<DeletionImpactDTO> response = diaryEntryController.getDeletionImpact(diaryEntryId, true);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isEqualTo(expectedResult);
+        verify(diaryEntryService).computeDeletionImpact(currentUserId, diaryEntryId, true);
     }
 }
