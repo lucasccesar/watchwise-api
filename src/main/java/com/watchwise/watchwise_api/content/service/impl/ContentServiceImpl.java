@@ -75,6 +75,7 @@ public class ContentServiceImpl implements ContentService {
                 .filter(previous -> previous.getSeasonNumber() < newSeasonNumber)
                 .ifPresent(previous -> {
                     previous.setIsSeriesFinale(false);
+                    previous.setUpdatedAt(LocalDateTime.now());
                     contentRepository.saveAndFlush(previous);
                 });
     }

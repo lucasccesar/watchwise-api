@@ -485,6 +485,7 @@ class ContentServiceImplTest {
 
         assertThat(result).isEqualTo(responseDto);
         assertThat(previousFinale.getIsSeriesFinale()).isFalse();
+        assertThat(previousFinale.getUpdatedAt()).isNotNull();
         verify(contentRepository).saveAndFlush(previousFinale);
     }
 
