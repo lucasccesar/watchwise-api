@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
@@ -146,13 +147,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpStatusCode status,
             WebRequest request
     ){
-        List<ValidationError> errors = ex.getBindingResult()
-                .getFieldErrors()
-                .stream()
-                .map(fieldError -> new ValidationError(
-                        fieldError.getField(),
-                        fieldError.getDefaultMessage()
-                ))
+        List<ValidationError> errors = Stream.concat(
+                        ex.getBindingResult().getFieldErrors().stream()
+                                .map(fieldError -> new ValidationError(fieldError.getField(), fieldError.getDefaultMessage())),
+                        ex.getBindingResult().getGlobalErrors().stream()
+                                .map(globalError -> new ValidationError(null, globalError.getDefaultMessage()))
+                )
                 .toList();
 
         HttpStatus httpStatus = HttpStatus.valueOf(status.value());
@@ -239,13 +239,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             WebRequest request
     ) {
         String path = ((ServletWebRequest) request).getRequest().getRequestURI();
-        String requiredType = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "the expected type";
+        Class<?> requiredType = ex.getRequiredType();
+        String requiredTypeName = requiredType != null ? requiredType.getSimpleName() : "the expected type";
+        String acceptedValuesSuffix = requiredType != null && requiredType.isEnum()
+                ? ". Accepted values: " + Arrays.stream(requiredType.getEnumConstants())
+                        .map(Object::toString)
+                        .collect(Collectors.joining(", "))
+                : "";
 
         ApiError apiError = new ApiError(
                 LocalDateTime.now(),
                 HttpStatus.BAD_REQUEST.value(),
                 "Bad Request",
-                "Invalid value '" + ex.getValue() + "' for parameter '" + ex.getPropertyName() + "'. Expected type: " + requiredType,
+                "Invalid value '" + ex.getValue() + "' for parameter '" + ex.getPropertyName() + "'. Expected type: " + requiredTypeName + acceptedValuesSuffix,
                 path
         );
 
