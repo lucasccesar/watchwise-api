@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
@@ -26,6 +27,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -58,6 +60,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final FollowerRepository followerRepository;
     private final DiaryEntryMapper diaryEntryMapper;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final WatchlistEntryService watchlistEntryService;
+    private final DroppedEntryRepository droppedEntryRepository;
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
@@ -123,12 +127,38 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             throw mapWatchNumberConflict(e);
         }
 
+        removeFromWatchlistAndDropped(userId, contentRef);
+
         CompletionSignal completion = triggerCompletionCascade(userId, content, entry.getWatchedDate());
 
         return new DiaryEntryCreationResultDTO(
                 diaryEntryMapper.diaryEntryToResponseDto(entry),
                 completion.completedSeason() != null ? diaryEntryMapper.diaryEntryToResponseDto(completion.completedSeason()) : null,
                 completion.completedSeries() != null ? diaryEntryMapper.diaryEntryToResponseDto(completion.completedSeries()) : null);
+    }
+
+    private void removeFromWatchlistAndDropped(UUID userId, ContentRefDTO loggedContent) {
+        if (loggedContent.type() == ContentType.MOVIE) {
+            removeContentFromWatchlistAndDropped(userId, ContentType.MOVIE, loggedContent.id());
+            return;
+        }
+        if (loggedContent.type() == ContentType.SERIES) {
+            removeContentFromWatchlistAndDropped(userId, ContentType.SERIES, loggedContent.id());
+            return;
+        }
+
+        removeSeriesFromWatchlistAndDropped(userId, loggedContent.seriesTmdbId());
+    }
+
+    private void removeSeriesFromWatchlistAndDropped(UUID userId, String seriesTmdbId) {
+        contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES)
+                .ifPresent(series -> removeContentFromWatchlistAndDropped(userId, ContentType.SERIES, series.getId()));
+    }
+
+    private void removeContentFromWatchlistAndDropped(UUID userId, ContentType type, UUID contentId) {
+        watchlistEntryService.removeEntryIfPresent(userId, type, contentId);
+        droppedEntryRepository.findByUserIdAndTypeAndContentId(userId, type, contentId)
+                .ifPresent(droppedEntryRepository::delete);
     }
 
     private ConflictException mapWatchNumberConflict(DataIntegrityViolationException e) {
@@ -176,12 +206,16 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         List<DiaryEntry> created = new ArrayList<>();
+        String seriesTmdbId;
         if (content.type() == ContentType.SEASON) {
+            seriesTmdbId = content.seriesTmdbId();
             bulkLogSeason(userId, content.seriesTmdbId(), content.seasonNumber(), content.isSeriesFinale(),
                     dto.finaleEpisodeNumber(), dto.watchedDate(), created);
         } else {
+            seriesTmdbId = content.tmdbId();
             bulkLogSeries(userId, content.tmdbId(), dto.finaleSeasonNumber(), dto.seasonFinaleEpisodeNumbers(), dto.watchedDate(), created);
         }
+        removeSeriesFromWatchlistAndDropped(userId, seriesTmdbId);
 
         return created.stream().map(diaryEntryMapper::diaryEntryToResponseDto).toList();
     }

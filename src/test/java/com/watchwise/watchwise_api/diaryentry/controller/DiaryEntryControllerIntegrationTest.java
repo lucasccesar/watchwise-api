@@ -10,11 +10,14 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,6 +85,12 @@ class DiaryEntryControllerIntegrationTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Autowired
+    private WatchlistEntryRepository watchlistEntryRepository;
+
+    @Autowired
+    private DroppedEntryRepository droppedEntryRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -93,6 +102,8 @@ class DiaryEntryControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         diaryEntryRepository.deleteAll();
+        watchlistEntryRepository.deleteAll();
+        droppedEntryRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -428,6 +439,59 @@ class DiaryEntryControllerIntegrationTest {
 
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
                 .hasSize(2);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Remove The Movie From The Watchlist - When Logging It")
+    void shouldRemoveTheMovieFromTheWatchlistWhenLoggingIt() throws Exception {
+        RegisteredUser user = registerUser("creatediaryremovemoviewatchlist");
+        mockMvc.perform(post("/users/me/watchlist/MOVIE")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"tmdbId\": \"550\" }"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(createRequest(user, creationBody("550", null)))
+                .andExpect(status().isCreated());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(entity.getId(), ContentType.MOVIE)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Remove The Movie Dropped Marker - When Logging It")
+    void shouldRemoveTheMovieDroppedMarkerWhenLoggingIt() throws Exception {
+        RegisteredUser user = registerUser("creatediaryremovemoviedropped");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("550", ContentType.MOVIE);
+        LocalDateTime now = LocalDateTime.now();
+        droppedEntryRepository.save(DroppedEntry.builder()
+                .user(entity).content(movie).type(ContentType.MOVIE).createdAt(now).updatedAt(now).build());
+
+        mockMvc.perform(createRequest(user, creationBody("550", null)))
+                .andExpect(status().isCreated());
+
+        assertThat(droppedEntryRepository.findByUserIdAndTypeAndContentId(entity.getId(), ContentType.MOVIE, movie.getId()))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Remove The Series From The Watchlist - When Logging One Of Its Episodes")
+    void shouldRemoveTheSeriesFromTheWatchlistWhenLoggingOneOfItsEpisodes() throws Exception {
+        RegisteredUser user = registerUser("creatediaryremoveserieswatchlist");
+        mockMvc.perform(post("/users/me/watchlist/SERIES")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"tmdbId\": \"1396\" }"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(createRequest(user, episodeBody("1396", 1, 1, null, null)))
+                .andExpect(status().isCreated());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(entity.getId(), ContentType.SERIES)).isEmpty();
     }
 
     @Test

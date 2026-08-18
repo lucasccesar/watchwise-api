@@ -21,10 +21,14 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
+import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -89,6 +93,12 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
+
+    @Mock
+    private WatchlistEntryService watchlistEntryService;
+
+    @Mock
+    private DroppedEntryRepository droppedEntryRepository;
 
     @InjectMocks
     private DiaryEntryServiceImpl diaryEntryService;
@@ -468,6 +478,123 @@ class DiaryEntryServiceImplTest {
 
         verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(3);
+    }
+
+    // ---------- createDiaryEntry: watchlist/dropped removal side effect ----------
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Remove The Matching Watchlist Entry - When Logging A Movie")
+    void shouldRemoveTheMatchingWatchlistEntryWhenLoggingAMovie() {
+        stubContentResolution(fightClub);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        DiaryEntry savedEntry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.MOVIE, fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Delete The Dropped Entry - When One Exists For The Logged Movie")
+    void shouldDeleteTheDroppedEntryWhenOneExistsForTheLoggedMovie() {
+        stubContentResolution(fightClub);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        DiaryEntry savedEntry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
+        DroppedEntry droppedEntry = DroppedEntry.builder().id(UUID.randomUUID()).build();
+        when(droppedEntryRepository.findByUserIdAndTypeAndContentId(lucasId, ContentType.MOVIE, fightClub.getId()))
+                .thenReturn(Optional.of(droppedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(droppedEntryRepository).delete(droppedEntry);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Resolve The Series And Remove Its Watchlist And Dropped Entries - When Logging An Episode")
+    void shouldResolveTheSeriesAndRemoveItsWatchlistAndDroppedEntriesWhenLoggingAnEpisode() {
+        Content episode = buildEpisode("900", 1, 1);
+        Content seriesContent = buildContent("900", ContentType.SERIES);
+
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, episode.getId())).thenReturn(0);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class))).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
+        when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(seriesContent));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "900", 1, 1, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
+        verify(droppedEntryRepository).findByUserIdAndTypeAndContentId(lucasId, ContentType.SERIES, seriesContent.getId());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Not Attempt Removal - When The Series Content Does Not Exist Yet")
+    void shouldNotAttemptRemovalWhenTheSeriesContentDoesNotExistYet() {
+        Content episode = buildEpisode("900", 1, 1);
+
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, episode.getId())).thenReturn(0);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class))).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "900", 1, 1, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(watchlistEntryService, never()).removeEntryIfPresent(any(), any(), any());
+        verify(droppedEntryRepository, never()).findByUserIdAndTypeAndContentId(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Remove The Matching Watchlist Entry - When Logging A Series Directly")
+    void shouldRemoveTheMatchingWatchlistEntryWhenLoggingASeriesDirectly() {
+        Content seriesContent = buildContent("900", ContentType.SERIES);
+
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(seriesContent.getId(), "900", ContentType.SERIES, null, null, null, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(seriesContent.getId())).thenReturn(seriesContent);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, seriesContent.getId())).thenReturn(0);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class))).thenReturn(buildResponseDto(buildEntry(lucas, seriesContent)));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
+        verify(contentRepository, never()).findByTmdbIdAndType(any(), any());
     }
 
     @Test
@@ -1464,6 +1591,64 @@ class DiaryEntryServiceImplTest {
         // Should return 4 episodes (2 per season, not the season entries)
         assertThat(result).hasSize(4);
         assertThat(result).allMatch(entry -> entry.watchNumber() == 1);
+    }
+
+    // ---------- createDiaryEntriesInBulk: watchlist/dropped removal side effect ----------
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Remove The Series Watchlist And Dropped Entries - When Bulk-Logging A Season")
+    void shouldRemoveTheSeriesWatchlistAndDroppedEntriesWhenBulkLoggingASeason() {
+        Content e1 = buildFinaleEpisode("900", 1, 1);
+        Content seriesContent = buildContent("900", ContentType.SERIES);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class))).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(seriesContent));
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 1, null, null);
+
+        diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
+        verify(droppedEntryRepository).findByUserIdAndTypeAndContentId(lucasId, ContentType.SERIES, seriesContent.getId());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Remove The Series Watchlist And Dropped Entries - When Bulk-Logging A Series")
+    void shouldRemoveTheSeriesWatchlistAndDroppedEntriesWhenBulkLoggingASeries() {
+        Content e1 = buildFinaleEpisode("900", 1, 1);
+        Content seriesContent = buildContent("900", ContentType.SERIES);
+
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class))).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(seriesContent));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 1, Map.of(1, 1));
+
+        diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
+        verify(droppedEntryRepository).findByUserIdAndTypeAndContentId(lucasId, ContentType.SERIES, seriesContent.getId());
     }
 
     @Test
