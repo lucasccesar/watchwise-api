@@ -114,7 +114,7 @@ class FollowerServiceImplTest {
     void shouldReturnAcceptedAndSaveWithAcceptedStatusWhenFollowedUserProfileIsPublic() {
         followedUser.setIsProfilePublic(true);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(userRepository.getReferenceById(followerId)).thenReturn(followerUser);
+        when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
 
         FollowStatus result = followerService.followUser(followerId, followedId);
 
@@ -130,7 +130,7 @@ class FollowerServiceImplTest {
     void shouldReturnPendingAndSaveWithPendingStatusWhenFollowedUserProfileIsPrivate() {
         followedUser.setIsProfilePublic(false);
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(userRepository.getReferenceById(followerId)).thenReturn(followerUser);
+        when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
 
         FollowStatus result = followerService.followUser(followerId, followedId);
 
@@ -162,10 +162,23 @@ class FollowerServiceImplTest {
     }
 
     @Test
+    @DisplayName("[followUser] Should Throw NotFoundException - When Follower's Own Account No Longer Exists")
+    void shouldThrowNotFoundExceptionWhenFollowersOwnAccountNoLongerExists() {
+        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findById(followerId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+
+        verifyNoInteractions(followerRepository);
+    }
+
+    @Test
     @DisplayName("[followUser] Should Throw ConflictException With Specific Message - When Unique Constraint Is Violated")
     void shouldThrowConflictExceptionWithSpecificMessageWhenUniqueConstraintIsViolated() {
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(userRepository.getReferenceById(followerId)).thenReturn(followerUser);
+        when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
         when(followerRepository.save(any(Follower.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_followers_follower_id_followed_id"));
 
@@ -178,7 +191,7 @@ class FollowerServiceImplTest {
     @DisplayName("[followUser] Should Throw ConflictException With Generic Message - When Constraint Name Is Unknown")
     void shouldThrowConflictExceptionWithGenericMessageWhenConstraintNameIsUnknown() {
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(userRepository.getReferenceById(followerId)).thenReturn(followerUser);
+        when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
         when(followerRepository.save(any(Follower.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_some_other_constraint"));
 
@@ -191,7 +204,7 @@ class FollowerServiceImplTest {
     @DisplayName("[followUser] Should Throw ConflictException With Generic Message - When Cause Is Not ConstraintViolationException")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNotConstraintViolationException() {
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(userRepository.getReferenceById(followerId)).thenReturn(followerUser);
+        when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
         DataIntegrityViolationException exception =
                 new DataIntegrityViolationException("generic db error", new RuntimeException("unexpected cause"));
         when(followerRepository.save(any(Follower.class))).thenThrow(exception);
@@ -205,7 +218,7 @@ class FollowerServiceImplTest {
     @DisplayName("[followUser] Should Throw ConflictException With Generic Message - When Cause Is Null")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNull() {
         when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
-        when(userRepository.getReferenceById(followerId)).thenReturn(followerUser);
+        when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
         DataIntegrityViolationException exception = new DataIntegrityViolationException("no cause here");
         when(followerRepository.save(any(Follower.class))).thenThrow(exception);
 
@@ -624,6 +637,14 @@ class FollowerServiceImplTest {
         verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.PENDING), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE);
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("[acceptAllPendingFollowRequestsFor] Should Delegate To Repository - When Called")
+    void shouldDelegateToRepositoryWhenAcceptAllPendingFollowRequestsForCalled() {
+        followerService.acceptAllPendingFollowRequestsFor(followedId);
+
+        verify(followerRepository).acceptAllPendingFollowRequestsFor(followedId);
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {

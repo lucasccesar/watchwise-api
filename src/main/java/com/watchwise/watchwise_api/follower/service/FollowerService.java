@@ -22,4 +22,6 @@ public interface FollowerService {
 
     Page<PublicUserDTO> getPendingFollowRequests(UUID targetUserId, Integer pageNumber, Integer pageSize);
 
+    void acceptAllPendingFollowRequestsFor(UUID followedId);
+
 }

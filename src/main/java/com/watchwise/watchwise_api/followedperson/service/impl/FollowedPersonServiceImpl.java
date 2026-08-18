@@ -42,8 +42,10 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                User user = userRepository.findById(userId)
+                        .orElseThrow(() -> new NotFoundException("User not found"));
                 FollowedPerson followedPerson = FollowedPerson.builder()
-                        .user(userRepository.getReferenceById(userId))
+                        .user(user)
                         .personTmdbId(personTmdbId)
                         .createdAt(LocalDateTime.now())
                         .build();

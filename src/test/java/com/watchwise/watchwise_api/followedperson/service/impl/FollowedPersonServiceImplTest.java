@@ -92,7 +92,7 @@ class FollowedPersonServiceImplTest {
     @DisplayName("[followPerson] Should Save New FollowedPerson - When Not Already Following")
     void shouldSaveNewFollowedPersonWhenNotAlreadyFollowing() {
         when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
-        when(userRepository.getReferenceById(userId)).thenReturn(user);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
 
         followedPersonService.followPerson(userId, personTmdbId);
 
@@ -106,7 +106,7 @@ class FollowedPersonServiceImplTest {
     @DisplayName("[followPerson] Should Attempt Save In A New Transaction - When Not Already Following")
     void shouldAttemptSaveInANewTransactionWhenNotAlreadyFollowing() {
         when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
-        when(userRepository.getReferenceById(userId)).thenReturn(user);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
 
         followedPersonService.followPerson(userId, personTmdbId);
 
@@ -121,7 +121,20 @@ class FollowedPersonServiceImplTest {
         followedPersonService.followPerson(userId, personTmdbId);
 
         verify(followedPersonRepository, never()).saveAndFlush(any());
-        verify(userRepository, never()).getReferenceById(any());
+        verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Throw NotFoundException - When The Acting User's Account No Longer Exists")
+    void shouldThrowNotFoundExceptionWhenTheActingUsersAccountNoLongerExists() {
+        when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> followedPersonService.followPerson(userId, personTmdbId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+
+        verify(followedPersonRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -130,7 +143,7 @@ class FollowedPersonServiceImplTest {
         when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId))
                 .thenReturn(false)
                 .thenReturn(true);
-        when(userRepository.getReferenceById(userId)).thenReturn(user);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(followedPersonRepository.saveAndFlush(any(FollowedPerson.class)))
                 .thenThrow(new DataIntegrityViolationException("duplicate"));
 
@@ -142,7 +155,7 @@ class FollowedPersonServiceImplTest {
     @DisplayName("[followPerson] Should Rethrow DataIntegrityViolationException - When Row Still Does Not Exist After Save Fails")
     void shouldRethrowDataIntegrityViolationExceptionWhenRowStillDoesNotExistAfterSaveFails() {
         when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
-        when(userRepository.getReferenceById(userId)).thenReturn(user);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         DataIntegrityViolationException exception = new DataIntegrityViolationException("unexpected db error");
         when(followedPersonRepository.saveAndFlush(any(FollowedPerson.class))).thenThrow(exception);
 

@@ -40,7 +40,8 @@ public class FollowerServiceImpl implements FollowerService {
 
         User followed = userRepository.findById(followedId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
-        User follower = userRepository.getReferenceById(followerId);
+        User follower = userRepository.findById(followerId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
 
         FollowStatus status = Boolean.TRUE.equals(followed.getIsProfilePublic())
                 ? FollowStatus.ACCEPTED
@@ -118,6 +119,11 @@ public class FollowerServiceImpl implements FollowerService {
         PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
         return followerRepository.findByFollowedIdAndStatus(targetUserId, FollowStatus.PENDING, pageRequest)
                 .map(follow -> userMapper.userToPublicUserDto(follow.getFollower()));
+    }
+
+    @Override
+    public void acceptAllPendingFollowRequestsFor(UUID followedId) {
+        followerRepository.acceptAllPendingFollowRequestsFor(followedId);
     }
 
     private void assertCanViewFollowGraph(UUID viewerId, UUID targetUserId, User target) {

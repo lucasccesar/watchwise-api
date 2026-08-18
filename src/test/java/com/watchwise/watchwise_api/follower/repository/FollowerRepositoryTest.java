@@ -185,6 +185,25 @@ class FollowerRepositoryTest {
     }
 
     @Test
+    @DisplayName("[acceptAllPendingFollowRequestsFor] Should Accept Only Pending Requests Targeting The Given User - When Called")
+    void shouldAcceptOnlyPendingRequestsTargetingTheGivenUserWhenCalled() {
+        Follower pendingForJoao = followerRepository.save(buildFollower(lucas, joao, FollowStatus.PENDING));
+        Follower alreadyAcceptedForJoao = followerRepository.save(buildFollower(marina, joao, FollowStatus.ACCEPTED));
+        Follower pendingForSomeoneElse = followerRepository.saveAndFlush(buildFollower(joao, marina, FollowStatus.PENDING));
+        entityManager.clear();
+
+        followerRepository.acceptAllPendingFollowRequestsFor(joao.getId());
+        entityManager.clear();
+
+        assertThat(followerRepository.findById(pendingForJoao.getId()).orElseThrow().getStatus())
+                .isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(followerRepository.findById(alreadyAcceptedForJoao.getId()).orElseThrow().getStatus())
+                .isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(followerRepository.findById(pendingForSomeoneElse.getId()).orElseThrow().getStatus())
+                .isEqualTo(FollowStatus.PENDING);
+    }
+
+    @Test
     @DisplayName("[deleteAll] Should Cascade Delete Follower Rows - When The Follower User Is Deleted")
     void shouldCascadeDeleteFollowerRowsWhenTheFollowerUserIsDeleted() {
         Follower saved = followerRepository.saveAndFlush(buildFollower(lucas, marina, FollowStatus.ACCEPTED));
