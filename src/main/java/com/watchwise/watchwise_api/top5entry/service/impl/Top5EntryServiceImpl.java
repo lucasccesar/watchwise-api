@@ -109,6 +109,8 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     @Override
     @Transactional
     public void removeEntry(UUID userId, ContentType type, UUID top5EntryId) {
+        validateType(type);
+
         Top5Entry entry = top5EntryRepository.findById(top5EntryId)
                 .orElseThrow(() -> new NotFoundException("Top 5 entry not found"));
 

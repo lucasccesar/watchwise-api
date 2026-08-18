@@ -543,6 +543,24 @@ class Top5EntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[removeEntry] Should Throw BadRequestException - When Type Is Season")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeasonOnRemove() {
+        assertThatThrownBy(() -> top5EntryService.removeEntry(lucasId, ContentType.SEASON, UUID.randomUUID()))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(top5EntryRepository);
+    }
+
+    @Test
+    @DisplayName("[removeEntry] Should Throw BadRequestException - When Type Is Episode")
+    void shouldThrowBadRequestExceptionWhenTypeIsEpisodeOnRemove() {
+        assertThatThrownBy(() -> top5EntryService.removeEntry(lucasId, ContentType.EPISODE, UUID.randomUUID()))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(top5EntryRepository);
+    }
+
+    @Test
     @DisplayName("[removeEntry] Should Throw NotFoundException - When Entry Does Not Exist")
     void shouldThrowNotFoundExceptionWhenEntryDoesNotExist() {
         UUID missingId = UUID.randomUUID();

@@ -82,6 +82,8 @@ public class DiaryEntryController {
             @PathVariable UUID diaryEntryId,
             @RequestParam(required = false, defaultValue = "false") boolean overrideProtectedEntries
     ) {
+        requestThrottler.checkAllowed(diaryActionKey(), diaryActionMaxRequests, Duration.ofMinutes(diaryActionWindowMinutes));
+
         diaryEntryService.deleteDiaryEntry(getCurrentUserId(), diaryEntryId, overrideProtectedEntries);
         return ResponseEntity.noContent().build();
     }

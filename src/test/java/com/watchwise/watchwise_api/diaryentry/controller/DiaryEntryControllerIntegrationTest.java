@@ -478,6 +478,26 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[deleteDiaryEntry] Should Return TooManyRequests - When Requests From The Same User Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenRequestsFromTheSameUserExceedTheConfiguredMaxOnDelete() throws Exception {
+        RegisteredUser user = registerUser("deletediaryratelimit");
+
+        MvcResult firstEntry = mockMvc.perform(createRequest(user, creationBody("movie0", null)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String firstEntryId = JsonPath.read(firstEntry.getResponse().getContentAsString(), "$.entry.id");
+
+        for (int i = 1; i < 60; i++) {
+            mockMvc.perform(createRequest(user, creationBody("movie" + i, null)))
+                    .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(deleteRequest(user, UUID.fromString(firstEntryId)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForCreate() throws Exception {
         RegisteredUser user = registerUser("creatediarynoauth");
