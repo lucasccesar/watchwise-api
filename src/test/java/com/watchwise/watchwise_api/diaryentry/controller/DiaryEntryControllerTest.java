@@ -193,7 +193,7 @@ class DiaryEntryControllerTest {
     @DisplayName("[createDiaryEntriesInBulk] Should Return Created With The List From The Service - When Called")
     void shouldReturnCreatedWithTheListFromTheServiceWhenCalled() {
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "901", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null, null);
         DiaryEntryResponseDTO entryResponseDTO = buildResponseDto();
         when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto)).thenReturn(List.of(entryResponseDTO));
 
@@ -207,7 +207,7 @@ class DiaryEntryControllerTest {
     @DisplayName("[createDiaryEntriesInBulk] Should Check Rate Limit Before Calling Service - When Called")
     void shouldCheckRateLimitBeforeCallingServiceWhenBulkCreateCalled() {
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "901", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null, null);
         when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto)).thenReturn(List.of());
 
         diaryEntryController.createDiaryEntriesInBulk(dto);

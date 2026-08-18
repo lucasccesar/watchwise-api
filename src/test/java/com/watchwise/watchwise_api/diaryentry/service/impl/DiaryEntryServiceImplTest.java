@@ -46,6 +46,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1266,7 +1267,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When Content Type Is Not SEASON Or SERIES")
     void shouldThrowBadRequestExceptionWhenContentTypeIsNotSeasonOrSeries() {
         ContentRefCreationDTO movieRef = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(movieRef, LocalDate.now(), null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(movieRef, LocalDate.now(), null, null, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
@@ -1280,7 +1281,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), null, null, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
@@ -1294,7 +1295,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 101, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 101, null, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
@@ -1308,7 +1309,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, null, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
@@ -1326,11 +1327,81 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("finaleEpisodeNumber is required");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When SeasonFinaleEpisodeNumbers Supplies A Value Below 1")
+    void shouldThrowBadRequestExceptionWhenSeasonFinaleEpisodeNumbersSuppliesAValueBelowOne() {
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 1, Map.of(1, 0));
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("must be greater than or equal to 1");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Bulk-Log Every Season From Scratch - When SeasonFinaleEpisodeNumbers Supplies Every Season's Finale")
+    void shouldBulkLogEverySeasonFromScratchWhenSeasonFinaleEpisodeNumbersSuppliesEveryFinale() {
+        Content s1e1 = buildEpisode("900", 1, 1);
+        Content s1e2 = buildFinaleEpisode("900", 1, 2);
+        Content s2e1 = buildEpisode("900", 2, 1);
+        Content s2e2 = buildFinaleEpisode("900", 2, 2);
+
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 2, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO refDto = inv.getArgument(0);
+                    Content content;
+                    if (refDto.episodeNumber() == 1 && refDto.seasonNumber() == 1) content = s1e1;
+                    else if (refDto.episodeNumber() == 2 && refDto.seasonNumber() == 1) content = s1e2;
+                    else if (refDto.episodeNumber() == 1 && refDto.seasonNumber() == 2) content = s2e1;
+                    else content = s2e2;
+                    return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
+                            null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(inv -> {
+                    UUID id = inv.getArgument(0);
+                    if (id.equals(s1e1.getId())) return s1e1;
+                    if (id.equals(s1e2.getId())) return s1e2;
+                    if (id.equals(s2e1.getId())) return s2e1;
+                    if (id.equals(s2e2.getId())) return s2e2;
+                    return null;
+                });
+
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class)))
+                .thenAnswer(inv -> buildResponseDto(inv.getArgument(0)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seriesRef, LocalDate.now(), null, 2, Map.of(1, 2, 2, 2));
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(4);
     }
 
     @Test
@@ -1386,7 +1457,7 @@ class DiaryEntryServiceImplTest {
                 });
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 2, null);
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
@@ -1442,7 +1513,7 @@ class DiaryEntryServiceImplTest {
                 });
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null, null);
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
@@ -1516,7 +1587,7 @@ class DiaryEntryServiceImplTest {
                 });
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.of(2024, 5, 1), null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.of(2024, 5, 1), null, null, null);
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 

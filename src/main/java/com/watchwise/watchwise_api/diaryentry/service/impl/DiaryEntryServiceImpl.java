@@ -180,7 +180,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             bulkLogSeason(userId, content.seriesTmdbId(), content.seasonNumber(), content.isSeriesFinale(),
                     dto.finaleEpisodeNumber(), dto.watchedDate(), created);
         } else {
-            bulkLogSeries(userId, content.tmdbId(), dto.finaleSeasonNumber(), dto.watchedDate(), created);
+            bulkLogSeries(userId, content.tmdbId(), dto.finaleSeasonNumber(), dto.seasonFinaleEpisodeNumbers(), dto.watchedDate(), created);
         }
 
         return created.stream().map(diaryEntryMapper::diaryEntryToResponseDto).toList();
@@ -343,6 +343,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (explicitFinaleEpisodeNumber == null) {
             throw new BadRequestException("finaleEpisodeNumber is required when season " + seasonNumber + " has no known finale episode yet");
         }
+        if (explicitFinaleEpisodeNumber < 1) {
+            throw new BadRequestException("finaleEpisodeNumber for season " + seasonNumber + " must be greater than or equal to 1");
+        }
         return explicitFinaleEpisodeNumber;
     }
 
@@ -373,12 +376,14 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return entry;
     }
 
-    private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber, LocalDate watchedDate, List<DiaryEntry> created) {
+    private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber,
+            Map<Integer, Integer> seasonFinaleEpisodeNumbers, LocalDate watchedDate, List<DiaryEntry> created) {
         int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber);
 
         int totalEpisodes = 0;
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
-            totalEpisodes += resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, null);
+            totalEpisodes += resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber,
+                    explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber));
         }
         if (totalEpisodes > MAX_BULK_EPISODES) {
             throw new BadRequestException("Series has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
@@ -386,12 +391,17 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
             boolean isSeriesFinaleSeason = seasonNumber == finaleSeasonNumber;
-            int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, null);
+            int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber,
+                    explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber));
             for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
                 created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
                         episodeNumber == finaleEpisodeNumber, isSeriesFinaleSeason, watchedDate, created));
             }
         }
+    }
+
+    private Integer explicitFinaleEpisodeNumberFor(Map<Integer, Integer> seasonFinaleEpisodeNumbers, int seasonNumber) {
+        return seasonFinaleEpisodeNumbers == null ? null : seasonFinaleEpisodeNumbers.get(seasonNumber);
     }
 
     private int resolveSeriesFinaleSeasonNumber(String seriesTmdbId, Integer explicitFinaleSeasonNumber) {
