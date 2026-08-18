@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.common.security;
 
+import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
@@ -12,14 +14,18 @@ import org.springframework.security.web.authentication.WebAuthenticationDetailsS
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @RequiredArgsConstructor
 public class JwtCookieAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final UserRepository userRepository;
 
     @Override
     protected void doFilterInternal(
@@ -33,14 +39,31 @@ public class JwtCookieAuthenticationFilter extends OncePerRequestFilter {
         if (token != null && jwtService.isTokenValid(token, TokenType.ACCESS) && SecurityContextHolder.getContext().getAuthentication() == null) {
             UUID userId = jwtService.extractUserId(token);
 
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(userId, null, List.of());
-            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+            if (isSessionStillValid(userId, token)) {
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(userId, null, List.of());
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private boolean isSessionStillValid(UUID userId, String token) {
+        Optional<User> user = userRepository.findById(userId);
+        if (user.isEmpty()) {
+            return true;
+        }
+
+        LocalDateTime sessionsInvalidatedAt = user.get().getSessionsInvalidatedAt();
+        if (sessionsInvalidatedAt == null) {
+            return true;
+        }
+
+        LocalDateTime issuedAt = LocalDateTime.ofInstant(jwtService.extractIssuedAt(token).toInstant(), ZoneId.systemDefault());
+        return issuedAt.isAfter(sessionsInvalidatedAt);
     }
 
     private String extractTokenFromCookies(HttpServletRequest request) {

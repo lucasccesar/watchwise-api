@@ -20,6 +20,7 @@ public class CookieUtil {
     private final long refreshTokenExpirationDays;
     private final boolean secureCookies;
     private final String refreshTokenPath;
+    private final String csrfTokenPath;
 
     public CookieUtil(
             @Value("${app.jwt.expiration-minutes}") long accessTokenExpirationMinutes,
@@ -31,10 +32,15 @@ public class CookieUtil {
         this.refreshTokenExpirationDays = refreshTokenExpirationDays;
         this.secureCookies = secureCookies;
         this.refreshTokenPath = contextPath + "/auth/refresh";
+        this.csrfTokenPath = contextPath.isEmpty() ? "/" : contextPath;
     }
 
     public String getRefreshTokenPath() {
         return refreshTokenPath;
+    }
+
+    public String getCsrfTokenPath() {
+        return csrfTokenPath;
     }
 
     public ResponseCookie buildAccessTokenCookie(String token) {

@@ -12,7 +12,7 @@ public interface RefreshTokenService {
 
     void revokeRefreshToken(String rawRefreshToken);
 
-    void revokeAllRefreshTokens(UUID userId);
+    void invalidateAllSessions(UUID userId);
 
     int cleanupExpiredTokens();
 

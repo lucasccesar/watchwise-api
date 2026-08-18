@@ -260,6 +260,24 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[updateCurrentUser] Should Invalidate The Access Token Already Issued - When Password Changes")
+    void shouldInvalidateTheAccessTokenAlreadyIssuedWhenPasswordChanges() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("pwchangeinvalidateuser", "pwchangeinvalidateuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie,
+                        "{ \"password\": \"NewPassword123\", \"currentPassword\": \"Password123\" }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Return BadRequest - When Changing Password Without CurrentPassword")
     void shouldReturnBadRequestWhenChangingPasswordWithoutCurrentPassword() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("nopwconfirmuser", "nopwconfirmuser@email.com"))

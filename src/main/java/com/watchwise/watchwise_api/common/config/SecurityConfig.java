@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.security.JsonAuthenticationEntryPoint;
 import com.watchwise.watchwise_api.common.security.JwtCookieAuthenticationFilter;
 import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.SpaCsrfTokenRequestHandler;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -40,8 +41,8 @@ public class SecurityConfig {
     }
 
     @Bean
-    public JwtCookieAuthenticationFilter jwtCookieAuthenticationFilter(JwtService jwtService) {
-        return new JwtCookieAuthenticationFilter(jwtService);
+    public JwtCookieAuthenticationFilter jwtCookieAuthenticationFilter(JwtService jwtService, UserRepository userRepository) {
+        return new JwtCookieAuthenticationFilter(jwtService, userRepository);
     }
 
     @Bean

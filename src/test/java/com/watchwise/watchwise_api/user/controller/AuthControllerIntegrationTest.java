@@ -547,6 +547,26 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[logoutAll] Should Invalidate The Access Token Already Issued - When Called")
+    void shouldInvalidateTheAccessTokenAlreadyIssuedWhenLogoutAllCalled() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("accesstokeninvalidateuser", "accesstokeninvalidateuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        assertThat(accessTokenCookie).isNotNull();
+
+        mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(logoutAllRequest(accessTokenCookie, csrfCookie))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("[logoutAll] Should Not Affect Refresh Tokens Of Other Users - When Called")
     void shouldNotAffectRefreshTokensOfOtherUsersWhenLogoutAllCalled() throws Exception {
         MvcResult userARegister = mockMvc.perform(registerRequest("logoutalluserA", "logoutalluserA@email.com"))

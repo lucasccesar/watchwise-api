@@ -61,6 +61,10 @@ public class JwtService {
         return parseClaims(token).getExpiration();
     }
 
+    public Date extractIssuedAt(String token) {
+        return parseClaims(token).getIssuedAt();
+    }
+
     public TokenType extractTokenType(String token) {
         return TokenType.valueOf(parseClaims(token).get(TYPE_CLAIM, String.class));
     }

@@ -15,6 +15,7 @@ public interface UserMapper {
     @Mapping(target = "isEmailVerified", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "sessionsInvalidatedAt", ignore = true)
     User postUserDtoToUser(PostUserDTO postUserDTO);
 
     UserResponseDTO userToUserResponseDto(User user);

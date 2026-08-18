@@ -568,6 +568,7 @@ class AuthControllerTest {
     void shouldReturnNoContentAndClearAccessRefreshAndCsrfCookiesWhenCalled() {
         ResponseCookie clearedCookie = ResponseCookie.from("cleared", "").build();
         when(cookieUtil.getRefreshTokenPath()).thenReturn("/api/v1/auth/refresh");
+        when(cookieUtil.getCsrfTokenPath()).thenReturn("/api/v1");
         when(cookieUtil.clearCookie(any(), any())).thenReturn(clearedCookie);
 
         ResponseEntity<Void> result = authController.logout("some-refresh-token", response);
@@ -575,7 +576,7 @@ class AuthControllerTest {
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(cookieUtil).clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
         verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, "/api/v1/auth/refresh");
-        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
+        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/api/v1");
         verify(cookieUtil, times(3)).addCookie(eq(response), eq(clearedCookie));
     }
 
@@ -605,7 +606,7 @@ class AuthControllerTest {
 
         authController.logoutAll(response);
 
-        verify(refreshTokenService).revokeAllRefreshTokens(currentUserId);
+        verify(refreshTokenService).invalidateAllSessions(currentUserId);
     }
 
     @Test
@@ -614,13 +615,14 @@ class AuthControllerTest {
         setAuthenticated(UUID.randomUUID());
         ResponseCookie clearedCookie = ResponseCookie.from("cleared", "").build();
         when(cookieUtil.getRefreshTokenPath()).thenReturn("/api/v1/auth/refresh");
+        when(cookieUtil.getCsrfTokenPath()).thenReturn("/api/v1");
         when(cookieUtil.clearCookie(any(), any())).thenReturn(clearedCookie);
 
         authController.logoutAll(response);
 
         verify(cookieUtil).clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
         verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, "/api/v1/auth/refresh");
-        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
+        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/api/v1");
         verify(cookieUtil, times(3)).addCookie(eq(response), eq(clearedCookie));
     }
 }

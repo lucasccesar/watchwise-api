@@ -190,18 +190,18 @@ public class AuthController {
 
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, cookieUtil.getRefreshTokenPath()));
-        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, cookieUtil.getCsrfTokenPath()));
 
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/logout-all")
     public ResponseEntity<Void> logoutAll(HttpServletResponse response) {
-        refreshTokenService.revokeAllRefreshTokens(getCurrentUserId());
+        refreshTokenService.invalidateAllSessions(getCurrentUserId());
 
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, cookieUtil.getRefreshTokenPath()));
-        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, cookieUtil.getCsrfTokenPath()));
 
         return ResponseEntity.noContent().build();
     }

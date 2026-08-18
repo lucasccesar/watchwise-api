@@ -48,6 +48,20 @@ class CookieUtilTest {
     }
 
     @Test
+    @DisplayName("[getCsrfTokenPath] Should Return Bare Context Path - When Context Path Is Set")
+    void shouldReturnBareContextPathWhenContextPathIsSet() {
+        assertThat(cookieUtil.getCsrfTokenPath()).isEqualTo("/api/v1");
+    }
+
+    @Test
+    @DisplayName("[getCsrfTokenPath] Should Return Root Path - When Context Path Is Blank")
+    void shouldReturnRootPathWhenContextPathIsBlank() {
+        CookieUtil noContextPathCookieUtil = new CookieUtil(60, 7, true, "");
+
+        assertThat(noContextPathCookieUtil.getCsrfTokenPath()).isEqualTo("/");
+    }
+
+    @Test
     @DisplayName("[clearCookie] Should Build Empty Cookie With Zero MaxAge - When Called With Name And Path")
     void shouldBuildEmptyCookieWithZeroMaxAgeWhenCalledWithNameAndPath() {
         ResponseCookie cookie = cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");

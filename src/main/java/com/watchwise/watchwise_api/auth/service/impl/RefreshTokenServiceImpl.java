@@ -9,7 +9,6 @@ import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.TokenType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
-import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -21,6 +20,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Service
@@ -61,7 +61,7 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
                 .orElseThrow(() -> new UnauthorizedException("Invalid refresh token"));
 
         if (Boolean.TRUE.equals(storedToken.getRevoked())) {
-            revokeAllRefreshTokens(storedToken.getUser().getId());
+            invalidateAllSessions(storedToken.getUser().getId());
             throw new UnauthorizedException("Invalid refresh token");
         }
 
@@ -69,7 +69,7 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         try {
             refreshTokenRepository.saveAndFlush(storedToken);
         } catch (ObjectOptimisticLockingFailureException e) {
-            revokeAllRefreshTokens(storedToken.getUser().getId());
+            invalidateAllSessions(storedToken.getUser().getId());
             throw new UnauthorizedException("Invalid refresh token");
         }
 
@@ -82,16 +82,11 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
 
     @Override
     public void revokeRefreshToken(String rawRefreshToken) {
-        if (!StringUtils.hasText(rawRefreshToken)) {
+        if (!StringUtils.hasText(rawRefreshToken) || !jwtService.isTokenValid(rawRefreshToken, TokenType.REFRESH)) {
             return;
         }
 
-        UUID jti;
-        try {
-            jti = jwtService.extractJti(rawRefreshToken);
-        } catch (JwtException | IllegalArgumentException e) {
-            return;
-        }
+        UUID jti = jwtService.extractJti(rawRefreshToken);
 
         refreshTokenRepository.findById(jti).ifPresent(refreshToken -> {
             refreshToken.setRevoked(true);
@@ -100,10 +95,13 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     }
 
     @Override
-    public void revokeAllRefreshTokens(UUID userId) {
+    public void invalidateAllSessions(UUID userId) {
         TransactionTemplate requiresNewTransaction = new TransactionTemplate(transactionManager);
         requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        requiresNewTransaction.executeWithoutResult(status -> refreshTokenRepository.revokeAllByUserId(userId));
+        requiresNewTransaction.executeWithoutResult(status -> {
+            refreshTokenRepository.revokeAllByUserId(userId);
+            userRepository.markSessionsInvalidatedAt(userId, LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS));
+        });
     }
 
     @Override

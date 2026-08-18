@@ -175,6 +175,7 @@ class RefreshTokenServiceImplTest {
                 .isInstanceOf(UnauthorizedException.class);
 
         verify(refreshTokenRepository).revokeAllByUserId(userId);
+        verify(userRepository).markSessionsInvalidatedAt(eq(userId), any(LocalDateTime.class));
     }
 
     @Test
@@ -236,17 +237,19 @@ class RefreshTokenServiceImplTest {
                 .isInstanceOf(UnauthorizedException.class);
 
         verify(refreshTokenRepository).revokeAllByUserId(userId);
+        verify(userRepository).markSessionsInvalidatedAt(eq(userId), any(LocalDateTime.class));
         verify(jwtService, never()).generateToken(any(), eq(TokenType.ACCESS));
     }
 
     @Test
-    @DisplayName("[revokeAllRefreshTokens] Should Delegate To Repository With Given User Id - When Called")
-    void shouldDelegateToRepositoryWithGivenUserIdWhenRevokeAllRefreshTokensCalled() {
+    @DisplayName("[invalidateAllSessions] Should Delegate To Repository With Given User Id - When Called")
+    void shouldDelegateToRepositoryWithGivenUserIdWhenInvalidateAllSessionsCalled() {
         when(transactionManager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
 
-        refreshTokenService.revokeAllRefreshTokens(userId);
+        refreshTokenService.invalidateAllSessions(userId);
 
         verify(refreshTokenRepository).revokeAllByUserId(userId);
+        verify(userRepository).markSessionsInvalidatedAt(eq(userId), any(LocalDateTime.class));
     }
 
     @Test
@@ -274,11 +277,23 @@ class RefreshTokenServiceImplTest {
     @DisplayName("[revokeRefreshToken] Should Do Nothing - When Token Cannot Be Parsed")
     void shouldDoNothingWhenTokenCannotBeParsed() {
         String token = "malformed-token";
-        when(jwtService.extractJti(token)).thenThrow(new JwtException("malformed"));
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(false);
 
         refreshTokenService.revokeRefreshToken(token);
 
         verifyNoInteractions(refreshTokenRepository);
+    }
+
+    @Test
+    @DisplayName("[revokeRefreshToken] Should Do Nothing - When Token Type Is Not Refresh")
+    void shouldDoNothingWhenTokenTypeIsNotRefresh() {
+        String token = "access-token-value";
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(false);
+
+        refreshTokenService.revokeRefreshToken(token);
+
+        verifyNoInteractions(refreshTokenRepository);
+        verify(jwtService, never()).extractJti(token);
     }
 
     @Test
@@ -287,6 +302,7 @@ class RefreshTokenServiceImplTest {
         String token = "valid-token";
         UUID jti = UUID.randomUUID();
 
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(true);
         when(jwtService.extractJti(token)).thenReturn(jti);
         when(refreshTokenRepository.findById(jti)).thenReturn(Optional.empty());
 
@@ -308,6 +324,7 @@ class RefreshTokenServiceImplTest {
                 .createdAt(LocalDateTime.now())
                 .build();
 
+        when(jwtService.isTokenValid(token, TokenType.REFRESH)).thenReturn(true);
         when(jwtService.extractJti(token)).thenReturn(jti);
         when(refreshTokenRepository.findById(jti)).thenReturn(Optional.of(storedToken));
 

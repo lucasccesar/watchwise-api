@@ -57,4 +57,8 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     @Setter
     private LocalDateTime updatedAt;
+
+    @Column(name = "sessions_invalidated_at")
+    @Setter
+    private LocalDateTime sessionsInvalidatedAt;
 }
