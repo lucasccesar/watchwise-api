@@ -41,7 +41,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -106,7 +105,7 @@ class UserControllerTest {
                 true
         );
         Page<UserPreviewDTO> page = new PageImpl<>(List.of(previewDTO), PageRequest.of(0, 10), 1);
-        when(userService.getUsersByUsername("jane", 1, 10, null)).thenReturn(page);
+        when(userService.getUsersByUsername("jane", 1, 10)).thenReturn(page);
 
         ResponseEntity<PageResponseDTO<UserPreviewDTO>> result = userController.getUsersByUsername("jane", 1, 10);
 
@@ -123,7 +122,7 @@ class UserControllerTest {
     @Test
     @DisplayName("[getUsersByUsername] Should Return Empty Content - When Service Returns No Results")
     void shouldReturnEmptyContentWhenServiceReturnsNoResults() {
-        when(userService.getUsersByUsername("nobody", null, null, null)).thenReturn(Page.empty());
+        when(userService.getUsersByUsername("nobody", null, null)).thenReturn(Page.empty());
 
         ResponseEntity<PageResponseDTO<UserPreviewDTO>> result = userController.getUsersByUsername("nobody", null, null);
 
@@ -133,25 +132,15 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("[getUsersByUsername] Should Always Pass Null IsProfilePublic Filter To Service - When Called")
-    void shouldAlwaysPassNullIsProfilePublicFilterToServiceWhenCalled() {
-        when(userService.getUsersByUsername(eq("jane"), any(), any(), isNull())).thenReturn(Page.empty());
-
-        userController.getUsersByUsername("jane", 2, 5);
-
-        verify(userService).getUsersByUsername("jane", 2, 5, null);
-    }
-
-    @Test
     @DisplayName("[getUsersByUsername] Should Check Rate Limit Before Querying - When Called")
     void shouldCheckRateLimitBeforeQueryingWhenGetUsersByUsernameCalled() {
-        when(userService.getUsersByUsername(any(), any(), any(), any())).thenReturn(Page.empty());
+        when(userService.getUsersByUsername(any(), any(), any())).thenReturn(Page.empty());
 
         userController.getUsersByUsername("jane", null, null);
 
         InOrder order = inOrder(requestThrottler, userService);
         order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
-        order.verify(userService).getUsersByUsername("jane", null, null, null);
+        order.verify(userService).getUsersByUsername("jane", null, null);
     }
 
     @Test
@@ -163,7 +152,7 @@ class UserControllerTest {
         assertThatThrownBy(() -> userController.getUsersByUsername("jane", null, null))
                 .isInstanceOf(TooManyRequestsException.class);
 
-        verify(userService, never()).getUsersByUsername(any(), any(), any(), any());
+        verify(userService, never()).getUsersByUsername(any(), any(), any());
     }
 
     @Test
@@ -352,7 +341,7 @@ class UserControllerTest {
     @DisplayName("[getUsersByUsername][getUserById] Should Share The Same Throttle Key - When Called By The Same User")
     void shouldShareTheSameThrottleKeyWhenCalledByTheSameUser() {
         UUID targetId = UUID.randomUUID();
-        when(userService.getUsersByUsername(any(), any(), any(), any())).thenReturn(Page.empty());
+        when(userService.getUsersByUsername(any(), any(), any())).thenReturn(Page.empty());
         when(userService.getUserById(targetId)).thenReturn(mock(PublicUserDTO.class));
 
         userController.getUsersByUsername("jane", null, null);
@@ -390,13 +379,14 @@ class UserControllerTest {
         HttpServletResponse response = mock(HttpServletResponse.class);
         ResponseCookie clearedCookie = ResponseCookie.from("cleared", "").build();
         when(cookieUtil.getRefreshTokenPath()).thenReturn("/api/v1/auth/refresh");
+        when(cookieUtil.getCsrfTokenPath()).thenReturn("/api/v1");
         when(cookieUtil.clearCookie(anyString(), anyString())).thenReturn(clearedCookie);
 
         userController.deleteCurrentUser(deleteAccountDTO, response);
 
         verify(cookieUtil).clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/");
         verify(cookieUtil).clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, "/api/v1/auth/refresh");
-        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/");
+        verify(cookieUtil).clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/api/v1");
         verify(cookieUtil, times(3)).addCookie(eq(response), eq(clearedCookie));
     }
 

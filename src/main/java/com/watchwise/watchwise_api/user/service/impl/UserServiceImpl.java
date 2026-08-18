@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
@@ -38,17 +39,22 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
+    private final FollowerService followerService;
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
+    static final int MIN_USERNAME_LENGTH = 3;
 
     @Override
     public UserResponseDTO saveNewUser(PostUserDTO postUserDTO) {
 
+        String trimmedUsername = postUserDTO.username().trim();
+        validateUsernameLength(trimmedUsername);
+
         User mapperUser = userMapper.postUserDtoToUser(postUserDTO);
         mapperUser.setPassword(passwordEncoder.encode(postUserDTO.password()));
         mapperUser.setEmail(postUserDTO.email().toLowerCase().trim());
-        mapperUser.setUsername(postUserDTO.username().trim());
+        mapperUser.setUsername(trimmedUsername);
         mapperUser.setIsEmailVerified(true);
 
         LocalDateTime now = LocalDateTime.now();
@@ -77,7 +83,7 @@ public class UserServiceImpl implements UserService {
         }
 
         if (touchesCredentials) {
-            refreshTokenService.revokeAllRefreshTokens(id);
+            refreshTokenService.invalidateAllSessions(id);
         }
 
         return response;
@@ -98,6 +104,7 @@ public class UserServiceImpl implements UserService {
 
         if (patchUserDTO.username() != null) {
             String newUsername = patchUserDTO.username().trim();
+            validateUsernameLength(newUsername);
             if (!newUsername.equals(user.getUsername())) {
                 user.setUsername(newUsername);
             }
@@ -120,10 +127,20 @@ public class UserServiceImpl implements UserService {
         }
 
         if (patchUserDTO.isProfilePublic() != null && !patchUserDTO.isProfilePublic().equals(user.getIsProfilePublic())) {
+            boolean becamePublic = Boolean.TRUE.equals(patchUserDTO.isProfilePublic()) && !Boolean.TRUE.equals(user.getIsProfilePublic());
             user.setIsProfilePublic(patchUserDTO.isProfilePublic());
+            if (becamePublic) {
+                followerService.acceptAllPendingFollowRequestsFor(user.getId());
+            }
         }
 
         return credentialChanges.touchesCredentials();
+    }
+
+    private void validateUsernameLength(String trimmedUsername) {
+        if (trimmedUsername.length() < MIN_USERNAME_LENGTH) {
+            throw new BadRequestException("Username must be at least " + MIN_USERNAME_LENGTH + " characters long");
+        }
     }
 
     private void requireCurrentPassword(User user, String currentPassword) {
@@ -180,7 +197,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic) {
+    public Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize) {
 
         String trimmedUsername = username == null ? null : username.trim();
         if (StringUtils.isEmpty(trimmedUsername)) {
@@ -189,10 +206,8 @@ public class UserServiceImpl implements UserService {
 
         PageRequest pageRequest = buildPageRequest(pageNumber, pageSize, null, null);
 
-        boolean onlyPublic = Boolean.TRUE.equals(isProfilePublic);
-
         return userRepository
-                .findByUsernameStartingWithIgnoreCase(trimmedUsername, escapeLikeWildcards(trimmedUsername), onlyPublic, pageRequest)
+                .findByUsernameStartingWithIgnoreCase(trimmedUsername, escapeLikeWildcards(trimmedUsername), pageRequest)
                 .map(userMapper::userToUserPreviewDto);
     }
 

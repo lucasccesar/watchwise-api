@@ -20,7 +20,7 @@ public interface UserService {
 
     UserResponseDTO getCurrentUser(UUID id);
 
-    Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize, Boolean isProfilePublic);
+    Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize);
 
     UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO);
 

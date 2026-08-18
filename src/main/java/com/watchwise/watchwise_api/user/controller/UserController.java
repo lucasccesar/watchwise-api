@@ -67,7 +67,7 @@ public class UserController {
     ) {
         requestThrottler.checkAllowed(profileScanKey(), profileScanMaxRequests, Duration.ofMinutes(profileScanWindowMinutes));
 
-        Page<UserPreviewDTO> users = userService.getUsersByUsername(username, page, size, null);
+        Page<UserPreviewDTO> users = userService.getUsersByUsername(username, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(users));
     }
 
@@ -130,7 +130,7 @@ public class UserController {
 
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.ACCESS_TOKEN_COOKIE, "/"));
         cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.REFRESH_TOKEN_COOKIE, cookieUtil.getRefreshTokenPath()));
-        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, "/"));
+        cookieUtil.addCookie(response, cookieUtil.clearCookie(CookieUtil.CSRF_TOKEN_COOKIE, cookieUtil.getCsrfTokenPath()));
 
         return ResponseEntity.noContent().build();
     }

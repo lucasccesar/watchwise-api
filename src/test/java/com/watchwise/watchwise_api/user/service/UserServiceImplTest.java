@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
@@ -57,6 +58,9 @@ class UserServiceImplTest {
 
     @Mock
     private RefreshTokenService refreshTokenService;
+
+    @Mock
+    private FollowerService followerService;
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -249,6 +253,25 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[saveNewUser] Should Throw BadRequestException - When Trimmed Username Is Shorter Than The Minimum Length")
+    void shouldThrowBadRequestExceptionWhenTrimmedUsernameIsShorterThanTheMinimumLength() {
+        PostUserDTO postUserDTOWithPaddedShortUsername = new PostUserDTO(
+                " ab ",
+                postUserDTO.email(),
+                postUserDTO.password(),
+                postUserDTO.description(),
+                postUserDTO.profilePicture(),
+                postUserDTO.isProfilePublic()
+        );
+
+        assertThatThrownBy(() -> userService.saveNewUser(postUserDTOWithPaddedShortUsername))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Username must be at least 3 characters long");
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("[getUserById] Should Return PublicUserDTO - When Id Exists And Profile Is Public")
     void shouldReturnPublicUserDtoWhenIdExistsAndProfileIsPublic() {
         UUID id = savedUser.getId();
@@ -331,27 +354,27 @@ class UserServiceImplTest {
 
     @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Username Is Null")
-    void shouldThrowException_whenUsernameIsNull() {
+    void shouldThrowBadRequestExceptionWhenUsernameIsNull() {
         assertThrows(BadRequestException.class,
-                () -> userService.getUsersByUsername(null, 1, 10, true));
+                () -> userService.getUsersByUsername(null, 1, 10));
 
         verifyNoInteractions(userRepository, userMapper);
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Username Is Empty")
-    void shouldThrowException_whenUsernameIsEmpty() {
+    void shouldThrowBadRequestExceptionWhenUsernameIsEmpty() {
         assertThrows(BadRequestException.class,
-                () -> userService.getUsersByUsername("", 1, 10, true));
+                () -> userService.getUsersByUsername("", 1, 10));
 
         verifyNoInteractions(userRepository, userMapper);
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Username Is Only Whitespace")
-    void shouldThrowExceptionWhenUsernameIsOnlyWhitespace() {
+    void shouldThrowBadRequestExceptionWhenUsernameIsOnlyWhitespace() {
         assertThrows(BadRequestException.class,
-                () -> userService.getUsersByUsername("   ", 1, 10, true));
+                () -> userService.getUsersByUsername("   ", 1, 10));
 
         verifyNoInteractions(userRepository, userMapper);
     }
@@ -359,29 +382,29 @@ class UserServiceImplTest {
     @Test
     @DisplayName("[getUsersByUsername] Should Trim Username Before Query - When Username Has Surrounding Whitespace")
     void shouldTrimUsernameBeforeQueryWhenUsernameHasSurroundingWhitespace() {
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("john"), anyString(), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("john"), anyString(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        userService.getUsersByUsername("  john  ", 1, 10, true);
+        userService.getUsersByUsername("  john  ", 1, 10);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq("john"), anyString(), anyBoolean(), any(PageRequest.class));
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq("john"), anyString(), any(PageRequest.class));
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Escape LIKE Wildcards - When Username Contains Percent Or Underscore")
     void shouldEscapeLikeWildcardsWhenUsernameContainsPercentOrUnderscore() {
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("50%_off"), anyString(), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("50%_off"), anyString(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        userService.getUsersByUsername("50%_off", 1, 10, true);
+        userService.getUsersByUsername("50%_off", 1, 10);
 
         verify(userRepository).findByUsernameStartingWithIgnoreCase(
-                eq("50%_off"), eq("50\\%\\_off"), anyBoolean(), any(PageRequest.class));
+                eq("50%_off"), eq("50\\%\\_off"), any(PageRequest.class));
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Return Page Of DTOs - When Happy Path")
-    void shouldReturnPageOfDtos_happyPath() {
+    void shouldReturnPageOfDtosWhenHappyPath() {
         String username = "john";
         Page<User> userPage = new PageImpl<>(List.of(savedUser));
         UserPreviewDTO dto = new UserPreviewDTO(
@@ -391,11 +414,11 @@ class UserServiceImplTest {
                 savedUser.getIsProfilePublic()
         );
 
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), any(PageRequest.class)))
                 .thenReturn(userPage);
         when(userMapper.userToUserPreviewDto(savedUser)).thenReturn(dto);
 
-        Page<UserPreviewDTO> result = userService.getUsersByUsername(username, 1, 10, true);
+        Page<UserPreviewDTO> result = userService.getUsersByUsername(username, 1, 10);
 
         assertEquals(1, result.getTotalElements());
         assertEquals(dto, result.getContent().get(0));
@@ -404,171 +427,135 @@ class UserServiceImplTest {
 
     @Test
     @DisplayName("[getUsersByUsername] Should Return Empty Page - When No Users Are Found")
-    void shouldReturnEmptyPage_whenNoUsersFound() {
+    void shouldReturnEmptyPageWhenNoUsersFound() {
         String username = "john";
 
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        Page<UserPreviewDTO> result = userService.getUsersByUsername(username, 1, 10, true);
+        Page<UserPreviewDTO> result = userService.getUsersByUsername(username, 1, 10);
 
         assertTrue(result.isEmpty());
         verify(userMapper, never()).userToUserPreviewDto(any());
     }
 
-    @Test
-    @DisplayName("[getUsersByUsername] Should Set OnlyPublic True - When IsProfilePublic Is True")
-    void shouldSetOnlyPublicTrue_whenIsProfilePublicIsTrue() {
-        String username = "john";
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(true), any(PageRequest.class)))
-                .thenReturn(Page.empty());
-
-        userService.getUsersByUsername(username, 1, 10, true);
-
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(true), any(PageRequest.class));
-    }
-
-    @Test
-    @DisplayName("[getUsersByUsername] Should Set OnlyPublic False - When IsProfilePublic Is False")
-    void shouldSetOnlyPublicFalse_whenIsProfilePublicIsFalse() {
-        String username = "john";
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class)))
-                .thenReturn(Page.empty());
-
-        userService.getUsersByUsername(username, 1, 10, false);
-
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class));
-    }
-
-    @Test
-    @DisplayName("[getUsersByUsername] Should Set OnlyPublic False - When IsProfilePublic Is Null")
-    void shouldSetOnlyPublicFalse_whenIsProfilePublicIsNull() {
-        String username = "john";
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class)))
-                .thenReturn(Page.empty());
-
-        userService.getUsersByUsername(username, 1, 10, null);
-
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq(username), anyString(), eq(false), any(PageRequest.class));
-    }
-
     private void stubRepositoryReturningEmptyPage() {
-        when(userRepository.findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), any(PageRequest.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCase(anyString(), anyString(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Use Default Page - When Page Number Is Null")
-    void shouldUseDefaultPage_whenPageNumberIsNull() {
+    void shouldUseDefaultPageWhenPageNumberIsNull() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", null, 10, true);
+        userService.getUsersByUsername("john", null, 10);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Use Default Page - When Page Number Is Zero")
-    void shouldUseDefaultPage_whenPageNumberIsZero() {
+    void shouldUseDefaultPageWhenPageNumberIsZero() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", 0, 10, true);
+        userService.getUsersByUsername("john", 0, 10);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Use Page Number Minus One - When Page Number Is Positive")
-    void shouldUsePageNumberMinusOne_whenPageNumberIsPositive() {
+    void shouldUsePageNumberMinusOneWhenPageNumberIsPositive() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", 3, 10, true);
+        userService.getUsersByUsername("john", 3, 10);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertEquals(2, pageRequestCaptor.getValue().getPageNumber());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Page Number Is Negative")
-    void shouldThrowException_whenPageNumberIsNegative() {
+    void shouldThrowBadRequestExceptionWhenPageNumberIsNegative() {
         assertThrows(BadRequestException.class,
-                () -> userService.getUsersByUsername("john", -1, 10, true));
+                () -> userService.getUsersByUsername("john", -1, 10));
 
         verifyNoInteractions(userRepository, userMapper);
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Use Default Page Size - When Page Size Is Null")
-    void shouldUseDefaultPageSize_whenPageSizeIsNull() {
+    void shouldUseDefaultPageSizeWhenPageSizeIsNull() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", 1, null, true);
+        userService.getUsersByUsername("john", 1, null);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSize_whenPageSizeExceedsLimit() {
+    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", 1, 1001, true);
+        userService.getUsersByUsername("john", 1, 1001);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertEquals(UserServiceImpl.DEFAULT_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Use Provided Page Size - When Page Size Is Valid")
-    void shouldUseProvidedPageSize_whenValid() {
+    void shouldUseProvidedPageSizeWhenPageSizeIsValid() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", 1, 25, true);
+        userService.getUsersByUsername("john", 1, 25);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertEquals(25, pageRequestCaptor.getValue().getPageSize());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Use Provided Page Size - When Page Size Is At Max Limit")
-    void shouldUseProvidedPageSize_whenPageSizeIsAtMaxLimit() {
+    void shouldUseProvidedPageSizeWhenPageSizeIsAtMaxLimit() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", 1, 1000, true);
+        userService.getUsersByUsername("john", 1, 1000);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertEquals(1000, pageRequestCaptor.getValue().getPageSize());
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Page Size Is Negative")
-    void shouldThrowException_whenPageSizeIsNegative() {
+    void shouldThrowBadRequestExceptionWhenPageSizeIsNegative() {
         assertThrows(BadRequestException.class,
-                () -> userService.getUsersByUsername("john", 1, -5, true));
+                () -> userService.getUsersByUsername("john", 1, -5));
 
         verifyNoInteractions(userRepository, userMapper);
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Throw BadRequestException - When Page Size Is Zero")
-    void shouldThrowException_whenPageSizeIsZero() {
+    void shouldThrowBadRequestExceptionWhenPageSizeIsZero() {
         assertThrows(BadRequestException.class,
-                () -> userService.getUsersByUsername("john", 1, 0, true));
+                () -> userService.getUsersByUsername("john", 1, 0));
 
         verifyNoInteractions(userRepository, userMapper);
     }
 
     @Test
     @DisplayName("[getUsersByUsername] Should Not Apply Sort - When SortBy Is Always Null")
-    void shouldNotApplySort_becauseSortByIsAlwaysNull() {
+    void shouldNotApplySortWhenSortByIsAlwaysNull() {
         stubRepositoryReturningEmptyPage();
 
-        userService.getUsersByUsername("john", 1, 10, true);
+        userService.getUsersByUsername("john", 1, 10);
 
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), anyBoolean(), pageRequestCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
         assertTrue(pageRequestCaptor.getValue().getSort().isUnsorted());
     }
 
@@ -643,6 +630,20 @@ class UserServiceImplTest {
 
         verify(userRepository).save(userCaptor.capture());
         assertThat(userCaptor.getValue().getUsername()).isEqualTo(savedUser.getUsername());
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Throw BadRequestException - When Trimmed Username Is Shorter Than The Minimum Length")
+    void shouldThrowBadRequestExceptionWhenTrimmedUsernameIsShorterThanTheMinimumLengthOnUpdate() {
+        UUID id = savedUser.getId();
+        PatchUserDTO patchUserDTO = new PatchUserDTO(" ab ", null, null, null, null, null, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+
+        assertThatThrownBy(() -> userService.updateUser(id, patchUserDTO))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Username must be at least 3 characters long");
+
+        verify(userRepository, never()).save(any());
     }
 
     @Test
@@ -733,7 +734,7 @@ class UserServiceImplTest {
 
         userService.updateUser(id, patchUserDTO);
 
-        verify(refreshTokenService).revokeAllRefreshTokens(id);
+        verify(refreshTokenService).invalidateAllSessions(id);
     }
 
     @Test
@@ -748,7 +749,7 @@ class UserServiceImplTest {
 
         userService.updateUser(id, patchUserDTO);
 
-        verify(refreshTokenService).revokeAllRefreshTokens(id);
+        verify(refreshTokenService).invalidateAllSessions(id);
     }
 
     @Test
@@ -814,6 +815,37 @@ class UserServiceImplTest {
 
         verify(userRepository).save(userCaptor.capture());
         assertThat(userCaptor.getValue().getIsProfilePublic()).isFalse();
+        verifyNoInteractions(followerService);
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Accept All Pending Follow Requests - When Profile Becomes Public")
+    void shouldAcceptAllPendingFollowRequestsWhenProfileBecomesPublic() {
+        UUID id = savedUser.getId();
+        savedUser.setIsProfilePublic(false);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, true, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verify(followerService).acceptAllPendingFollowRequestsFor(id);
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Not Accept Pending Follow Requests - When Profile Is Already Public")
+    void shouldNotAcceptPendingFollowRequestsWhenProfileIsAlreadyPublic() {
+        UUID id = savedUser.getId();
+        savedUser.setIsProfilePublic(true);
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, true, null);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
+
+        userService.updateUser(id, patchUserDTO);
+
+        verifyNoInteractions(followerService);
     }
 
     @Test
