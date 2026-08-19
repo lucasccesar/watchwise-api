@@ -1,10 +1,9 @@
-### CLAUDE ###
-CLAUDE.md
-docs/
-
 HELP.md
 target/
 .mvn/wrapper/maven-wrapper.jar
+CLAUDE.md
+docs/
+.claude
 !**/src/main/**/target/
 !**/src/test/**/target/
 
