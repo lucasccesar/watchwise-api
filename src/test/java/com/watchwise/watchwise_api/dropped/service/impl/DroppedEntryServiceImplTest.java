@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -69,6 +70,9 @@ class DroppedEntryServiceImplTest {
 
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
+
+    @Mock
+    private WatchlistEntryService watchlistEntryService;
 
     @InjectMocks
     private DroppedEntryServiceImpl droppedEntryService;
@@ -368,6 +372,34 @@ class DroppedEntryServiceImplTest {
         droppedEntryService.markAsDropped(lucasId, ContentType.MOVIE, fightClub.getTmdbId(), null);
 
         verify(newTransactionExecutor).runInNewTransaction(any());
+    }
+
+    @Test
+    @DisplayName("[markAsDropped] Should Remove The Matching Watchlist Entry - When Marking A New Drop")
+    void shouldRemoveTheMatchingWatchlistEntryWhenMarkingANewDrop() {
+        stubContentResolution(fightClub, ContentType.MOVIE);
+        when(droppedEntryRepository.findByUserIdAndTypeAndContentId(lucasId, ContentType.MOVIE, fightClub.getId()))
+                .thenReturn(Optional.empty());
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        stubNewTransactionPassthrough();
+
+        droppedEntryService.markAsDropped(lucasId, ContentType.MOVIE, fightClub.getTmdbId(), null);
+
+        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.MOVIE, fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[markAsDropped] Should Remove The Matching Watchlist Entry - When Already Dropped")
+    void shouldRemoveTheMatchingWatchlistEntryWhenAlreadyDropped() {
+        DroppedEntry existing = buildEntry(lucas, fightClub, ContentType.MOVIE, "Old comment");
+        stubContentResolution(fightClub, ContentType.MOVIE);
+        when(droppedEntryRepository.findByUserIdAndTypeAndContentId(lucasId, ContentType.MOVIE, fightClub.getId()))
+                .thenReturn(Optional.of(existing));
+
+        droppedEntryService.markAsDropped(lucasId, ContentType.MOVIE, fightClub.getTmdbId(), null);
+
+        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.MOVIE, fightClub.getId());
     }
 
     @Test

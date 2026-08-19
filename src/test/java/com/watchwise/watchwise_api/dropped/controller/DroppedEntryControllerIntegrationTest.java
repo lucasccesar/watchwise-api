@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -69,6 +70,9 @@ class DroppedEntryControllerIntegrationTest {
     private DroppedEntryRepository droppedEntryRepository;
 
     @Autowired
+    private WatchlistEntryRepository watchlistEntryRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -80,6 +84,7 @@ class DroppedEntryControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         droppedEntryRepository.deleteAll();
+        watchlistEntryRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -182,6 +187,23 @@ class DroppedEntryControllerIntegrationTest {
         var entry = droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(user.id(), ContentType.MOVIE,
                 PageRequest.of(0, 10)).getContent().getFirst();
         assertThat(entry.getComment()).isNull();
+    }
+
+    @Test
+    @DisplayName("[markAsDropped] Should Remove The Movie From The Watchlist - When Marking It As Dropped")
+    void shouldRemoveTheMovieFromTheWatchlistWhenMarkingItAsDropped() throws Exception {
+        RegisteredUser user = registerUser("markdroppedremoveswatchlist");
+        mockMvc.perform(post("/users/me/watchlist/MOVIE")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"tmdbId\": \"550\" }"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(markRequest(user, ContentType.MOVIE, "550"))
+                .andExpect(status().isNoContent());
+
+        assertThat(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(user.id(), ContentType.MOVIE)).isEmpty();
     }
 
     @Test

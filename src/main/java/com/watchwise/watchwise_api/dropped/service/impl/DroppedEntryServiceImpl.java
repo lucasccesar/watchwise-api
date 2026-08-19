@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -41,6 +42,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
     private final FollowerRepository followerRepository;
     private final DroppedEntryMapper droppedEntryMapper;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final WatchlistEntryService watchlistEntryService;
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
@@ -79,6 +81,8 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
 
         ContentRefDTO contentRef = contentService.getOrCreateReference(
                 new ContentRefCreationDTO(tmdbId, type, null, null, null, null, null));
+
+        watchlistEntryService.removeEntryIfPresent(userId, type, contentRef.id());
 
         Optional<DroppedEntry> existing = droppedEntryRepository.findByUserIdAndTypeAndContentId(userId, type, contentRef.id());
         if (existing.isPresent()) {
