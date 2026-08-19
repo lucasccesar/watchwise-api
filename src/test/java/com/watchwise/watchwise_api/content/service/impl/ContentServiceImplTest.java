@@ -589,6 +589,31 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Also Clear Previous Series Finale - When The Superseded Season Finale Episode Was Also The Series Finale")
+    void shouldAlsoClearPreviousSeriesFinaleWhenTheSupersededSeasonFinaleEpisodeWasAlsoTheSeriesFinale() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 11, true, null);
+        Content previousFinale = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(10).type(ContentType.EPISODE).isSeasonFinale(true).isSeriesFinale(true).build();
+        Content mapped = Content.builder().seriesTmdbId("200").seasonNumber(1).episodeNumber(11).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).seriesTmdbId("200").seasonNumber(1).episodeNumber(11).type(ContentType.EPISODE).isSeasonFinale(true).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), null, ContentType.EPISODE, "200", 1, 11, true, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 11, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("200", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(previousFinale));
+        when(contentRepository.saveAndFlush(previousFinale)).thenReturn(previousFinale);
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        contentService.getOrCreateReference(dto);
+
+        assertThat(previousFinale.getIsSeasonFinale()).isFalse();
+        assertThat(previousFinale.getIsSeriesFinale()).isFalse();
+        verify(contentRepository).saveAndFlush(previousFinale);
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Not Clear Previous Season Finale - When New Episode Is Earlier Than The Current Finale")
     void shouldNotClearPreviousSeasonFinaleWhenNewEpisodeIsEarlierThanTheCurrentFinale() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 5, true, null);

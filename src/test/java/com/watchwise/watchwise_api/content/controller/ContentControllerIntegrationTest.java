@@ -241,6 +241,26 @@ class ContentControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Also Clear IsSeriesFinale On The Old Episode - When Its Season Finale Status Is Superseded")
+    void shouldAlsoClearIsSeriesFinaleOnTheOldEpisodeWhenItsSeasonFinaleStatusIsSuperseded() throws Exception {
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 8, \"isSeasonFinale\": true, \"isSeriesFinale\": true }"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(referenceRequest(
+                        "{ \"seriesTmdbId\": \"1399\", \"type\": \"EPISODE\", \"seasonNumber\": 1, \"episodeNumber\": 11, \"isSeasonFinale\": true }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSeasonFinale").value(true));
+
+        Content oldEpisode = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, 8, ContentType.EPISODE)
+                .orElseThrow();
+
+        assertThat(oldEpisode.getIsSeasonFinale()).isFalse();
+        assertThat(oldEpisode.getIsSeriesFinale()).isFalse();
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Return TooManyRequests - When Requests From The Same User Exceed The Configured Max")
     void shouldReturnTooManyRequestsWhenRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
         for (int i = 0; i < 60; i++) {
