@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -141,7 +142,7 @@ class FollowerRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByFollowedIdAndStatus] Should Return Only Accepted Followers Of The Given User - When Called")
+    @DisplayName("[findByFollowedIdAndStatus] Should Return Only Accepted Followers Of The Given User With Follower Already Initialized - When Called")
     void shouldReturnOnlyAcceptedFollowersOfTheGivenUserWhenCalled() {
         followerRepository.save(buildFollower(lucas, joao, FollowStatus.ACCEPTED));
         followerRepository.save(buildFollower(marina, joao, FollowStatus.PENDING));
@@ -153,10 +154,12 @@ class FollowerRepositoryTest {
         assertThat(result.getContent())
                 .extracting(follower -> follower.getFollower().getId())
                 .containsExactly(lucas.getId());
+        assertThat(Hibernate.isInitialized(result.getContent().get(0).getFollower())).isTrue();
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("[findByFollowedIdAndStatus] Should Return Only Pending Requests Of The Given User - When Called")
+    @DisplayName("[findByFollowedIdAndStatus] Should Return Only Pending Requests Of The Given User With Follower Already Initialized - When Called")
     void shouldReturnOnlyPendingRequestsOfTheGivenUserWhenCalled() {
         followerRepository.save(buildFollower(lucas, joao, FollowStatus.ACCEPTED));
         followerRepository.saveAndFlush(buildFollower(marina, joao, FollowStatus.PENDING));
@@ -167,10 +170,12 @@ class FollowerRepositoryTest {
         assertThat(result.getContent())
                 .extracting(follower -> follower.getFollower().getId())
                 .containsExactly(marina.getId());
+        assertThat(Hibernate.isInitialized(result.getContent().get(0).getFollower())).isTrue();
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("[findByFollowerIdAndStatus] Should Return Only Accepted Users The Given User Follows - When Called")
+    @DisplayName("[findByFollowerIdAndStatus] Should Return Only Accepted Users The Given User Follows With Followed Already Initialized - When Called")
     void shouldReturnOnlyAcceptedUsersTheGivenUserFollowsWhenCalled() {
         followerRepository.save(buildFollower(lucas, joao, FollowStatus.ACCEPTED));
         followerRepository.save(buildFollower(lucas, marina, FollowStatus.PENDING));
@@ -182,6 +187,8 @@ class FollowerRepositoryTest {
         assertThat(result.getContent())
                 .extracting(follower -> follower.getFollowed().getId())
                 .containsExactly(joao.getId());
+        assertThat(Hibernate.isInitialized(result.getContent().get(0).getFollowed())).isTrue();
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
     @Test

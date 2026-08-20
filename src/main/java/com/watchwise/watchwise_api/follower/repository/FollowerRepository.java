@@ -21,9 +21,13 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
 
     boolean existsByFollowerIdAndFollowedIdAndStatus(UUID followerId, UUID followedId, FollowStatus status);
 
-    Page<Follower> findByFollowedIdAndStatus(UUID followedId, FollowStatus status, Pageable pageable);
+    @Query("SELECT f FROM Follower f JOIN FETCH f.follower WHERE f.followed.id = :followedId AND f.status = :status")
+    Page<Follower> findByFollowedIdAndStatus(
+            @Param("followedId") UUID followedId, @Param("status") FollowStatus status, Pageable pageable);
 
-    Page<Follower> findByFollowerIdAndStatus(UUID followerId, FollowStatus status, Pageable pageable);
+    @Query("SELECT f FROM Follower f JOIN FETCH f.followed WHERE f.follower.id = :followerId AND f.status = :status")
+    Page<Follower> findByFollowerIdAndStatus(
+            @Param("followerId") UUID followerId, @Param("status") FollowStatus status, Pageable pageable);
 
     @Transactional
     @Modifying
