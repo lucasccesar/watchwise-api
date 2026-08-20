@@ -4,9 +4,18 @@ import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListItem;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,6 +71,15 @@ class UserListControllerIntegrationTest {
     private UserListRepository userListRepository;
 
     @Autowired
+    private UserListItemRepository userListItemRepository;
+
+    @Autowired
+    private ContentRepository contentRepository;
+
+    @Autowired
+    private FollowerRepository followerRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -69,7 +87,10 @@ class UserListControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        userListItemRepository.deleteAll();
         userListRepository.deleteAll();
+        contentRepository.deleteAll();
+        followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
@@ -106,8 +127,32 @@ class UserListControllerIntegrationTest {
                 .content(body);
     }
 
+    private void makeProfilePrivate(RegisteredUser user) throws Exception {
+        mockMvc.perform(patch("/users/me")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"isProfilePublic\": false }"))
+                .andExpect(status().isOk());
+    }
+
+    private void persistAcceptedFollow(UUID followerId, UUID followedId) {
+        User followerUser = userRepository.findById(followerId).orElseThrow();
+        User followedUser = userRepository.findById(followedId).orElseThrow();
+        followerRepository.save(Follower.builder()
+                .follower(followerUser)
+                .followed(followedUser)
+                .status(FollowStatus.ACCEPTED)
+                .createdAt(LocalDateTime.now())
+                .build());
+    }
+
     private MockHttpServletRequestBuilder getUserListsRequest(RegisteredUser viewer, UUID targetUserId) {
         return get("/users/" + targetUserId + "/lists").cookie(viewer.accessToken());
+    }
+
+    private MockHttpServletRequestBuilder getUserListByIdRequest(RegisteredUser viewer, UUID listId) {
+        return get("/lists/" + listId).cookie(viewer.accessToken());
     }
 
     private MockHttpServletRequestBuilder createRequest(RegisteredUser actor, String body) {
@@ -116,6 +161,33 @@ class UserListControllerIntegrationTest {
                 .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
+    }
+
+    private MockHttpServletRequestBuilder createBulkRequest(RegisteredUser actor, String body) {
+        return post("/users/me/lists/bulk")
+                .cookie(actor.accessToken(), actor.csrfToken())
+                .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private String bulkCreationBody(String name, String description, UserListVisibility visibility, String itemsJson) {
+        String descriptionField = description == null ? "null" : "\"" + description + "\"";
+        String visibilityField = visibility == null ? "null" : "\"" + visibility + "\"";
+        return """
+                {
+                    "name": "%s",
+                    "description": %s,
+                    "visibility": %s,
+                    "items": %s
+                }
+                """.formatted(name, descriptionField, visibilityField, itemsJson);
+    }
+
+    private String contentRefJson(String tmdbId, String type) {
+        return """
+                { "tmdbId": "%s", "type": "%s" }
+                """.formatted(tmdbId, type);
     }
 
     private MockHttpServletRequestBuilder updateRequest(RegisteredUser actor, UUID listId, String body) {
@@ -132,24 +204,69 @@ class UserListControllerIntegrationTest {
                 .header("X-XSRF-TOKEN", actor.csrfToken().getValue());
     }
 
-    private String creationBody(String name, String description, Boolean isPublic) {
+    private String creationBody(String name, String description, UserListVisibility visibility) {
         String descriptionField = description == null ? "null" : "\"" + description + "\"";
-        String isPublicField = isPublic == null ? "null" : String.valueOf(isPublic);
+        String visibilityField = visibility == null ? "null" : "\"" + visibility + "\"";
         return """
                 {
                     "name": "%s",
                     "description": %s,
-                    "isPublic": %s
+                    "visibility": %s
                 }
-                """.formatted(name, descriptionField, isPublicField);
+                """.formatted(name, descriptionField, visibilityField);
+    }
+
+    private String patchBody(String name, String description, UserListVisibility visibility) {
+        String nameField = name == null ? "null" : "\"" + name + "\"";
+        String descriptionField = description == null ? "null" : "\"" + description + "\"";
+        String visibilityField = visibility == null ? "null" : "\"" + visibility + "\"";
+        return """
+                {
+                    "name": %s,
+                    "description": %s,
+                    "visibility": %s
+                }
+                """.formatted(nameField, descriptionField, visibilityField);
     }
 
     private UserList persistList(User user, String name, boolean isPublic) {
+        return persistList(user, name, isPublic ? UserListVisibility.PUBLIC : UserListVisibility.PRIVATE);
+    }
+
+    private UserList persistList(User user, String name, UserListVisibility visibility) {
         LocalDateTime now = LocalDateTime.now();
         return userListRepository.save(UserList.builder()
                 .user(user)
                 .name(name)
-                .isPublic(isPublic)
+                .visibility(visibility)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private UserListItem persistContentItem(UserList list, String tmdbId, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId(tmdbId)
+                .type(ContentType.MOVIE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+        return userListItemRepository.save(UserListItem.builder()
+                .userList(list)
+                .content(content)
+                .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private UserListItem persistNestedListItem(UserList list, UserList childList, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        return userListItemRepository.save(UserListItem.builder()
+                .userList(list)
+                .childList(childList)
+                .position(position)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -172,19 +289,62 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserLists] Should Return Only Public Lists - When Viewer Is A Different User")
-    void shouldReturnOnlyPublicListsWhenViewerIsADifferentUser() throws Exception {
+    @DisplayName("[getUserLists] Should Return Only Public Lists - When Viewer Does Not Follow Target")
+    void shouldReturnOnlyPublicListsWhenViewerDoesNotFollowTarget() throws Exception {
         RegisteredUser viewer = registerUser("getlistsviewer");
         RegisteredUser target = registerUser("getliststarget");
         User targetEntity = userRepository.findById(target.id()).orElseThrow();
-        persistList(targetEntity, "Public list", true);
-        persistList(targetEntity, "Private list", false);
+        persistList(targetEntity, "Public list", UserListVisibility.PUBLIC);
+        persistList(targetEntity, "Followers-only list", UserListVisibility.FOLLOWERS);
+        persistList(targetEntity, "Private list", UserListVisibility.PRIVATE);
 
         mockMvc.perform(getUserListsRequest(viewer, target.id()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.content[0].name").value("Public list"))
-                .andExpect(jsonPath("$.content[0].user.username").value("getliststarget"));
+                .andExpect(jsonPath("$.content[0].user").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Return Public And Followers-Only Lists - When Viewer Follows Target")
+    void shouldReturnPublicAndFollowersOnlyListsWhenViewerFollowsTarget() throws Exception {
+        RegisteredUser viewer = registerUser("getlistsfollower");
+        RegisteredUser target = registerUser("getlistsfollowed");
+        User targetEntity = userRepository.findById(target.id()).orElseThrow();
+        persistList(targetEntity, "Public list", UserListVisibility.PUBLIC);
+        persistList(targetEntity, "Followers-only list", UserListVisibility.FOLLOWERS);
+        persistList(targetEntity, "Private list", UserListVisibility.PRIVATE);
+        persistAcceptedFollow(viewer.id(), target.id());
+
+        mockMvc.perform(getUserListsRequest(viewer, target.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[*].name")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder("Public list", "Followers-only list")));
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Return Forbidden - When Target Profile Is Private And Viewer Does Not Follow")
+    void shouldReturnForbiddenWhenTargetProfileIsPrivateAndViewerDoesNotFollow() throws Exception {
+        RegisteredUser viewer = registerUser("getlistsprivateviewer");
+        RegisteredUser target = registerUser("getlistsprivatetarget");
+        makeProfilePrivate(target);
+
+        mockMvc.perform(getUserListsRequest(viewer, target.id()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Return Ok - When Target Profile Is Private But Viewer Follows Target")
+    void shouldReturnOkWhenTargetProfileIsPrivateButViewerFollowsTarget() throws Exception {
+        RegisteredUser viewer = registerUser("getlistsprivatefollower");
+        RegisteredUser target = registerUser("getlistsprivatefollowed");
+        persistAcceptedFollow(viewer.id(), target.id());
+        makeProfilePrivate(target);
+
+        mockMvc.perform(getUserListsRequest(viewer, target.id()))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -205,6 +365,58 @@ class UserListControllerIntegrationTest {
         mockMvc.perform(getUserListsRequest(viewer, UUID.randomUUID()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Include Up To 5 Content Items Ordered By Position - When List Has More Than 5")
+    void shouldIncludeUpToFiveContentItemsOrderedByPositionWhenListHasMoreThanFive() throws Exception {
+        RegisteredUser user = registerUser("getlistspreview");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        for (int i = 1; i <= 6; i++) {
+            persistContentItem(list, "tmdb-" + i, i);
+        }
+
+        mockMvc.perform(getUserListsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].previewItems.length()").value(5))
+                .andExpect(jsonPath("$.content[0].previewItems[0].tmdbId").value("tmdb-1"))
+                .andExpect(jsonPath("$.content[0].previewItems[4].tmdbId").value("tmdb-5"))
+                .andExpect(jsonPath("$.content[0].nestedListsCount").value(0));
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Return Empty Preview And Nested Lists Count - When List Has No Items")
+    void shouldReturnEmptyPreviewAndNestedListsCountWhenListHasNoItems() throws Exception {
+        RegisteredUser user = registerUser("getlistspreviewempty");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistList(entity, "My list", true);
+
+        mockMvc.perform(getUserListsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].previewItems.length()").value(0))
+                .andExpect(jsonPath("$.content[0].nestedListsCount").value(0));
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Return Empty Preview And Nested Lists Count - When List Only Has Nested Lists")
+    void shouldReturnEmptyPreviewAndNestedListsCountWhenListOnlyHasNestedLists() throws Exception {
+        RegisteredUser user = registerUser("getlistspreviewnested");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList listOfLists = persistList(entity, "List of lists", true);
+
+        RegisteredUser childOwner = registerUser("getlistspreviewnestedchild");
+        User childOwnerEntity = userRepository.findById(childOwner.id()).orElseThrow();
+        UserList childA = persistList(childOwnerEntity, "Nested list A", true);
+        UserList childB = persistList(childOwnerEntity, "Nested list B", true);
+        persistNestedListItem(listOfLists, childA, 1);
+        persistNestedListItem(listOfLists, childB, 2);
+
+        mockMvc.perform(getUserListsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].previewItems.length()").value(0))
+                .andExpect(jsonPath("$.content[0].nestedListsCount").value(2));
     }
 
     @Test
@@ -231,6 +443,106 @@ class UserListControllerIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    // ---------- GET /lists/{listId} ----------
+
+    @Test
+    @DisplayName("[getUserListById] Should Return The List With Its Items - When Viewer Is The Owner")
+    void shouldReturnTheListWithItsItemsWhenViewerIsTheOwner() throws Exception {
+        RegisteredUser user = registerUser("getbyidowner");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PRIVATE);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("My list"))
+                .andExpect(jsonPath("$.visibility").value("PRIVATE"))
+                .andExpect(jsonPath("$.items.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return The List - When List Is Public And Viewer Is A Different User")
+    void shouldReturnTheListWhenListIsPublicAndViewerIsADifferentUser() throws Exception {
+        RegisteredUser owner = registerUser("getbyidpublicowner");
+        RegisteredUser viewer = registerUser("getbyidpublicviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Public list"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return The List - When Owner's Profile Is Private But The List Itself Is Public")
+    void shouldReturnTheListWhenOwnersProfileIsPrivateButTheListItselfIsPublic() throws Exception {
+        RegisteredUser owner = registerUser("getbyidprivateprofile");
+        RegisteredUser viewer = registerUser("getbyidprivateprofileviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+        makeProfilePrivate(owner);
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Public list"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return The List - When List Is Followers-Only And Viewer Follows The Owner")
+    void shouldReturnTheListWhenListIsFollowersOnlyAndViewerFollowsTheOwner() throws Exception {
+        RegisteredUser owner = registerUser("getbyidfollowersowner");
+        RegisteredUser viewer = registerUser("getbyidfollowersviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Followers-only list", UserListVisibility.FOLLOWERS);
+        persistAcceptedFollow(viewer.id(), owner.id());
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Followers-only list"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return Forbidden - When List Is Followers-Only And Viewer Does Not Follow The Owner")
+    void shouldReturnForbiddenWhenListIsFollowersOnlyAndViewerDoesNotFollowTheOwner() throws Exception {
+        RegisteredUser owner = registerUser("getbyidforbiddenfollowers");
+        RegisteredUser viewer = registerUser("getbyidforbiddenfollowersviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Followers-only list", UserListVisibility.FOLLOWERS);
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This list is private"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return Forbidden - When List Is Private And Viewer Is A Different User")
+    void shouldReturnForbiddenWhenListIsPrivateAndViewerIsADifferentUser() throws Exception {
+        RegisteredUser owner = registerUser("getbyidforbiddenprivate");
+        RegisteredUser viewer = registerUser("getbyidforbiddenprivateviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Private list", UserListVisibility.PRIVATE);
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This list is private"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return NotFound - When List Does Not Exist")
+    void shouldReturnNotFoundWhenListDoesNotExistOnGetById() throws Exception {
+        RegisteredUser user = registerUser("getbyidnotfound");
+
+        mockMvc.perform(getUserListByIdRequest(user, UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List not found"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetById() throws Exception {
+        mockMvc.perform(get("/lists/" + UUID.randomUUID()))
+                .andExpect(status().isUnauthorized());
+    }
+
     // ---------- POST /users/me/lists ----------
 
     @Test
@@ -238,25 +550,25 @@ class UserListControllerIntegrationTest {
     void shouldReturnCreatedAndPersistTheListWhenPayloadIsValid() throws Exception {
         RegisteredUser user = registerUser("createlistok");
 
-        mockMvc.perform(createRequest(user, creationBody("Best sci-fi of the 90s", "A curated list", false)))
+        mockMvc.perform(createRequest(user, creationBody("Best sci-fi of the 90s", "A curated list", UserListVisibility.PRIVATE)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("Best sci-fi of the 90s"))
                 .andExpect(jsonPath("$.description").value("A curated list"))
-                .andExpect(jsonPath("$.isPublic").value(false))
-                .andExpect(jsonPath("$.user.username").value("createlistok"));
+                .andExpect(jsonPath("$.visibility").value("PRIVATE"))
+                .andExpect(jsonPath("$.user").doesNotExist());
 
         User entity = userRepository.findById(user.id()).orElseThrow();
         assertThat(userListRepository.findByUserId(entity.getId())).hasSize(1);
     }
 
     @Test
-    @DisplayName("[createUserList] Should Default IsPublic To True - When Omitted")
-    void shouldDefaultIsPublicToTrueWhenOmitted() throws Exception {
+    @DisplayName("[createUserList] Should Default Visibility To Public - When Omitted")
+    void shouldDefaultVisibilityToPublicWhenOmitted() throws Exception {
         RegisteredUser user = registerUser("createlistdefault");
 
         mockMvc.perform(createRequest(user, creationBody("My list", null, null)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.isPublic").value(true));
+                .andExpect(jsonPath("$.visibility").value("PUBLIC"));
     }
 
     @Test
@@ -296,6 +608,105 @@ class UserListControllerIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    // ---------- POST /users/me/lists/bulk ----------
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return Created And Persist The List With Items In Order - When Payload Is Valid")
+    void shouldReturnCreatedAndPersistTheListWithItemsInOrderWhenPayloadIsValid() throws Exception {
+        RegisteredUser user = registerUser("bulklistok");
+        String items = "[" + contentRefJson("100", "MOVIE") + "," + contentRefJson("200", "SERIES") + "]";
+
+        MvcResult result = mockMvc.perform(createBulkRequest(user, bulkCreationBody("My bulk list", "Movies and series", UserListVisibility.PUBLIC, items)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value("My bulk list"))
+                .andExpect(jsonPath("$.visibility").value("PUBLIC"))
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].content.tmdbId").value("100"))
+                .andExpect(jsonPath("$.items[0].position").value(1))
+                .andExpect(jsonPath("$.items[1].content.tmdbId").value("200"))
+                .andExpect(jsonPath("$.items[1].position").value(2))
+                .andReturn();
+
+        String listId = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.id");
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(UUID.fromString(listId))).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Default Visibility To Public - When Omitted")
+    void shouldDefaultVisibilityToPublicWhenOmittedOnBulkCreate() throws Exception {
+        RegisteredUser user = registerUser("bulklistdefault");
+        String items = "[" + contentRefJson("100", "MOVIE") + "]";
+
+        mockMvc.perform(createBulkRequest(user, bulkCreationBody("My list", null, null, items)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.visibility").value("PUBLIC"));
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return BadRequest And Not Persist - When Items Is Empty")
+    void shouldReturnBadRequestAndNotPersistWhenItemsIsEmpty() throws Exception {
+        RegisteredUser user = registerUser("bulklistempty");
+
+        mockMvc.perform(createBulkRequest(user, bulkCreationBody("My list", null, UserListVisibility.PUBLIC, "[]")))
+                .andExpect(status().isBadRequest());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return BadRequest And Not Persist - When Name Is Missing")
+    void shouldReturnBadRequestAndNotPersistWhenNameIsMissingOnBulkCreate() throws Exception {
+        RegisteredUser user = registerUser("bulklistnoname");
+        String body = "{ \"items\": [" + contentRefJson("100", "MOVIE") + "] }";
+
+        mockMvc.perform(createBulkRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return Conflict And Not Persist The List - When The Same Content Appears Twice")
+    void shouldReturnConflictAndNotPersistTheListWhenTheSameContentAppearsTwice() throws Exception {
+        RegisteredUser user = registerUser("bulklistduplicate");
+        String items = "[" + contentRefJson("100", "MOVIE") + "," + contentRefJson("100", "MOVIE") + "]";
+
+        mockMvc.perform(createBulkRequest(user, bulkCreationBody("My list", null, UserListVisibility.PUBLIC, items)))
+                .andExpect(status().isConflict());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForBulkCreate() throws Exception {
+        RegisteredUser user = registerUser("bulklistnoauth");
+        String items = "[" + contentRefJson("100", "MOVIE") + "]";
+
+        mockMvc.perform(post("/users/me/lists/bulk")
+                        .cookie(user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bulkCreationBody("My list", null, UserListVisibility.PUBLIC, items)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingForBulkCreate() throws Exception {
+        RegisteredUser user = registerUser("bulklistnocsrf");
+        String items = "[" + contentRefJson("100", "MOVIE") + "]";
+
+        mockMvc.perform(post("/users/me/lists/bulk")
+                        .cookie(user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bulkCreationBody("My list", null, UserListVisibility.PUBLIC, items)))
+                .andExpect(status().isForbidden());
+    }
+
     // ---------- PATCH /lists/{listId} ----------
 
     @Test
@@ -305,37 +716,59 @@ class UserListControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "Old name", true);
 
-        mockMvc.perform(updateRequest(user, list.getId(), creationBody("New name", "New description", false)))
+        mockMvc.perform(updateRequest(user, list.getId(), patchBody("New name", "New description", UserListVisibility.PRIVATE)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name").value("New name"))
                 .andExpect(jsonPath("$.description").value("New description"))
-                .andExpect(jsonPath("$.isPublic").value(false));
+                .andExpect(jsonPath("$.visibility").value("PRIVATE"));
 
         UserList updated = userListRepository.findById(list.getId()).orElseThrow();
         assertThat(updated.getName()).isEqualTo("New name");
     }
 
     @Test
-    @DisplayName("[updateUserList] Should Default IsPublic To True - When Omitted")
-    void shouldDefaultIsPublicToTrueWhenOmittedOnUpdate() throws Exception {
-        RegisteredUser user = registerUser("updatelistdefault");
+    @DisplayName("[updateUserList] Should Only Update Description - When Name And Visibility Are Omitted")
+    void shouldOnlyUpdateDescriptionWhenNameAndVisibilityAreOmitted() throws Exception {
+        RegisteredUser user = registerUser("updatelistdesconly");
         User entity = userRepository.findById(user.id()).orElseThrow();
-        UserList list = persistList(entity, "Old name", false);
+        UserList list = persistList(entity, "Old name", UserListVisibility.PRIVATE);
 
-        mockMvc.perform(updateRequest(user, list.getId(), creationBody("Old name", null, null)))
+        mockMvc.perform(updateRequest(user, list.getId(), patchBody(null, "New description", null)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.isPublic").value(true));
+                .andExpect(jsonPath("$.name").value("Old name"))
+                .andExpect(jsonPath("$.description").value("New description"))
+                .andExpect(jsonPath("$.visibility").value("PRIVATE"));
+
+        UserList updated = userListRepository.findById(list.getId()).orElseThrow();
+        assertThat(updated.getName()).isEqualTo("Old name");
+        assertThat(updated.getVisibility()).isEqualTo(UserListVisibility.PRIVATE);
     }
 
     @Test
-    @DisplayName("[updateUserList] Should Return BadRequest - When Name Is Missing")
-    void shouldReturnBadRequestWhenNameIsMissingOnUpdate() throws Exception {
-        RegisteredUser user = registerUser("updatelistnoname");
+    @DisplayName("[updateUserList] Should Not Change Any Field - When Payload Is Empty")
+    void shouldNotChangeAnyFieldWhenPayloadIsEmpty() throws Exception {
+        RegisteredUser user = registerUser("updatelistempty");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Old name", UserListVisibility.PRIVATE);
+
+        mockMvc.perform(updateRequest(user, list.getId(), "{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Old name"))
+                .andExpect(jsonPath("$.visibility").value("PRIVATE"));
+    }
+
+    @Test
+    @DisplayName("[updateUserList] Should Return BadRequest - When Name Is Blank")
+    void shouldReturnBadRequestWhenNameIsBlankOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatelistblankname");
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "Old name", true);
 
-        mockMvc.perform(updateRequest(user, list.getId(), "{ \"description\": \"No name\" }"))
+        mockMvc.perform(updateRequest(user, list.getId(), patchBody("   ", null, null)))
                 .andExpect(status().isBadRequest());
+
+        UserList untouched = userListRepository.findById(list.getId()).orElseThrow();
+        assertThat(untouched.getName()).isEqualTo("Old name");
     }
 
     @Test
@@ -343,7 +776,7 @@ class UserListControllerIntegrationTest {
     void shouldReturnNotFoundWhenListDoesNotExist() throws Exception {
         RegisteredUser user = registerUser("updatelistnotfound");
 
-        mockMvc.perform(updateRequest(user, UUID.randomUUID(), creationBody("New name", null, null)))
+        mockMvc.perform(updateRequest(user, UUID.randomUUID(), patchBody("New name", null, null)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("List not found"));
     }
@@ -356,7 +789,7 @@ class UserListControllerIntegrationTest {
         User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
         UserList list = persistList(ownerEntity, "Owner's list", true);
 
-        mockMvc.perform(updateRequest(intruder, list.getId(), creationBody("Hijacked", null, null)))
+        mockMvc.perform(updateRequest(intruder, list.getId(), patchBody("Hijacked", null, null)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("List not found"));
 
@@ -373,7 +806,7 @@ class UserListControllerIntegrationTest {
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(creationBody("New name", null, null)))
+                        .content(patchBody("New name", null, null)))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -385,7 +818,7 @@ class UserListControllerIntegrationTest {
         mockMvc.perform(patch("/lists/" + UUID.randomUUID())
                         .cookie(user.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(creationBody("New name", null, null)))
+                        .content(patchBody("New name", null, null)))
                 .andExpect(status().isForbidden());
     }
 

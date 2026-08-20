@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -252,6 +253,71 @@ class UserListItemRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc] Should Return At Most 5 Content Items Ordered By Position - When More Than 5 Exist")
+    void shouldReturnAtMostFiveContentItemsOrderedByPositionWhenMoreThanFiveExist() {
+        List<Content> contents = List.of(
+                fightClub,
+                pulpFiction,
+                contentRepository.save(buildContent("13", ContentType.MOVIE)),
+                contentRepository.save(buildContent("14", ContentType.MOVIE)),
+                contentRepository.save(buildContent("15", ContentType.MOVIE)),
+                contentRepository.save(buildContent("16", ContentType.MOVIE)));
+
+        for (int i = 0; i < contents.size(); i++) {
+            userListItemRepository.save(buildContentItem(scifi, contents.get(i), contents.size() - i));
+        }
+        userListItemRepository.flush();
+        entityManager.clear();
+
+        List<UserListItem> result = userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(scifi.getId());
+
+        assertThat(result).hasSize(5);
+        assertThat(result).extracting(UserListItem::getPosition).isSorted();
+        assertThat(result.get(0).getContent().getId()).isEqualTo(contents.get(5).getId());
+    }
+
+    @Test
+    @DisplayName("[findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc] Should Not Include Nested List Items")
+    void shouldNotIncludeNestedListItemsInTop5ContentItems() {
+        userListItemRepository.saveAndFlush(buildChildListItem(nestedList, scifi, 1));
+        entityManager.clear();
+
+        List<UserListItem> result = userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(nestedList.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc] Should Return Empty List - When List Has No Items")
+    void shouldReturnEmptyListWhenListHasNoItemsForTop5() {
+        List<UserListItem> result = userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(scifi.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[countByUserListIdAndChildListIdIsNotNull] Should Count Only Nested List Items - When List Has Both Types Across Lists")
+    void shouldCountOnlyNestedListItemsWhenListHasBothTypesAcrossLists() {
+        UserList anotherNestedList = userListRepository.save(buildList(lucas, "Another list of lists"));
+        userListItemRepository.save(buildChildListItem(nestedList, scifi, 1));
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.saveAndFlush(buildChildListItem(nestedList, horror, 2));
+        entityManager.clear();
+
+        assertThat(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(nestedList.getId())).isEqualTo(2);
+        assertThat(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(anotherNestedList.getId())).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("[countByUserListIdAndChildListIdIsNotNull] Should Return Zero - When List Has Only Content Items")
+    void shouldReturnZeroWhenListHasOnlyContentItems() {
+        userListItemRepository.saveAndFlush(buildContentItem(scifi, fightClub, 1));
+        entityManager.clear();
+
+        assertThat(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(scifi.getId())).isEqualTo(0);
+    }
+
+    @Test
     @DisplayName("[deleteAll] Should Cascade Delete UserListItem Rows - When The Owning List Is Deleted")
     void shouldCascadeDeleteUserListItemRowsWhenTheOwningListIsDeleted() {
         UserListItem saved = userListItemRepository.saveAndFlush(buildContentItem(scifi, fightClub, 1));
@@ -314,7 +380,7 @@ class UserListItemRepositoryTest {
         return UserList.builder()
                 .user(user)
                 .name(name)
-                .isPublic(true)
+                .visibility(UserListVisibility.PUBLIC)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

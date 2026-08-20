@@ -10,8 +10,12 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
 
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);
 
+    List<UserListItem> findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(UUID userListId);
+
     boolean existsByUserListIdAndContentIdIsNotNull(UUID userListId);
 
     boolean existsByUserListIdAndChildListIdIsNotNull(UUID userListId);
+
+    long countByUserListIdAndChildListIdIsNotNull(UUID userListId);
 
 }

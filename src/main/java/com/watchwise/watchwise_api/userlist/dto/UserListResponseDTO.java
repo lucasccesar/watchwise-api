@@ -1,18 +1,21 @@
 package com.watchwise.watchwise_api.userlist.dto;
 
-import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public record UserListResponseDTO(
         UUID id,
-        UserPreviewDTO user,
         String name,
         String description,
-        Boolean isPublic,
+        UserListVisibility visibility,
         Double watchedPercentage,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        List<ContentRefDTO> previewItems,
+        long nestedListsCount
 ) {
 }
