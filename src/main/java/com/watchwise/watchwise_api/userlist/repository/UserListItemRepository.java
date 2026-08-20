@@ -13,6 +13,16 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
 
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);
 
+    @Query("""
+            SELECT uli FROM UserListItem uli
+            LEFT JOIN FETCH uli.content
+            LEFT JOIN FETCH uli.childList cl
+            LEFT JOIN FETCH cl.user
+            WHERE uli.userList.id = :userListId
+            ORDER BY uli.position ASC
+            """)
+    List<UserListItem> findByUserListIdWithContentAndChildListOrderByPositionAsc(@Param("userListId") UUID userListId);
+
     boolean existsByUserListIdAndContentIdIsNotNull(UUID userListId);
 
     boolean existsByUserListIdAndChildListIdIsNotNull(UUID userListId);

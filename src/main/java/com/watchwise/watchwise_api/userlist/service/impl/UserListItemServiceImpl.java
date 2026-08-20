@@ -47,7 +47,7 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     @Override
     public List<UserListItemResponseDTO> getItems(UUID listId) {
-        return userListItemRepository.findByUserListIdOrderByPositionAsc(listId).stream()
+        return userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId).stream()
                 .map(userListItemMapper::userListItemToResponseDto)
                 .toList();
     }

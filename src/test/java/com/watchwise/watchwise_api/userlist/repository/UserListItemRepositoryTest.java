@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -110,6 +111,50 @@ class UserListItemRepositoryTest {
         entityManager.clear();
 
         List<UserListItem> result = userListItemRepository.findByUserListIdOrderByPositionAsc(scifi.getId());
+
+        assertThat(result).extracting(item -> item.getContent().getId()).containsExactly(fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserListIdWithContentAndChildListOrderByPositionAsc] Should Return Items Ordered By Position With Content And Child List Already Initialized - When Multiple Items Exist")
+    void shouldReturnItemsOrderedByPositionWithContentAndChildListAlreadyInitializedWhenMultipleItemsExist() {
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.saveAndFlush(buildChildListItem(scifi, nestedList, 2));
+        entityManager.clear();
+
+        List<UserListItem> result = userListItemRepository
+                .findByUserListIdWithContentAndChildListOrderByPositionAsc(scifi.getId());
+
+        assertThat(result).extracting(UserListItem::getPosition).containsExactly(1, 2);
+        UserListItem contentItem = result.get(0);
+        UserListItem childListItem = result.get(1);
+        assertThat(Hibernate.isInitialized(contentItem.getContent())).isTrue();
+        assertThat(contentItem.getContent().getId()).isEqualTo(fightClub.getId());
+        assertThat(Hibernate.isInitialized(childListItem.getChildList())).isTrue();
+        assertThat(childListItem.getChildList().getId()).isEqualTo(nestedList.getId());
+        assertThat(Hibernate.isInitialized(childListItem.getChildList().getUser())).isTrue();
+        assertThat(childListItem.getChildList().getUser().getId()).isEqualTo(lucas.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserListIdWithContentAndChildListOrderByPositionAsc] Should Return Empty List - When List Has No Items")
+    void shouldReturnEmptyListWhenListHasNoItemsWithFetchJoin() {
+        List<UserListItem> result = userListItemRepository
+                .findByUserListIdWithContentAndChildListOrderByPositionAsc(scifi.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findByUserListIdWithContentAndChildListOrderByPositionAsc] Should Not Include Items Of A Different List - When Filtering")
+    void shouldNotIncludeItemsOfADifferentListWhenFilteringWithFetchJoin() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(horror, pulpFiction, 1));
+        entityManager.clear();
+
+        List<UserListItem> result = userListItemRepository
+                .findByUserListIdWithContentAndChildListOrderByPositionAsc(scifi.getId());
 
         assertThat(result).extracting(item -> item.getContent().getId()).containsExactly(fightClub.getId());
     }
