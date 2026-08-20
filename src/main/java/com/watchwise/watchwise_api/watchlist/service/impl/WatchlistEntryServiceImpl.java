@@ -29,8 +29,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -46,6 +44,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
+    static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
     @Override
     public Page<WatchlistEntryResponseDTO> getWatchlist(UUID viewerId, UUID userId, ContentType type, Integer pageNumber, Integer pageSize) {
@@ -84,7 +83,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 watchlistEntryCreationDTO.tmdbId(), type, null, null, null, null, null);
         ContentRefDTO contentRef = contentService.getOrCreateReference(contentRefCreation);
 
-        int currentCount = watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type).size();
+        long currentCount = watchlistEntryRepository.countByUserIdAndType(userId, type);
 
         User user = userRepository.getReferenceById(userId);
         Content content = contentRepository.getReferenceById(contentRef.id());
@@ -94,7 +93,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 .user(user)
                 .content(content)
                 .type(type)
-                .position(currentCount + 1)
+                .position((int) currentCount + 1)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -137,15 +136,9 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         watchlistEntryRepository.delete(entry);
         watchlistEntryRepository.flush();
 
-        List<WatchlistEntry> toShift = watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type).stream()
-                .filter(remaining -> remaining.getPosition() > removedPosition)
-                .toList();
-
-        for (WatchlistEntry remaining : toShift) {
-            remaining.setPosition(remaining.getPosition() - 1);
-            watchlistEntryRepository.save(remaining);
-            watchlistEntryRepository.flush();
-        }
+        watchlistEntryRepository.parkPositionsInRange(
+                userId, type, removedPosition + 1, Integer.MAX_VALUE, POSITION_PARK_OFFSET);
+        watchlistEntryRepository.settleParkedPositions(userId, type, POSITION_PARK_OFFSET, -1);
     }
 
     @Override
@@ -160,8 +153,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
             throw new NotFoundException("Watchlist entry not found");
         }
 
-        List<WatchlistEntry> existing = watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type);
-        int currentCount = existing.size();
+        long currentCount = watchlistEntryRepository.countByUserIdAndType(userId, type);
         int oldPosition = entry.getPosition();
         int newPosition = watchlistEntryReorderDTO.position();
 
@@ -174,39 +166,27 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         }
 
         try {
-            return performMove(entry, existing, oldPosition, newPosition, currentCount);
+            return performMove(entry, oldPosition, newPosition, currentCount);
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException("Watchlist entry could not be reordered due to a concurrent update");
         }
     }
 
-    private WatchlistEntryResponseDTO performMove(WatchlistEntry entry, List<WatchlistEntry> existing,
-            int oldPosition, int newPosition, int currentCount) {
-        List<WatchlistEntry> others = existing.stream()
-                .filter(other -> !other.getId().equals(entry.getId()))
-                .toList();
+    private WatchlistEntryResponseDTO performMove(WatchlistEntry entry, int oldPosition, int newPosition, long currentCount) {
+        UUID userId = entry.getUser().getId();
+        ContentType type = entry.getType();
 
-        entry.setPosition(currentCount + 1);
+        entry.setPosition((int) currentCount + 1);
         watchlistEntryRepository.save(entry);
         watchlistEntryRepository.flush();
 
         boolean movingForward = newPosition < oldPosition;
-        List<WatchlistEntry> toShift = movingForward
-                ? others.stream()
-                        .filter(other -> other.getPosition() >= newPosition && other.getPosition() < oldPosition)
-                        .sorted(Comparator.comparing(WatchlistEntry::getPosition).reversed())
-                        .toList()
-                : others.stream()
-                        .filter(other -> other.getPosition() > oldPosition && other.getPosition() <= newPosition)
-                        .sorted(Comparator.comparing(WatchlistEntry::getPosition))
-                        .toList();
-
+        int rangeStart = movingForward ? newPosition : oldPosition + 1;
+        int rangeEnd = movingForward ? oldPosition - 1 : newPosition;
         int shiftDelta = movingForward ? 1 : -1;
-        for (WatchlistEntry other : toShift) {
-            other.setPosition(other.getPosition() + shiftDelta);
-            watchlistEntryRepository.save(other);
-            watchlistEntryRepository.flush();
-        }
+
+        watchlistEntryRepository.parkPositionsInRange(userId, type, rangeStart, rangeEnd, POSITION_PARK_OFFSET);
+        watchlistEntryRepository.settleParkedPositions(userId, type, POSITION_PARK_OFFSET, shiftDelta);
 
         entry.setPosition(newPosition);
         WatchlistEntry saved = watchlistEntryRepository.save(entry);

@@ -38,7 +38,6 @@ import org.springframework.data.domain.PageRequest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -341,8 +340,7 @@ class WatchlistEntryServiceImplTest {
         WatchlistEntry savedEntry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
         WatchlistEntryResponseDTO expectedDto = buildResponseDto(savedEntry);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(0L);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(watchlistEntryRepository.save(any(WatchlistEntry.class))).thenReturn(savedEntry);
@@ -363,13 +361,10 @@ class WatchlistEntryServiceImplTest {
     @Test
     @DisplayName("[insertEntry] Should Insert At Next Free Position - When Watchlist Already Has Entries")
     void shouldInsertAtNextFreePositionWhenWatchlistAlreadyHasEntries() {
-        WatchlistEntry existing1 = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
-        WatchlistEntry existing2 = buildEntry(lucas, pulpFiction, ContentType.MOVIE, 2);
         Content thirdMovie = buildContent("111", ContentType.MOVIE);
         WatchlistEntry savedEntry = buildEntry(lucas, thirdMovie, ContentType.MOVIE, 3);
         stubContentResolution(thirdMovie, ContentType.MOVIE);
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(existing1, existing2));
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(2L);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(thirdMovie.getId())).thenReturn(thirdMovie);
         when(watchlistEntryRepository.save(any(WatchlistEntry.class))).thenReturn(savedEntry);
@@ -407,8 +402,7 @@ class WatchlistEntryServiceImplTest {
     @DisplayName("[insertEntry] Should Throw ConflictException With Specific Message - When Content Is Already In The Watchlist")
     void shouldThrowConflictExceptionWithSpecificMessageWhenContentIsAlreadyInTheWatchlist() {
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(0L);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(watchlistEntryRepository.save(any(WatchlistEntry.class)))
@@ -424,8 +418,7 @@ class WatchlistEntryServiceImplTest {
     @DisplayName("[insertEntry] Should Throw ConflictException With Specific Message - When Position Was Just Taken By A Concurrent Insert")
     void shouldThrowConflictExceptionWithSpecificMessageWhenPositionWasJustTakenByAConcurrentInsert() {
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(0L);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(watchlistEntryRepository.save(any(WatchlistEntry.class)))
@@ -441,8 +434,7 @@ class WatchlistEntryServiceImplTest {
     @DisplayName("[insertEntry] Should Throw ConflictException With Generic Message - When Constraint Name Is Unknown")
     void shouldThrowConflictExceptionWithGenericMessageWhenConstraintNameIsUnknown() {
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(0L);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(watchlistEntryRepository.save(any(WatchlistEntry.class)))
@@ -458,8 +450,7 @@ class WatchlistEntryServiceImplTest {
     @DisplayName("[insertEntry] Should Throw ConflictException With Generic Message - When Cause Is Not ConstraintViolationException")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNotConstraintViolationException() {
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(0L);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         DataIntegrityViolationException exception =
@@ -476,8 +467,7 @@ class WatchlistEntryServiceImplTest {
     @DisplayName("[insertEntry] Should Throw ConflictException With Generic Message - When Cause Is Null")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNull() {
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of());
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(0L);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         DataIntegrityViolationException exception = new DataIntegrityViolationException("no cause here");
@@ -492,43 +482,20 @@ class WatchlistEntryServiceImplTest {
     // ---------- removeEntry ----------
 
     @Test
-    @DisplayName("[removeEntry] Should Delete And Not Shift - When No Remaining Entry Has A Higher Position")
-    void shouldDeleteAndNotShiftWhenNoRemainingEntryHasAHigherPosition() {
-        WatchlistEntry toRemove = buildEntry(lucas, fightClub, ContentType.MOVIE, 3);
-        WatchlistEntry remaining = buildEntry(lucas, pulpFiction, ContentType.MOVIE, 1);
+    @DisplayName("[removeEntry] Should Delete And Bulk Shift Remaining Positions Down - When Entry Is Removed")
+    void shouldDeleteAndBulkShiftRemainingPositionsDownWhenEntryIsRemoved() {
+        WatchlistEntry toRemove = buildEntry(lucas, fightClub, ContentType.MOVIE, 2);
         when(watchlistEntryRepository.findById(toRemove.getId())).thenReturn(Optional.of(toRemove));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(remaining));
 
         watchlistEntryService.removeEntry(lucasId, ContentType.MOVIE, toRemove.getId());
 
         verify(watchlistEntryRepository).delete(toRemove);
         verify(watchlistEntryRepository, never()).save(any());
         verify(watchlistEntryRepository, times(1)).flush();
-    }
-
-    @Test
-    @DisplayName("[removeEntry] Should Shift Remaining Positions Down - When Entry Removed Is In The Middle")
-    void shouldShiftRemainingPositionsDownWhenEntryRemovedIsInTheMiddle() {
-        WatchlistEntry toRemove = buildEntry(lucas, fightClub, ContentType.MOVIE, 2);
-        WatchlistEntry pos1 = buildEntry(lucas, pulpFiction, ContentType.MOVIE, 1);
-        WatchlistEntry pos3 = buildEntry(lucas, breakingBad, ContentType.MOVIE, 3);
-        Content content4 = buildContent("444", ContentType.MOVIE);
-        WatchlistEntry pos4 = buildEntry(lucas, content4, ContentType.MOVIE, 4);
-        when(watchlistEntryRepository.findById(toRemove.getId())).thenReturn(Optional.of(toRemove));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(pos1, pos3, pos4));
-
-        watchlistEntryService.removeEntry(lucasId, ContentType.MOVIE, toRemove.getId());
-
-        verify(watchlistEntryRepository).delete(toRemove);
-        verify(watchlistEntryRepository, times(2)).save(entryCaptor.capture());
-        List<WatchlistEntry> saved = entryCaptor.getAllValues();
-        assertThat(saved.get(0)).isEqualTo(pos3);
-        assertThat(saved.get(0).getPosition()).isEqualTo(2);
-        assertThat(saved.get(1)).isEqualTo(pos4);
-        assertThat(saved.get(1).getPosition()).isEqualTo(3);
-        verify(watchlistEntryRepository, times(3)).flush();
+        verify(watchlistEntryRepository).parkPositionsInRange(
+                lucasId, ContentType.MOVIE, 3, Integer.MAX_VALUE, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET);
+        verify(watchlistEntryRepository).settleParkedPositions(
+                lucasId, ContentType.MOVIE, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET, -1);
     }
 
     @Test
@@ -604,115 +571,84 @@ class WatchlistEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[removeEntryIfPresent] Should Delete And Not Shift - When No Remaining Entry Has A Higher Position")
-    void shouldDeleteAndNotShiftWhenNoRemainingEntryHasAHigherPositionOnRemoveIfPresent() {
-        WatchlistEntry toRemove = buildEntry(lucas, fightClub, ContentType.MOVIE, 3);
-        WatchlistEntry remaining = buildEntry(lucas, pulpFiction, ContentType.MOVIE, 1);
+    @DisplayName("[removeEntryIfPresent] Should Delete And Bulk Shift Remaining Positions Down - When Entry Is Removed")
+    void shouldDeleteAndBulkShiftRemainingPositionsDownWhenEntryIsRemovedOnRemoveIfPresent() {
+        WatchlistEntry toRemove = buildEntry(lucas, fightClub, ContentType.MOVIE, 2);
         when(watchlistEntryRepository.findByUserIdAndTypeAndContentId(lucasId, ContentType.MOVIE, fightClub.getId()))
                 .thenReturn(Optional.of(toRemove));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(remaining));
 
         watchlistEntryService.removeEntryIfPresent(lucasId, ContentType.MOVIE, fightClub.getId());
 
         verify(watchlistEntryRepository).delete(toRemove);
         verify(watchlistEntryRepository, never()).save(any());
         verify(watchlistEntryRepository, times(1)).flush();
-    }
-
-    @Test
-    @DisplayName("[removeEntryIfPresent] Should Shift Remaining Positions Down - When Entry Removed Is In The Middle")
-    void shouldShiftRemainingPositionsDownWhenEntryRemovedIsInTheMiddleOnRemoveIfPresent() {
-        WatchlistEntry toRemove = buildEntry(lucas, fightClub, ContentType.MOVIE, 2);
-        WatchlistEntry pos1 = buildEntry(lucas, pulpFiction, ContentType.MOVIE, 1);
-        WatchlistEntry pos3 = buildEntry(lucas, breakingBad, ContentType.MOVIE, 3);
-        when(watchlistEntryRepository.findByUserIdAndTypeAndContentId(lucasId, ContentType.MOVIE, fightClub.getId()))
-                .thenReturn(Optional.of(toRemove));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(pos1, pos3));
-
-        watchlistEntryService.removeEntryIfPresent(lucasId, ContentType.MOVIE, fightClub.getId());
-
-        verify(watchlistEntryRepository).delete(toRemove);
-        verify(watchlistEntryRepository).save(entryCaptor.capture());
-        assertThat(entryCaptor.getValue()).isEqualTo(pos3);
-        assertThat(entryCaptor.getValue().getPosition()).isEqualTo(2);
-        verify(watchlistEntryRepository, times(2)).flush();
+        verify(watchlistEntryRepository).parkPositionsInRange(
+                lucasId, ContentType.MOVIE, 3, Integer.MAX_VALUE, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET);
+        verify(watchlistEntryRepository).settleParkedPositions(
+                lucasId, ContentType.MOVIE, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET, -1);
     }
 
     // ---------- moveEntry ----------
 
     @Test
-    @DisplayName("[moveEntry] Should Shift Entries Between New And Old Position Forward - When Moving To An Earlier Position")
-    void shouldShiftEntriesBetweenNewAndOldPositionForwardWhenMovingToAnEarlierPosition() {
-        WatchlistEntry a = buildEntry(lucas, buildContent("1", ContentType.MOVIE), ContentType.MOVIE, 1);
-        WatchlistEntry b = buildEntry(lucas, buildContent("2", ContentType.MOVIE), ContentType.MOVIE, 2);
-        WatchlistEntry c = buildEntry(lucas, buildContent("3", ContentType.MOVIE), ContentType.MOVIE, 3);
+    @DisplayName("[moveEntry] Should Park Entry Then Bulk Shift Others Forward - When Moving To An Earlier Position")
+    void shouldParkEntryThenBulkShiftOthersForwardWhenMovingToAnEarlierPosition() {
         WatchlistEntry d = buildEntry(lucas, buildContent("4", ContentType.MOVIE), ContentType.MOVIE, 4);
         when(watchlistEntryRepository.findById(d.getId())).thenReturn(Optional.of(d));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(a, b, c, d));
-        List<Map.Entry<UUID, Integer>> saveLog = new ArrayList<>();
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(4L);
+        List<Integer> savedPositions = new ArrayList<>();
         when(watchlistEntryRepository.save(any(WatchlistEntry.class))).thenAnswer(invocation -> {
             WatchlistEntry arg = invocation.getArgument(0);
-            saveLog.add(Map.entry(arg.getId(), arg.getPosition()));
+            savedPositions.add(arg.getPosition());
             return arg;
         });
         when(watchlistEntryMapper.watchlistEntryToResponseDto(d)).thenReturn(buildResponseDto(d));
 
         watchlistEntryService.moveEntry(lucasId, ContentType.MOVIE, d.getId(), new WatchlistEntryReorderDTO(2));
 
-        verify(watchlistEntryRepository, times(4)).save(any(WatchlistEntry.class));
-        assertThat(saveLog).containsExactly(
-                Map.entry(d.getId(), 5),
-                Map.entry(c.getId(), 4),
-                Map.entry(b.getId(), 3),
-                Map.entry(d.getId(), 2));
-        assertThat(a.getPosition()).isEqualTo(1);
+        verify(watchlistEntryRepository, times(2)).save(any(WatchlistEntry.class));
+        assertThat(savedPositions).containsExactly(5, 2);
         assertThat(d.getPosition()).isEqualTo(2);
-        verify(watchlistEntryRepository, times(4)).flush();
+        verify(watchlistEntryRepository).parkPositionsInRange(
+                lucasId, ContentType.MOVIE, 2, 3, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET);
+        verify(watchlistEntryRepository).settleParkedPositions(
+                lucasId, ContentType.MOVIE, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET, 1);
+        verify(watchlistEntryRepository, times(2)).flush();
     }
 
     @Test
-    @DisplayName("[moveEntry] Should Shift Entries Between Old And New Position Backward - When Moving To A Later Position")
-    void shouldShiftEntriesBetweenOldAndNewPositionBackwardWhenMovingToALaterPosition() {
+    @DisplayName("[moveEntry] Should Park Entry Then Bulk Shift Others Backward - When Moving To A Later Position")
+    void shouldParkEntryThenBulkShiftOthersBackwardWhenMovingToALaterPosition() {
         WatchlistEntry a = buildEntry(lucas, buildContent("1", ContentType.MOVIE), ContentType.MOVIE, 1);
-        WatchlistEntry b = buildEntry(lucas, buildContent("2", ContentType.MOVIE), ContentType.MOVIE, 2);
-        WatchlistEntry c = buildEntry(lucas, buildContent("3", ContentType.MOVIE), ContentType.MOVIE, 3);
-        WatchlistEntry d = buildEntry(lucas, buildContent("4", ContentType.MOVIE), ContentType.MOVIE, 4);
         when(watchlistEntryRepository.findById(a.getId())).thenReturn(Optional.of(a));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(a, b, c, d));
-        List<Map.Entry<UUID, Integer>> saveLog = new ArrayList<>();
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(4L);
+        List<Integer> savedPositions = new ArrayList<>();
         when(watchlistEntryRepository.save(any(WatchlistEntry.class))).thenAnswer(invocation -> {
             WatchlistEntry arg = invocation.getArgument(0);
-            saveLog.add(Map.entry(arg.getId(), arg.getPosition()));
+            savedPositions.add(arg.getPosition());
             return arg;
         });
         when(watchlistEntryMapper.watchlistEntryToResponseDto(a)).thenReturn(buildResponseDto(a));
 
         watchlistEntryService.moveEntry(lucasId, ContentType.MOVIE, a.getId(), new WatchlistEntryReorderDTO(3));
 
-        verify(watchlistEntryRepository, times(4)).save(any(WatchlistEntry.class));
-        assertThat(saveLog).containsExactly(
-                Map.entry(a.getId(), 5),
-                Map.entry(b.getId(), 1),
-                Map.entry(c.getId(), 2),
-                Map.entry(a.getId(), 3));
+        verify(watchlistEntryRepository, times(2)).save(any(WatchlistEntry.class));
+        assertThat(savedPositions).containsExactly(5, 3);
         assertThat(a.getPosition()).isEqualTo(3);
-        assertThat(d.getPosition()).isEqualTo(4);
-        verify(watchlistEntryRepository, times(4)).flush();
+        verify(watchlistEntryRepository).parkPositionsInRange(
+                lucasId, ContentType.MOVIE, 2, 3, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET);
+        verify(watchlistEntryRepository).settleParkedPositions(
+                lucasId, ContentType.MOVIE, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET, -1);
+        verify(watchlistEntryRepository, times(2)).flush();
     }
 
     @Test
     @DisplayName("[moveEntry] Should Return Entry Without Saving - When New Position Equals Current Position")
     void shouldReturnEntryWithoutSavingWhenNewPositionEqualsCurrentPosition() {
         WatchlistEntry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 2);
-        WatchlistEntry other = buildEntry(lucas, pulpFiction, ContentType.MOVIE, 1);
         WatchlistEntryResponseDTO expectedDto = buildResponseDto(entry);
         when(watchlistEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(other, entry));
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(2L);
         when(watchlistEntryMapper.watchlistEntryToResponseDto(entry)).thenReturn(expectedDto);
 
         WatchlistEntryResponseDTO result = watchlistEntryService.moveEntry(
@@ -728,8 +664,7 @@ class WatchlistEntryServiceImplTest {
     void shouldThrowBadRequestExceptionWhenNewPositionIsGreaterThanTheCurrentEntryCount() {
         WatchlistEntry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
         when(watchlistEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(entry));
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(1L);
 
         assertThatThrownBy(() -> watchlistEntryService.moveEntry(
                 lucasId, ContentType.MOVIE, entry.getId(), new WatchlistEntryReorderDTO(2)))
@@ -799,10 +734,8 @@ class WatchlistEntryServiceImplTest {
     @DisplayName("[moveEntry] Should Throw ConflictException - When A Concurrent Update Causes A Data Integrity Violation")
     void shouldThrowConflictExceptionWhenAConcurrentUpdateCausesADataIntegrityViolation() {
         WatchlistEntry a = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
-        WatchlistEntry b = buildEntry(lucas, pulpFiction, ContentType.MOVIE, 2);
         when(watchlistEntryRepository.findById(a.getId())).thenReturn(Optional.of(a));
-        when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
-                .thenReturn(List.of(a, b));
+        when(watchlistEntryRepository.countByUserIdAndType(lucasId, ContentType.MOVIE)).thenReturn(2L);
         when(watchlistEntryRepository.save(any(WatchlistEntry.class)))
                 .thenThrow(new DataIntegrityViolationException("concurrent modification"));
 
