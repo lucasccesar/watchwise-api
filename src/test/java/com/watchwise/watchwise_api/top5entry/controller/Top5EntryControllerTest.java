@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.top5entry.controller;
 
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
@@ -58,7 +59,7 @@ class Top5EntryControllerTest {
         Top5EntryResponseDTO dto = buildResponseDto();
         when(top5EntryService.getTop5(currentUserId, targetUserId, ContentType.MOVIE)).thenReturn(List.of(dto));
 
-        ResponseEntity<List<Top5EntryResponseDTO>> result = top5EntryController.getTop5(targetUserId, ContentType.MOVIE);
+        ResponseEntity<List<Top5EntryResponseDTO>> result = top5EntryController.getTop5(targetUserId, MovieOrSeriesType.MOVIE);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).containsExactly(dto);
@@ -70,7 +71,7 @@ class Top5EntryControllerTest {
         UUID targetUserId = UUID.randomUUID();
         when(top5EntryService.getTop5(currentUserId, targetUserId, ContentType.MOVIE)).thenReturn(List.of());
 
-        top5EntryController.getTop5(targetUserId, ContentType.MOVIE);
+        top5EntryController.getTop5(targetUserId, MovieOrSeriesType.MOVIE);
 
         verify(top5EntryService).getTop5(currentUserId, targetUserId, ContentType.MOVIE);
     }
@@ -82,7 +83,7 @@ class Top5EntryControllerTest {
         Top5EntryResponseDTO dto = buildResponseDto();
         when(top5EntryService.insertEntry(currentUserId, ContentType.MOVIE, creationDTO)).thenReturn(dto);
 
-        ResponseEntity<Top5EntryResponseDTO> result = top5EntryController.insertEntry(ContentType.MOVIE, creationDTO);
+        ResponseEntity<Top5EntryResponseDTO> result = top5EntryController.insertEntry(MovieOrSeriesType.MOVIE, creationDTO);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -94,7 +95,7 @@ class Top5EntryControllerTest {
         Top5EntryCreationDTO creationDTO = new Top5EntryCreationDTO("550", 1);
         when(top5EntryService.insertEntry(currentUserId, ContentType.MOVIE, creationDTO)).thenReturn(buildResponseDto());
 
-        top5EntryController.insertEntry(ContentType.MOVIE, creationDTO);
+        top5EntryController.insertEntry(MovieOrSeriesType.MOVIE, creationDTO);
 
         verify(top5EntryService).insertEntry(currentUserId, ContentType.MOVIE, creationDTO);
     }
@@ -104,7 +105,7 @@ class Top5EntryControllerTest {
     void shouldReturnNoContentWhenRemovingEntry() {
         UUID top5EntryId = UUID.randomUUID();
 
-        ResponseEntity<Void> result = top5EntryController.removeEntry(ContentType.MOVIE, top5EntryId);
+        ResponseEntity<Void> result = top5EntryController.removeEntry(MovieOrSeriesType.MOVIE, top5EntryId);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
     }
@@ -114,7 +115,7 @@ class Top5EntryControllerTest {
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenRemovingEntry() {
         UUID top5EntryId = UUID.randomUUID();
 
-        top5EntryController.removeEntry(ContentType.MOVIE, top5EntryId);
+        top5EntryController.removeEntry(MovieOrSeriesType.MOVIE, top5EntryId);
 
         verify(top5EntryService).removeEntry(currentUserId, ContentType.MOVIE, top5EntryId);
     }

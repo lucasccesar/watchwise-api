@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.watchlist.controller;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
@@ -64,7 +65,7 @@ class WatchlistEntryControllerTest {
         when(watchlistEntryService.getWatchlist(currentUserId, targetUserId, ContentType.MOVIE, 1, 10)).thenReturn(page);
 
         ResponseEntity<PageResponseDTO<WatchlistEntryResponseDTO>> result =
-                watchlistEntryController.getWatchlist(targetUserId, ContentType.MOVIE, 1, 10);
+                watchlistEntryController.getWatchlist(targetUserId, MovieOrSeriesType.MOVIE, 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody().content()).containsExactly(dto);
@@ -77,7 +78,7 @@ class WatchlistEntryControllerTest {
         when(watchlistEntryService.getWatchlist(currentUserId, targetUserId, ContentType.MOVIE, 1, 10))
                 .thenReturn(Page.empty());
 
-        watchlistEntryController.getWatchlist(targetUserId, ContentType.MOVIE, 1, 10);
+        watchlistEntryController.getWatchlist(targetUserId, MovieOrSeriesType.MOVIE, 1, 10);
 
         verify(watchlistEntryService).getWatchlist(currentUserId, targetUserId, ContentType.MOVIE, 1, 10);
     }
@@ -89,7 +90,7 @@ class WatchlistEntryControllerTest {
         WatchlistEntryResponseDTO dto = buildResponseDto();
         when(watchlistEntryService.insertEntry(currentUserId, ContentType.MOVIE, creationDTO)).thenReturn(dto);
 
-        ResponseEntity<WatchlistEntryResponseDTO> result = watchlistEntryController.insertEntry(ContentType.MOVIE, creationDTO);
+        ResponseEntity<WatchlistEntryResponseDTO> result = watchlistEntryController.insertEntry(MovieOrSeriesType.MOVIE, creationDTO);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -101,7 +102,7 @@ class WatchlistEntryControllerTest {
         WatchlistEntryCreationDTO creationDTO = new WatchlistEntryCreationDTO("550");
         when(watchlistEntryService.insertEntry(currentUserId, ContentType.MOVIE, creationDTO)).thenReturn(buildResponseDto());
 
-        watchlistEntryController.insertEntry(ContentType.MOVIE, creationDTO);
+        watchlistEntryController.insertEntry(MovieOrSeriesType.MOVIE, creationDTO);
 
         verify(watchlistEntryService).insertEntry(currentUserId, ContentType.MOVIE, creationDTO);
     }
@@ -115,7 +116,7 @@ class WatchlistEntryControllerTest {
         when(watchlistEntryService.moveEntry(currentUserId, ContentType.MOVIE, watchlistEntryId, reorderDTO)).thenReturn(dto);
 
         ResponseEntity<WatchlistEntryResponseDTO> result =
-                watchlistEntryController.moveEntry(ContentType.MOVIE, watchlistEntryId, reorderDTO);
+                watchlistEntryController.moveEntry(MovieOrSeriesType.MOVIE, watchlistEntryId, reorderDTO);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -129,7 +130,7 @@ class WatchlistEntryControllerTest {
         when(watchlistEntryService.moveEntry(currentUserId, ContentType.MOVIE, watchlistEntryId, reorderDTO))
                 .thenReturn(buildResponseDto());
 
-        watchlistEntryController.moveEntry(ContentType.MOVIE, watchlistEntryId, reorderDTO);
+        watchlistEntryController.moveEntry(MovieOrSeriesType.MOVIE, watchlistEntryId, reorderDTO);
 
         verify(watchlistEntryService).moveEntry(currentUserId, ContentType.MOVIE, watchlistEntryId, reorderDTO);
     }
@@ -139,7 +140,7 @@ class WatchlistEntryControllerTest {
     void shouldReturnNoContentWhenRemovingEntry() {
         UUID watchlistEntryId = UUID.randomUUID();
 
-        ResponseEntity<Void> result = watchlistEntryController.removeEntry(ContentType.MOVIE, watchlistEntryId);
+        ResponseEntity<Void> result = watchlistEntryController.removeEntry(MovieOrSeriesType.MOVIE, watchlistEntryId);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
     }
@@ -149,7 +150,7 @@ class WatchlistEntryControllerTest {
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenRemovingEntry() {
         UUID watchlistEntryId = UUID.randomUUID();
 
-        watchlistEntryController.removeEntry(ContentType.MOVIE, watchlistEntryId);
+        watchlistEntryController.removeEntry(MovieOrSeriesType.MOVIE, watchlistEntryId);
 
         verify(watchlistEntryService).removeEntry(currentUserId, ContentType.MOVIE, watchlistEntryId);
     }

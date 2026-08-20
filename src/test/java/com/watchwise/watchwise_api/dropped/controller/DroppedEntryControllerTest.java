@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.dropped.dto.DroppedEntryCreationDTO;
 import com.watchwise.watchwise_api.dropped.dto.DroppedEntryResponseDTO;
 import com.watchwise.watchwise_api.dropped.service.DroppedEntryService;
@@ -67,7 +68,7 @@ class DroppedEntryControllerTest {
         when(droppedEntryService.getDropped(currentUserId, targetUserId, ContentType.MOVIE, 1, 10)).thenReturn(page);
 
         ResponseEntity<PageResponseDTO<DroppedEntryResponseDTO>> result =
-                droppedEntryController.getDropped(targetUserId, ContentType.MOVIE, 1, 10);
+                droppedEntryController.getDropped(targetUserId, MovieOrSeriesType.MOVIE, 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody().content()).containsExactly(dto);
@@ -79,7 +80,7 @@ class DroppedEntryControllerTest {
         UUID targetUserId = UUID.randomUUID();
         when(droppedEntryService.getDropped(currentUserId, targetUserId, ContentType.MOVIE, 1, 10)).thenReturn(Page.empty());
 
-        droppedEntryController.getDropped(targetUserId, ContentType.MOVIE, 1, 10);
+        droppedEntryController.getDropped(targetUserId, MovieOrSeriesType.MOVIE, 1, 10);
 
         verify(droppedEntryService).getDropped(currentUserId, targetUserId, ContentType.MOVIE, 1, 10);
     }
@@ -89,7 +90,7 @@ class DroppedEntryControllerTest {
     void shouldReturnNoContentAndDelegateToServiceWhenMarkingAsDropped() {
         DroppedEntryCreationDTO creationDTO = new DroppedEntryCreationDTO("Lost interest");
 
-        ResponseEntity<Void> result = droppedEntryController.markAsDropped(ContentType.MOVIE, "550", creationDTO);
+        ResponseEntity<Void> result = droppedEntryController.markAsDropped(MovieOrSeriesType.MOVIE, "550", creationDTO);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(droppedEntryService).markAsDropped(currentUserId, ContentType.MOVIE, "550", creationDTO);
@@ -98,7 +99,7 @@ class DroppedEntryControllerTest {
     @Test
     @DisplayName("[markAsDropped] Should Delegate With A Null Body - When The Request Body Is Omitted")
     void shouldDelegateWithANullBodyWhenTheRequestBodyIsOmitted() {
-        ResponseEntity<Void> result = droppedEntryController.markAsDropped(ContentType.MOVIE, "550", null);
+        ResponseEntity<Void> result = droppedEntryController.markAsDropped(MovieOrSeriesType.MOVIE, "550", null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(droppedEntryService).markAsDropped(currentUserId, ContentType.MOVIE, "550", null);
@@ -107,7 +108,7 @@ class DroppedEntryControllerTest {
     @Test
     @DisplayName("[unmarkAsDropped] Should Return NoContent And Delegate To Service - When Called")
     void shouldReturnNoContentAndDelegateToServiceWhenUnmarkingAsDropped() {
-        ResponseEntity<Void> result = droppedEntryController.unmarkAsDropped(ContentType.MOVIE, "550");
+        ResponseEntity<Void> result = droppedEntryController.unmarkAsDropped(MovieOrSeriesType.MOVIE, "550");
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(droppedEntryService).unmarkAsDropped(currentUserId, ContentType.MOVIE, "550");

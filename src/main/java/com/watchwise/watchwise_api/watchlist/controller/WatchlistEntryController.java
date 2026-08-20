@@ -1,7 +1,7 @@
 package com.watchwise.watchwise_api.watchlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
-import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
@@ -26,39 +26,39 @@ public class WatchlistEntryController {
     @GetMapping("/{userId}/watchlist/{type}")
     public ResponseEntity<PageResponseDTO<WatchlistEntryResponseDTO>> getWatchlist(
             @PathVariable UUID userId,
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
-        Page<WatchlistEntryResponseDTO> entries = watchlistEntryService.getWatchlist(getCurrentUserId(), userId, type, page, size);
+        Page<WatchlistEntryResponseDTO> entries = watchlistEntryService.getWatchlist(getCurrentUserId(), userId, type.toContentType(), page, size);
         return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 
     @PostMapping("/me/watchlist/{type}")
     public ResponseEntity<WatchlistEntryResponseDTO> insertEntry(
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @Valid @RequestBody WatchlistEntryCreationDTO watchlistEntryCreationDTO
     ) {
-        WatchlistEntryResponseDTO created = watchlistEntryService.insertEntry(getCurrentUserId(), type, watchlistEntryCreationDTO);
+        WatchlistEntryResponseDTO created = watchlistEntryService.insertEntry(getCurrentUserId(), type.toContentType(), watchlistEntryCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PatchMapping("/me/watchlist/{type}/{watchlistEntryId}")
     public ResponseEntity<WatchlistEntryResponseDTO> moveEntry(
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @PathVariable UUID watchlistEntryId,
             @Valid @RequestBody WatchlistEntryReorderDTO watchlistEntryReorderDTO
     ) {
-        WatchlistEntryResponseDTO moved = watchlistEntryService.moveEntry(getCurrentUserId(), type, watchlistEntryId, watchlistEntryReorderDTO);
+        WatchlistEntryResponseDTO moved = watchlistEntryService.moveEntry(getCurrentUserId(), type.toContentType(), watchlistEntryId, watchlistEntryReorderDTO);
         return ResponseEntity.ok(moved);
     }
 
     @DeleteMapping("/me/watchlist/{type}/{watchlistEntryId}")
     public ResponseEntity<Void> removeEntry(
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @PathVariable UUID watchlistEntryId
     ) {
-        watchlistEntryService.removeEntry(getCurrentUserId(), type, watchlistEntryId);
+        watchlistEntryService.removeEntry(getCurrentUserId(), type.toContentType(), watchlistEntryId);
         return ResponseEntity.noContent().build();
     }
 

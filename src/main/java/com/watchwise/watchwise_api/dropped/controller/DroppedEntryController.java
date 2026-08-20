@@ -2,7 +2,7 @@ package com.watchwise.watchwise_api.dropped.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
-import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.dropped.dto.DroppedEntryCreationDTO;
 import com.watchwise.watchwise_api.dropped.dto.DroppedEntryResponseDTO;
 import com.watchwise.watchwise_api.dropped.service.DroppedEntryService;
@@ -33,32 +33,32 @@ public class DroppedEntryController {
     @GetMapping("/{userId}/dropped/{type}")
     public ResponseEntity<PageResponseDTO<DroppedEntryResponseDTO>> getDropped(
             @PathVariable UUID userId,
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
-        Page<DroppedEntryResponseDTO> entries = droppedEntryService.getDropped(getCurrentUserId(), userId, type, page, size);
+        Page<DroppedEntryResponseDTO> entries = droppedEntryService.getDropped(getCurrentUserId(), userId, type.toContentType(), page, size);
         return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 
     @PostMapping("/me/dropped/{type}/{tmdbId}")
     public ResponseEntity<Void> markAsDropped(
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @PathVariable String tmdbId,
             @Valid @RequestBody(required = false) DroppedEntryCreationDTO droppedEntryCreationDTO
     ) {
         requestThrottler.checkAllowed(droppedActionKey(), droppedActionMaxRequests, Duration.ofMinutes(droppedActionWindowMinutes));
 
-        droppedEntryService.markAsDropped(getCurrentUserId(), type, tmdbId, droppedEntryCreationDTO);
+        droppedEntryService.markAsDropped(getCurrentUserId(), type.toContentType(), tmdbId, droppedEntryCreationDTO);
         return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/me/dropped/{type}/{tmdbId}")
     public ResponseEntity<Void> unmarkAsDropped(
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @PathVariable String tmdbId
     ) {
-        droppedEntryService.unmarkAsDropped(getCurrentUserId(), type, tmdbId);
+        droppedEntryService.unmarkAsDropped(getCurrentUserId(), type.toContentType(), tmdbId);
         return ResponseEntity.noContent().build();
     }
 

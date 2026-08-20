@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.top5entry.controller;
 
-import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
@@ -24,26 +24,26 @@ public class Top5EntryController {
     @GetMapping("/{userId}/top5/{type}")
     public ResponseEntity<List<Top5EntryResponseDTO>> getTop5(
             @PathVariable UUID userId,
-            @PathVariable ContentType type
+            @PathVariable MovieOrSeriesType type
     ) {
-        return ResponseEntity.ok(top5EntryService.getTop5(getCurrentUserId(), userId, type));
+        return ResponseEntity.ok(top5EntryService.getTop5(getCurrentUserId(), userId, type.toContentType()));
     }
 
     @PostMapping("/me/top5/{type}")
     public ResponseEntity<Top5EntryResponseDTO> insertEntry(
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @Valid @RequestBody Top5EntryCreationDTO top5EntryCreationDTO
     ) {
-        Top5EntryResponseDTO created = top5EntryService.insertEntry(getCurrentUserId(), type, top5EntryCreationDTO);
+        Top5EntryResponseDTO created = top5EntryService.insertEntry(getCurrentUserId(), type.toContentType(), top5EntryCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @DeleteMapping("/me/top5/{type}/{top5EntryId}")
     public ResponseEntity<Void> removeEntry(
-            @PathVariable ContentType type,
+            @PathVariable MovieOrSeriesType type,
             @PathVariable UUID top5EntryId
     ) {
-        top5EntryService.removeEntry(getCurrentUserId(), type, top5EntryId);
+        top5EntryService.removeEntry(getCurrentUserId(), type.toContentType(), top5EntryId);
         return ResponseEntity.noContent().build();
     }
 

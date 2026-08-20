@@ -249,7 +249,8 @@ class Top5EntryControllerIntegrationTest {
         mockMvc.perform(get("/users/" + user.id() + "/top5/NOT_A_TYPE").cookie(user.accessToken()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").exists())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values: MOVIE, SERIES, SEASON, EPISODE")))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values: MOVIE, SERIES")))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("SEASON"))))
                 .andExpect(jsonPath("$.detail").doesNotExist());
     }
 
