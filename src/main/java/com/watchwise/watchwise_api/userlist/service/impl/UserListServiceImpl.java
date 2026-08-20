@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -61,7 +62,16 @@ public class UserListServiceImpl implements UserListService {
                 ? userListRepository.findByUserId(userId, pageRequest)
                 : userListRepository.findByUserIdAndVisibilityIn(userId, visibleVisibilitiesFor(viewerFollowsTarget), pageRequest);
 
-        return lists.map(list -> toResponseDto(list, viewerId));
+        List<UUID> listIds = lists.getContent().stream().map(UserList::getId).toList();
+        Map<UUID, List<ContentRefDTO>> previewsByListId = userListItemService.getPreviewItemsByListIds(listIds);
+        Map<UUID, Long> nestedListsCountByListId = userListItemService.countNestedListsByListIds(listIds);
+        Map<UUID, Double> watchedPercentageByListId = userListItemService.getWatchedPercentagesByListIds(listIds, viewerId);
+
+        return lists.map(list -> userListMapper.userListToResponseDto(
+                list,
+                previewsByListId.getOrDefault(list.getId(), List.of()),
+                nestedListsCountByListId.getOrDefault(list.getId(), 0L),
+                watchedPercentageByListId.getOrDefault(list.getId(), 0.0)));
     }
 
     private UserListResponseDTO toResponseDto(UserList userList, UUID viewerId) {

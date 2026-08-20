@@ -253,68 +253,89 @@ class UserListItemRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc] Should Return At Most 5 Content Items Ordered By Position - When More Than 5 Exist")
-    void shouldReturnAtMostFiveContentItemsOrderedByPositionWhenMoreThanFiveExist() {
-        List<Content> contents = List.of(
-                fightClub,
-                pulpFiction,
-                contentRepository.save(buildContent("13", ContentType.MOVIE)),
-                contentRepository.save(buildContent("14", ContentType.MOVIE)),
-                contentRepository.save(buildContent("15", ContentType.MOVIE)),
-                contentRepository.save(buildContent("16", ContentType.MOVIE)));
-
-        for (int i = 0; i < contents.size(); i++) {
-            userListItemRepository.save(buildContentItem(scifi, contents.get(i), contents.size() - i));
-        }
-        userListItemRepository.flush();
+    @DisplayName("[findContentItemsByUserListIdInOrderByPosition] Should Return Content Items Ordered By List Then Position - When Multiple Lists Are Requested")
+    void shouldReturnContentItemsOrderedByListThenPositionWhenMultipleListsAreRequested() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 2));
+        userListItemRepository.save(buildContentItem(scifi, pulpFiction, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(horror, fightClub, 1));
         entityManager.clear();
 
-        List<UserListItem> result = userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(scifi.getId());
+        List<UserListItem> result = userListItemRepository.findContentItemsByUserListIdInOrderByPosition(
+                List.of(scifi.getId(), horror.getId()));
 
-        assertThat(result).hasSize(5);
-        assertThat(result).extracting(UserListItem::getPosition).isSorted();
-        assertThat(result.get(0).getContent().getId()).isEqualTo(contents.get(5).getId());
+        assertThat(result).hasSize(3);
+        assertThat(result).filteredOn(item -> item.getUserList().getId().equals(scifi.getId()))
+                .extracting(UserListItem::getPosition).containsExactly(1, 2);
+        assertThat(result).filteredOn(item -> item.getUserList().getId().equals(horror.getId()))
+                .extracting(item -> item.getContent().getId()).containsExactly(fightClub.getId());
     }
 
     @Test
-    @DisplayName("[findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc] Should Not Include Nested List Items")
-    void shouldNotIncludeNestedListItemsInTop5ContentItems() {
+    @DisplayName("[findContentItemsByUserListIdInOrderByPosition] Should Not Include Nested List Items")
+    void shouldNotIncludeNestedListItemsWhenFindingContentItemsByListIds() {
         userListItemRepository.saveAndFlush(buildChildListItem(nestedList, scifi, 1));
         entityManager.clear();
 
-        List<UserListItem> result = userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(nestedList.getId());
+        List<UserListItem> result = userListItemRepository.findContentItemsByUserListIdInOrderByPosition(
+                List.of(nestedList.getId()));
 
         assertThat(result).isEmpty();
     }
 
     @Test
-    @DisplayName("[findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc] Should Return Empty List - When List Has No Items")
-    void shouldReturnEmptyListWhenListHasNoItemsForTop5() {
-        List<UserListItem> result = userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(scifi.getId());
+    @DisplayName("[findContentItemsByUserListIdInOrderByPosition] Should Return Empty List - When None Of The Lists Have Items")
+    void shouldReturnEmptyListWhenNoneOfTheListsHaveItems() {
+        List<UserListItem> result = userListItemRepository.findContentItemsByUserListIdInOrderByPosition(
+                List.of(scifi.getId()));
 
         assertThat(result).isEmpty();
     }
 
     @Test
-    @DisplayName("[countByUserListIdAndChildListIdIsNotNull] Should Count Only Nested List Items - When List Has Both Types Across Lists")
-    void shouldCountOnlyNestedListItemsWhenListHasBothTypesAcrossLists() {
+    @DisplayName("[countNestedListsByUserListIdIn] Should Count Only Nested List Items Per List - When Several Lists Are Requested")
+    void shouldCountOnlyNestedListItemsPerListWhenSeveralListsAreRequested() {
         UserList anotherNestedList = userListRepository.save(buildList(lucas, "Another list of lists"));
         userListItemRepository.save(buildChildListItem(nestedList, scifi, 1));
         UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
         userListItemRepository.saveAndFlush(buildChildListItem(nestedList, horror, 2));
         entityManager.clear();
 
-        assertThat(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(nestedList.getId())).isEqualTo(2);
-        assertThat(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(anotherNestedList.getId())).isEqualTo(0);
+        List<UserListItemRepository.UserListCount> result = userListItemRepository.countNestedListsByUserListIdIn(
+                List.of(nestedList.getId(), anotherNestedList.getId()));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getUserListId()).isEqualTo(nestedList.getId());
+        assertThat(result.get(0).getCount()).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("[countByUserListIdAndChildListIdIsNotNull] Should Return Zero - When List Has Only Content Items")
-    void shouldReturnZeroWhenListHasOnlyContentItems() {
+    @DisplayName("[countNestedListsByUserListIdIn] Should Return Empty List - When None Of The Lists Have Nested List Items")
+    void shouldReturnEmptyListWhenNoneOfTheListsHaveNestedListItems() {
         userListItemRepository.saveAndFlush(buildContentItem(scifi, fightClub, 1));
         entityManager.clear();
 
-        assertThat(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(scifi.getId())).isEqualTo(0);
+        List<UserListItemRepository.UserListCount> result = userListItemRepository.countNestedListsByUserListIdIn(
+                List.of(scifi.getId()));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[countContentItemsByUserListIdIn] Should Count Only Content Items Per List - When Several Lists Are Requested")
+    void shouldCountOnlyContentItemsPerListWhenSeveralListsAreRequested() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.save(buildContentItem(scifi, pulpFiction, 2));
+        userListItemRepository.saveAndFlush(buildChildListItem(nestedList, horror, 1));
+        entityManager.clear();
+
+        List<UserListItemRepository.UserListCount> result = userListItemRepository.countContentItemsByUserListIdIn(
+                List.of(scifi.getId(), nestedList.getId()));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getUserListId()).isEqualTo(scifi.getId());
+        assertThat(result.get(0).getCount()).isEqualTo(2);
     }
 
     @Test

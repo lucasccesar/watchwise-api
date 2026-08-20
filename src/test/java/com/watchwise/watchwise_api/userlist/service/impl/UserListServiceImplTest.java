@@ -38,6 +38,7 @@ import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -107,8 +108,9 @@ class UserListServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(userListRepository.findByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(list)));
-        when(userListItemService.getPreviewItems(list.getId())).thenReturn(List.of());
-        when(userListItemService.countNestedLists(list.getId())).thenReturn(0L);
+        when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of());
         when(userListMapper.userListToResponseDto(list, List.of(), 0L, 0.0)).thenReturn(dto);
 
         Page<UserListResponseDTO> result = userListService.getUserLists(lucasId, lucasId, 1, 10);
@@ -125,8 +127,9 @@ class UserListServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(userListRepository.findByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(list)));
-        when(userListItemService.getPreviewItems(list.getId())).thenReturn(previewItems);
-        when(userListItemService.countNestedLists(list.getId())).thenReturn(2L);
+        when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of(list.getId(), previewItems));
+        when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of(list.getId(), 2L));
+        when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of());
         when(userListMapper.userListToResponseDto(list, previewItems, 2L, 0.0)).thenReturn(buildResponseDto(list));
 
         userListService.getUserLists(lucasId, lucasId, 1, 10);
@@ -141,9 +144,9 @@ class UserListServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(userListRepository.findByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(list)));
-        when(userListItemService.getPreviewItems(list.getId())).thenReturn(List.of());
-        when(userListItemService.countNestedLists(list.getId())).thenReturn(0L);
-        when(userListItemService.getWatchedPercentage(list.getId(), lucasId)).thenReturn(75.0);
+        when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of(list.getId(), 75.0));
         when(userListMapper.userListToResponseDto(list, List.of(), 0L, 75.0)).thenReturn(buildResponseDto(list));
 
         userListService.getUserLists(lucasId, lucasId, 1, 10);
@@ -159,15 +162,15 @@ class UserListServiceImplTest {
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(false);
         when(userListRepository.findByUserIdAndVisibilityIn(eq(lucasId), any(), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(list)));
-        when(userListItemService.getPreviewItems(list.getId())).thenReturn(List.of());
-        when(userListItemService.countNestedLists(list.getId())).thenReturn(0L);
-        when(userListItemService.getWatchedPercentage(list.getId(), marinaId)).thenReturn(10.0);
+        when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), marinaId)).thenReturn(Map.of(list.getId(), 10.0));
         when(userListMapper.userListToResponseDto(list, List.of(), 0L, 10.0)).thenReturn(buildResponseDto(list));
 
         userListService.getUserLists(marinaId, lucasId, 1, 10);
 
-        verify(userListItemService).getWatchedPercentage(list.getId(), marinaId);
-        verify(userListItemService, never()).getWatchedPercentage(list.getId(), lucasId);
+        verify(userListItemService).getWatchedPercentagesByListIds(List.of(list.getId()), marinaId);
+        verify(userListItemService, never()).getWatchedPercentagesByListIds(List.of(list.getId()), lucasId);
     }
 
     @Test
@@ -175,6 +178,9 @@ class UserListServiceImplTest {
     void shouldReturnEmptyPageWhenUserHasNoLists() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(userListRepository.findByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+        when(userListItemService.getPreviewItemsByListIds(List.of())).thenReturn(Map.of());
+        when(userListItemService.countNestedListsByListIds(List.of())).thenReturn(Map.of());
+        when(userListItemService.getWatchedPercentagesByListIds(List.of(), lucasId)).thenReturn(Map.of());
 
         Page<UserListResponseDTO> result = userListService.getUserLists(lucasId, lucasId, 1, 10);
 

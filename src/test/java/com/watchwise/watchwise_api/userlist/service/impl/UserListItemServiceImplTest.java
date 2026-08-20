@@ -110,14 +110,14 @@ class UserListItemServiceImplTest {
         fightClub = buildContent("550", ContentType.MOVIE);
     }
 
-    // ---------- getPreviewItems ----------
+    // ---------- getPreviewItems / getPreviewItemsByListIds ----------
 
     @Test
     @DisplayName("[getPreviewItems] Should Return Mapped Content Refs Ordered By Position - When List Has Content Items")
     void shouldReturnMappedContentRefsOrderedByPositionWhenListHasContentItems() {
         UserListItem item1 = buildContentItem(scifi, fightClub, 1);
         ContentRefDTO contentRef1 = buildContentRefDto(fightClub);
-        when(userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(listId))
+        when(userListItemRepository.findContentItemsByUserListIdInOrderByPosition(List.of(listId)))
                 .thenReturn(List.of(item1));
         when(userListItemMapper.userListItemToResponseDto(item1))
                 .thenReturn(new UserListItemResponseDTO(item1.getId(), contentRef1, null, 1, null, LocalDateTime.now(), LocalDateTime.now()));
@@ -130,7 +130,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[getPreviewItems] Should Return Empty List - When List Has No Content Items")
     void shouldReturnEmptyListWhenListHasNoContentItemsForPreview() {
-        when(userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(listId))
+        when(userListItemRepository.findContentItemsByUserListIdInOrderByPosition(List.of(listId)))
                 .thenReturn(List.of());
 
         List<ContentRefDTO> result = userListItemService.getPreviewItems(listId);
@@ -139,12 +139,53 @@ class UserListItemServiceImplTest {
         verifyNoInteractions(userListItemMapper);
     }
 
-    // ---------- countNestedLists ----------
+    @Test
+    @DisplayName("[getPreviewItemsByListIds] Should Group Items By Their Own List And Cap Each At Five - When Multiple Lists Are Requested")
+    void shouldGroupItemsByTheirOwnListAndCapEachAtFiveWhenMultipleListsAreRequested() {
+        UUID otherListId = UUID.randomUUID();
+        UserList horror = buildUserList(otherListId, lucas, "Underrated horror", UserListVisibility.PUBLIC);
+
+        List<Content> extraContents = List.of(
+                buildContent("13", ContentType.MOVIE), buildContent("14", ContentType.MOVIE),
+                buildContent("15", ContentType.MOVIE), buildContent("16", ContentType.MOVIE),
+                buildContent("17", ContentType.MOVIE));
+        List<UserListItem> scifiItems = extraContents.stream()
+                .map(content -> buildContentItem(scifi, content, 1))
+                .toList();
+        UserListItem horrorItem = buildContentItem(horror, fightClub, 1);
+
+        List<UserListItem> allItems = new ArrayList<>(scifiItems);
+        allItems.add(horrorItem);
+
+        when(userListItemRepository.findContentItemsByUserListIdInOrderByPosition(List.of(listId, otherListId)))
+                .thenReturn(allItems);
+        for (UserListItem item : allItems) {
+            when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(
+                    new UserListItemResponseDTO(item.getId(), buildContentRefDto(item.getContent()), null, 1, null, LocalDateTime.now(), LocalDateTime.now()));
+        }
+
+        Map<UUID, List<ContentRefDTO>> result = userListItemService.getPreviewItemsByListIds(List.of(listId, otherListId));
+
+        assertThat(result.get(listId)).hasSize(5);
+        assertThat(result.get(otherListId)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[getPreviewItemsByListIds] Should Return Empty Map - When No List Ids Are Given")
+    void shouldReturnEmptyMapWhenNoListIdsAreGivenForPreviewItems() {
+        Map<UUID, List<ContentRefDTO>> result = userListItemService.getPreviewItemsByListIds(List.of());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userListItemRepository);
+    }
+
+    // ---------- countNestedLists / countNestedListsByListIds ----------
 
     @Test
     @DisplayName("[countNestedLists] Should Return The Repository Count - When List Has Nested List Items")
     void shouldReturnTheRepositoryCountWhenListHasNestedListItems() {
-        when(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(3L);
+        when(userListItemRepository.countNestedListsByUserListIdIn(List.of(listId)))
+                .thenReturn(List.of(buildUserListCount(listId, 3L)));
 
         long result = userListItemService.countNestedLists(listId);
 
@@ -154,7 +195,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[countNestedLists] Should Return Zero - When List Has No Nested List Items")
     void shouldReturnZeroWhenListHasNoNestedListItems() {
-        when(userListItemRepository.countByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(0L);
+        when(userListItemRepository.countNestedListsByUserListIdIn(List.of(listId))).thenReturn(List.of());
 
         long result = userListItemService.countNestedLists(listId);
 
@@ -162,21 +203,34 @@ class UserListItemServiceImplTest {
     }
 
     @Test
+    @DisplayName("[countNestedListsByListIds] Should Return Empty Map - When No List Ids Are Given")
+    void shouldReturnEmptyMapWhenNoListIdsAreGivenForNestedListsCount() {
+        Map<UUID, Long> result = userListItemService.countNestedListsByListIds(List.of());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userListItemRepository);
+    }
+
+    // ---------- getWatchedPercentage / getWatchedPercentagesByListIds ----------
+
+    @Test
     @DisplayName("[getWatchedPercentage] Should Return Zero - When List Has No Content Items")
     void shouldReturnZeroWhenListHasNoContentItems() {
-        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(0L);
+        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId))).thenReturn(List.of());
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
         assertThat(result).isEqualTo(0.0);
-        verify(userListItemRepository, never()).countWatchedContentItems(any(), any());
+        verify(userListItemRepository, never()).countWatchedContentItemsByUserListIdIn(any(), any());
     }
 
     @Test
     @DisplayName("[getWatchedPercentage] Should Return The Proportion Watched - When Some Items Are Watched")
     void shouldReturnTheProportionWatchedWhenSomeItemsAreWatched() {
-        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(4L);
-        when(userListItemRepository.countWatchedContentItems(listId, lucasId)).thenReturn(1L);
+        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId)))
+                .thenReturn(List.of(buildUserListCount(listId, 4L)));
+        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId), lucasId))
+                .thenReturn(List.of(buildUserListCount(listId, 1L)));
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
@@ -186,8 +240,10 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[getWatchedPercentage] Should Return One Hundred - When All Items Are Watched")
     void shouldReturnOneHundredWhenAllItemsAreWatched() {
-        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(2L);
-        when(userListItemRepository.countWatchedContentItems(listId, lucasId)).thenReturn(2L);
+        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId)))
+                .thenReturn(List.of(buildUserListCount(listId, 2L)));
+        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId), lucasId))
+                .thenReturn(List.of(buildUserListCount(listId, 2L)));
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
@@ -197,12 +253,38 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[getWatchedPercentage] Should Return Zero - When No Items Are Watched")
     void shouldReturnZeroWhenNoItemsAreWatched() {
-        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(3L);
-        when(userListItemRepository.countWatchedContentItems(listId, lucasId)).thenReturn(0L);
+        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId)))
+                .thenReturn(List.of(buildUserListCount(listId, 3L)));
+        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId), lucasId))
+                .thenReturn(List.of());
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
         assertThat(result).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("[getWatchedPercentagesByListIds] Should Compute Percentage Independently Per List - When Multiple Lists Are Requested")
+    void shouldComputePercentageIndependentlyPerListWhenMultipleListsAreRequested() {
+        UUID otherListId = UUID.randomUUID();
+        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId, otherListId)))
+                .thenReturn(List.of(buildUserListCount(listId, 4L), buildUserListCount(otherListId, 2L)));
+        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId, otherListId), lucasId))
+                .thenReturn(List.of(buildUserListCount(listId, 1L), buildUserListCount(otherListId, 2L)));
+
+        Map<UUID, Double> result = userListItemService.getWatchedPercentagesByListIds(List.of(listId, otherListId), lucasId);
+
+        assertThat(result.get(listId)).isEqualTo(25.0);
+        assertThat(result.get(otherListId)).isEqualTo(100.0);
+    }
+
+    @Test
+    @DisplayName("[getWatchedPercentagesByListIds] Should Return Empty Map - When No List Ids Are Given")
+    void shouldReturnEmptyMapWhenNoListIdsAreGivenForWatchedPercentages() {
+        Map<UUID, Double> result = userListItemService.getWatchedPercentagesByListIds(List.of(), lucasId);
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userListItemRepository);
     }
 
     @Test
@@ -840,5 +922,19 @@ class UserListItemServiceImplTest {
         org.hibernate.exception.ConstraintViolationException cve =
                 new org.hibernate.exception.ConstraintViolationException("constraint violated", null, constraintName);
         return new DataIntegrityViolationException("db error", cve);
+    }
+
+    private UserListItemRepository.UserListCount buildUserListCount(UUID userListId, long count) {
+        return new UserListItemRepository.UserListCount() {
+            @Override
+            public UUID getUserListId() {
+                return userListId;
+            }
+
+            @Override
+            public long getCount() {
+                return count;
+            }
+        };
     }
 }

@@ -25,9 +25,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -49,26 +54,73 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     @Override
     public List<ContentRefDTO> getPreviewItems(UUID listId) {
-        return userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(listId).stream()
-                .map(userListItemMapper::userListItemToResponseDto)
-                .map(UserListItemResponseDTO::content)
-                .toList();
+        return getPreviewItemsByListIds(List.of(listId)).getOrDefault(listId, List.of());
     }
 
     @Override
     public long countNestedLists(UUID listId) {
-        return userListItemRepository.countByUserListIdAndChildListIdIsNotNull(listId);
+        return countNestedListsByListIds(List.of(listId)).getOrDefault(listId, 0L);
     }
 
     @Override
     public double getWatchedPercentage(UUID listId, UUID ownerId) {
-        long totalContentItems = userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId);
-        if (totalContentItems == 0) {
-            return 0.0;
+        return getWatchedPercentagesByListIds(List.of(listId), ownerId).getOrDefault(listId, 0.0);
+    }
+
+    @Override
+    public Map<UUID, List<ContentRefDTO>> getPreviewItemsByListIds(Collection<UUID> listIds) {
+        if (listIds.isEmpty()) {
+            return Map.of();
         }
 
-        long watchedContentItems = userListItemRepository.countWatchedContentItems(listId, ownerId);
-        return (watchedContentItems * 100.0) / totalContentItems;
+        Map<UUID, List<ContentRefDTO>> previewsByListId = new LinkedHashMap<>();
+        for (UserListItem item : userListItemRepository.findContentItemsByUserListIdInOrderByPosition(listIds)) {
+            List<ContentRefDTO> previews = previewsByListId.computeIfAbsent(
+                    item.getUserList().getId(), id -> new ArrayList<>());
+            if (previews.size() < 5) {
+                previews.add(userListItemMapper.userListItemToResponseDto(item).content());
+            }
+        }
+        return previewsByListId;
+    }
+
+    @Override
+    public Map<UUID, Long> countNestedListsByListIds(Collection<UUID> listIds) {
+        if (listIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return userListItemRepository.countNestedListsByUserListIdIn(listIds).stream()
+                .collect(Collectors.toMap(
+                        UserListItemRepository.UserListCount::getUserListId,
+                        UserListItemRepository.UserListCount::getCount));
+    }
+
+    @Override
+    public Map<UUID, Double> getWatchedPercentagesByListIds(Collection<UUID> listIds, UUID ownerId) {
+        if (listIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, Long> totalCountsByListId = userListItemRepository.countContentItemsByUserListIdIn(listIds).stream()
+                .collect(Collectors.toMap(
+                        UserListItemRepository.UserListCount::getUserListId,
+                        UserListItemRepository.UserListCount::getCount));
+        if (totalCountsByListId.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, Long> watchedCountsByListId = userListItemRepository.countWatchedContentItemsByUserListIdIn(listIds, ownerId).stream()
+                .collect(Collectors.toMap(
+                        UserListItemRepository.UserListCount::getUserListId,
+                        UserListItemRepository.UserListCount::getCount));
+
+        Map<UUID, Double> percentagesByListId = new LinkedHashMap<>();
+        totalCountsByListId.forEach((listId, totalCount) -> {
+            long watchedCount = watchedCountsByListId.getOrDefault(listId, 0L);
+            percentagesByListId.put(listId, (watchedCount * 100.0) / totalCount);
+        });
+        return percentagesByListId;
     }
 
     @Override
