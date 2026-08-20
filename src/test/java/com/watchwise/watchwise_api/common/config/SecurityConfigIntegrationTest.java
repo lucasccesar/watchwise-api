@@ -80,9 +80,22 @@ class SecurityConfigIntegrationTest {
     @Test
     @DisplayName("[securityFilterChain] Should Let Request Reach Spring Mvc Routing - When Access Token Cookie Is Valid")
     void shouldLetRequestReachSpringMvcRoutingWhenAccessTokenCookieIsValid() throws Exception {
-        String accessToken = jwtService.generateToken(UUID.randomUUID(), TokenType.ACCESS);
+        String body = """
+                {
+                    "username": "securityconfigroutinguser",
+                    "email": "securityconfigroutinguser@email.com",
+                    "password": "Password123",
+                    "isProfilePublic": true
+                }
+                """;
+        var registerResult = mockMvc.perform(post("/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
 
-        mockMvc.perform(get(PROTECTED_ROUTE).cookie(new Cookie(CookieUtil.ACCESS_TOKEN_COOKIE, accessToken)))
+        mockMvc.perform(get(PROTECTED_ROUTE).cookie(accessTokenCookie))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(404))

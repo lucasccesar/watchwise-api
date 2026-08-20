@@ -116,13 +116,13 @@ class JwtCookieAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("[doFilterInternal] Should Still Authenticate - When The User No Longer Exists (Downstream 404 Handles It)")
-    void shouldStillAuthenticateWhenTheUserNoLongerExists() throws Exception {
+    @DisplayName("[doFilterInternal] Should Not Authenticate - When The User No Longer Exists")
+    void shouldNotAuthenticateWhenTheUserNoLongerExists() throws Exception {
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         filter.doFilterInternal(request, response, filterChain);
 
-        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         verify(filterChain).doFilter(request, response);
     }
 

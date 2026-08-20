@@ -172,8 +172,8 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[updateCurrentUser] Should Return NotFound - When Account Was Deleted After Token Was Issued")
-    void shouldReturnNotFoundWhenAccountWasDeletedAfterTokenWasIssued() throws Exception {
+    @DisplayName("[updateCurrentUser] Should Return Unauthorized - When Account Was Deleted After Token Was Issued")
+    void shouldReturnUnauthorizedWhenAccountWasDeletedAfterTokenWasIssued() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("stalepatchuser", "stalepatchuser@email.com"))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -185,8 +185,7 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"description\": \"Updated bio\" }"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value("User not found"));
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -560,8 +559,8 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[deleteCurrentUser] Should Return NotFound - When Account Was Already Deleted")
-    void shouldReturnNotFoundWhenAccountWasAlreadyDeleted() throws Exception {
+    @DisplayName("[deleteCurrentUser] Should Return Unauthorized - When Retried With The Access Token Of An Already-Deleted Account")
+    void shouldReturnUnauthorizedWhenRetriedWithTheAccessTokenOfAnAlreadyDeletedAccount() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("doubledeleteuser", "doubledeleteuser@email.com"))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -573,8 +572,24 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value("User not found"));
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getCurrentUser] Should Return Unauthorized - When Called With The Access Token Of An Already-Deleted Account")
+    void shouldReturnUnauthorizedWhenCalledWithTheAccessTokenOfAnAlreadyDeletedAccount() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("deletedtokenuser", "deletedtokenuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(deleteMeRequest(accessTokenCookie, csrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

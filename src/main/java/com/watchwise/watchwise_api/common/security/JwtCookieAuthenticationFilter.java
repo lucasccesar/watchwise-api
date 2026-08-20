@@ -54,7 +54,7 @@ public class JwtCookieAuthenticationFilter extends OncePerRequestFilter {
     private boolean isSessionStillValid(UUID userId, String token) {
         Optional<User> user = userRepository.findById(userId);
         if (user.isEmpty()) {
-            return true;
+            return false;
         }
 
         LocalDateTime sessionsInvalidatedAt = user.get().getSessionsInvalidatedAt();
