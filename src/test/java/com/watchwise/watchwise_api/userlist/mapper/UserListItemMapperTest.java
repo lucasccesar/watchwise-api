@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPreviewDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -87,7 +88,7 @@ class UserListItemMapperTest {
         assertThat(result.content()).isNull();
         assertThat(result.childList().id()).isEqualTo(childList.getId());
         assertThat(result.childList().name()).isEqualTo(childList.getName());
-        assertThat(result.childList().isPublic()).isTrue();
+        assertThat(result.childList().visibility()).isEqualTo(UserListVisibility.PUBLIC);
         assertThat(result.childList().user().id()).isEqualTo(childOwnerId);
         assertThat(result.childList().user().username()).isEqualTo("marina");
         assertThat(result.description()).isNull();
@@ -117,7 +118,7 @@ class UserListItemMapperTest {
                 .id(UUID.randomUUID())
                 .user(owner)
                 .name("Best sci-fi of the 90s")
-                .isPublic(true)
+                .visibility(UserListVisibility.PUBLIC)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

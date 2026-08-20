@@ -32,9 +32,10 @@ public class UserList {
     @Setter
     private String description;
 
-    @Column(name = "is_public", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "visibility", nullable = false, length = 20)
     @Setter
-    private Boolean isPublic;
+    private UserListVisibility visibility;
 
     @Column(name = "created_at", nullable = false)
     @Setter

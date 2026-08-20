@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.userlist.repository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -110,24 +111,28 @@ class UserListRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndIsPublicTrue] Should Only Return Public Lists - When Filtering")
-    void shouldOnlyReturnPublicListsWhenFiltering() {
-        userListRepository.save(buildList(lucas, "Public list", true));
-        userListRepository.saveAndFlush(buildList(lucas, "Private list", false));
+    @DisplayName("[findByUserIdAndVisibilityIn] Should Only Return Lists Matching The Given Visibilities - When Filtering")
+    void shouldOnlyReturnListsMatchingTheGivenVisibilitiesWhenFiltering() {
+        userListRepository.save(buildListWithVisibility(lucas, "Public list", UserListVisibility.PUBLIC));
+        userListRepository.save(buildListWithVisibility(lucas, "Followers-only list", UserListVisibility.FOLLOWERS));
+        userListRepository.saveAndFlush(buildListWithVisibility(lucas, "Private list", UserListVisibility.PRIVATE));
         entityManager.clear();
 
-        Page<UserList> result = userListRepository.findByUserIdAndIsPublicTrue(lucas.getId(), PageRequest.of(0, 10));
+        Page<UserList> result = userListRepository.findByUserIdAndVisibilityIn(
+                lucas.getId(), List.of(UserListVisibility.PUBLIC, UserListVisibility.FOLLOWERS), PageRequest.of(0, 10));
 
-        assertThat(result.getContent()).extracting(UserList::getName).containsExactly("Public list");
+        assertThat(result.getContent()).extracting(UserList::getName)
+                .containsExactlyInAnyOrder("Public list", "Followers-only list");
     }
 
     @Test
-    @DisplayName("[findByUserIdAndIsPublicTrue] Should Return Empty Page - When User Has No Public Lists")
-    void shouldReturnEmptyPageWhenUserHasNoPublicLists() {
-        userListRepository.saveAndFlush(buildList(lucas, "Private list", false));
+    @DisplayName("[findByUserIdAndVisibilityIn] Should Return Empty Page - When User Has No List Matching The Given Visibilities")
+    void shouldReturnEmptyPageWhenUserHasNoListMatchingTheGivenVisibilities() {
+        userListRepository.saveAndFlush(buildListWithVisibility(lucas, "Private list", UserListVisibility.PRIVATE));
         entityManager.clear();
 
-        Page<UserList> result = userListRepository.findByUserIdAndIsPublicTrue(lucas.getId(), PageRequest.of(0, 10));
+        Page<UserList> result = userListRepository.findByUserIdAndVisibilityIn(
+                lucas.getId(), List.of(UserListVisibility.PUBLIC), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
     }
@@ -155,14 +160,25 @@ class UserListRepositoryTest {
     }
 
     @Test
-    @DisplayName("[save] Should Persist IsPublic As False - When Explicitly Set")
-    void shouldPersistIsPublicAsFalseWhenExplicitlySet() {
-        UserList saved = userListRepository.saveAndFlush(buildList(lucas, "Private list", false));
+    @DisplayName("[save] Should Persist Visibility As Private - When Explicitly Set")
+    void shouldPersistVisibilityAsPrivateWhenExplicitlySet() {
+        UserList saved = userListRepository.saveAndFlush(buildListWithVisibility(lucas, "Private list", UserListVisibility.PRIVATE));
         entityManager.clear();
 
         UserList found = userListRepository.findById(saved.getId()).orElseThrow();
 
-        assertThat(found.getIsPublic()).isFalse();
+        assertThat(found.getVisibility()).isEqualTo(UserListVisibility.PRIVATE);
+    }
+
+    @Test
+    @DisplayName("[save] Should Persist Visibility As Followers - When Explicitly Set")
+    void shouldPersistVisibilityAsFollowersWhenExplicitlySet() {
+        UserList saved = userListRepository.saveAndFlush(buildListWithVisibility(lucas, "Followers-only list", UserListVisibility.FOLLOWERS));
+        entityManager.clear();
+
+        UserList found = userListRepository.findById(saved.getId()).orElseThrow();
+
+        assertThat(found.getVisibility()).isEqualTo(UserListVisibility.FOLLOWERS);
     }
 
     @Test
@@ -198,11 +214,15 @@ class UserListRepositoryTest {
     }
 
     private UserList buildList(User user, String name, boolean isPublic) {
+        return buildListWithVisibility(user, name, isPublic ? UserListVisibility.PUBLIC : UserListVisibility.PRIVATE);
+    }
+
+    private UserList buildListWithVisibility(User user, String name, UserListVisibility visibility) {
         LocalDateTime now = LocalDateTime.now();
         return UserList.builder()
                 .user(user)
                 .name(name)
-                .isPublic(isPublic)
+                .visibility(visibility)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -214,7 +234,7 @@ class UserListRepositoryTest {
                 .user(user)
                 .name(name)
                 .description(description)
-                .isPublic(isPublic)
+                .visibility(isPublic ? UserListVisibility.PUBLIC : UserListVisibility.PRIVATE)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
