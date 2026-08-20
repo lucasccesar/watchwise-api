@@ -52,7 +52,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
 
         assertCanViewTop5(viewerId, userId, target);
 
-        return top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type).stream()
+        return top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(userId, type).stream()
                 .map(top5EntryMapper::top5EntryToResponseDto)
                 .toList();
     }

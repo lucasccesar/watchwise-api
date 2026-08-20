@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -115,6 +116,41 @@ class Top5EntryRepositoryTest {
         entityManager.clear();
 
         List<Top5Entry> result = top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucas.getId(), ContentType.MOVIE);
+
+        assertThat(result).extracting(entry -> entry.getContent().getId()).containsExactly(fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserIdAndTypeWithContentOrderByPositionAsc] Should Return Entries Ordered By Position With Content Already Initialized - When Multiple Entries Exist")
+    void shouldReturnEntriesOrderedByPositionWithContentAlreadyInitializedWhenMultipleEntriesExist() {
+        top5EntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 2));
+        top5EntryRepository.saveAndFlush(buildEntry(lucas, pulpFiction, ContentType.MOVIE, 1));
+        entityManager.clear();
+
+        List<Top5Entry> result = top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucas.getId(), ContentType.MOVIE);
+
+        assertThat(result).extracting(Top5Entry::getPosition).containsExactly(1, 2);
+        assertThat(result).extracting(entry -> entry.getContent().getId())
+                .containsExactly(pulpFiction.getId(), fightClub.getId());
+        assertThat(Hibernate.isInitialized(result.get(0).getContent())).isTrue();
+    }
+
+    @Test
+    @DisplayName("[findByUserIdAndTypeWithContentOrderByPositionAsc] Should Return Empty List - When User Has No Entries Of That Type")
+    void shouldReturnEmptyListWhenUserHasNoEntriesOfThatTypeWithContent() {
+        List<Top5Entry> result = top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucas.getId(), ContentType.MOVIE);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findByUserIdAndTypeWithContentOrderByPositionAsc] Should Not Include Entries Of A Different Type - When Filtering")
+    void shouldNotIncludeEntriesOfADifferentTypeWhenFilteringWithContent() {
+        top5EntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
+        top5EntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 1));
+        entityManager.clear();
+
+        List<Top5Entry> result = top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucas.getId(), ContentType.MOVIE);
 
         assertThat(result).extracting(entry -> entry.getContent().getId()).containsExactly(fightClub.getId());
     }

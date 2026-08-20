@@ -108,7 +108,7 @@ class Top5EntryServiceImplTest {
         Top5EntryResponseDTO dto1 = buildResponseDto(entry1);
         Top5EntryResponseDTO dto2 = buildResponseDto(entry2);
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
                 .thenReturn(List.of(entry1, entry2));
         when(top5EntryMapper.top5EntryToResponseDto(entry1)).thenReturn(dto1);
         when(top5EntryMapper.top5EntryToResponseDto(entry2)).thenReturn(dto2);
@@ -122,7 +122,7 @@ class Top5EntryServiceImplTest {
     @DisplayName("[getTop5] Should Return Empty List - When User Has No Entries Of That Type")
     void shouldReturnEmptyListWhenUserHasNoEntriesOfThatType() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
                 .thenReturn(List.of());
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
@@ -167,7 +167,7 @@ class Top5EntryServiceImplTest {
         UUID viewerId = UUID.randomUUID();
         lucas.setIsProfilePublic(true);
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
                 .thenReturn(List.of());
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(viewerId, lucasId, ContentType.MOVIE);
@@ -184,7 +184,7 @@ class Top5EntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, lucasId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
                 .thenReturn(List.of());
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(viewerId, lucasId, ContentType.MOVIE);
