@@ -14,10 +14,20 @@ import java.util.UUID;
 
 public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
 
-    Page<DiaryEntry> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
+    @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.content WHERE d.user.id = :userId ORDER BY d.createdAt DESC")
+    Page<DiaryEntry> findByUserIdOrderByCreatedAtDesc(@Param("userId") UUID userId, Pageable pageable);
 
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.watchedDate BETWEEN :watchedDateStart AND :watchedDateEnd
+            ORDER BY d.createdAt DESC
+            """)
     Page<DiaryEntry> findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
-            UUID userId, LocalDate watchedDateStart, LocalDate watchedDateEnd, Pageable pageable);
+            @Param("userId") UUID userId,
+            @Param("watchedDateStart") LocalDate watchedDateStart,
+            @Param("watchedDateEnd") LocalDate watchedDateEnd,
+            Pageable pageable);
 
     List<DiaryEntry> findByUserIdAndContentIdAndWatchNumberGreaterThan(UUID userId, UUID contentId, Integer watchNumber);
 

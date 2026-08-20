@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -123,7 +124,7 @@ class WatchlistEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndTypeOrderByPositionAsc] Should Return Requested Page Ordered By Position - When Paginated")
+    @DisplayName("[findByUserIdAndTypeOrderByPositionAsc] Should Return Requested Page Ordered By Position With Content Already Initialized - When Paginated")
     void shouldReturnRequestedPageOrderedByPositionWhenPaginated() {
         watchlistEntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
         watchlistEntryRepository.save(buildEntry(lucas, pulpFiction, ContentType.MOVIE, 2));
@@ -137,6 +138,7 @@ class WatchlistEntryRepositoryTest {
         assertThat(firstPage.getTotalPages()).isEqualTo(2);
         assertThat(firstPage.getContent()).extracting(entry -> entry.getContent().getId())
                 .containsExactly(fightClub.getId());
+        assertThat(Hibernate.isInitialized(firstPage.getContent().get(0).getContent())).isTrue();
     }
 
     @Test

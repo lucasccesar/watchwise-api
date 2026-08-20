@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -158,7 +159,7 @@ class DroppedEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndTypeOrderByCreatedAtDesc] Should Return Requested Page - When Paginated")
+    @DisplayName("[findByUserIdAndTypeOrderByCreatedAtDesc] Should Return Requested Page With Content Already Initialized - When Paginated")
     void shouldReturnRequestedPageWhenPaginated() {
         droppedEntryRepository.saveAndFlush(buildEntryWithCreatedAt(lucas, fightClub, ContentType.MOVIE, LocalDateTime.now().minusDays(1)));
         droppedEntryRepository.saveAndFlush(buildEntryWithCreatedAt(lucas, pulpFiction, ContentType.MOVIE, LocalDateTime.now()));
@@ -170,6 +171,7 @@ class DroppedEntryRepositoryTest {
         assertThat(firstPage.getTotalElements()).isEqualTo(2);
         assertThat(firstPage.getTotalPages()).isEqualTo(2);
         assertThat(firstPage.getContent()).extracting(entry -> entry.getContent().getId()).containsExactly(pulpFiction.getId());
+        assertThat(Hibernate.isInitialized(firstPage.getContent().get(0).getContent())).isTrue();
     }
 
     @Test

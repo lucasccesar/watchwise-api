@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -75,7 +76,7 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdOrderByCreatedAtDesc] Should Return Only Entries Of That User - When Multiple Users Have Entries")
+    @DisplayName("[findByUserIdOrderByCreatedAtDesc] Should Return Only Entries Of That User With Content Already Initialized - When Multiple Users Have Entries")
     void shouldReturnOnlyEntriesOfThatUserWhenMultipleUsersHaveEntries() {
         diaryEntryRepository.save(buildEntry(lucas, fightClub));
         diaryEntryRepository.saveAndFlush(buildEntry(marina, pulpFiction));
@@ -85,6 +86,8 @@ class DiaryEntryRepositoryTest {
 
         assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
                 .containsExactly(fightClub.getId());
+        assertThat(Hibernate.isInitialized(result.getContent().get(0).getContent())).isTrue();
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
     @Test
@@ -117,7 +120,7 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc] Should Return Only Entries Watched In That Year")
+    @DisplayName("[findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc] Should Return Only Entries Watched In That Year With Content Already Initialized")
     void shouldReturnOnlyEntriesWatchedInThatYear() {
         DiaryEntry watchedIn2024 = buildEntry(lucas, fightClub);
         watchedIn2024.setWatchedDate(LocalDate.of(2024, 6, 1));
@@ -132,6 +135,8 @@ class DiaryEntryRepositoryTest {
 
         assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
                 .containsExactly(fightClub.getId());
+        assertThat(Hibernate.isInitialized(result.getContent().get(0).getContent())).isTrue();
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
     @Test
