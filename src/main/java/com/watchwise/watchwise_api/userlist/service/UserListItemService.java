@@ -16,6 +16,8 @@ public interface UserListItemService {
 
     long countNestedLists(UUID listId);
 
+    double getWatchedPercentage(UUID listId, UUID ownerId);
+
     UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO);
 
     List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);

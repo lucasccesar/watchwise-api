@@ -162,6 +162,50 @@ class UserListItemServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getWatchedPercentage] Should Return Zero - When List Has No Content Items")
+    void shouldReturnZeroWhenListHasNoContentItems() {
+        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(0L);
+
+        double result = userListItemService.getWatchedPercentage(listId, lucasId);
+
+        assertThat(result).isEqualTo(0.0);
+        verify(userListItemRepository, never()).countWatchedContentItems(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getWatchedPercentage] Should Return The Proportion Watched - When Some Items Are Watched")
+    void shouldReturnTheProportionWatchedWhenSomeItemsAreWatched() {
+        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(4L);
+        when(userListItemRepository.countWatchedContentItems(listId, lucasId)).thenReturn(1L);
+
+        double result = userListItemService.getWatchedPercentage(listId, lucasId);
+
+        assertThat(result).isEqualTo(25.0);
+    }
+
+    @Test
+    @DisplayName("[getWatchedPercentage] Should Return One Hundred - When All Items Are Watched")
+    void shouldReturnOneHundredWhenAllItemsAreWatched() {
+        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(2L);
+        when(userListItemRepository.countWatchedContentItems(listId, lucasId)).thenReturn(2L);
+
+        double result = userListItemService.getWatchedPercentage(listId, lucasId);
+
+        assertThat(result).isEqualTo(100.0);
+    }
+
+    @Test
+    @DisplayName("[getWatchedPercentage] Should Return Zero - When No Items Are Watched")
+    void shouldReturnZeroWhenNoItemsAreWatched() {
+        when(userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId)).thenReturn(3L);
+        when(userListItemRepository.countWatchedContentItems(listId, lucasId)).thenReturn(0L);
+
+        double result = userListItemService.getWatchedPercentage(listId, lucasId);
+
+        assertThat(result).isEqualTo(0.0);
+    }
+
+    @Test
     @DisplayName("[addItem] Should Insert At Position One - When List Is Empty")
     void shouldInsertAtPositionOneWhenListIsEmpty() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));

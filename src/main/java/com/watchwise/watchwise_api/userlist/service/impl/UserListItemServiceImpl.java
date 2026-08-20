@@ -61,6 +61,17 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     @Override
+    public double getWatchedPercentage(UUID listId, UUID ownerId) {
+        long totalContentItems = userListItemRepository.countByUserListIdAndContentIdIsNotNull(listId);
+        if (totalContentItems == 0) {
+            return 0.0;
+        }
+
+        long watchedContentItems = userListItemRepository.countWatchedContentItems(listId, ownerId);
+        return (watchedContentItems * 100.0) / totalContentItems;
+    }
+
+    @Override
     @Transactional
     public UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO) {
         UserList userList = findOwnedList(userId, listId);

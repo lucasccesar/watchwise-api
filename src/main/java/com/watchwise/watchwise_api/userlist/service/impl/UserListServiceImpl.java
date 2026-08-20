@@ -61,13 +61,14 @@ public class UserListServiceImpl implements UserListService {
                 ? userListRepository.findByUserId(userId, pageRequest)
                 : userListRepository.findByUserIdAndVisibilityIn(userId, visibleVisibilitiesFor(viewerFollowsTarget), pageRequest);
 
-        return lists.map(this::toResponseDto);
+        return lists.map(list -> toResponseDto(list, viewerId));
     }
 
-    private UserListResponseDTO toResponseDto(UserList userList) {
+    private UserListResponseDTO toResponseDto(UserList userList, UUID viewerId) {
         List<ContentRefDTO> previewItems = userListItemService.getPreviewItems(userList.getId());
         long nestedListsCount = userListItemService.countNestedLists(userList.getId());
-        return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount);
+        double watchedPercentage = userListItemService.getWatchedPercentage(userList.getId(), viewerId);
+        return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage);
     }
 
     private void assertCanViewLists(User target, boolean isOwner, boolean viewerFollowsTarget) {
@@ -92,8 +93,9 @@ public class UserListServiceImpl implements UserListService {
         assertListIsVisibleTo(viewerId, userList);
 
         List<UserListItemResponseDTO> items = userListItemService.getItems(listId);
+        double watchedPercentage = userListItemService.getWatchedPercentage(listId, viewerId);
 
-        return userListMapper.userListToDetailedResponseDto(userList, items);
+        return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage);
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {
@@ -129,7 +131,7 @@ public class UserListServiceImpl implements UserListService {
                 .updatedAt(now)
                 .build();
 
-        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L);
+        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0);
     }
 
     @Override
@@ -152,8 +154,9 @@ public class UserListServiceImpl implements UserListService {
         List<UserListItemResponseDTO> items = userListBulkCreationDTO.items().stream()
                 .map(content -> addContentItem(userId, savedList.getId(), content))
                 .toList();
+        double watchedPercentage = userListItemService.getWatchedPercentage(savedList.getId(), userId);
 
-        return userListMapper.userListToDetailedResponseDto(savedList, items);
+        return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage);
     }
 
     private UserListItemResponseDTO addContentItem(UUID userId, UUID listId, ContentRefCreationDTO content) {
@@ -168,7 +171,7 @@ public class UserListServiceImpl implements UserListService {
         applyPatch(userList, userListPatchDTO);
         userList.setUpdatedAt(LocalDateTime.now());
 
-        return toResponseDto(userListRepository.save(userList));
+        return toResponseDto(userListRepository.save(userList), userId);
     }
 
     private void applyPatch(UserList userList, UserListPatchDTO userListPatchDTO) {

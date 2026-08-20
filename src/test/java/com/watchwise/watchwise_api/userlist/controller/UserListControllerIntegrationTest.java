@@ -420,6 +420,68 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getUserLists] Should Return Zero Watched Percentage - When No List Items Were Logged")
+    void shouldReturnZeroWatchedPercentageWhenNoListItemsWereLogged() throws Exception {
+        RegisteredUser user = registerUser("getlistswatchedzero");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        persistContentItem(list, "550", 1);
+        persistContentItem(list, "680", 2);
+
+        mockMvc.perform(getUserListsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].watchedPercentage").value(0.0));
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Reflect Logged Content In Watched Percentage - When A List Item Is Logged Via DiaryEntry")
+    void shouldReflectLoggedContentInWatchedPercentageWhenAListItemIsLoggedViaDiaryEntry() throws Exception {
+        RegisteredUser user = registerUser("getlistswatchedsome");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        persistContentItem(list, "550", 1);
+        persistContentItem(list, "680", 2);
+
+        mockMvc.perform(post("/diary")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"content\": { \"tmdbId\": \"550\", \"type\": \"MOVIE\" } }"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(getUserListsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].watchedPercentage").value(50.0));
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Not Double Count A Rewatch In Watched Percentage")
+    void shouldNotDoubleCountARewatchInWatchedPercentage() throws Exception {
+        RegisteredUser user = registerUser("getlistswatchedrewatch");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        persistContentItem(list, "550", 1);
+
+        String body = "{ \"content\": { \"tmdbId\": \"550\", \"type\": \"MOVIE\" }, \"isRewatch\": %s }";
+        mockMvc.perform(post("/diary")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.formatted("null")))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/diary")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.formatted("true")))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(getUserListsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].watchedPercentage").value(100.0));
+    }
+
+    @Test
     @DisplayName("[getUserLists] Should Paginate Results - When Page And Size Are Provided")
     void shouldPaginateResultsWhenPageAndSizeAreProvided() throws Exception {
         RegisteredUser user = registerUser("getlistspage");
@@ -457,6 +519,63 @@ class UserListControllerIntegrationTest {
                 .andExpect(jsonPath("$.name").value("My list"))
                 .andExpect(jsonPath("$.visibility").value("PRIVATE"))
                 .andExpect(jsonPath("$.items.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Reflect Logged Content In Watched Percentage - When A List Item Is Logged Via DiaryEntry")
+    void shouldReflectLoggedContentInWatchedPercentageWhenAListItemIsLoggedViaDiaryEntryOnGetById() throws Exception {
+        RegisteredUser user = registerUser("getbyidwatched");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PUBLIC);
+        persistContentItem(list, "550", 1);
+        persistContentItem(list, "680", 2);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.watchedPercentage").value(0.0));
+
+        mockMvc.perform(post("/diary")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"content\": { \"tmdbId\": \"550\", \"type\": \"MOVIE\" } }"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.watchedPercentage").value(50.0));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Populate Watched Percentage From The Viewer's Own History - When Viewer Is A Different User From The Owner")
+    void shouldPopulateWatchedPercentageFromTheViewersOwnHistoryWhenViewerIsADifferentUserFromTheOwner() throws Exception {
+        RegisteredUser owner = registerUser("getbyidwatchedowner");
+        RegisteredUser viewer = registerUser("getbyidwatchedviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+        persistContentItem(list, "550", 1);
+        persistContentItem(list, "680", 2);
+
+        mockMvc.perform(post("/diary")
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"content\": { \"tmdbId\": \"550\", \"type\": \"MOVIE\" } }"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/diary")
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"content\": { \"tmdbId\": \"680\", \"type\": \"MOVIE\" } }"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(getUserListByIdRequest(owner, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.watchedPercentage").value(100.0));
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.watchedPercentage").value(0.0));
     }
 
     @Test

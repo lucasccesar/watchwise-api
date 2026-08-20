@@ -6,7 +6,6 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import org.mapstruct.Mapper;
-import org.mapstruct.Mapping;
 import org.mapstruct.ReportingPolicy;
 
 import java.util.List;
@@ -14,11 +13,8 @@ import java.util.List;
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface UserListMapper {
 
-    // watchedPercentage is computed from UserListItem completion once that entity exists; hardcoded until then.
-    @Mapping(target = "watchedPercentage", constant = "0.0")
-    UserListResponseDTO userListToResponseDto(UserList userList, List<ContentRefDTO> previewItems, long nestedListsCount);
+    UserListResponseDTO userListToResponseDto(UserList userList, List<ContentRefDTO> previewItems, long nestedListsCount, double watchedPercentage);
 
-    @Mapping(target = "watchedPercentage", constant = "0.0")
-    UserListDetailedResponseDTO userListToDetailedResponseDto(UserList userList, List<UserListItemResponseDTO> items);
+    UserListDetailedResponseDTO userListToDetailedResponseDto(UserList userList, List<UserListItemResponseDTO> items, double watchedPercentage);
 
 }
