@@ -31,6 +31,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
 
     List<DiaryEntry> findByUserIdAndContentIdAndWatchNumberGreaterThan(UUID userId, UUID contentId, Integer watchNumber);
 
+    @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.user WHERE d.id = :id")
+    Optional<DiaryEntry> findByIdWithUser(@Param("id") UUID id);
+
     @Query("""
             SELECT COALESCE(MAX(de.watchNumber), 0) FROM DiaryEntry de
             WHERE de.user.id = :userId
