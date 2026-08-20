@@ -1,5 +1,8 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
@@ -76,6 +79,32 @@ class UserListItemControllerTest {
     }
 
     @Test
+    @DisplayName("[addItems] Should Return Created With The Service Result - When Called")
+    void shouldReturnCreatedWithTheServiceResultWhenAddingItems() {
+        UUID listId = UUID.randomUUID();
+        UserListItemBulkCreationDTO bulkDto = new UserListItemBulkCreationDTO(List.of(contentRefCreation("550")));
+        List<UserListItemResponseDTO> dtos = List.of(buildResponseDto());
+        when(userListItemService.addItems(currentUserId, listId, bulkDto)).thenReturn(dtos);
+
+        ResponseEntity<List<UserListItemResponseDTO>> result = userListItemController.addItems(listId, bulkDto);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(result.getBody()).isEqualTo(dtos);
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenAddingItems() {
+        UUID listId = UUID.randomUUID();
+        UserListItemBulkCreationDTO bulkDto = new UserListItemBulkCreationDTO(List.of(contentRefCreation("550")));
+        when(userListItemService.addItems(currentUserId, listId, bulkDto)).thenReturn(List.of(buildResponseDto()));
+
+        userListItemController.addItems(listId, bulkDto);
+
+        verify(userListItemService).addItems(currentUserId, listId, bulkDto);
+    }
+
+    @Test
     @DisplayName("[removeItem] Should Return NoContent - When Called")
     void shouldReturnNoContentWhenRemovingItem() {
         UUID listId = UUID.randomUUID();
@@ -100,5 +129,9 @@ class UserListItemControllerTest {
     private UserListItemResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
         return new UserListItemResponseDTO(UUID.randomUUID(), null, null, 1, null, now, now);
+    }
+
+    private ContentRefCreationDTO contentRefCreation(String tmdbId) {
+        return new ContentRefCreationDTO(tmdbId, ContentType.MOVIE, null, null, null, null, null);
     }
 }

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
+import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
@@ -10,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -25,6 +27,15 @@ public class UserListItemController {
             @Valid @RequestBody UserListItemCreationDTO userListItemCreationDTO
     ) {
         UserListItemResponseDTO created = userListItemService.addItem(getCurrentUserId(), listId, userListItemCreationDTO);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    @PostMapping("/{listId}/items/bulk")
+    public ResponseEntity<List<UserListItemResponseDTO>> addItems(
+            @PathVariable UUID listId,
+            @Valid @RequestBody UserListItemBulkCreationDTO userListItemBulkCreationDTO
+    ) {
+        List<UserListItemResponseDTO> created = userListItemService.addItems(getCurrentUserId(), listId, userListItemBulkCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 

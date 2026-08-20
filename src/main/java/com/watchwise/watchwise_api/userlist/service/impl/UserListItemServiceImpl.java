@@ -7,10 +7,14 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.mapper.UserListItemMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
@@ -33,7 +37,28 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final UserListRepository userListRepository;
     private final ContentRepository contentRepository;
     private final ContentService contentService;
+    private final FollowerRepository followerRepository;
     private final UserListItemMapper userListItemMapper;
+
+    @Override
+    public List<UserListItemResponseDTO> getItems(UUID listId) {
+        return userListItemRepository.findByUserListIdOrderByPositionAsc(listId).stream()
+                .map(userListItemMapper::userListItemToResponseDto)
+                .toList();
+    }
+
+    @Override
+    public List<ContentRefDTO> getPreviewItems(UUID listId) {
+        return userListItemRepository.findTop5ByUserListIdAndContentIdIsNotNullOrderByPositionAsc(listId).stream()
+                .map(userListItemMapper::userListItemToResponseDto)
+                .map(UserListItemResponseDTO::content)
+                .toList();
+    }
+
+    @Override
+    public long countNestedLists(UUID listId) {
+        return userListItemRepository.countByUserListIdAndChildListIdIsNotNull(listId);
+    }
 
     @Override
     @Transactional
@@ -69,6 +94,16 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     @Override
     @Transactional
+    public List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
+        findOwnedList(userId, listId);
+
+        return userListItemBulkCreationDTO.items().stream()
+                .map(content -> addItem(userId, listId, new UserListItemCreationDTO(content, null, null, null)))
+                .toList();
+    }
+
+    @Override
+    @Transactional
     public void removeItem(UUID userId, UUID listId, UUID itemId) {
         findOwnedList(userId, listId);
 
@@ -99,15 +134,28 @@ public class UserListItemServiceImpl implements UserListItemService {
             throw new BadRequestException("A list cannot reference itself");
         }
 
-        if (!childList.getUser().getId().equals(userId) && !Boolean.TRUE.equals(childList.getIsPublic())) {
-            throw new ForbiddenException("This list is private");
-        }
+        assertListIsVisibleTo(userId, childList);
 
         if (userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)) {
             throw new BadRequestException("The referenced list already contains nested lists; nesting depth is limited to one level");
         }
 
         return childList;
+    }
+
+    private void assertListIsVisibleTo(UUID viewerId, UserList list) {
+        UUID ownerId = list.getUser().getId();
+
+        if (viewerId.equals(ownerId) || list.getVisibility() == UserListVisibility.PUBLIC) {
+            return;
+        }
+
+        if (list.getVisibility() == UserListVisibility.FOLLOWERS
+                && followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, ownerId, FollowStatus.ACCEPTED)) {
+            return;
+        }
+
+        throw new ForbiddenException("This list is private");
     }
 
     private void assertListIsNotLockedAsListOfLists(UUID listId) {

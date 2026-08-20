@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import jakarta.servlet.http.Cookie;
@@ -125,6 +126,14 @@ class UserListItemControllerIntegrationTest {
                 .content(body);
     }
 
+    private MockHttpServletRequestBuilder addItemsBulkRequest(RegisteredUser actor, UUID listId, String body) {
+        return post("/lists/" + listId + "/items/bulk")
+                .cookie(actor.accessToken(), actor.csrfToken())
+                .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
     private MockHttpServletRequestBuilder removeItemRequest(RegisteredUser actor, UUID listId, UUID itemId) {
         return delete("/lists/" + listId + "/items/" + itemId)
                 .cookie(actor.accessToken(), actor.csrfToken())
@@ -141,6 +150,17 @@ class UserListItemControllerIntegrationTest {
                     "description": %s
                 }
                 """.formatted(tmdbId, positionField, descriptionField);
+    }
+
+    private String bulkItemsBody(String... tmdbIds) {
+        String items = java.util.Arrays.stream(tmdbIds)
+                .map(tmdbId -> "{ \"tmdbId\": \"%s\", \"type\": \"MOVIE\" }".formatted(tmdbId))
+                .collect(java.util.stream.Collectors.joining(","));
+        return """
+                {
+                    "items": [%s]
+                }
+                """.formatted(items);
     }
 
     private String childListItemBody(UUID childListId, Integer position) {
@@ -163,11 +183,15 @@ class UserListItemControllerIntegrationTest {
     }
 
     private UserList persistList(User user, String name, boolean isPublic) {
+        return persistList(user, name, isPublic ? UserListVisibility.PUBLIC : UserListVisibility.PRIVATE);
+    }
+
+    private UserList persistList(User user, String name, UserListVisibility visibility) {
         LocalDateTime now = LocalDateTime.now();
         return userListRepository.save(UserList.builder()
                 .user(user)
                 .name(name)
-                .isPublic(isPublic)
+                .visibility(visibility)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -463,6 +487,149 @@ class UserListItemControllerIntegrationTest {
                         .cookie(user.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(contentItemBody("550", null, null)))
+                .andExpect(status().isForbidden());
+    }
+
+    // ---------- POST /lists/{listId}/items/bulk ----------
+
+    @Test
+    @DisplayName("[addItems] Should Return Created And Persist All Items In Order - When All Items Are Valid")
+    void shouldReturnCreatedAndPersistAllItemsInOrderWhenAllItemsAreValid() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+
+        mockMvc.perform(addItemsBulkRequest(user, list.getId(), bulkItemsBody("550", "551")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$[0].content.tmdbId").value("550"))
+                .andExpect(jsonPath("$[0].position").value(1))
+                .andExpect(jsonPath("$[1].content.tmdbId").value("551"))
+                .andExpect(jsonPath("$[1].position").value(2));
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Append After Existing Items - When List Already Has Items")
+    void shouldAppendAfterExistingItemsWhenListAlreadyHasItems() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsappend");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        Content first = persistContent("1");
+        persistContentItem(list, first, 1);
+
+        mockMvc.perform(addItemsBulkRequest(user, list.getId(), bulkItemsBody("550", "551")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$[0].position").value(2))
+                .andExpect(jsonPath("$[1].position").value(3));
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return BadRequest And Persist Nothing - When Items Is Empty")
+    void shouldReturnBadRequestAndPersistNothingWhenItemsIsEmpty() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsempty");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+
+        mockMvc.perform(addItemsBulkRequest(user, list.getId(), bulkItemsBody()))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return Conflict And Persist Nothing - When Two Items In The Payload Point To The Same Content")
+    void shouldReturnConflictAndPersistNothingWhenTwoItemsInThePayloadPointToTheSameContent() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsdupe");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+
+        mockMvc.perform(addItemsBulkRequest(user, list.getId(), bulkItemsBody("550", "550")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("This content is already in the list"));
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return Conflict And Persist Nothing - When An Item Is Already In The List")
+    void shouldReturnConflictAndPersistNothingWhenAnItemIsAlreadyInTheList() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsexisting");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        Content existing = persistContent("550");
+        persistContentItem(list, existing, 1);
+
+        mockMvc.perform(addItemsBulkRequest(user, list.getId(), bulkItemsBody("551", "550")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("This content is already in the list"));
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return BadRequest - When List Is Already Locked As A List Of Lists")
+    void shouldReturnBadRequestWhenListIsAlreadyLockedAsAListOfLists() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemslocked");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        UserList childList = persistList(entity, "Child list", true);
+        persistChildListItem(list, childList, 1);
+
+        mockMvc.perform(addItemsBulkRequest(user, list.getId(), bulkItemsBody("550")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("cannot also contain content items")));
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return NotFound - When List Does Not Exist")
+    void shouldReturnNotFoundWhenListDoesNotExistOnBulkAdd() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsnolist");
+
+        mockMvc.perform(addItemsBulkRequest(user, UUID.randomUUID(), bulkItemsBody("550")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List not found"));
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return NotFound - When List Belongs To A Different User")
+    void shouldReturnNotFoundWhenListBelongsToADifferentUserOnBulkAdd() throws Exception {
+        RegisteredUser owner = registerUser("bulkadditemsowner");
+        RegisteredUser intruder = registerUser("bulkadditemsintruder");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Owner's list", true);
+
+        mockMvc.perform(addItemsBulkRequest(intruder, list.getId(), bulkItemsBody("550")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List not found"));
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentOnBulkAdd() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsnoauth");
+
+        mockMvc.perform(post("/lists/" + UUID.randomUUID() + "/items/bulk")
+                        .cookie(user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bulkItemsBody("550")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingOnBulkAdd() throws Exception {
+        RegisteredUser user = registerUser("bulkadditemsnocsrf");
+
+        mockMvc.perform(post("/lists/" + UUID.randomUUID() + "/items/bulk")
+                        .cookie(user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(bulkItemsBody("550")))
                 .andExpect(status().isForbidden());
     }
 
