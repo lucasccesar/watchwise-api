@@ -1,9 +1,16 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
-import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -79,9 +86,33 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getUserListById] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenGettingUserListById() {
+        UUID listId = UUID.randomUUID();
+        UserListDetailedResponseDTO dto = buildDetailedResponseDto();
+        when(userListService.getUserListById(currentUserId, listId)).thenReturn(dto);
+
+        ResponseEntity<UserListDetailedResponseDTO> result = userListController.getUserListById(listId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingUserListById() {
+        UUID listId = UUID.randomUUID();
+        when(userListService.getUserListById(currentUserId, listId)).thenReturn(buildDetailedResponseDto());
+
+        userListController.getUserListById(listId);
+
+        verify(userListService).getUserListById(currentUserId, listId);
+    }
+
+    @Test
     @DisplayName("[createUserList] Should Return Created With The Service Result - When Called")
     void shouldReturnCreatedWithTheServiceResultWhenCreatingUserList() {
-        UserListCreationDTO creationDTO = new UserListCreationDTO("Best sci-fi of the 90s", null, true);
+        UserListCreationDTO creationDTO = new UserListCreationDTO("Best sci-fi of the 90s", null, UserListVisibility.PRIVATE);
         UserListResponseDTO dto = buildResponseDto();
         when(userListService.createUserList(currentUserId, creationDTO)).thenReturn(dto);
 
@@ -103,10 +134,36 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[createUserListWithItems] Should Return Created With The Service Result - When Called")
+    void shouldReturnCreatedWithTheServiceResultWhenCreatingUserListWithItems() {
+        UserListBulkCreationDTO creationDTO = new UserListBulkCreationDTO(
+                "Best sci-fi of the 90s", null, UserListVisibility.PRIVATE, List.of(buildContentRef()));
+        UserListDetailedResponseDTO dto = buildDetailedResponseDto();
+        when(userListService.createUserListWithItems(currentUserId, creationDTO)).thenReturn(dto);
+
+        ResponseEntity<UserListDetailedResponseDTO> result = userListController.createUserListWithItems(creationDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenCreatingUserListWithItems() {
+        UserListBulkCreationDTO creationDTO = new UserListBulkCreationDTO(
+                "My list", null, null, List.of(buildContentRef()));
+        when(userListService.createUserListWithItems(currentUserId, creationDTO)).thenReturn(buildDetailedResponseDto());
+
+        userListController.createUserListWithItems(creationDTO);
+
+        verify(userListService).createUserListWithItems(currentUserId, creationDTO);
+    }
+
+    @Test
     @DisplayName("[updateUserList] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenUpdatingUserList() {
         UUID listId = UUID.randomUUID();
-        UserListCreationDTO updateDTO = new UserListCreationDTO("New name", null, false);
+        UserListPatchDTO updateDTO = new UserListPatchDTO("New name", null, UserListVisibility.PRIVATE);
         UserListResponseDTO dto = buildResponseDto();
         when(userListService.updateUserList(currentUserId, listId, updateDTO)).thenReturn(dto);
 
@@ -120,7 +177,7 @@ class UserListControllerTest {
     @DisplayName("[updateUserList] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenUpdatingUserList() {
         UUID listId = UUID.randomUUID();
-        UserListCreationDTO updateDTO = new UserListCreationDTO("New name", null, null);
+        UserListPatchDTO updateDTO = new UserListPatchDTO("New name", null, null);
         when(userListService.updateUserList(currentUserId, listId, updateDTO)).thenReturn(buildResponseDto());
 
         userListController.updateUserList(listId, updateDTO);
@@ -150,7 +207,19 @@ class UserListControllerTest {
 
     private UserListResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
-        UserPreviewDTO owner = new UserPreviewDTO(UUID.randomUUID(), "lucas", "https://example.com/photo.png", true);
-        return new UserListResponseDTO(UUID.randomUUID(), owner, "My list", null, true, 0.0, now, now);
+        return new UserListResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(), 0L);
+    }
+
+    private UserListDetailedResponseDTO buildDetailedResponseDto() {
+        LocalDateTime now = LocalDateTime.now();
+        UserListItemResponseDTO item = new UserListItemResponseDTO(
+                UUID.randomUUID(),
+                new ContentRefDTO(UUID.randomUUID(), "100", ContentType.MOVIE, null, null, null, null, null, now, now),
+                null, 1, null, now, now);
+        return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(item));
+    }
+
+    private ContentRefCreationDTO buildContentRef() {
+        return new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
     }
 }

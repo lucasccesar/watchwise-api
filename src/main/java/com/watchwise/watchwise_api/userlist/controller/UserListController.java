@@ -1,7 +1,10 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import jakarta.validation.Valid;
@@ -36,12 +39,26 @@ public class UserListController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
+    @PostMapping("/users/me/lists/bulk")
+    public ResponseEntity<UserListDetailedResponseDTO> createUserListWithItems(
+            @Valid @RequestBody UserListBulkCreationDTO userListBulkCreationDTO
+    ) {
+        UserListDetailedResponseDTO created = userListService.createUserListWithItems(getCurrentUserId(), userListBulkCreationDTO);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    @GetMapping("/lists/{listId}")
+    public ResponseEntity<UserListDetailedResponseDTO> getUserListById(@PathVariable UUID listId) {
+        UserListDetailedResponseDTO list = userListService.getUserListById(getCurrentUserId(), listId);
+        return ResponseEntity.ok(list);
+    }
+
     @PatchMapping("/lists/{listId}")
     public ResponseEntity<UserListResponseDTO> updateUserList(
             @PathVariable UUID listId,
-            @Valid @RequestBody UserListCreationDTO userListCreationDTO
+            @Valid @RequestBody UserListPatchDTO userListPatchDTO
     ) {
-        UserListResponseDTO updated = userListService.updateUserList(getCurrentUserId(), listId, userListCreationDTO);
+        UserListResponseDTO updated = userListService.updateUserList(getCurrentUserId(), listId, userListPatchDTO);
         return ResponseEntity.ok(updated);
     }
 
