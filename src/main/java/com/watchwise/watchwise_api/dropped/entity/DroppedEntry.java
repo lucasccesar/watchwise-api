@@ -35,7 +35,7 @@ public class DroppedEntry {
     @Setter
     private ContentType type;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(length = 280)
     @Setter
     private String comment;
 

@@ -1,0 +1,1 @@
+ALTER TABLE dropped_entries ALTER COLUMN comment TYPE VARCHAR(280);

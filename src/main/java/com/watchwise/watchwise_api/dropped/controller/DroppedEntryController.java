@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.dropped.dto.DroppedEntryCreationDTO;
 import com.watchwise.watchwise_api.dropped.dto.DroppedEntryResponseDTO;
 import com.watchwise.watchwise_api.dropped.service.DroppedEntryService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -44,7 +45,7 @@ public class DroppedEntryController {
     public ResponseEntity<Void> markAsDropped(
             @PathVariable ContentType type,
             @PathVariable String tmdbId,
-            @RequestBody(required = false) DroppedEntryCreationDTO droppedEntryCreationDTO
+            @Valid @RequestBody(required = false) DroppedEntryCreationDTO droppedEntryCreationDTO
     ) {
         requestThrottler.checkAllowed(droppedActionKey(), droppedActionMaxRequests, Duration.ofMinutes(droppedActionWindowMinutes));
 

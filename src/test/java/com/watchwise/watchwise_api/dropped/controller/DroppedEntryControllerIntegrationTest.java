@@ -263,6 +263,32 @@ class DroppedEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[markAsDropped] Should Return BadRequest And Not Persist - When Comment Exceeds 280 Characters")
+    void shouldReturnBadRequestAndNotPersistWhenCommentExceeds280Characters() throws Exception {
+        RegisteredUser user = registerUser("markdroppedcommenttoolong");
+
+        mockMvc.perform(markRequest(user, ContentType.MOVIE, "550", "a".repeat(281)))
+                .andExpect(status().isBadRequest());
+
+        assertThat(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(user.id(), ContentType.MOVIE,
+                PageRequest.of(0, 10)).getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[markAsDropped] Should Return NoContent - When Comment Is Exactly 280 Characters")
+    void shouldReturnNoContentWhenCommentIsExactly280Characters() throws Exception {
+        RegisteredUser user = registerUser("markdroppedcommentmax");
+        String comment = "a".repeat(280);
+
+        mockMvc.perform(markRequest(user, ContentType.MOVIE, "550", comment))
+                .andExpect(status().isNoContent());
+
+        var entry = droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(user.id(), ContentType.MOVIE,
+                PageRequest.of(0, 10)).getContent().getFirst();
+        assertThat(entry.getComment()).isEqualTo(comment);
+    }
+
+    @Test
     @DisplayName("[markAsDropped] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForMark() throws Exception {
         RegisteredUser user = registerUser("markdroppednoauth");
