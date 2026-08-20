@@ -80,7 +80,8 @@ public class UserController {
     @PatchMapping("/me")
     public ResponseEntity<UserResponseDTO> updateCurrentUser(@Valid @RequestBody PatchUserDTO patchUserDTO) {
         UUID currentUserId = getCurrentUserId();
-        boolean touchesCredentials = userService.willChangeCredentials(currentUserId, patchUserDTO);
+        UserService.CredentialCheck credentialCheck = userService.checkCredentialChanges(currentUserId, patchUserDTO);
+        boolean touchesCredentials = credentialCheck.touchesCredentials();
         String lockoutKey = lockoutKey("patch-account", currentUserId);
 
         if (touchesCredentials) {
@@ -89,7 +90,7 @@ public class UserController {
 
         UserResponseDTO user;
         try {
-            user = userService.updateUser(currentUserId, patchUserDTO);
+            user = userService.updateUser(credentialCheck.user(), patchUserDTO);
         } catch (UnauthorizedException e) {
             if (touchesCredentials) {
                 attemptLockout.recordFailure(lockoutKey, patchAccountMaxAttempts, Duration.ofMinutes(patchAccountWindowMinutes), Duration.ofMinutes(patchAccountBlockMinutes));

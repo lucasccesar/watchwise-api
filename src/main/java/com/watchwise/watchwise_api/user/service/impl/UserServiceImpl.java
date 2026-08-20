@@ -69,9 +69,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserResponseDTO updateUser(UUID id, PatchUserDTO patchUserDTO) {
-        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
-
+    public UserResponseDTO updateUser(User user, PatchUserDTO patchUserDTO) {
         boolean touchesCredentials = applyPatch(user, patchUserDTO);
         user.setUpdatedAt(LocalDateTime.now());
 
@@ -83,16 +81,17 @@ public class UserServiceImpl implements UserService {
         }
 
         if (touchesCredentials) {
-            refreshTokenService.invalidateAllSessions(id);
+            refreshTokenService.invalidateAllSessions(user.getId());
         }
 
         return response;
     }
 
     @Override
-    public boolean willChangeCredentials(UUID id, PatchUserDTO patchUserDTO) {
+    public CredentialCheck checkCredentialChanges(UUID id, PatchUserDTO patchUserDTO) {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
-        return resolveCredentialChanges(user, patchUserDTO).touchesCredentials();
+        boolean touchesCredentials = resolveCredentialChanges(user, patchUserDTO).touchesCredentials();
+        return new CredentialCheck(user, touchesCredentials);
     }
 
     private boolean applyPatch(User user, PatchUserDTO patchUserDTO) {

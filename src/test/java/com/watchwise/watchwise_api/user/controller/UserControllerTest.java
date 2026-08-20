@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.service.UserService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.AfterEach;
@@ -69,11 +70,21 @@ class UserControllerTest {
     private UserController userController;
 
     private UUID currentUserId;
+    private User currentUser;
     private UserResponseDTO userResponseDTO;
 
     @BeforeEach
     void setUp() {
         currentUserId = UUID.randomUUID();
+        currentUser = User.builder()
+                .id(currentUserId)
+                .username("JohnDoe")
+                .email("john.doe@email.com")
+                .password("hashed_password")
+                .isProfilePublic(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
         userResponseDTO = new UserResponseDTO(
                 currentUserId,
                 "JohnDoe",
@@ -180,7 +191,9 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Return UserResponseDTO Of The Authenticated User - When Called")
     void shouldReturnUserResponseDtoOfTheAuthenticatedUserWhenUpdateCalled() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null, null);
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, false));
+        when(userService.updateUser(currentUser, patchUserDTO)).thenReturn(userResponseDTO);
 
         ResponseEntity<UserResponseDTO> result = userController.updateCurrentUser(patchUserDTO);
 
@@ -192,19 +205,22 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Resolve Id From The Security Context - When Called")
     void shouldResolveIdFromTheSecurityContextWhenUpdateCalled() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null, null);
-        when(userService.updateUser(any(UUID.class), any(PatchUserDTO.class))).thenReturn(userResponseDTO);
+        when(userService.checkCredentialChanges(any(UUID.class), any(PatchUserDTO.class)))
+                .thenReturn(new UserService.CredentialCheck(currentUser, false));
+        when(userService.updateUser(any(User.class), any(PatchUserDTO.class))).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
 
-        verify(userService).updateUser(currentUserId, patchUserDTO);
+        verify(userService).checkCredentialChanges(currentUserId, patchUserDTO);
     }
 
     @Test
     @DisplayName("[updateCurrentUser] Should Not Interact With AttemptLockout - When Patch Does Not Touch Password Or Email")
     void shouldNotInteractWithAttemptLockoutWhenPatchDoesNotTouchPasswordOrEmail() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "Updated bio", null, null, null);
-        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(false);
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, false));
+        when(userService.updateUser(currentUser, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
 
@@ -215,8 +231,9 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Not Interact With AttemptLockout - When Email Is Provided But Unchanged")
     void shouldNotInteractWithAttemptLockoutWhenEmailIsProvidedButUnchanged() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "john.doe@email.com", null, null, null, null, null);
-        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(false);
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, false));
+        when(userService.updateUser(currentUser, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
 
@@ -227,14 +244,15 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Check Lockout Before Updating - When Credentials Will Change")
     void shouldCheckLockoutBeforeUpdatingWhenCredentialsWillChange() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "CurrentPass1");
-        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, true));
+        when(userService.updateUser(currentUser, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
 
         InOrder order = inOrder(attemptLockout, userService);
         order.verify(attemptLockout).checkAllowed(any());
-        order.verify(userService).updateUser(currentUserId, patchUserDTO);
+        order.verify(userService).updateUser(currentUser, patchUserDTO);
         verify(attemptLockout).recordSuccess(any());
     }
 
@@ -242,8 +260,9 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Build Lockout Key From Action And UserId - When Credentials Will Change")
     void shouldBuildLockoutKeyFromActionAndUserIdWhenCredentialsWillChange() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "CurrentPass1");
-        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, true));
+        when(userService.updateUser(currentUser, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
 
@@ -254,8 +273,9 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Record Failure And Rethrow - When Credentials Will Change And Service Throws UnauthorizedException")
     void shouldRecordFailureAndRethrowWhenCredentialsWillChangeAndServiceThrowsUnauthorizedException() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "WrongCurrentPass1");
-        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenThrow(new UnauthorizedException("Invalid password"));
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, true));
+        when(userService.updateUser(currentUser, patchUserDTO)).thenThrow(new UnauthorizedException("Invalid password"));
 
         assertThatThrownBy(() -> userController.updateCurrentUser(patchUserDTO))
                 .isInstanceOf(UnauthorizedException.class);
@@ -268,8 +288,9 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Not Record Success - When Email Is Provided But Unchanged")
     void shouldNotRecordSuccessWhenEmailIsProvidedButUnchanged() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "john.doe@email.com", null, null, null, null, null);
-        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(false);
-        when(userService.updateUser(currentUserId, patchUserDTO)).thenReturn(userResponseDTO);
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, false));
+        when(userService.updateUser(currentUser, patchUserDTO)).thenReturn(userResponseDTO);
 
         userController.updateCurrentUser(patchUserDTO);
 
@@ -280,7 +301,8 @@ class UserControllerTest {
     @DisplayName("[updateCurrentUser] Should Throw TooManyRequestsException And Not Call Service - When Credentials Will Change And Rate Limited")
     void shouldThrowTooManyRequestsExceptionAndNotCallServiceWhenCredentialsWillChangeAndRateLimited() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "NewPassword123", null, null, null, "CurrentPass1");
-        when(userService.willChangeCredentials(currentUserId, patchUserDTO)).thenReturn(true);
+        when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
+                .thenReturn(new UserService.CredentialCheck(currentUser, true));
         doThrow(new TooManyRequestsException("Too many attempts. Try again later."))
                 .when(attemptLockout).checkAllowed(any());
 
