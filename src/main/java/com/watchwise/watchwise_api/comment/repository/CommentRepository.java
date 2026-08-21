@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Optional;
 import java.util.UUID;
 
 public interface CommentRepository extends JpaRepository<Comment, UUID> {
@@ -19,4 +20,12 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
 
     @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.diaryEntry.id = :diaryEntryId ORDER BY c.createdAt ASC")
     Page<Comment> findByDiaryEntryIdOrderByCreatedAtAsc(@Param("diaryEntryId") UUID diaryEntryId, Pageable pageable);
+
+    @Query("""
+            SELECT c FROM Comment c
+            LEFT JOIN FETCH c.list l LEFT JOIN FETCH l.user
+            LEFT JOIN FETCH c.diaryEntry d LEFT JOIN FETCH d.user
+            WHERE c.id = :id
+            """)
+    Optional<Comment> findByIdWithTargets(@Param("id") UUID id);
 }

@@ -30,6 +30,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -253,6 +254,50 @@ class CommentRepositoryTest {
         Page<Comment> result = commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(diaryEntry.getId(), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findByIdWithTargets] Should Return Comment With List And Its User Already Initialized - When Comment Targets A List")
+    void shouldReturnCommentWithListAndItsUserAlreadyInitializedWhenCommentTargetsAList() {
+        Comment saved = commentRepository.saveAndFlush(buildListComment(lucas, scifi, "Nice picks"));
+        entityManager.clear();
+
+        Comment found = commentRepository.findByIdWithTargets(saved.getId()).orElseThrow();
+
+        assertThat(Hibernate.isInitialized(found.getList())).isTrue();
+        assertThat(Hibernate.isInitialized(found.getList().getUser())).isTrue();
+        assertThat(found.getList().getUser().getId()).isEqualTo(lucas.getId());
+    }
+
+    @Test
+    @DisplayName("[findByIdWithTargets] Should Return Comment With Diary Entry And Its User Already Initialized - When Comment Targets A Diary Entry")
+    void shouldReturnCommentWithDiaryEntryAndItsUserAlreadyInitializedWhenCommentTargetsADiaryEntry() {
+        Comment saved = commentRepository.saveAndFlush(buildDiaryEntryComment(lucas, diaryEntry, "Agreed"));
+        entityManager.clear();
+
+        Comment found = commentRepository.findByIdWithTargets(saved.getId()).orElseThrow();
+
+        assertThat(Hibernate.isInitialized(found.getDiaryEntry())).isTrue();
+        assertThat(Hibernate.isInitialized(found.getDiaryEntry().getUser())).isTrue();
+        assertThat(found.getDiaryEntry().getUser().getId()).isEqualTo(lucas.getId());
+    }
+
+    @Test
+    @DisplayName("[findByIdWithTargets] Should Return Comment With Null List And Diary Entry - When Comment Targets Content")
+    void shouldReturnCommentWithNullListAndDiaryEntryWhenCommentTargetsContent() {
+        Comment saved = commentRepository.saveAndFlush(buildContentComment(lucas, fightClub, "Great movie!"));
+        entityManager.clear();
+
+        Comment found = commentRepository.findByIdWithTargets(saved.getId()).orElseThrow();
+
+        assertThat(found.getList()).isNull();
+        assertThat(found.getDiaryEntry()).isNull();
+    }
+
+    @Test
+    @DisplayName("[findByIdWithTargets] Should Return Empty - When Comment Does Not Exist")
+    void shouldReturnEmptyWhenCommentDoesNotExistForFindByIdWithTargets() {
+        assertThat(commentRepository.findByIdWithTargets(UUID.randomUUID())).isEmpty();
     }
 
     @Test

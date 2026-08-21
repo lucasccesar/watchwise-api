@@ -12,4 +12,8 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
 
     Optional<Like> findByUserIdAndDiaryEntryId(UUID userId, UUID diaryEntryId);
 
+    boolean existsByUserIdAndCommentId(UUID userId, UUID commentId);
+
+    boolean existsByUserIdAndDiaryEntryId(UUID userId, UUID diaryEntryId);
+
 }

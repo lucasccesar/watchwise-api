@@ -219,6 +219,36 @@ class LikeRepositoryTest {
     }
 
     @Test
+    @DisplayName("[existsByUserIdAndCommentId] Should Return True - When It Exists")
+    void shouldReturnTrueWhenItExistsByUserIdAndCommentId() {
+        likeRepository.saveAndFlush(buildCommentLike(lucas, comment));
+        entityManager.clear();
+
+        assertThat(likeRepository.existsByUserIdAndCommentId(lucas.getId(), comment.getId())).isTrue();
+    }
+
+    @Test
+    @DisplayName("[existsByUserIdAndCommentId] Should Return False - When It Does Not Exist")
+    void shouldReturnFalseWhenItDoesNotExistByUserIdAndCommentId() {
+        assertThat(likeRepository.existsByUserIdAndCommentId(lucas.getId(), comment.getId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("[existsByUserIdAndDiaryEntryId] Should Return True - When It Exists")
+    void shouldReturnTrueWhenItExistsByUserIdAndDiaryEntryId() {
+        likeRepository.saveAndFlush(buildDiaryEntryLike(lucas, diaryEntry));
+        entityManager.clear();
+
+        assertThat(likeRepository.existsByUserIdAndDiaryEntryId(lucas.getId(), diaryEntry.getId())).isTrue();
+    }
+
+    @Test
+    @DisplayName("[existsByUserIdAndDiaryEntryId] Should Return False - When It Does Not Exist")
+    void shouldReturnFalseWhenItDoesNotExistByUserIdAndDiaryEntryId() {
+        assertThat(likeRepository.existsByUserIdAndDiaryEntryId(lucas.getId(), diaryEntry.getId())).isFalse();
+    }
+
+    @Test
     @DisplayName("[deleteAll] Should Cascade Delete Like Rows - When The Target Comment Is Deleted")
     void shouldCascadeDeleteLikeRowsWhenTheTargetCommentIsDeleted() {
         Like saved = likeRepository.saveAndFlush(buildCommentLike(lucas, comment));
