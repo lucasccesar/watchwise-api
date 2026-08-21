@@ -124,4 +124,44 @@ class LikeControllerTest {
 
         verify(likeService).unlikeDiaryEntry(currentUserId, diaryEntryId);
     }
+
+    @Test
+    @DisplayName("[likeList] Should Return NoContent - When Called")
+    void shouldReturnNoContentWhenLikingList() {
+        UUID listId = UUID.randomUUID();
+
+        ResponseEntity<Void> result = likeController.likeList(listId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenLikingList() {
+        UUID listId = UUID.randomUUID();
+
+        likeController.likeList(listId);
+
+        verify(likeService).likeList(currentUserId, listId);
+    }
+
+    @Test
+    @DisplayName("[unlikeList] Should Return NoContent - When Called")
+    void shouldReturnNoContentWhenUnlikingList() {
+        UUID listId = UUID.randomUUID();
+
+        ResponseEntity<Void> result = likeController.unlikeList(listId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    @DisplayName("[unlikeList] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenUnlikingList() {
+        UUID listId = UUID.randomUUID();
+
+        likeController.unlikeList(listId);
+
+        verify(likeService).unlikeList(currentUserId, listId);
+    }
 }

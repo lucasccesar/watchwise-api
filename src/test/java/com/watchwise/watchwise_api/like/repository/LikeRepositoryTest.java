@@ -10,6 +10,9 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +64,9 @@ class LikeRepositoryTest {
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
 
+    @Autowired
+    private UserListRepository userListRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -69,12 +75,14 @@ class LikeRepositoryTest {
     private Content fightClub;
     private Comment comment;
     private DiaryEntry diaryEntry;
+    private UserList scifi;
 
     @BeforeEach
     void setUp() {
         likeRepository.deleteAll();
         commentRepository.deleteAll();
         diaryEntryRepository.deleteAll();
+        userListRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
 
@@ -83,6 +91,7 @@ class LikeRepositoryTest {
         fightClub = contentRepository.save(buildContent("550"));
         comment = commentRepository.save(buildComment(marina, fightClub));
         diaryEntry = diaryEntryRepository.save(buildDiaryEntry(marina, fightClub));
+        scifi = userListRepository.save(buildList(marina, "Best sci-fi of the 90s"));
     }
 
     @Test
@@ -108,6 +117,19 @@ class LikeRepositoryTest {
 
         assertThat(found.getDiaryEntry().getId()).isEqualTo(diaryEntry.getId());
         assertThat(found.getComment()).isNull();
+    }
+
+    @Test
+    @DisplayName("[save] Should Persist A Like On A List - When List Is Provided As The Target")
+    void shouldPersistALikeOnAListWhenListIsProvidedAsTheTarget() {
+        Like saved = likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        entityManager.clear();
+
+        Like found = likeRepository.findById(saved.getId()).orElseThrow();
+
+        assertThat(found.getList().getId()).isEqualTo(scifi.getId());
+        assertThat(found.getComment()).isNull();
+        assertThat(found.getDiaryEntry()).isNull();
     }
 
     @Test
@@ -137,6 +159,35 @@ class LikeRepositoryTest {
     }
 
     @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When Both Comment And List Are Provided")
+    void shouldThrowDataIntegrityViolationExceptionWhenBothCommentAndListAreProvided() {
+        Like like = Like.builder()
+                .user(lucas)
+                .comment(comment)
+                .list(scifi)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        assertThatThrownBy(() -> likeRepository.saveAndFlush(like))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When All Three Targets Are Provided")
+    void shouldThrowDataIntegrityViolationExceptionWhenAllThreeTargetsAreProvided() {
+        Like like = Like.builder()
+                .user(lucas)
+                .comment(comment)
+                .diaryEntry(diaryEntry)
+                .list(scifi)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        assertThatThrownBy(() -> likeRepository.saveAndFlush(like))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
     @DisplayName("[save] Should Throw DataIntegrityViolationException - When The Same User Likes The Same Comment Twice")
     void shouldThrowDataIntegrityViolationExceptionWhenTheSameUserLikesTheSameCommentTwice() {
         likeRepository.saveAndFlush(buildCommentLike(lucas, comment));
@@ -154,6 +205,27 @@ class LikeRepositoryTest {
 
         assertThatThrownBy(() -> likeRepository.saveAndFlush(buildDiaryEntryLike(lucas, diaryEntry)))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When The Same User Likes The Same List Twice")
+    void shouldThrowDataIntegrityViolationExceptionWhenTheSameUserLikesTheSameListTwice() {
+        likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        entityManager.clear();
+
+        assertThatThrownBy(() -> likeRepository.saveAndFlush(buildListLike(lucas, scifi)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("[save] Should Allow Different Users To Like The Same List")
+    void shouldAllowDifferentUsersToLikeTheSameList() {
+        likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        entityManager.clear();
+
+        Like saved = likeRepository.saveAndFlush(buildListLike(marina, scifi));
+
+        assertThat(saved.getId()).isNotNull();
     }
 
     @Test
@@ -249,6 +321,41 @@ class LikeRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUserIdAndListId] Should Return The Like - When It Exists")
+    void shouldReturnTheLikeWhenItExistsByUserIdAndListId() {
+        Like saved = likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        entityManager.clear();
+
+        Optional<Like> result = likeRepository.findByUserIdAndListId(lucas.getId(), scifi.getId());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getId()).isEqualTo(saved.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserIdAndListId] Should Return Empty - When It Does Not Exist")
+    void shouldReturnEmptyWhenItDoesNotExistByUserIdAndListId() {
+        Optional<Like> result = likeRepository.findByUserIdAndListId(lucas.getId(), scifi.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[existsByUserIdAndListId] Should Return True - When It Exists")
+    void shouldReturnTrueWhenItExistsByUserIdAndListId() {
+        likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        entityManager.clear();
+
+        assertThat(likeRepository.existsByUserIdAndListId(lucas.getId(), scifi.getId())).isTrue();
+    }
+
+    @Test
+    @DisplayName("[existsByUserIdAndListId] Should Return False - When It Does Not Exist")
+    void shouldReturnFalseWhenItDoesNotExistByUserIdAndListId() {
+        assertThat(likeRepository.existsByUserIdAndListId(lucas.getId(), scifi.getId())).isFalse();
+    }
+
+    @Test
     @DisplayName("[deleteAll] Should Cascade Delete Like Rows - When The Target Comment Is Deleted")
     void shouldCascadeDeleteLikeRowsWhenTheTargetCommentIsDeleted() {
         Like saved = likeRepository.saveAndFlush(buildCommentLike(lucas, comment));
@@ -268,6 +375,18 @@ class LikeRepositoryTest {
 
         diaryEntryRepository.delete(diaryEntryRepository.findById(diaryEntry.getId()).orElseThrow());
         diaryEntryRepository.flush();
+
+        assertThat(likeRepository.findById(saved.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[deleteAll] Should Cascade Delete Like Rows - When The Target List Is Deleted")
+    void shouldCascadeDeleteLikeRowsWhenTheTargetListIsDeleted() {
+        Like saved = likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        entityManager.clear();
+
+        userListRepository.delete(userListRepository.findById(scifi.getId()).orElseThrow());
+        userListRepository.flush();
 
         assertThat(likeRepository.findById(saved.getId())).isEmpty();
     }
@@ -297,6 +416,25 @@ class LikeRepositoryTest {
                 .user(user)
                 .diaryEntry(diaryEntry)
                 .createdAt(LocalDateTime.now())
+                .build();
+    }
+
+    private Like buildListLike(User user, UserList list) {
+        return Like.builder()
+                .user(user)
+                .list(list)
+                .createdAt(LocalDateTime.now())
+                .build();
+    }
+
+    private UserList buildList(User user, String name) {
+        LocalDateTime now = LocalDateTime.now();
+        return UserList.builder()
+                .user(user)
+                .name(name)
+                .visibility(UserListVisibility.PUBLIC)
+                .createdAt(now)
+                .updatedAt(now)
                 .build();
     }
 

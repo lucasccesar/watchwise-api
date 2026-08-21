@@ -38,6 +38,18 @@ public class LikeController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/lists/{listId}/like")
+    public ResponseEntity<Void> likeList(@PathVariable UUID listId) {
+        likeService.likeList(getCurrentUserId(), listId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/lists/{listId}/like")
+    public ResponseEntity<Void> unlikeList(@PathVariable UUID listId) {
+        likeService.unlikeList(getCurrentUserId(), listId);
+        return ResponseEntity.noContent().build();
+    }
+
     private UUID getCurrentUserId() {
         return (UUID) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }

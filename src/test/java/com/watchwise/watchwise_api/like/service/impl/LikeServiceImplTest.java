@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.like.service.impl;
 
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -17,6 +18,8 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
+import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,6 +60,12 @@ class LikeServiceImplTest {
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
+    private UserListRepository userListRepository;
+
+    @Mock
+    private UserListItemRepository userListItemRepository;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -176,6 +185,28 @@ class LikeServiceImplTest {
                 .build();
     }
 
+    private Comment buildReplyToContentComment() {
+        Comment parent = Comment.builder()
+                .id(UUID.randomUUID())
+                .user(marina)
+                .content(fightClub)
+                .text("Great movie!")
+                .containsSpoiler(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        return Comment.builder()
+                .id(commentId)
+                .user(lucas)
+                .content(fightClub)
+                .parentComment(parent)
+                .text("Totally agree")
+                .containsSpoiler(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
     // ---------- likeComment ----------
 
     @Test
@@ -230,6 +261,20 @@ class LikeServiceImplTest {
                 .hasMessage("Comment not found");
 
         verify(likeRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[likeComment] Should Save - When The Comment Is A Reply To Another Comment")
+    void shouldSaveWhenTheCommentIsAReplyToAnotherComment() {
+        Comment reply = buildReplyToContentComment();
+        when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId)).thenReturn(false);
+        when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(reply));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.getReferenceById(commentId)).thenReturn(reply);
+
+        likeService.likeComment(lucasId, commentId);
+
+        verify(likeRepository).saveAndFlush(any(Like.class));
     }
 
     @Test
@@ -554,6 +599,198 @@ class LikeServiceImplTest {
         when(likeRepository.findByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(Optional.empty());
 
         likeService.unlikeDiaryEntry(lucasId, diaryEntryId);
+
+        verify(likeRepository, never()).delete(any());
+    }
+
+    // ---------- likeList ----------
+
+    @Test
+    @DisplayName("[likeList] Should Save New Like - When Not Already Liked And List Is Public")
+    void shouldSaveNewLikeWhenNotAlreadyLikedAndListIsPublic() {
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
+
+        likeService.likeList(lucasId, listId);
+
+        verify(likeRepository).saveAndFlush(likeCaptor.capture());
+        assertThat(likeCaptor.getValue().getUser()).isEqualTo(lucas);
+        assertThat(likeCaptor.getValue().getList()).isEqualTo(scifi);
+        assertThat(likeCaptor.getValue().getComment()).isNull();
+        assertThat(likeCaptor.getValue().getDiaryEntry()).isNull();
+        assertThat(likeCaptor.getValue().getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Attempt Save In A New Transaction - When Not Already Liked")
+    void shouldAttemptSaveInANewTransactionWhenNotAlreadyLikedList() {
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
+
+        likeService.likeList(lucasId, listId);
+
+        verify(newTransactionExecutor).runInNewTransaction(any());
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Do Nothing - When Already Liked That List")
+    void shouldDoNothingWhenAlreadyLikedThatList() {
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(true);
+
+        likeService.likeList(lucasId, listId);
+
+        verify(likeRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(userListRepository);
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Throw NotFoundException - When List Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenListDoesNotExistOnLike() {
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> likeService.likeList(lucasId, listId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("List not found");
+
+        verify(likeRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Save - When List Is Private And Liker Is The Owner")
+    void shouldSaveWhenListIsPrivateAndLikerIsTheOwner() {
+        scifi.setVisibility(UserListVisibility.PRIVATE);
+        when(likeRepository.existsByUserIdAndListId(marinaId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
+
+        likeService.likeList(marinaId, listId);
+
+        verify(likeRepository).saveAndFlush(any(Like.class));
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Save - When List Is Followers-Only And Liker Follows The Owner")
+    void shouldSaveWhenListIsFollowersOnlyAndLikerFollowsTheOwner() {
+        scifi.setVisibility(UserListVisibility.FOLLOWERS);
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
+
+        likeService.likeList(lucasId, listId);
+
+        verify(likeRepository).saveAndFlush(any(Like.class));
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Throw ForbiddenException - When List Is Private And Liker Is Not The Owner")
+    void shouldThrowForbiddenExceptionWhenListIsPrivateAndLikerIsNotTheOwner() {
+        scifi.setVisibility(UserListVisibility.PRIVATE);
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+
+        assertThatThrownBy(() -> likeService.likeList(lucasId, listId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This list is private");
+
+        verify(likeRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Throw ForbiddenException - When List Is Followers-Only And Liker Does Not Follow The Owner")
+    void shouldThrowForbiddenExceptionWhenListIsFollowersOnlyAndLikerDoesNotFollowTheOwner() {
+        scifi.setVisibility(UserListVisibility.FOLLOWERS);
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> likeService.likeList(lucasId, listId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This list is private");
+
+        verify(likeRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Throw BadRequestException - When The List Is A List Of Lists")
+    void shouldThrowBadRequestExceptionWhenTheListIsAListOfLists() {
+        when(likeRepository.existsByUserIdAndListId(marinaId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(true);
+
+        assertThatThrownBy(() -> likeService.likeList(marinaId, listId))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("This list is a list of lists and cannot receive likes");
+
+        verify(likeRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Resolve Successfully - When Save Throws DataIntegrityViolationException But Row Now Exists")
+    void shouldResolveSuccessfullyWhenSaveThrowsDataIntegrityViolationExceptionButRowNowExistsForList() {
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId))
+                .thenReturn(false)
+                .thenReturn(true);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
+
+        assertThatCode(() -> likeService.likeList(lucasId, listId)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Rethrow DataIntegrityViolationException - When Row Still Does Not Exist After Save Fails")
+    void shouldRethrowDataIntegrityViolationExceptionWhenRowStillDoesNotExistAfterSaveFailsForList() {
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
+        DataIntegrityViolationException exception = new DataIntegrityViolationException("unexpected db error");
+        when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(exception);
+
+        assertThatThrownBy(() -> likeService.likeList(lucasId, listId)).isSameAs(exception);
+    }
+
+    // ---------- unlikeList ----------
+
+    @Test
+    @DisplayName("[unlikeList] Should Delete The Row - When It Exists")
+    void shouldDeleteTheRowWhenItExistsForList() {
+        Like like = Like.builder()
+                .id(UUID.randomUUID())
+                .user(lucas)
+                .list(scifi)
+                .createdAt(LocalDateTime.now())
+                .build();
+        when(likeRepository.findByUserIdAndListId(lucasId, listId)).thenReturn(Optional.of(like));
+
+        likeService.unlikeList(lucasId, listId);
+
+        verify(likeRepository).delete(like);
+    }
+
+    @Test
+    @DisplayName("[unlikeList] Should Do Nothing - When The Row Does Not Exist")
+    void shouldDoNothingWhenTheRowDoesNotExistForList() {
+        when(likeRepository.findByUserIdAndListId(lucasId, listId)).thenReturn(Optional.empty());
+
+        likeService.unlikeList(lucasId, listId);
 
         verify(likeRepository, never()).delete(any());
     }

@@ -15,7 +15,9 @@ import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +74,9 @@ class LikeControllerIntegrationTest {
     private UserListRepository userListRepository;
 
     @Autowired
+    private UserListItemRepository userListItemRepository;
+
+    @Autowired
     private DiaryEntryRepository diaryEntryRepository;
 
     @Autowired
@@ -91,6 +96,7 @@ class LikeControllerIntegrationTest {
         likeRepository.deleteAll();
         commentRepository.deleteAll();
         diaryEntryRepository.deleteAll();
+        userListItemRepository.deleteAll();
         userListRepository.deleteAll();
         contentRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -180,6 +186,17 @@ class LikeControllerIntegrationTest {
                 .content(content)
                 .text(text)
                 .containsSpoiler(false)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private void persistChildListItem(UserList userList, UserList childList) {
+        LocalDateTime now = LocalDateTime.now();
+        userListItemRepository.save(UserListItem.builder()
+                .userList(userList)
+                .childList(childList)
+                .position(1)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -434,6 +451,142 @@ class LikeControllerIntegrationTest {
         RegisteredUser user = registerUser("unlikediarynocsrf");
 
         mockMvc.perform(delete("/diary/" + UUID.randomUUID() + "/like").cookie(user.accessToken()))
+                .andExpect(status().isForbidden());
+    }
+
+    // ---------- POST /lists/{listId}/like ----------
+
+    @Test
+    @DisplayName("[likeList] Should Return NoContent And Persist The Like - When List Is Public")
+    void shouldReturnNoContentAndPersistTheLikeWhenListIsPublic() throws Exception {
+        RegisteredUser user = registerUser("likelistok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/like"))
+                .andExpect(status().isNoContent());
+
+        assertThat(likeRepository.findByUserIdAndListId(user.id(), list.getId())).isPresent();
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Return NoContent And Persist Only One Row - When Already Liked")
+    void shouldReturnNoContentAndPersistOnlyOneRowWhenListAlreadyLiked() throws Exception {
+        RegisteredUser user = registerUser("likelisttwice");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/like")).andExpect(status().isNoContent());
+        mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/like")).andExpect(status().isNoContent());
+
+        assertThat(likeRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Return NotFound - When The List Does Not Exist")
+    void shouldReturnNotFoundWhenTheListDoesNotExistOnLike() throws Exception {
+        RegisteredUser user = registerUser("likelistnf");
+
+        mockMvc.perform(postRequest(user, "/lists/" + UUID.randomUUID() + "/like"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List not found"));
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Return Forbidden And Not Persist - When List Is Private And Liker Is Not The Owner")
+    void shouldReturnForbiddenAndNotPersistWhenListIsPrivateAndLikerIsNotTheOwner() throws Exception {
+        RegisteredUser owner = registerUser("likelistprivowner");
+        RegisteredUser stranger = registerUser("likeliststranger");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Private list", UserListVisibility.PRIVATE);
+
+        mockMvc.perform(postRequest(stranger, "/lists/" + list.getId() + "/like"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This list is private"));
+
+        assertThat(likeRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Return BadRequest And Not Persist - When The List Is A List Of Lists")
+    void shouldReturnBadRequestAndNotPersistWhenTheListIsAListOfLists() throws Exception {
+        RegisteredUser user = registerUser("likelistlocked");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "List of lists", UserListVisibility.PUBLIC);
+        UserList childList = persistList(entity, "Child list", UserListVisibility.PUBLIC);
+        persistChildListItem(list, childList);
+
+        mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/like"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("This list is a list of lists and cannot receive likes"));
+
+        assertThat(likeRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentOnLikeList() throws Exception {
+        RegisteredUser user = registerUser("likelistnoauth");
+
+        mockMvc.perform(post("/lists/" + UUID.randomUUID() + "/like")
+                        .cookie(user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[likeList] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingOnLikeList() throws Exception {
+        RegisteredUser user = registerUser("likelistnocsrf");
+
+        mockMvc.perform(post("/lists/" + UUID.randomUUID() + "/like").cookie(user.accessToken()))
+                .andExpect(status().isForbidden());
+    }
+
+    // ---------- DELETE /lists/{listId}/like ----------
+
+    @Test
+    @DisplayName("[unlikeList] Should Return NoContent And Remove The Like - When It Exists")
+    void shouldReturnNoContentAndRemoveTheLikeWhenItExistsForList() throws Exception {
+        RegisteredUser user = registerUser("unlikelistok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PUBLIC);
+        mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/like")).andExpect(status().isNoContent());
+
+        mockMvc.perform(deleteRequest(user, "/lists/" + list.getId() + "/like"))
+                .andExpect(status().isNoContent());
+
+        assertThat(likeRepository.findByUserIdAndListId(user.id(), list.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[unlikeList] Should Return NoContent - When The Like Does Not Exist")
+    void shouldReturnNoContentWhenTheLikeDoesNotExistOnUnlikeList() throws Exception {
+        RegisteredUser user = registerUser("unlikelistnoop");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(deleteRequest(user, "/lists/" + list.getId() + "/like"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("[unlikeList] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentOnUnlikeList() throws Exception {
+        RegisteredUser user = registerUser("unlikelistnoauth");
+
+        mockMvc.perform(delete("/lists/" + UUID.randomUUID() + "/like")
+                        .cookie(user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[unlikeList] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingOnUnlikeList() throws Exception {
+        RegisteredUser user = registerUser("unlikelistnocsrf");
+
+        mockMvc.perform(delete("/lists/" + UUID.randomUUID() + "/like").cookie(user.accessToken()))
                 .andExpect(status().isForbidden());
     }
 }
