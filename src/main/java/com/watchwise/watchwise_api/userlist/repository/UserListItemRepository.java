@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.userlist.repository;
 
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -10,6 +11,8 @@ import java.util.List;
 import java.util.UUID;
 
 public interface UserListItemRepository extends JpaRepository<UserListItem, UUID> {
+
+    long countByUserListId(UUID userListId);
 
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);
 
@@ -26,6 +29,26 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     boolean existsByUserListIdAndContentIdIsNotNull(UUID userListId);
 
     boolean existsByUserListIdAndChildListIdIsNotNull(UUID userListId);
+
+    @Modifying
+    @Query("""
+            UPDATE UserListItem uli SET uli.position = uli.position + :offset
+            WHERE uli.userList.id = :userListId
+            AND uli.position >= :rangeStart AND uli.position <= :rangeEnd
+            """)
+    void parkPositionsInRange(
+            @Param("userListId") UUID userListId,
+            @Param("rangeStart") int rangeStart, @Param("rangeEnd") int rangeEnd, @Param("offset") int offset);
+
+    @Modifying
+    @Query("""
+            UPDATE UserListItem uli SET uli.position = uli.position - :offset + :delta
+            WHERE uli.userList.id = :userListId
+            AND uli.position > :offset
+            """)
+    void settleParkedPositions(
+            @Param("userListId") UUID userListId,
+            @Param("offset") int offset, @Param("delta") int delta);
 
     @Query("""
             SELECT uli FROM UserListItem uli

@@ -293,7 +293,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
         UserListItemResponseDTO expectedDto = buildResponseDto();
@@ -312,12 +312,10 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Insert At Next Free Position - When List Already Has Items And No Position Given")
     void shouldInsertAtNextFreePositionWhenListAlreadyHasItemsAndNoPositionGiven() {
-        UserListItem existing1 = buildContentItem(scifi, buildContent("1", ContentType.MOVIE), 1);
-        UserListItem existing2 = buildContentItem(scifi, buildContent("2", ContentType.MOVIE), 2);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of(existing1, existing2));
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(2L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -326,33 +324,27 @@ class UserListItemServiceImplTest {
         verify(userListItemRepository).save(itemCaptor.capture());
         assertThat(itemCaptor.getValue().getPosition()).isEqualTo(3);
         verify(userListItemRepository, never()).delete(any());
+        verify(userListItemRepository, never()).parkPositionsInRange(any(), anyInt(), anyInt(), anyInt());
     }
 
     @Test
     @DisplayName("[addItem] Should Shift Existing Items Forward - When An Explicit Position Is Given")
     void shouldShiftExistingItemsForwardWhenAnExplicitPositionIsGiven() {
-        UserListItem existing1 = buildContentItem(scifi, buildContent("1", ContentType.MOVIE), 1);
-        UserListItem existing2 = buildContentItem(scifi, buildContent("2", ContentType.MOVIE), 2);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of(existing1, existing2));
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(2L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
-        List<Map.Entry<UUID, Integer>> saveLog = new ArrayList<>();
-        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> {
-            UserListItem arg = invocation.getArgument(0);
-            saveLog.add(Map.entry(arg.getId() != null ? arg.getId() : UUID.fromString("00000000-0000-0000-0000-000000000000"), arg.getPosition()));
-            return arg;
-        });
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.addItem(lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, 1, null));
 
-        verify(userListItemRepository, times(3)).save(any(UserListItem.class));
-        assertThat(saveLog).containsExactly(
-                Map.entry(existing2.getId(), 3),
-                Map.entry(existing1.getId(), 2),
-                Map.entry(UUID.fromString("00000000-0000-0000-0000-000000000000"), 1));
-        verify(userListItemRepository, times(3)).flush();
+        verify(userListItemRepository).parkPositionsInRange(
+                listId, 1, Integer.MAX_VALUE, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+        verify(userListItemRepository).settleParkedPositions(
+                listId, UserListItemServiceImpl.POSITION_PARK_OFFSET, 1);
+        verify(userListItemRepository).save(itemCaptor.capture());
+        assertThat(itemCaptor.getValue().getPosition()).isEqualTo(1);
     }
 
     @Test
@@ -361,7 +353,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
 
         assertThatThrownBy(() -> userListItemService.addItem(
                 lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, 2, null)))
@@ -379,7 +371,7 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(false);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.addItem(lucasId, listId, new UserListItemCreationDTO(null, childListId, null, null));
@@ -399,7 +391,7 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(false);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.addItem(lucasId, listId, new UserListItemCreationDTO(null, childListId, null, null));
@@ -435,7 +427,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED)).thenReturn(true);
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(false);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.addItem(lucasId, listId, new UserListItemCreationDTO(null, childListId, null, null));
@@ -587,7 +579,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(userListItemRepository.save(any(UserListItem.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_user_list_items_user_list_id_content_id"));
@@ -607,7 +599,7 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(false);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(userListItemRepository.save(any(UserListItem.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_user_list_items_user_list_id_child_list_id"));
 
@@ -623,7 +615,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(userListItemRepository.save(any(UserListItem.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_user_list_items_user_list_id_position"));
@@ -640,7 +632,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(userListItemRepository.save(any(UserListItem.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_some_other_constraint"));
@@ -657,7 +649,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         DataIntegrityViolationException exception =
                 new DataIntegrityViolationException("generic db error", new RuntimeException("unexpected cause"));
@@ -675,7 +667,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         DataIntegrityViolationException exception = new DataIntegrityViolationException("no cause here");
         when(userListItemRepository.save(any(UserListItem.class))).thenThrow(exception);
@@ -699,8 +691,8 @@ class UserListItemServiceImplTest {
         when(contentRepository.getReferenceById(contentB.getId())).thenReturn(contentB);
 
         List<UserListItem> persisted = new ArrayList<>();
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId))
-                .thenAnswer(invocation -> List.copyOf(persisted));
+        when(userListItemRepository.countByUserListId(listId))
+                .thenAnswer(invocation -> (long) persisted.size());
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> {
             UserListItem item = invocation.getArgument(0);
             persisted.add(item);
@@ -726,7 +718,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         when(userListItemRepository.save(any(UserListItem.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0))
@@ -781,35 +773,36 @@ class UserListItemServiceImplTest {
     }
 
     @Test
-    @DisplayName("[removeItem] Should Delete And Not Shift - When No Remaining Item Has A Higher Position")
+    @DisplayName("[removeItem] Should Delete And Park/Settle Positions - When No Remaining Item Has A Higher Position")
     void shouldDeleteAndNotShiftWhenNoRemainingItemHasAHigherPosition() {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of());
 
         userListItemService.removeItem(lucasId, listId, item.getId());
 
         verify(userListItemRepository).delete(item);
+        verify(userListItemRepository).parkPositionsInRange(
+                listId, 2, Integer.MAX_VALUE, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+        verify(userListItemRepository).settleParkedPositions(
+                listId, UserListItemServiceImpl.POSITION_PARK_OFFSET, -1);
         verify(userListItemRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("[removeItem] Should Shift Remaining Positions Down - When Item Removed Is In The Middle")
+    @DisplayName("[removeItem] Should Park And Settle Remaining Positions - When Item Removed Is In The Middle")
     void shouldShiftRemainingPositionsDownWhenItemRemovedIsInTheMiddle() {
         UserListItem removed = buildContentItem(scifi, fightClub, 2);
-        UserListItem after1 = buildContentItem(scifi, buildContent("2", ContentType.MOVIE), 3);
-        UserListItem after2 = buildContentItem(scifi, buildContent("3", ContentType.MOVIE), 4);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.findById(removed.getId())).thenReturn(Optional.of(removed));
-        when(userListItemRepository.findByUserListIdOrderByPositionAsc(listId)).thenReturn(List.of(after1, after2));
 
         userListItemService.removeItem(lucasId, listId, removed.getId());
 
         verify(userListItemRepository).delete(removed);
-        assertThat(after1.getPosition()).isEqualTo(2);
-        assertThat(after2.getPosition()).isEqualTo(3);
-        verify(userListItemRepository, times(2)).save(any(UserListItem.class));
+        verify(userListItemRepository).parkPositionsInRange(
+                listId, 3, Integer.MAX_VALUE, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+        verify(userListItemRepository).settleParkedPositions(
+                listId, UserListItemServiceImpl.POSITION_PARK_OFFSET, -1);
     }
 
     @Test

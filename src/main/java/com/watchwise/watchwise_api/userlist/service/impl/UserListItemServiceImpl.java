@@ -27,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +43,8 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final ContentService contentService;
     private final FollowerRepository followerRepository;
     private final UserListItemMapper userListItemMapper;
+
+    static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
     @Override
     public List<UserListItemResponseDTO> getItems(UUID listId) {
@@ -234,23 +235,16 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     private UserListItem insertAtPosition(UUID listId, UserListItem newItem, Integer requestedPosition) {
-        List<UserListItem> existing = userListItemRepository.findByUserListIdOrderByPositionAsc(listId);
-        int currentCount = existing.size();
-        int targetPosition = requestedPosition != null ? requestedPosition : currentCount + 1;
+        long currentCount = userListItemRepository.countByUserListId(listId);
+        int targetPosition = requestedPosition != null ? requestedPosition : (int) currentCount + 1;
 
         if (targetPosition > currentCount + 1) {
             throw new BadRequestException("position cannot be greater than " + (currentCount + 1) + ", the next free position in the list");
         }
 
-        List<UserListItem> toShift = existing.stream()
-                .filter(item -> item.getPosition() >= targetPosition)
-                .sorted(Comparator.comparing(UserListItem::getPosition).reversed())
-                .toList();
-
-        for (UserListItem item : toShift) {
-            item.setPosition(item.getPosition() + 1);
-            userListItemRepository.save(item);
-            userListItemRepository.flush();
+        if (targetPosition <= currentCount) {
+            userListItemRepository.parkPositionsInRange(listId, targetPosition, Integer.MAX_VALUE, POSITION_PARK_OFFSET);
+            userListItemRepository.settleParkedPositions(listId, POSITION_PARK_OFFSET, 1);
         }
 
         newItem.setPosition(targetPosition);
@@ -265,15 +259,8 @@ public class UserListItemServiceImpl implements UserListItemService {
         userListItemRepository.delete(item);
         userListItemRepository.flush();
 
-        List<UserListItem> toShift = userListItemRepository.findByUserListIdOrderByPositionAsc(listId).stream()
-                .filter(remaining -> remaining.getPosition() > removedPosition)
-                .toList();
-
-        for (UserListItem remaining : toShift) {
-            remaining.setPosition(remaining.getPosition() - 1);
-            userListItemRepository.save(remaining);
-            userListItemRepository.flush();
-        }
+        userListItemRepository.parkPositionsInRange(listId, removedPosition + 1, Integer.MAX_VALUE, POSITION_PARK_OFFSET);
+        userListItemRepository.settleParkedPositions(listId, POSITION_PARK_OFFSET, -1);
     }
 
     private UserList findOwnedList(UUID userId, UUID listId) {
