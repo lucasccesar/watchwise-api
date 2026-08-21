@@ -10,4 +10,6 @@ public interface LikeService {
 
     void likeDiaryEntry(UUID userId, UUID diaryEntryId);
 
+    void unlikeDiaryEntry(UUID userId, UUID diaryEntryId);
+
 }

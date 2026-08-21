@@ -93,6 +93,12 @@ public class LikeServiceImpl implements LikeService {
         }
     }
 
+    @Override
+    public void unlikeDiaryEntry(UUID userId, UUID diaryEntryId) {
+        likeRepository.findByUserIdAndDiaryEntryId(userId, diaryEntryId)
+                .ifPresent(likeRepository::delete);
+    }
+
     private void assertCommentIsVisibleTo(UUID viewerId, Comment comment) {
         if (comment.getContent() != null) {
             return;

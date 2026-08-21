@@ -529,4 +529,32 @@ class LikeServiceImplTest {
 
         assertThatThrownBy(() -> likeService.likeDiaryEntry(lucasId, diaryEntryId)).isSameAs(exception);
     }
+
+    // ---------- unlikeDiaryEntry ----------
+
+    @Test
+    @DisplayName("[unlikeDiaryEntry] Should Delete The Row - When It Exists")
+    void shouldDeleteTheRowWhenItExistsForDiaryEntry() {
+        Like like = Like.builder()
+                .id(UUID.randomUUID())
+                .user(lucas)
+                .diaryEntry(diaryEntry)
+                .createdAt(LocalDateTime.now())
+                .build();
+        when(likeRepository.findByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(Optional.of(like));
+
+        likeService.unlikeDiaryEntry(lucasId, diaryEntryId);
+
+        verify(likeRepository).delete(like);
+    }
+
+    @Test
+    @DisplayName("[unlikeDiaryEntry] Should Do Nothing - When The Row Does Not Exist")
+    void shouldDoNothingWhenTheRowDoesNotExistForDiaryEntry() {
+        when(likeRepository.findByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(Optional.empty());
+
+        likeService.unlikeDiaryEntry(lucasId, diaryEntryId);
+
+        verify(likeRepository, never()).delete(any());
+    }
 }
