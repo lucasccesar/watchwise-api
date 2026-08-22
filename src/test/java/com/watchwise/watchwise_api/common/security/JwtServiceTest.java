@@ -89,7 +89,10 @@ class JwtServiceTest {
     void shouldReturnSameIdEmbeddedAtGenerationWhenCalled() {
         String token = jwtService.generateToken(UUID.randomUUID(), TokenType.REFRESH);
 
-        assertThat(jwtService.extractJti(token)).isNotNull();
+        Claims claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
+        UUID embeddedJti = UUID.fromString(claims.getId());
+
+        assertThat(jwtService.extractJti(token)).isEqualTo(embeddedJti);
     }
 
     @Test
