@@ -284,7 +284,7 @@ class AuthControllerTest {
         authController.login(loginUserDTO, request, response);
 
         InOrder order = inOrder(attemptLockout, userService);
-        order.verify(attemptLockout).checkAllowed(any());
+        order.verify(attemptLockout).checkAllowed(any(), anyInt(), any());
         order.verify(userService).login(loginUserDTO);
     }
 
@@ -299,7 +299,7 @@ class AuthControllerTest {
 
         InOrder order = inOrder(requestThrottler, attemptLockout, userService);
         order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
-        order.verify(attemptLockout).checkAllowed(any());
+        order.verify(attemptLockout).checkAllowed(any(), anyInt(), any());
         order.verify(userService).login(loginUserDTO);
     }
 
@@ -327,7 +327,7 @@ class AuthControllerTest {
         assertThatThrownBy(() -> authController.login(loginUserDTO, request, response))
                 .isInstanceOf(TooManyRequestsException.class);
 
-        verify(attemptLockout, never()).checkAllowed(any());
+        verify(attemptLockout, never()).checkAllowed(any(), anyInt(), any());
         verify(userService, never()).login(any());
         verify(cookieUtil, never()).addCookie(any(), any());
     }
@@ -342,7 +342,7 @@ class AuthControllerTest {
 
         authController.login(loginUserDTO, request, response);
 
-        verify(attemptLockout).checkAllowed("login|127.0.0.1|john.doe@email.com");
+        verify(attemptLockout).checkAllowed(eq("login|127.0.0.1|john.doe@email.com"), anyInt(), any());
     }
 
     @Test
@@ -351,7 +351,7 @@ class AuthControllerTest {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("john.doe@email.com", "Password123");
         doThrow(new TooManyRequestsException("Too many attempts. Try again later."))
-                .when(attemptLockout).checkAllowed(any());
+                .when(attemptLockout).checkAllowed(any(), anyInt(), any());
 
         assertThatThrownBy(() -> authController.login(loginUserDTO, request, response))
                 .isInstanceOf(TooManyRequestsException.class);
@@ -371,7 +371,7 @@ class AuthControllerTest {
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("Invalid credentials");
 
-        verify(attemptLockout).recordFailure(any(), anyInt(), any(), any());
+        verify(attemptLockout).recordFailure(any(), anyInt(), any());
         verify(attemptLockout, never()).recordSuccess(any());
         verify(cookieUtil, never()).addCookie(any(), any());
     }
@@ -386,7 +386,7 @@ class AuthControllerTest {
         authController.login(loginUserDTO, request, response);
 
         verify(attemptLockout).recordSuccess(any());
-        verify(attemptLockout, never()).recordFailure(any(), anyInt(), any(), any());
+        verify(attemptLockout, never()).recordFailure(any(), anyInt(), any());
     }
 
     @Test

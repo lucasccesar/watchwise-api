@@ -52,14 +52,24 @@ class AttemptLockoutTest {
         currentInstant.set(currentInstant.get().plus(duration));
     }
 
-    private void recordFailure(String key) {
-        attemptLockout.recordFailure(key, MAX_ATTEMPTS, WINDOW, BLOCK_DURATION);
+    private void checkAllowed(String key) {
+        attemptLockout.checkAllowed(key, MAX_ATTEMPTS, WINDOW);
+    }
+
+    private void simulateFailedAttempt(String key) {
+        attemptLockout.checkAllowed(key, MAX_ATTEMPTS, WINDOW);
+        attemptLockout.recordFailure(key, MAX_ATTEMPTS, BLOCK_DURATION);
+    }
+
+    private void simulateSuccessfulAttempt(String key) {
+        attemptLockout.checkAllowed(key, MAX_ATTEMPTS, WINDOW);
+        attemptLockout.recordSuccess(key);
     }
 
     @Test
     @DisplayName("[checkAllowed] Should Not Throw - When No Prior Attempts Exist")
     void shouldNotThrowWhenNoPriorAttemptsExist() {
-        assertThatCode(() -> attemptLockout.checkAllowed("1.2.3.4|user"))
+        assertThatCode(() -> checkAllowed("1.2.3.4|user"))
                 .doesNotThrowAnyException();
     }
 
@@ -68,10 +78,10 @@ class AttemptLockoutTest {
     void shouldNotThrowWhenFailuresAreBelowMaxAttempts() {
         String key = "1.2.3.4|user";
 
-        recordFailure(key);
-        recordFailure(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
 
-        assertThatCode(() -> attemptLockout.checkAllowed(key))
+        assertThatCode(() -> checkAllowed(key))
                 .doesNotThrowAnyException();
     }
 
@@ -80,11 +90,25 @@ class AttemptLockoutTest {
     void shouldThrowTooManyRequestsExceptionWhenFailuresReachMaxAttempts() {
         String key = "1.2.3.4|user";
 
-        recordFailure(key);
-        recordFailure(key);
-        recordFailure(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
 
-        assertThatThrownBy(() -> attemptLockout.checkAllowed(key))
+        assertThatThrownBy(() -> checkAllowed(key))
+                .isInstanceOf(TooManyRequestsException.class)
+                .hasMessage("Too many attempts. Try again later.");
+    }
+
+    @Test
+    @DisplayName("[checkAllowed] Should Throw TooManyRequestsException - When A Concurrent Reservation Would Exceed Max Attempts")
+    void shouldThrowTooManyRequestsExceptionWhenAConcurrentReservationWouldExceedMaxAttempts() {
+        String key = "1.2.3.4|user";
+
+        // Two attempts reserve their slots before either one records its outcome,
+        // simulating requests racing past the slow (e.g. password-hashing) step.
+        attemptLockout.checkAllowed(key, 1, WINDOW);
+
+        assertThatThrownBy(() -> attemptLockout.checkAllowed(key, 1, WINDOW))
                 .isInstanceOf(TooManyRequestsException.class)
                 .hasMessage("Too many attempts. Try again later.");
     }
@@ -94,9 +118,10 @@ class AttemptLockoutTest {
     void shouldThrowTooManyRequestsExceptionWhenMaxAttemptsIsOneAndTheFirstFailureIsRecorded() {
         String key = "1.2.3.4|user";
 
-        attemptLockout.recordFailure(key, 1, WINDOW, BLOCK_DURATION);
+        attemptLockout.checkAllowed(key, 1, WINDOW);
+        attemptLockout.recordFailure(key, 1, BLOCK_DURATION);
 
-        assertThatThrownBy(() -> attemptLockout.checkAllowed(key))
+        assertThatThrownBy(() -> attemptLockout.checkAllowed(key, 1, WINDOW))
                 .isInstanceOf(TooManyRequestsException.class)
                 .hasMessage("Too many attempts. Try again later.");
     }
@@ -106,46 +131,46 @@ class AttemptLockoutTest {
     void shouldNotThrowWhenBlockDurationHasElapsed() {
         String key = "1.2.3.4|user";
 
-        recordFailure(key);
-        recordFailure(key);
-        recordFailure(key);
-        assertThatThrownBy(() -> attemptLockout.checkAllowed(key)).isInstanceOf(TooManyRequestsException.class);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
+        assertThatThrownBy(() -> checkAllowed(key)).isInstanceOf(TooManyRequestsException.class);
 
         advanceClock(BLOCK_DURATION.plusSeconds(1));
 
-        assertThatCode(() -> attemptLockout.checkAllowed(key))
+        assertThatCode(() -> checkAllowed(key))
                 .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("[recordFailure] Should Reset The Counter - When The Block Duration Has Already Elapsed")
+    @DisplayName("[checkAllowed] Should Reset The Counter - When The Block Duration Has Already Elapsed")
     void shouldResetTheCounterWhenBlockDurationHasAlreadyElapsed() {
         String key = "1.2.3.4|user";
 
-        recordFailure(key);
-        recordFailure(key);
-        recordFailure(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
         advanceClock(BLOCK_DURATION.plusSeconds(1));
 
-        recordFailure(key);
+        simulateFailedAttempt(key);
 
-        assertThatCode(() -> attemptLockout.checkAllowed(key))
+        assertThatCode(() -> checkAllowed(key))
                 .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("[recordFailure] Should Reset The Counter - When The Window Has Naturally Expired")
+    @DisplayName("[checkAllowed] Should Reset The Counter - When The Window Has Naturally Expired")
     void shouldResetTheCounterWhenTheWindowHasNaturallyExpired() {
         String key = "1.2.3.4|user";
 
-        recordFailure(key);
-        recordFailure(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
         advanceClock(WINDOW.plusSeconds(1));
 
-        recordFailure(key);
-        recordFailure(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
 
-        assertThatCode(() -> attemptLockout.checkAllowed(key))
+        assertThatCode(() -> checkAllowed(key))
                 .doesNotThrowAnyException();
     }
 
@@ -154,13 +179,13 @@ class AttemptLockoutTest {
     void shouldClearPriorFailuresWhenRecordSuccessCalled() {
         String key = "1.2.3.4|user";
 
-        recordFailure(key);
-        recordFailure(key);
-        attemptLockout.recordSuccess(key);
-        recordFailure(key);
-        recordFailure(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
+        simulateSuccessfulAttempt(key);
+        simulateFailedAttempt(key);
+        simulateFailedAttempt(key);
 
-        assertThatCode(() -> attemptLockout.checkAllowed(key))
+        assertThatCode(() -> checkAllowed(key))
                 .doesNotThrowAnyException();
     }
 
@@ -170,12 +195,12 @@ class AttemptLockoutTest {
         String blockedKey = "1.2.3.4|userA";
         String otherKey = "1.2.3.4|userB";
 
-        recordFailure(blockedKey);
-        recordFailure(blockedKey);
-        recordFailure(blockedKey);
+        simulateFailedAttempt(blockedKey);
+        simulateFailedAttempt(blockedKey);
+        simulateFailedAttempt(blockedKey);
 
-        assertThatThrownBy(() -> attemptLockout.checkAllowed(blockedKey)).isInstanceOf(TooManyRequestsException.class);
-        assertThatCode(() -> attemptLockout.checkAllowed(otherKey)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> checkAllowed(blockedKey)).isInstanceOf(TooManyRequestsException.class);
+        assertThatCode(() -> checkAllowed(otherKey)).doesNotThrowAnyException();
     }
 
     @Test
@@ -184,12 +209,12 @@ class AttemptLockoutTest {
         String blockedKey = "1.2.3.4|user";
         String otherKey = "5.6.7.8|user";
 
-        recordFailure(blockedKey);
-        recordFailure(blockedKey);
-        recordFailure(blockedKey);
+        simulateFailedAttempt(blockedKey);
+        simulateFailedAttempt(blockedKey);
+        simulateFailedAttempt(blockedKey);
 
-        assertThatThrownBy(() -> attemptLockout.checkAllowed(blockedKey)).isInstanceOf(TooManyRequestsException.class);
-        assertThatCode(() -> attemptLockout.checkAllowed(otherKey)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> checkAllowed(blockedKey)).isInstanceOf(TooManyRequestsException.class);
+        assertThatCode(() -> checkAllowed(otherKey)).doesNotThrowAnyException();
     }
 
     @Test
@@ -198,19 +223,19 @@ class AttemptLockoutTest {
         String blockedKey = "login|1.2.3.4|user";
         String otherActionKey = "delete-account|1.2.3.4|user";
 
-        recordFailure(blockedKey);
-        recordFailure(blockedKey);
-        recordFailure(blockedKey);
+        simulateFailedAttempt(blockedKey);
+        simulateFailedAttempt(blockedKey);
+        simulateFailedAttempt(blockedKey);
 
-        assertThatThrownBy(() -> attemptLockout.checkAllowed(blockedKey)).isInstanceOf(TooManyRequestsException.class);
-        assertThatCode(() -> attemptLockout.checkAllowed(otherActionKey)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> checkAllowed(blockedKey)).isInstanceOf(TooManyRequestsException.class);
+        assertThatCode(() -> checkAllowed(otherActionKey)).doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("[cleanupExpired] Should Remove An Entry - When Its Window Has Elapsed And It Is Not Blocked")
     void shouldRemoveAnEntryWhenItsWindowHasElapsedAndItIsNotBlocked() {
         String key = "1.2.3.4|user";
-        recordFailure(key);
+        simulateFailedAttempt(key);
         advanceClock(WINDOW.plusSeconds(1));
 
         attemptLockout.cleanupExpired();
@@ -222,7 +247,7 @@ class AttemptLockoutTest {
     @DisplayName("[cleanupExpired] Should Not Remove An Entry - When Its Window Is Still Open")
     void shouldNotRemoveAnEntryWhenItsWindowIsStillOpen() {
         String key = "1.2.3.4|user";
-        recordFailure(key);
+        simulateFailedAttempt(key);
 
         attemptLockout.cleanupExpired();
 
@@ -233,8 +258,13 @@ class AttemptLockoutTest {
     @DisplayName("[cleanupExpired] Should Not Remove An Entry - When Its Block Outlasts The Window")
     void shouldNotRemoveAnEntryWhenItsBlockOutlastsTheWindow() {
         String key = "1.2.3.4|user";
-        attemptLockout.recordFailure(key, 2, Duration.ofMinutes(1), Duration.ofMinutes(30));
-        attemptLockout.recordFailure(key, 2, Duration.ofMinutes(1), Duration.ofMinutes(30));
+        Duration shortWindow = Duration.ofMinutes(1);
+        Duration longBlock = Duration.ofMinutes(30);
+
+        attemptLockout.checkAllowed(key, 2, shortWindow);
+        attemptLockout.recordFailure(key, 2, longBlock);
+        attemptLockout.checkAllowed(key, 2, shortWindow);
+        attemptLockout.recordFailure(key, 2, longBlock);
         advanceClock(Duration.ofMinutes(2));
 
         attemptLockout.cleanupExpired();

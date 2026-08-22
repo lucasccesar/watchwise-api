@@ -19,28 +19,37 @@ public class AttemptLockout {
         this.clock = clock;
     }
 
-    public void checkAllowed(String key) {
-        Attempt attempt = attempts.get(key);
-        if (attempt != null && attempt.blockedUntil() != null && clock.instant().isBefore(attempt.blockedUntil())) {
-            throw new TooManyRequestsException("Too many attempts. Try again later.");
-        }
-    }
-
-    public void recordFailure(String key, int maxAttempts, Duration window, Duration blockDuration) {
+    public void checkAllowed(String key, int maxAttempts, Duration window) {
         Instant now = clock.instant();
         attempts.compute(key, (k, existing) -> {
+            boolean stillBlocked = existing != null
+                    && existing.blockedUntil() != null
+                    && now.isBefore(existing.blockedUntil());
+            if (stillBlocked) {
+                throw new TooManyRequestsException("Too many attempts. Try again later.");
+            }
+
             boolean expired = existing == null
                     || now.isAfter(existing.windowStart().plus(existing.window()))
-                    || (existing.blockedUntil() != null && !now.isBefore(existing.blockedUntil()));
-
+                    || existing.blockedUntil() != null;
             if (expired) {
-                Instant blockedUntil = 1 >= maxAttempts ? now.plus(blockDuration) : null;
-                return new Attempt(1, now, blockedUntil, window);
+                return new Attempt(1, now, null, window);
             }
 
             int count = existing.count() + 1;
-            Instant blockedUntil = count >= maxAttempts ? now.plus(blockDuration) : null;
-            return new Attempt(count, existing.windowStart(), blockedUntil, existing.window());
+            if (count > maxAttempts) {
+                throw new TooManyRequestsException("Too many attempts. Try again later.");
+            }
+
+            return new Attempt(count, existing.windowStart(), null, existing.window());
+        });
+    }
+
+    public void recordFailure(String key, int maxAttempts, Duration blockDuration) {
+        Instant now = clock.instant();
+        attempts.computeIfPresent(key, (k, existing) -> {
+            Instant blockedUntil = existing.count() >= maxAttempts ? now.plus(blockDuration) : existing.blockedUntil();
+            return new Attempt(existing.count(), existing.windowStart(), blockedUntil, existing.window());
         });
     }
 

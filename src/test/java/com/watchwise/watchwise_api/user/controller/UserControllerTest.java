@@ -251,7 +251,7 @@ class UserControllerTest {
         userController.updateCurrentUser(patchUserDTO);
 
         InOrder order = inOrder(attemptLockout, userService);
-        order.verify(attemptLockout).checkAllowed(any());
+        order.verify(attemptLockout).checkAllowed(any(), anyInt(), any());
         order.verify(userService).updateUser(currentUser, patchUserDTO);
         verify(attemptLockout).recordSuccess(any());
     }
@@ -266,7 +266,7 @@ class UserControllerTest {
 
         userController.updateCurrentUser(patchUserDTO);
 
-        verify(attemptLockout).checkAllowed("patch-account|" + currentUserId);
+        verify(attemptLockout).checkAllowed(eq("patch-account|" + currentUserId), anyInt(), any());
     }
 
     @Test
@@ -280,7 +280,7 @@ class UserControllerTest {
         assertThatThrownBy(() -> userController.updateCurrentUser(patchUserDTO))
                 .isInstanceOf(UnauthorizedException.class);
 
-        verify(attemptLockout).recordFailure(any(), anyInt(), any(), any());
+        verify(attemptLockout).recordFailure(any(), anyInt(), any());
         verify(attemptLockout, never()).recordSuccess(any());
     }
 
@@ -304,7 +304,7 @@ class UserControllerTest {
         when(userService.checkCredentialChanges(currentUserId, patchUserDTO))
                 .thenReturn(new UserService.CredentialCheck(currentUser, true));
         doThrow(new TooManyRequestsException("Too many attempts. Try again later."))
-                .when(attemptLockout).checkAllowed(any());
+                .when(attemptLockout).checkAllowed(any(), anyInt(), any());
 
         assertThatThrownBy(() -> userController.updateCurrentUser(patchUserDTO))
                 .isInstanceOf(TooManyRequestsException.class);
@@ -421,7 +421,7 @@ class UserControllerTest {
         userController.deleteCurrentUser(deleteAccountDTO, response);
 
         InOrder order = inOrder(attemptLockout, userService);
-        order.verify(attemptLockout).checkAllowed(any());
+        order.verify(attemptLockout).checkAllowed(any(), anyInt(), any());
         order.verify(userService).deleteAccount(currentUserId, deleteAccountDTO);
         verify(attemptLockout).recordSuccess(any());
     }
@@ -434,7 +434,7 @@ class UserControllerTest {
 
         userController.deleteCurrentUser(deleteAccountDTO, response);
 
-        verify(attemptLockout).checkAllowed("delete-account|" + currentUserId);
+        verify(attemptLockout).checkAllowed(eq("delete-account|" + currentUserId), anyInt(), any());
     }
 
     @Test
@@ -448,7 +448,7 @@ class UserControllerTest {
         assertThatThrownBy(() -> userController.deleteCurrentUser(deleteAccountDTO, response))
                 .isInstanceOf(UnauthorizedException.class);
 
-        verify(attemptLockout).recordFailure(any(), anyInt(), any(), any());
+        verify(attemptLockout).recordFailure(any(), anyInt(), any());
         verify(attemptLockout, never()).recordSuccess(any());
     }
 
@@ -458,7 +458,7 @@ class UserControllerTest {
         DeleteAccountDTO deleteAccountDTO = new DeleteAccountDTO("Password123");
         HttpServletResponse response = mock(HttpServletResponse.class);
         doThrow(new TooManyRequestsException("Too many attempts. Try again later."))
-                .when(attemptLockout).checkAllowed(any());
+                .when(attemptLockout).checkAllowed(any(), anyInt(), any());
 
         assertThatThrownBy(() -> userController.deleteCurrentUser(deleteAccountDTO, response))
                 .isInstanceOf(TooManyRequestsException.class);

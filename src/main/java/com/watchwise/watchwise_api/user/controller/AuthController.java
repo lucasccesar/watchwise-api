@@ -116,13 +116,13 @@ public class AuthController {
         requestThrottler.checkAllowed(throttleKey("login", request), loginIpMaxRequests, Duration.ofMinutes(loginIpWindowMinutes));
 
         String lockoutKey = buildLockoutKey(request, loginUserDTO.identifier());
-        attemptLockout.checkAllowed(lockoutKey);
+        attemptLockout.checkAllowed(lockoutKey, loginMaxAttempts, Duration.ofMinutes(loginWindowMinutes));
 
         UserResponseDTO user;
         try {
             user = userService.login(loginUserDTO);
         } catch (UnauthorizedException e) {
-            attemptLockout.recordFailure(lockoutKey, loginMaxAttempts, Duration.ofMinutes(loginWindowMinutes), Duration.ofMinutes(loginBlockMinutes));
+            attemptLockout.recordFailure(lockoutKey, loginMaxAttempts, Duration.ofMinutes(loginBlockMinutes));
             throw e;
         }
         attemptLockout.recordSuccess(lockoutKey);

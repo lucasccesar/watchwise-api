@@ -85,7 +85,7 @@ public class UserController {
         String lockoutKey = lockoutKey("patch-account", currentUserId);
 
         if (touchesCredentials) {
-            attemptLockout.checkAllowed(lockoutKey);
+            attemptLockout.checkAllowed(lockoutKey, patchAccountMaxAttempts, Duration.ofMinutes(patchAccountWindowMinutes));
         }
 
         UserResponseDTO user;
@@ -93,7 +93,7 @@ public class UserController {
             user = userService.updateUser(credentialCheck.user(), patchUserDTO);
         } catch (UnauthorizedException e) {
             if (touchesCredentials) {
-                attemptLockout.recordFailure(lockoutKey, patchAccountMaxAttempts, Duration.ofMinutes(patchAccountWindowMinutes), Duration.ofMinutes(patchAccountBlockMinutes));
+                attemptLockout.recordFailure(lockoutKey, patchAccountMaxAttempts, Duration.ofMinutes(patchAccountBlockMinutes));
             }
             throw e;
         }
@@ -119,12 +119,12 @@ public class UserController {
     ) {
         UUID currentUserId = getCurrentUserId();
         String lockoutKey = lockoutKey("delete-account", currentUserId);
-        attemptLockout.checkAllowed(lockoutKey);
+        attemptLockout.checkAllowed(lockoutKey, deleteAccountMaxAttempts, Duration.ofMinutes(deleteAccountWindowMinutes));
 
         try {
             userService.deleteAccount(currentUserId, deleteAccountDTO);
         } catch (UnauthorizedException e) {
-            attemptLockout.recordFailure(lockoutKey, deleteAccountMaxAttempts, Duration.ofMinutes(deleteAccountWindowMinutes), Duration.ofMinutes(deleteAccountBlockMinutes));
+            attemptLockout.recordFailure(lockoutKey, deleteAccountMaxAttempts, Duration.ofMinutes(deleteAccountBlockMinutes));
             throw e;
         }
         attemptLockout.recordSuccess(lockoutKey);
