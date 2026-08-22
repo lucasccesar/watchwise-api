@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import org.junit.jupiter.api.AfterEach;
@@ -102,6 +103,34 @@ class UserListItemControllerTest {
         userListItemController.addItems(listId, bulkDto);
 
         verify(userListItemService).addItems(currentUserId, listId, bulkDto);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenUpdatingItem() {
+        UUID listId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UserListItemPatchDTO patchDTO = new UserListItemPatchDTO(2, "New description");
+        UserListItemResponseDTO dto = buildResponseDto();
+        when(userListItemService.updateItem(currentUserId, listId, itemId, patchDTO)).thenReturn(dto);
+
+        ResponseEntity<UserListItemResponseDTO> result = userListItemController.updateItem(listId, itemId, patchDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenUpdatingItem() {
+        UUID listId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        UserListItemPatchDTO patchDTO = new UserListItemPatchDTO(2, null);
+        when(userListItemService.updateItem(currentUserId, listId, itemId, patchDTO)).thenReturn(buildResponseDto());
+
+        userListItemController.updateItem(listId, itemId, patchDTO);
+
+        verify(userListItemService).updateItem(currentUserId, listId, itemId, patchDTO);
     }
 
     @Test

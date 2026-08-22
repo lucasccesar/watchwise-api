@@ -36,6 +36,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -138,6 +139,25 @@ class UserListItemControllerIntegrationTest {
         return delete("/lists/" + listId + "/items/" + itemId)
                 .cookie(actor.accessToken(), actor.csrfToken())
                 .header("X-XSRF-TOKEN", actor.csrfToken().getValue());
+    }
+
+    private MockHttpServletRequestBuilder updateItemRequest(RegisteredUser actor, UUID listId, UUID itemId, String body) {
+        return patch("/lists/" + listId + "/items/" + itemId)
+                .cookie(actor.accessToken(), actor.csrfToken())
+                .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private String patchItemBody(Integer position, String description) {
+        String positionField = position == null ? "null" : String.valueOf(position);
+        String descriptionField = description == null ? "null" : "\"" + description + "\"";
+        return """
+                {
+                    "position": %s,
+                    "description": %s
+                }
+                """.formatted(positionField, descriptionField);
     }
 
     private String contentItemBody(String tmdbId, Integer position, String description) {
@@ -630,6 +650,217 @@ class UserListItemControllerIntegrationTest {
                         .cookie(user.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(bulkItemsBody("550")))
+                .andExpect(status().isForbidden());
+    }
+
+    // ---------- PATCH /lists/{listId}/items/{itemId} ----------
+
+    @Test
+    @DisplayName("[updateItem] Should Return Ok And Persist The New Description - When Only Description Is Provided")
+    void shouldReturnOkAndPersistTheNewDescriptionWhenOnlyDescriptionIsProvided() throws Exception {
+        RegisteredUser user = registerUser("updateitemdescription");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        Content content = persistContent("550");
+        UserListItem item = persistContentItem(list, content, 1);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, "New description")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.description").value("New description"))
+                .andExpect(jsonPath("$.position").value(1));
+
+        UserListItem updated = userListItemRepository.findById(item.getId()).orElseThrow();
+        assertThat(updated.getDescription()).isEqualTo("New description");
+        assertThat(updated.getPosition()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Move Forward And Shift Items Between New And Old Position - When Position Is Earlier")
+    void shouldMoveForwardAndShiftItemsBetweenNewAndOldPositionWhenPositionIsEarlier() throws Exception {
+        RegisteredUser user = registerUser("updateitemforward");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        Content content1 = persistContent("1");
+        Content content2 = persistContent("2");
+        Content content3 = persistContent("3");
+        persistContentItem(list, content1, 1);
+        persistContentItem(list, content2, 2);
+        UserListItem c = persistContentItem(list, content3, 3);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), c.getId(), patchItemBody(1, null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.position").value(1))
+                .andExpect(jsonPath("$.content.tmdbId").value("3"));
+
+        var items = userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId());
+        assertThat(items).extracting(i -> i.getContent().getId()).containsExactly(content3.getId(), content1.getId(), content2.getId());
+        assertThat(items).extracting(UserListItem::getPosition).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Move Backward And Shift Items Between Old And New Position - When Position Is Later")
+    void shouldMoveBackwardAndShiftItemsBetweenOldAndNewPositionWhenPositionIsLater() throws Exception {
+        RegisteredUser user = registerUser("updateitembackward");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        Content content1 = persistContent("1");
+        Content content2 = persistContent("2");
+        Content content3 = persistContent("3");
+        UserListItem a = persistContentItem(list, content1, 1);
+        persistContentItem(list, content2, 2);
+        persistContentItem(list, content3, 3);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), a.getId(), patchItemBody(3, null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.position").value(3))
+                .andExpect(jsonPath("$.content.tmdbId").value("1"));
+
+        var items = userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId());
+        assertThat(items).extracting(i -> i.getContent().getId()).containsExactly(content2.getId(), content3.getId(), content1.getId());
+        assertThat(items).extracting(UserListItem::getPosition).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Preserve The Item Id - When Moved And Redescribed In The Same Call")
+    void shouldPreserveTheItemIdWhenMovedAndRedescribedInTheSameCall() throws Exception {
+        RegisteredUser user = registerUser("updateitemcombined");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        Content content1 = persistContent("1");
+        Content content2 = persistContent("2");
+        UserListItem a = persistContentItem(list, content1, 1);
+        persistContentItem(list, content2, 2);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), a.getId(), patchItemBody(2, "Moved and redescribed")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(a.getId().toString()))
+                .andExpect(jsonPath("$.position").value(2))
+                .andExpect(jsonPath("$.description").value("Moved and redescribed"));
+
+        UserListItem updated = userListItemRepository.findById(a.getId()).orElseThrow();
+        assertThat(updated.getDescription()).isEqualTo("Moved and redescribed");
+        assertThat(updated.getPosition()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return Ok Without Changing Order - When Position Equals The Current Position")
+    void shouldReturnOkWithoutChangingOrderWhenPositionEqualsTheCurrentPosition() throws Exception {
+        RegisteredUser user = registerUser("updateitemnoop");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        Content content1 = persistContent("1");
+        Content content2 = persistContent("2");
+        UserListItem a = persistContentItem(list, content1, 1);
+        persistContentItem(list, content2, 2);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), a.getId(), patchItemBody(1, null)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.position").value(1));
+
+        var items = userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId());
+        assertThat(items).extracting(i -> i.getContent().getId()).containsExactly(content1.getId(), content2.getId());
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return BadRequest - When Position Is Greater Than The Current Item Count")
+    void shouldReturnBadRequestWhenPositionIsGreaterThanTheCurrentItemCount() throws Exception {
+        RegisteredUser user = registerUser("updateitemtoofar");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        UserListItem item = persistContentItem(list, persistContent("1"), 1);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(2, null)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return BadRequest - When Position Is Below One")
+    void shouldReturnBadRequestWhenPositionIsBelowOne() throws Exception {
+        RegisteredUser user = registerUser("updateitembelowone");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        UserListItem item = persistContentItem(list, persistContent("1"), 1);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(0, null)))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return NotFound - When List Does Not Exist")
+    void shouldReturnNotFoundWhenListDoesNotExistOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemnolist");
+
+        mockMvc.perform(updateItemRequest(user, UUID.randomUUID(), UUID.randomUUID(), patchItemBody(1, null)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List not found"));
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return NotFound - When List Belongs To A Different User")
+    void shouldReturnNotFoundWhenListBelongsToADifferentUserOnUpdate() throws Exception {
+        RegisteredUser owner = registerUser("updateitemowner");
+        RegisteredUser intruder = registerUser("updateitemintruder");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Owner's list", true);
+        UserListItem item = persistContentItem(list, persistContent("550"), 1);
+
+        mockMvc.perform(updateItemRequest(intruder, list.getId(), item.getId(), patchItemBody(null, "Hijacked")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List not found"));
+
+        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getDescription()).isNull();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return NotFound - When Item Does Not Exist")
+    void shouldReturnNotFoundWhenItemDoesNotExistOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemnoitem");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), UUID.randomUUID(), patchItemBody(1, null)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List item not found"));
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return NotFound - When Item Belongs To A Different List")
+    void shouldReturnNotFoundWhenItemBelongsToADifferentListOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemwronglist");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList listA = persistList(entity, "List A", true);
+        UserList listB = persistList(entity, "List B", true);
+        UserListItem item = persistContentItem(listB, persistContent("550"), 1);
+
+        mockMvc.perform(updateItemRequest(user, listA.getId(), item.getId(), patchItemBody(null, "Wrong list")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("List item not found"));
+
+        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getDescription()).isNull();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemnoauth");
+
+        mockMvc.perform(patch("/lists/" + UUID.randomUUID() + "/items/" + UUID.randomUUID())
+                        .cookie(user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(patchItemBody(1, null)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemnocsrf");
+
+        mockMvc.perform(patch("/lists/" + UUID.randomUUID() + "/items/" + UUID.randomUUID())
+                        .cookie(user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(patchItemBody(1, null)))
                 .andExpect(status().isForbidden());
     }
 

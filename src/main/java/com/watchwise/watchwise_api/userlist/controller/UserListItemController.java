@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import jakarta.validation.Valid;
@@ -37,6 +38,16 @@ public class UserListItemController {
     ) {
         List<UserListItemResponseDTO> created = userListItemService.addItems(getCurrentUserId(), listId, userListItemBulkCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
+    @PatchMapping("/{listId}/items/{itemId}")
+    public ResponseEntity<UserListItemResponseDTO> updateItem(
+            @PathVariable UUID listId,
+            @PathVariable UUID itemId,
+            @Valid @RequestBody UserListItemPatchDTO userListItemPatchDTO
+    ) {
+        UserListItemResponseDTO updated = userListItemService.updateItem(getCurrentUserId(), listId, itemId, userListItemPatchDTO);
+        return ResponseEntity.ok(updated);
     }
 
     @DeleteMapping("/{listId}/items/{itemId}")

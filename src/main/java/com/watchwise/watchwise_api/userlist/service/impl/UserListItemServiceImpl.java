@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
@@ -168,9 +169,76 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     @Override
     @Transactional
+    public UserListItemResponseDTO updateItem(UUID userId, UUID listId, UUID itemId, UserListItemPatchDTO userListItemPatchDTO) {
+        findOwnedList(userId, listId);
+        UserListItem item = findOwnedItem(listId, itemId);
+
+        boolean descriptionChanged = userListItemPatchDTO.description() != null
+                && !userListItemPatchDTO.description().equals(item.getDescription());
+        boolean positionChanged = userListItemPatchDTO.position() != null
+                && !userListItemPatchDTO.position().equals(item.getPosition());
+
+        if (!descriptionChanged && !positionChanged) {
+            return userListItemMapper.userListItemToResponseDto(item);
+        }
+
+        long currentCount = positionChanged ? userListItemRepository.countByUserListId(listId) : 0;
+        if (positionChanged && userListItemPatchDTO.position() > currentCount) {
+            throw new BadRequestException("position cannot be greater than " + currentCount + ", the last position in the list");
+        }
+
+        if (descriptionChanged) {
+            item.setDescription(userListItemPatchDTO.description());
+        }
+        item.setUpdatedAt(LocalDateTime.now());
+
+        if (positionChanged) {
+            try {
+                item = performMove(item, item.getPosition(), userListItemPatchDTO.position(), currentCount);
+            } catch (DataIntegrityViolationException e) {
+                throw new ConflictException("List item could not be reordered due to a concurrent update");
+            }
+        } else {
+            item = userListItemRepository.save(item);
+            userListItemRepository.flush();
+        }
+
+        return userListItemMapper.userListItemToResponseDto(item);
+    }
+
+    private UserListItem performMove(UserListItem item, int oldPosition, int newPosition, long currentCount) {
+        UUID listId = item.getUserList().getId();
+
+        item.setPosition((int) currentCount + 1);
+        userListItemRepository.save(item);
+        userListItemRepository.flush();
+
+        boolean movingForward = newPosition < oldPosition;
+        int rangeStart = movingForward ? newPosition : oldPosition + 1;
+        int rangeEnd = movingForward ? oldPosition - 1 : newPosition;
+        int shiftDelta = movingForward ? 1 : -1;
+
+        userListItemRepository.parkPositionsInRange(listId, rangeStart, rangeEnd, POSITION_PARK_OFFSET);
+        userListItemRepository.settleParkedPositions(listId, POSITION_PARK_OFFSET, shiftDelta);
+
+        item.setPosition(newPosition);
+        UserListItem saved = userListItemRepository.save(item);
+        userListItemRepository.flush();
+
+        return saved;
+    }
+
+    @Override
+    @Transactional
     public void removeItem(UUID userId, UUID listId, UUID itemId) {
         findOwnedList(userId, listId);
 
+        UserListItem item = findOwnedItem(listId, itemId);
+
+        deleteAndCloseGap(item);
+    }
+
+    private UserListItem findOwnedItem(UUID listId, UUID itemId) {
         UserListItem item = userListItemRepository.findById(itemId)
                 .orElseThrow(() -> new NotFoundException("List item not found"));
 
@@ -178,7 +246,7 @@ public class UserListItemServiceImpl implements UserListItemService {
             throw new NotFoundException("List item not found");
         }
 
-        deleteAndCloseGap(item);
+        return item;
     }
 
     private void validateExactlyOneTarget(UserListItemCreationDTO userListItemCreationDTO) {

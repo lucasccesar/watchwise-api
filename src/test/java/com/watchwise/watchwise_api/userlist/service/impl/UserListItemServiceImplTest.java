@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
@@ -770,6 +771,217 @@ class UserListItemServiceImplTest {
                 .hasMessage("List not found");
 
         verifyNoInteractions(contentService);
+    }
+
+    // ---------- updateItem ----------
+
+    @Test
+    @DisplayName("[updateItem] Should Change Description - When A Different Value Is Provided")
+    void shouldChangeDescriptionWhenADifferentValueIsProvided() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        item.setDescription("Old description");
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userListItemService.updateItem(lucasId, listId, item.getId(), new UserListItemPatchDTO(null, "New description"));
+
+        verify(userListItemRepository).save(itemCaptor.capture());
+        assertThat(itemCaptor.getValue().getDescription()).isEqualTo("New description");
+        verify(userListItemRepository, never()).parkPositionsInRange(any(), anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Not Save - When Same Description Value Is Provided")
+    void shouldNotSaveWhenSameDescriptionValueIsProvided() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        item.setDescription("Same description");
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+
+        userListItemService.updateItem(lucasId, listId, item.getId(), new UserListItemPatchDTO(null, "Same description"));
+
+        verify(userListItemRepository, never()).save(any());
+        verify(userListItemRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Not Change Anything - When Both Position And Description Are Null")
+    void shouldNotChangeAnythingWhenBothPositionAndDescriptionAreNull() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+
+        userListItemService.updateItem(lucasId, listId, item.getId(), new UserListItemPatchDTO(null, null));
+
+        verify(userListItemRepository, never()).save(any());
+        verify(userListItemRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Park Item Then Bulk Shift Others Forward - When Moving To An Earlier Position")
+    void shouldParkItemThenBulkShiftOthersForwardWhenMovingToAnEarlierPosition() {
+        UserListItem d = buildContentItem(scifi, buildContent("4", ContentType.MOVIE), 4);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(d.getId())).thenReturn(Optional.of(d));
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(4L);
+        List<Integer> savedPositions = new ArrayList<>();
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> {
+            UserListItem arg = invocation.getArgument(0);
+            savedPositions.add(arg.getPosition());
+            return arg;
+        });
+
+        userListItemService.updateItem(lucasId, listId, d.getId(), new UserListItemPatchDTO(2, null));
+
+        verify(userListItemRepository, times(2)).save(any(UserListItem.class));
+        assertThat(savedPositions).containsExactly(5, 2);
+        assertThat(d.getPosition()).isEqualTo(2);
+        verify(userListItemRepository).parkPositionsInRange(
+                listId, 2, 3, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+        verify(userListItemRepository).settleParkedPositions(
+                listId, UserListItemServiceImpl.POSITION_PARK_OFFSET, 1);
+        verify(userListItemRepository, times(2)).flush();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Park Item Then Bulk Shift Others Backward - When Moving To A Later Position")
+    void shouldParkItemThenBulkShiftOthersBackwardWhenMovingToALaterPosition() {
+        UserListItem a = buildContentItem(scifi, buildContent("1", ContentType.MOVIE), 1);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(a.getId())).thenReturn(Optional.of(a));
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(4L);
+        List<Integer> savedPositions = new ArrayList<>();
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> {
+            UserListItem arg = invocation.getArgument(0);
+            savedPositions.add(arg.getPosition());
+            return arg;
+        });
+
+        userListItemService.updateItem(lucasId, listId, a.getId(), new UserListItemPatchDTO(3, null));
+
+        verify(userListItemRepository, times(2)).save(any(UserListItem.class));
+        assertThat(savedPositions).containsExactly(5, 3);
+        assertThat(a.getPosition()).isEqualTo(3);
+        verify(userListItemRepository).parkPositionsInRange(
+                listId, 2, 3, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+        verify(userListItemRepository).settleParkedPositions(
+                listId, UserListItemServiceImpl.POSITION_PARK_OFFSET, -1);
+        verify(userListItemRepository, times(2)).flush();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Not Save - When New Position Equals Current Position")
+    void shouldNotSaveWhenNewPositionEqualsCurrentPosition() {
+        UserListItem item = buildContentItem(scifi, fightClub, 2);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+
+        userListItemService.updateItem(lucasId, listId, item.getId(), new UserListItemPatchDTO(2, null));
+
+        verify(userListItemRepository, never()).save(any());
+        verify(userListItemRepository, never()).flush();
+        verify(userListItemRepository, never()).countByUserListId(any());
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Update Both Position And Description - When Both Are Provided")
+    void shouldUpdateBothPositionAndDescriptionWhenBothAreProvided() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(2L);
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userListItemService.updateItem(lucasId, listId, item.getId(), new UserListItemPatchDTO(2, "Updated"));
+
+        assertThat(item.getDescription()).isEqualTo("Updated");
+        assertThat(item.getPosition()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Throw BadRequestException - When New Position Is Greater Than The Current Item Count")
+    void shouldThrowBadRequestExceptionWhenNewPositionIsGreaterThanTheCurrentItemCount() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(1L);
+
+        assertThatThrownBy(() -> userListItemService.updateItem(
+                lucasId, listId, item.getId(), new UserListItemPatchDTO(2, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("position cannot be greater than 1, the last position in the list");
+
+        verify(userListItemRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Throw NotFoundException - When List Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenListDoesNotExistOnUpdate() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userListItemService.updateItem(
+                lucasId, listId, UUID.randomUUID(), new UserListItemPatchDTO(1, null)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("List not found");
+
+        verifyNoInteractions(userListItemRepository);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Throw NotFoundException - When List Belongs To A Different User")
+    void shouldThrowNotFoundExceptionWhenListBelongsToADifferentUserOnUpdate() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+
+        assertThatThrownBy(() -> userListItemService.updateItem(
+                marinaId, listId, UUID.randomUUID(), new UserListItemPatchDTO(1, null)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("List not found");
+
+        verifyNoInteractions(userListItemRepository);
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Throw NotFoundException - When Item Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenItemDoesNotExistOnUpdate() {
+        UUID itemId = UUID.randomUUID();
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(itemId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userListItemService.updateItem(
+                lucasId, listId, itemId, new UserListItemPatchDTO(1, null)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("List item not found");
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Throw NotFoundException - When Item Belongs To A Different List")
+    void shouldThrowNotFoundExceptionWhenItemBelongsToADifferentListOnUpdate() {
+        UserList anotherList = buildUserList(UUID.randomUUID(), lucas, "Another list", UserListVisibility.PUBLIC);
+        UserListItem item = buildContentItem(anotherList, fightClub, 1);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+
+        assertThatThrownBy(() -> userListItemService.updateItem(
+                lucasId, listId, item.getId(), new UserListItemPatchDTO(1, null)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("List item not found");
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Throw ConflictException - When A Concurrent Update Causes A Data Integrity Violation")
+    void shouldThrowConflictExceptionWhenAConcurrentUpdateCausesADataIntegrityViolationOnUpdate() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(2L);
+        when(userListItemRepository.save(any(UserListItem.class)))
+                .thenThrow(new DataIntegrityViolationException("concurrent modification"));
+
+        assertThatThrownBy(() -> userListItemService.updateItem(
+                lucasId, listId, item.getId(), new UserListItemPatchDTO(2, null)))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("List item could not be reordered due to a concurrent update");
     }
 
     @Test
