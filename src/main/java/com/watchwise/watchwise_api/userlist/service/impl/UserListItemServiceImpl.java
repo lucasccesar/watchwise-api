@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +35,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserListItemServiceImpl implements UserListItemService {
@@ -367,6 +369,8 @@ public class UserListItemServiceImpl implements UserListItemService {
         if ("uq_user_list_items_user_list_id_position".equals(constraintName)) {
             return new ConflictException("This position was just taken by a concurrent insert");
         }
+
+        log.warn("Unmapped data integrity violation while inserting a user list item (constraint={})", constraintName, e);
         return new ConflictException("Unable to insert this item into the list");
     }
 

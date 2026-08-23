@@ -152,13 +152,20 @@ item volta `null` na resposta, sem afetar id/posição/descrição. `getUserList
 dono da lista filha, e itens de conteúdo não afetados; metadados mascarados quando a lista
 filha virou privada).
 
-### 12. `mapUniqueConstraintViolation` (userlist) com fallback genérico
+### 12. ~~`mapUniqueConstraintViolation` (userlist) com fallback genérico~~ — CORRIGIDO
 **Arquivo:** `src/main/java/com/watchwise/watchwise_api/userlist/service/impl/UserListItemServiceImpl.java` (~linhas 345-358)
 
-Só trata 3 nomes de constraint `uq_*`. Qualquer outra `DataIntegrityViolationException`
-cai num fallback genérico "Unable to insert this item into the list" (409), mascarando a
-causa raiz real com uma mensagem que sugere retry. Não é silencioso (ainda lança exceção),
-mas dificulta diagnóstico.
+Só tratava 3 nomes de constraint `uq_*`. Qualquer outra `DataIntegrityViolationException`
+caía num fallback genérico "Unable to insert this item into the list" (409), mascarando a
+causa raiz real com uma mensagem que sugere retry. Não era silencioso (ainda lançava
+exceção), mas dificultava diagnóstico.
+
+**Correção:** ao cair no fallback genérico, `mapUniqueConstraintViolation` agora loga em
+WARN (`@Slf4j`) o nome da constraint extraída (ou `null`) junto com a exceção original
+completa (stack trace incluso), antes de devolver o `ConflictException` — a resposta ao
+cliente não muda, mas a causa raiz fica rastreável nos logs. Cobertura adicionada em
+`UserListItemServiceImplTest` usando um `ListAppender` do Logback para capturar o evento de
+log e validar nível, mensagem (constraint) e throwable anexado.
 
 ### 13. Validações de entrada ausentes / clamps silenciosos
 - `DiaryEntryBulkCreationDTO.finaleSeasonNumber`/mapa de episódios: só tem `@Min(1)`, sem

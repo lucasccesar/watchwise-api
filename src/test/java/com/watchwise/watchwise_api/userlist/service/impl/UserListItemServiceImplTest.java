@@ -1,5 +1,8 @@
 package com.watchwise.watchwise_api.userlist.service.impl;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
@@ -32,6 +35,7 @@ import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
@@ -714,6 +718,38 @@ class UserListItemServiceImplTest {
                 lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, null, null)))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Unable to insert this item into the list");
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Log The Original Exception - When Constraint Name Is Unknown")
+    void shouldLogTheOriginalExceptionWhenConstraintNameIsUnknown() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        stubContentResolution(fightClub, ContentType.MOVIE);
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        DataIntegrityViolationException exception = buildDataIntegrityViolationException("uq_some_other_constraint");
+        when(userListItemRepository.save(any(UserListItem.class))).thenThrow(exception);
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(UserListItemServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try {
+            assertThatThrownBy(() -> userListItemService.addItem(
+                    lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, null, null)))
+                    .isInstanceOf(ConflictException.class);
+
+            assertThat(appender.list).hasSize(1);
+            ILoggingEvent event = appender.list.get(0);
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage()).contains("uq_some_other_constraint");
+            assertThat(event.getThrowableProxy().getMessage()).isEqualTo(exception.getMessage());
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     @Test
