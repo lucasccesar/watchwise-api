@@ -133,14 +133,24 @@ causando contagem de ciclos incorreta silenciosamente. Afeta só o endpoint sing
 
 ## Baixa severidade / informativo
 
-### 11. Vazamento de metadados de `childList` com visibilidade desatualizada
+### 11. ~~Vazamento de metadados de `childList` com visibilidade desatualizada~~ — CORRIGIDO
 **Arquivo:** `src/main/java/com/watchwise/watchwise_api/userlist/service/impl/UserListItemServiceImpl.java`
 
-`assertListIsVisibleTo` só é chamada em `resolveChildList`, no momento da inserção. Ao ler
-os itens de uma lista pai, a `childList` aninhada é sempre retornada como
+`assertListIsVisibleTo` só era chamada em `resolveChildList`, no momento da inserção. Ao ler
+os itens de uma lista pai, a `childList` aninhada era sempre retornada como
 `UserListPreviewDTO` (id, nome, dono, visibilidade) sem reverificar a visibilidade atual —
-se o dono da lista filha mudar para PRIVATE depois, quem acessa a lista pai pública ainda
-vê nome/dono/visibilidade da filha (não o conteúdo, que continua protegido).
+se o dono da lista filha mudasse para PRIVATE depois, quem acessava a lista pai pública ainda
+via nome/dono/visibilidade da filha (não o conteúdo, que continuava protegido).
+
+**Correção:** `getItems` agora recebe `viewerId` e, para cada item com `childList`,
+reverifica a visibilidade atual via `isVisibleTo` (extraído de `assertListIsVisibleTo`, que
+agora só lança `ForbiddenException` quando essa checagem falha) antes de devolver a
+`UserListPreviewDTO`; se a lista filha não é mais visível ao viewer, o campo `childList` do
+item volta `null` na resposta, sem afetar id/posição/descrição. `getUserListById`
+(`UserListServiceImpl`) passa o `viewerId` já disponível adiante. Cobertura adicionada em
+`UserListItemServiceImplTest` (metadados mantidos quando ainda visível, quando o viewer é o
+dono da lista filha, e itens de conteúdo não afetados; metadados mascarados quando a lista
+filha virou privada).
 
 ### 12. `mapUniqueConstraintViolation` (userlist) com fallback genérico
 **Arquivo:** `src/main/java/com/watchwise/watchwise_api/userlist/service/impl/UserListItemServiceImpl.java` (~linhas 345-358)

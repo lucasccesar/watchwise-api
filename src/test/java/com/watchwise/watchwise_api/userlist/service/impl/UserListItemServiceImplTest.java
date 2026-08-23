@@ -111,6 +111,78 @@ class UserListItemServiceImplTest {
         fightClub = buildContent("550", ContentType.MOVIE);
     }
 
+    // ---------- getItems ----------
+
+    @Test
+    @DisplayName("[getItems] Should Keep ChildList Metadata - When Nested List Is Still Visible To The Viewer")
+    void shouldKeepChildListMetadataWhenNestedListIsStillVisibleToTheViewer() {
+        UserList childList = buildUserList(UUID.randomUUID(), lucas, "Nested", UserListVisibility.PUBLIC);
+        UserListItem item = buildChildListItem(scifi, childList, 1);
+        UserListItemResponseDTO mapped = new UserListItemResponseDTO(
+                item.getId(), null, buildPreviewDto(childList), 1, null, LocalDateTime.now(), LocalDateTime.now());
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(item));
+        when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
+
+        List<UserListItemResponseDTO> result = userListItemService.getItems(marinaId, listId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).childList()).isEqualTo(mapped.childList());
+    }
+
+    @Test
+    @DisplayName("[getItems] Should Mask ChildList Metadata - When Nested List Became Private After Being Added")
+    void shouldMaskChildListMetadataWhenNestedListBecamePrivateAfterBeingAdded() {
+        UserList childList = buildUserList(UUID.randomUUID(), marina, "Now private", UserListVisibility.PRIVATE);
+        UserListItem item = buildChildListItem(scifi, childList, 1);
+        UserListItemResponseDTO mapped = new UserListItemResponseDTO(
+                item.getId(), null, buildPreviewDto(childList), 1, "desc", LocalDateTime.now(), LocalDateTime.now());
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(item));
+        when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
+
+        List<UserListItemResponseDTO> result = userListItemService.getItems(lucasId, listId);
+
+        assertThat(result).hasSize(1);
+        UserListItemResponseDTO dto = result.get(0);
+        assertThat(dto.childList()).isNull();
+        assertThat(dto.id()).isEqualTo(mapped.id());
+        assertThat(dto.position()).isEqualTo(mapped.position());
+        assertThat(dto.description()).isEqualTo(mapped.description());
+    }
+
+    @Test
+    @DisplayName("[getItems] Should Keep ChildList Metadata - When Viewer Is The Nested List's Owner")
+    void shouldKeepChildListMetadataWhenViewerIsTheNestedListsOwner() {
+        UserList childList = buildUserList(UUID.randomUUID(), marina, "Marina's private list", UserListVisibility.PRIVATE);
+        UserListItem item = buildChildListItem(scifi, childList, 1);
+        UserListItemResponseDTO mapped = new UserListItemResponseDTO(
+                item.getId(), null, buildPreviewDto(childList), 1, null, LocalDateTime.now(), LocalDateTime.now());
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(item));
+        when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
+
+        List<UserListItemResponseDTO> result = userListItemService.getItems(marinaId, listId);
+
+        assertThat(result.get(0).childList()).isEqualTo(mapped.childList());
+    }
+
+    @Test
+    @DisplayName("[getItems] Should Not Touch Content Items - When Item Has No ChildList")
+    void shouldNotTouchContentItemsWhenItemHasNoChildList() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        UserListItemResponseDTO mapped = new UserListItemResponseDTO(
+                item.getId(), buildContentRefDto(fightClub), null, 1, null, LocalDateTime.now(), LocalDateTime.now());
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(item));
+        when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
+
+        List<UserListItemResponseDTO> result = userListItemService.getItems(marinaId, listId);
+
+        assertThat(result.get(0)).isEqualTo(mapped);
+        verifyNoInteractions(followerRepository);
+    }
+
     // ---------- getPreviewItems / getPreviewItemsByListIds ----------
 
     @Test
@@ -1094,6 +1166,23 @@ class UserListItemServiceImplTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
+    }
+
+    private UserListItem buildChildListItem(UserList userList, UserList childList, Integer position) {
+        LocalDateTime now = LocalDateTime.now();
+        return UserListItem.builder()
+                .id(UUID.randomUUID())
+                .userList(userList)
+                .childList(childList)
+                .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private com.watchwise.watchwise_api.userlist.dto.UserListPreviewDTO buildPreviewDto(UserList list) {
+        return new com.watchwise.watchwise_api.userlist.dto.UserListPreviewDTO(
+                list.getId(), null, list.getName(), list.getVisibility());
     }
 
     private UserList buildUserList(UUID id, User owner, String name, UserListVisibility visibility) {

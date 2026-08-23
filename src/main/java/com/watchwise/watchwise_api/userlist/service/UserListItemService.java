@@ -13,7 +13,7 @@ import java.util.UUID;
 
 public interface UserListItemService {
 
-    List<UserListItemResponseDTO> getItems(UUID listId);
+    List<UserListItemResponseDTO> getItems(UUID viewerId, UUID listId);
 
     List<ContentRefDTO> getPreviewItems(UUID listId);
 

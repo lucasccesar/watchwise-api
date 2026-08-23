@@ -399,7 +399,7 @@ class UserListServiceImplTest {
         List<UserListItemResponseDTO> items = List.of(buildItemResponseDto(buildContentRef("100", ContentType.MOVIE)));
         UserListDetailedResponseDTO dto = buildDetailedResponseDto(list, items);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(list.getId())).thenReturn(items);
+        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(items);
         when(userListMapper.userListToDetailedResponseDto(list, items, 0.0)).thenReturn(dto);
 
         UserListDetailedResponseDTO result = userListService.getUserListById(lucasId, list.getId());
@@ -413,7 +413,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         List<UserListItemResponseDTO> items = List.of(buildItemResponseDto(buildContentRef("100", ContentType.MOVIE)));
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(list.getId())).thenReturn(items);
+        when(userListItemService.getItems(marinaId, list.getId())).thenReturn(items);
         when(userListItemService.getWatchedPercentage(list.getId(), marinaId)).thenReturn(50.0);
         when(userListMapper.userListToDetailedResponseDto(list, items, 50.0)).thenReturn(buildDetailedResponseDto(list, items));
 
@@ -428,7 +428,7 @@ class UserListServiceImplTest {
     void shouldReturnDetailedListWhenListIsPublicAndViewerIsADifferentUser() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(list.getId())).thenReturn(List.of());
+        when(userListItemService.getItems(marinaId, list.getId())).thenReturn(List.of());
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble())).thenReturn(buildDetailedResponseDto(list, List.of()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(marinaId, list.getId());
@@ -443,7 +443,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.FOLLOWERS);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(true);
-        when(userListItemService.getItems(list.getId())).thenReturn(List.of());
+        when(userListItemService.getItems(marinaId, list.getId())).thenReturn(List.of());
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble())).thenReturn(buildDetailedResponseDto(list, List.of()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(marinaId, list.getId());

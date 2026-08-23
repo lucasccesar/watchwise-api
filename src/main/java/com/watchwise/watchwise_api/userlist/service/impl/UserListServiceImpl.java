@@ -102,7 +102,7 @@ public class UserListServiceImpl implements UserListService {
 
         assertListIsVisibleTo(viewerId, userList);
 
-        List<UserListItemResponseDTO> items = userListItemService.getItems(listId);
+        List<UserListItemResponseDTO> items = userListItemService.getItems(viewerId, listId);
         double watchedPercentage = userListItemService.getWatchedPercentage(listId, viewerId);
 
         return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage);

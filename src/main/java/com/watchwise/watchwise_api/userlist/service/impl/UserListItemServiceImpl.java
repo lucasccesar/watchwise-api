@@ -48,10 +48,21 @@ public class UserListItemServiceImpl implements UserListItemService {
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
     @Override
-    public List<UserListItemResponseDTO> getItems(UUID listId) {
+    public List<UserListItemResponseDTO> getItems(UUID viewerId, UUID listId) {
         return userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId).stream()
-                .map(userListItemMapper::userListItemToResponseDto)
+                .map(item -> toVisibilityScopedResponseDto(viewerId, item))
                 .toList();
+    }
+
+    private UserListItemResponseDTO toVisibilityScopedResponseDto(UUID viewerId, UserListItem item) {
+        UserListItemResponseDTO dto = userListItemMapper.userListItemToResponseDto(item);
+
+        if (item.getChildList() != null && !isVisibleTo(viewerId, item.getChildList())) {
+            return new UserListItemResponseDTO(
+                    dto.id(), dto.content(), null, dto.position(), dto.description(), dto.createdAt(), dto.updatedAt());
+        }
+
+        return dto;
     }
 
     @Override
@@ -276,18 +287,20 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList list) {
+        if (!isVisibleTo(viewerId, list)) {
+            throw new ForbiddenException("This list is private");
+        }
+    }
+
+    private boolean isVisibleTo(UUID viewerId, UserList list) {
         UUID ownerId = list.getUser().getId();
 
         if (viewerId.equals(ownerId) || list.getVisibility() == UserListVisibility.PUBLIC) {
-            return;
+            return true;
         }
 
-        if (list.getVisibility() == UserListVisibility.FOLLOWERS
-                && followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, ownerId, FollowStatus.ACCEPTED)) {
-            return;
-        }
-
-        throw new ForbiddenException("This list is private");
+        return list.getVisibility() == UserListVisibility.FOLLOWERS
+                && followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, ownerId, FollowStatus.ACCEPTED);
     }
 
     private void assertListIsNotLockedAsListOfLists(UUID listId) {
