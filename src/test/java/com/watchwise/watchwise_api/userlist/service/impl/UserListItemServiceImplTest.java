@@ -1176,6 +1176,57 @@ class UserListItemServiceImplTest {
         verify(userListItemRepository, never()).delete(any());
     }
 
+    // ---------- removeItemsReferencingChildList ----------
+
+    @Test
+    @DisplayName("[removeItemsReferencingChildList] Should Delete The Referencing Item And Close The Gap - When One Parent List References It")
+    void shouldDeleteTheReferencingItemAndCloseTheGapWhenOneParentListReferencesIt() {
+        UUID nestedListId = UUID.randomUUID();
+        UserListItem referencingItem = buildChildListItem(scifi, buildUserList(nestedListId, lucas, "Nested", UserListVisibility.PUBLIC), 2);
+        when(userListItemRepository.findByChildListId(nestedListId)).thenReturn(List.of(referencingItem));
+
+        userListItemService.removeItemsReferencingChildList(nestedListId);
+
+        verify(userListItemRepository).delete(referencingItem);
+        verify(userListItemRepository).parkPositionsInRange(
+                listId, 3, Integer.MAX_VALUE, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+        verify(userListItemRepository).settleParkedPositions(
+                listId, UserListItemServiceImpl.POSITION_PARK_OFFSET, -1);
+    }
+
+    @Test
+    @DisplayName("[removeItemsReferencingChildList] Should Close The Gap In Each Distinct Parent List - When Multiple Lists Reference It")
+    void shouldCloseTheGapInEachDistinctParentListWhenMultipleListsReferenceIt() {
+        UUID nestedListId = UUID.randomUUID();
+        UserList nested = buildUserList(nestedListId, lucas, "Nested", UserListVisibility.PUBLIC);
+        UserList marinasList = buildUserList(UUID.randomUUID(), marina, "Marina's list", UserListVisibility.PUBLIC);
+        UserListItem itemInScifi = buildChildListItem(scifi, nested, 1);
+        UserListItem itemInMarinasList = buildChildListItem(marinasList, nested, 1);
+        when(userListItemRepository.findByChildListId(nestedListId))
+                .thenReturn(List.of(itemInScifi, itemInMarinasList));
+
+        userListItemService.removeItemsReferencingChildList(nestedListId);
+
+        verify(userListItemRepository).delete(itemInScifi);
+        verify(userListItemRepository).delete(itemInMarinasList);
+        verify(userListItemRepository).parkPositionsInRange(
+                listId, 2, Integer.MAX_VALUE, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+        verify(userListItemRepository).parkPositionsInRange(
+                marinasList.getId(), 2, Integer.MAX_VALUE, UserListItemServiceImpl.POSITION_PARK_OFFSET);
+    }
+
+    @Test
+    @DisplayName("[removeItemsReferencingChildList] Should Do Nothing - When No Item References It")
+    void shouldDoNothingWhenNoItemReferencesIt() {
+        UUID nestedListId = UUID.randomUUID();
+        when(userListItemRepository.findByChildListId(nestedListId)).thenReturn(List.of());
+
+        userListItemService.removeItemsReferencingChildList(nestedListId);
+
+        verify(userListItemRepository, never()).delete(any());
+        verify(userListItemRepository, never()).parkPositionsInRange(any(), anyInt(), anyInt(), anyInt());
+    }
+
     private void stubContentResolution(Content content, ContentType type) {
         ContentRefDTO contentRefDto = new ContentRefDTO(
                 content.getId(), content.getTmdbId(), type, null, null, null, null, null,

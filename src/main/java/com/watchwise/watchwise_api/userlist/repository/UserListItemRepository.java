@@ -16,6 +16,8 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
 
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);
 
+    List<UserListItem> findByChildListId(UUID childListId);
+
     @Query("""
             SELECT uli FROM UserListItem uli
             LEFT JOIN FETCH uli.content

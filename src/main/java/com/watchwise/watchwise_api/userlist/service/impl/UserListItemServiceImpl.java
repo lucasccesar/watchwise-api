@@ -251,6 +251,12 @@ public class UserListItemServiceImpl implements UserListItemService {
         deleteAndCloseGap(item);
     }
 
+    @Override
+    @Transactional
+    public void removeItemsReferencingChildList(UUID childListId) {
+        userListItemRepository.findByChildListId(childListId).forEach(this::deleteAndCloseGap);
+    }
+
     private UserListItem findOwnedItem(UUID listId, UUID itemId) {
         UserListItem item = userListItemRepository.findById(itemId)
                 .orElseThrow(() -> new NotFoundException("List item not found"));

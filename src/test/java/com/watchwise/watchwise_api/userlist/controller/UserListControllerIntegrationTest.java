@@ -35,9 +35,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -954,6 +956,33 @@ class UserListControllerIntegrationTest {
                 .andExpect(status().isNoContent());
 
         assertThat(userListRepository.findById(list.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[deleteUserList] Should Close The Position Gap In The Parent List - When The Deleted List Is Nested As A Child Item")
+    void shouldCloseThePositionGapInTheParentListWhenTheDeletedListIsNestedAsAChildItem() throws Exception {
+        RegisteredUser owner = registerUser("deletenestedlistowner");
+        RegisteredUser childOwner = registerUser("deletenestedlistchildowner");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        User childOwnerEntity = userRepository.findById(childOwner.id()).orElseThrow();
+        UserList listOfLists = persistList(ownerEntity, "List of lists", true);
+        UserList childA = persistList(childOwnerEntity, "Nested A", true);
+        UserList childB = persistList(childOwnerEntity, "Nested B", true);
+        UserList childC = persistList(childOwnerEntity, "Nested C", true);
+        persistNestedListItem(listOfLists, childA, 1);
+        UserListItem itemB = persistNestedListItem(listOfLists, childB, 2);
+        persistNestedListItem(listOfLists, childC, 3);
+
+        mockMvc.perform(deleteRequest(childOwner, childB.getId()))
+                .andExpect(status().isNoContent());
+
+        assertThat(userListRepository.findById(childB.getId())).isEmpty();
+        assertThat(userListItemRepository.findById(itemB.getId())).isEmpty();
+        List<UserListItem> remaining = userListItemRepository.findByUserListIdOrderByPositionAsc(listOfLists.getId());
+        assertThat(remaining).extracting(item -> item.getChildList().getId(), UserListItem::getPosition)
+                .containsExactly(
+                        tuple(childA.getId(), 1),
+                        tuple(childC.getId(), 2));
     }
 
     @Test

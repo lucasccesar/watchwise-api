@@ -35,4 +35,6 @@ public interface UserListItemService {
 
     void removeItem(UUID userId, UUID listId, UUID itemId);
 
+    void removeItemsReferencingChildList(UUID childListId);
+
 }
