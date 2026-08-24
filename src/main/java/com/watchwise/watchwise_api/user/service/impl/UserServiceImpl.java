@@ -26,6 +26,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -69,22 +72,37 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional
     public UserResponseDTO updateUser(User user, PatchUserDTO patchUserDTO) {
         boolean touchesCredentials = applyPatch(user, patchUserDTO);
         user.setUpdatedAt(LocalDateTime.now());
 
         UserResponseDTO response;
         try {
-            response = userMapper.userToUserResponseDto(userRepository.save(user));
+            response = userMapper.userToUserResponseDto(userRepository.saveAndFlush(user));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
 
         if (touchesCredentials) {
-            refreshTokenService.invalidateAllSessions(user.getId());
+            invalidateSessionsAfterCommit(user.getId());
         }
 
         return response;
+    }
+
+    private void invalidateSessionsAfterCommit(UUID userId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            refreshTokenService.invalidateAllSessions(userId);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                refreshTokenService.invalidateAllSessions(userId);
+            }
+        });
     }
 
     @Override

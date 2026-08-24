@@ -564,14 +564,14 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Change Any Field - When All Patch Fields Are Null")
     void shouldNotChangeAnyFieldWhenAllPatchFieldsAreNull() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         User capturedUser = userCaptor.getValue();
 
         assertThat(capturedUser.getUsername()).isEqualTo(savedUser.getUsername());
@@ -587,14 +587,14 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update Username Trimmed - When A Different Value Is Provided")
     void shouldUpdateUsernameTrimmedWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO("  NewUsername  ", null, null, null, null, null, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getUsername()).isEqualTo("NewUsername");
     }
 
@@ -602,14 +602,14 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Change Username - When The Same Value Is Provided")
     void shouldNotChangeUsernameWhenSameValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO("  " + savedUser.getUsername() + "  ", null, null, null, null, null, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getUsername()).isEqualTo(savedUser.getUsername());
     }
 
@@ -630,14 +630,14 @@ class UserServiceImplTest {
     void shouldUpdateEmailNormalizedWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  NEW.EMAIL@EMAIL.COM  ", null, null, null, null, "Password123");
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getEmail()).isEqualTo("new.email@email.com");
     }
 
@@ -645,14 +645,14 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Change Email - When The Same Value Is Provided")
     void shouldNotChangeEmailWhenSameValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  " + savedUser.getEmail().toUpperCase() + "  ", null, null, null, null, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getEmail()).isEqualTo(savedUser.getEmail());
     }
 
@@ -661,7 +661,7 @@ class UserServiceImplTest {
     void shouldNotReEncodePasswordWhenProvidedPasswordMatchesCurrentHash() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "SamePassword123", null, null, null, null);
         when(passwordEncoder.matches("SamePassword123", savedUser.getPassword())).thenReturn(true);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
@@ -669,7 +669,7 @@ class UserServiceImplTest {
         userService.updateUser(savedUser, patchUserDTO);
 
         verify(passwordEncoder, never()).encode(any());
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getPassword()).isEqualTo(savedUser.getPassword());
     }
 
@@ -680,14 +680,14 @@ class UserServiceImplTest {
         when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(passwordEncoder.encode("NewPassword123")).thenReturn("newHashedPassword");
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getPassword()).isEqualTo("newHashedPassword");
     }
 
@@ -699,7 +699,7 @@ class UserServiceImplTest {
         when(passwordEncoder.matches("NewPassword123", savedUser.getPassword())).thenReturn(false);
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(passwordEncoder.encode("NewPassword123")).thenReturn("newHashedPassword");
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
@@ -713,7 +713,7 @@ class UserServiceImplTest {
         UUID id = savedUser.getId();
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null, "Password123");
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
@@ -725,7 +725,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Not Revoke Any Refresh Token - When Neither Password Nor Email Changes")
     void shouldNotRevokeAnyRefreshTokenWhenNeitherPasswordNorEmailChanges() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New bio", null, null, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
@@ -737,14 +737,14 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update Description - When A Different Value Is Provided")
     void shouldUpdateDescriptionWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New description", null, null, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getDescription()).isEqualTo("New description");
     }
 
@@ -752,14 +752,14 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update ProfilePicture - When A Different Value Is Provided")
     void shouldUpdateProfilePictureWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, "https://new-picture.com/pic.png", null, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getProfilePicture()).isEqualTo("https://new-picture.com/pic.png");
     }
 
@@ -767,14 +767,14 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Update IsProfilePublic - When A Different Value Is Provided")
     void shouldUpdateIsProfilePublicWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, false, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(userRepository).save(userCaptor.capture());
+        verify(userRepository).saveAndFlush(userCaptor.capture());
         assertThat(userCaptor.getValue().getIsProfilePublic()).isFalse();
         verifyNoInteractions(followerService);
     }
@@ -785,7 +785,7 @@ class UserServiceImplTest {
         UUID id = savedUser.getId();
         savedUser.setIsProfilePublic(false);
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, true, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
@@ -798,7 +798,7 @@ class UserServiceImplTest {
     void shouldNotAcceptPendingFollowRequestsWhenProfileIsAlreadyPublic() {
         savedUser.setIsProfilePublic(true);
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, true, null);
-        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(savedUser)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
@@ -810,7 +810,7 @@ class UserServiceImplTest {
     @DisplayName("[updateUser] Should Throw ConflictException With Username Message - When Update Violates Username Constraint")
     void shouldThrowConflictExceptionWithUsernameMessageWhenUpdateViolatesUsernameConstraint() {
         PatchUserDTO patchUserDTO = new PatchUserDTO("TakenUsername", null, null, null, null, null, null);
-        when(userRepository.save(any(User.class)))
+        when(userRepository.saveAndFlush(any(User.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_users_username"));
 
         assertThatThrownBy(() -> userService.updateUser(savedUser, patchUserDTO))
@@ -825,7 +825,7 @@ class UserServiceImplTest {
     void shouldThrowConflictExceptionWithEmailMessageWhenUpdateViolatesEmailConstraint() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "taken@email.com", null, null, null, null, "Password123");
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(userRepository.save(any(User.class)))
+        when(userRepository.saveAndFlush(any(User.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_users_email"));
 
         assertThatThrownBy(() -> userService.updateUser(savedUser, patchUserDTO))
