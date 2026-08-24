@@ -263,6 +263,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
         DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
         Content content = entry.getContent();
+        int watchNumber = entry.getWatchNumber();
 
         diaryEntryRepository.delete(entry);
         diaryEntryRepository.flush();
@@ -272,7 +273,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         } else if (content.getType() == ContentType.SEASON) {
             retractSeriesIfIncomplete(userId, content.getSeriesTmdbId(), overrideProtectedEntries, cascadeDeleted);
         } else if (content.getType() == ContentType.SERIES) {
-            wipeSeriesHistory(userId, content.getTmdbId(), overrideProtectedEntries, cascadeDeleted);
+            wipeSeriesHistory(userId, content.getTmdbId(), watchNumber, overrideProtectedEntries, cascadeDeleted);
         }
     }
 
@@ -291,8 +292,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return true;
     }
 
-    private void wipeSeriesHistory(UUID userId, String seriesTmdbId, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
-        deleteRespectingProtection(computeSeriesWipeCandidates(userId, seriesTmdbId), overrideProtectedEntries, cascadeDeleted);
+    private void wipeSeriesHistory(UUID userId, String seriesTmdbId, int watchNumber, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
+        deleteRespectingProtection(computeSeriesWipeCandidates(userId, seriesTmdbId, watchNumber), overrideProtectedEntries, cascadeDeleted);
     }
 
     private void retractSeasonIfIncomplete(UUID userId, String seriesTmdbId, Integer seasonNumber, boolean overrideProtectedEntries,
@@ -344,11 +345,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(userId, seriesContent.get().getId(), minMax);
     }
 
-    private List<DiaryEntry> computeSeriesWipeCandidates(UUID userId, String seriesTmdbId) {
+    private List<DiaryEntry> computeSeriesWipeCandidates(UUID userId, String seriesTmdbId, int watchNumber) {
         return Stream.of(
-                        diaryEntryRepository.findAllEpisodeEntriesInSeries(userId, seriesTmdbId),
-                        diaryEntryRepository.findAllSeasonEntriesInSeries(userId, seriesTmdbId),
-                        diaryEntryRepository.findAllSeriesEntries(userId, seriesTmdbId))
+                        diaryEntryRepository.findEpisodeEntriesInSeriesByWatchNumber(userId, seriesTmdbId, watchNumber),
+                        diaryEntryRepository.findSeasonEntriesInSeriesByWatchNumber(userId, seriesTmdbId, watchNumber),
+                        diaryEntryRepository.findSeriesEntriesByWatchNumber(userId, seriesTmdbId, watchNumber))
                 .flatMap(List::stream)
                 .toList();
     }
