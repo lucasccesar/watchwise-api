@@ -26,6 +26,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -76,6 +77,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
     }
 
     @Override
+    @Transactional
     public void markAsDropped(UUID userId, ContentType type, String tmdbId, DroppedEntryCreationDTO droppedEntryCreationDTO) {
         validateType(type);
 
