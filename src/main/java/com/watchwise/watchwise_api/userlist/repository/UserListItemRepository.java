@@ -32,6 +32,8 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
 
     boolean existsByUserListIdAndChildListIdIsNotNull(UUID userListId);
 
+    boolean existsByChildListId(UUID childListId);
+
     @Modifying
     @Query("""
             UPDATE UserListItem uli SET uli.position = uli.position + :offset

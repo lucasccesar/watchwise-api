@@ -287,6 +287,10 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         assertListIsVisibleTo(userId, childList);
 
+        if (userListItemRepository.existsByChildListId(parentListId)) {
+            throw new BadRequestException("This list is already nested inside another list; nesting depth is limited to one level");
+        }
+
         if (userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)) {
             throw new BadRequestException("The referenced list already contains nested lists; nesting depth is limited to one level");
         }

@@ -574,6 +574,24 @@ class UserListItemServiceImplTest {
     }
 
     @Test
+    @DisplayName("[addItem] Should Throw BadRequestException - When Parent List Is Already Nested Inside Another List")
+    void shouldThrowBadRequestExceptionWhenParentListIsAlreadyNestedInsideAnotherList() {
+        UUID childListId = UUID.randomUUID();
+        UserList childList = buildUserList(childListId, lucas, "Would-be grandchild list", UserListVisibility.PUBLIC);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
+        when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
+        when(userListItemRepository.existsByChildListId(listId)).thenReturn(true);
+
+        assertThatThrownBy(() -> userListItemService.addItem(
+                lucasId, listId, new UserListItemCreationDTO(null, childListId, null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("nesting depth is limited to one level");
+
+        verify(userListItemRepository, never()).existsByUserListIdAndChildListIdIsNotNull(childListId);
+    }
+
+    @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When List Already Contains Content Items And ChildListId Is Given")
     void shouldThrowBadRequestExceptionWhenListAlreadyContainsContentItemsAndChildListIdIsGiven() {
         UUID childListId = UUID.randomUUID();
