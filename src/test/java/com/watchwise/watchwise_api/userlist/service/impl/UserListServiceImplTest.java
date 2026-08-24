@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -40,11 +42,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -68,6 +72,9 @@ class UserListServiceImplTest {
 
     @Mock
     private UserListMapper userListMapper;
+
+    @Mock
+    private LikeService likeService;
 
     @InjectMocks
     private UserListServiceImpl userListService;
@@ -96,6 +103,8 @@ class UserListServiceImplTest {
 
         lucas = buildUser(lucasId, "lucas", true);
         marina = buildUser(marinaId, "marina", true);
+
+        lenient().when(likeService.getLikedListIds(any(), any())).thenReturn(Set.of());
     }
 
     // ---------- getUserLists ----------
@@ -111,7 +120,7 @@ class UserListServiceImplTest {
         when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of());
         when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of());
         when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of());
-        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 0.0)).thenReturn(dto);
+        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 0.0, false)).thenReturn(dto);
 
         Page<UserListResponseDTO> result = userListService.getUserLists(lucasId, lucasId, 1, 10);
 
@@ -130,11 +139,11 @@ class UserListServiceImplTest {
         when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of(list.getId(), previewItems));
         when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of(list.getId(), 2L));
         when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of());
-        when(userListMapper.userListToResponseDto(list, previewItems, 2L, 0.0)).thenReturn(buildResponseDto(list));
+        when(userListMapper.userListToResponseDto(list, previewItems, 2L, 0.0, false)).thenReturn(buildResponseDto(list));
 
         userListService.getUserLists(lucasId, lucasId, 1, 10);
 
-        verify(userListMapper).userListToResponseDto(list, previewItems, 2L, 0.0);
+        verify(userListMapper).userListToResponseDto(list, previewItems, 2L, 0.0, false);
     }
 
     @Test
@@ -147,11 +156,11 @@ class UserListServiceImplTest {
         when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of());
         when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of());
         when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of(list.getId(), 75.0));
-        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 75.0)).thenReturn(buildResponseDto(list));
+        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 75.0, false)).thenReturn(buildResponseDto(list));
 
         userListService.getUserLists(lucasId, lucasId, 1, 10);
 
-        verify(userListMapper).userListToResponseDto(list, List.of(), 0L, 75.0);
+        verify(userListMapper).userListToResponseDto(list, List.of(), 0L, 75.0, false);
     }
 
     @Test
@@ -165,7 +174,7 @@ class UserListServiceImplTest {
         when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of());
         when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of());
         when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), marinaId)).thenReturn(Map.of(list.getId(), 10.0));
-        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 10.0)).thenReturn(buildResponseDto(list));
+        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 10.0, false)).thenReturn(buildResponseDto(list));
 
         userListService.getUserLists(marinaId, lucasId, 1, 10);
 
@@ -185,7 +194,7 @@ class UserListServiceImplTest {
         Page<UserListResponseDTO> result = userListService.getUserLists(lucasId, lucasId, 1, 10);
 
         assertThat(result.getContent()).isEmpty();
-        verify(userListMapper, never()).userListToResponseDto(any(), any(), anyLong(), anyDouble());
+        verify(userListMapper, never()).userListToResponseDto(any(), any(), anyLong(), anyDouble(), anyBoolean());
     }
 
     @Test
@@ -400,7 +409,7 @@ class UserListServiceImplTest {
         UserListDetailedResponseDTO dto = buildDetailedResponseDto(list, items);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItems(lucasId, list.getId())).thenReturn(items);
-        when(userListMapper.userListToDetailedResponseDto(list, items, 0.0)).thenReturn(dto);
+        when(userListMapper.userListToDetailedResponseDto(list, items, 0.0, false)).thenReturn(dto);
 
         UserListDetailedResponseDTO result = userListService.getUserListById(lucasId, list.getId());
 
@@ -415,7 +424,7 @@ class UserListServiceImplTest {
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItems(marinaId, list.getId())).thenReturn(items);
         when(userListItemService.getWatchedPercentage(list.getId(), marinaId)).thenReturn(50.0);
-        when(userListMapper.userListToDetailedResponseDto(list, items, 50.0)).thenReturn(buildDetailedResponseDto(list, items));
+        when(userListMapper.userListToDetailedResponseDto(list, items, 50.0, false)).thenReturn(buildDetailedResponseDto(list, items));
 
         userListService.getUserListById(marinaId, list.getId());
 
@@ -429,7 +438,7 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItems(marinaId, list.getId())).thenReturn(List.of());
-        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble())).thenReturn(buildDetailedResponseDto(list, List.of()));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean())).thenReturn(buildDetailedResponseDto(list, List.of()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(marinaId, list.getId());
 
@@ -444,7 +453,7 @@ class UserListServiceImplTest {
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(true);
         when(userListItemService.getItems(marinaId, list.getId())).thenReturn(List.of());
-        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble())).thenReturn(buildDetailedResponseDto(list, List.of()));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean())).thenReturn(buildDetailedResponseDto(list, List.of()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(marinaId, list.getId());
 
@@ -496,7 +505,7 @@ class UserListServiceImplTest {
     void shouldSaveNewListWithProvidedFields() {
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         UserListResponseDTO result = userListService.createUserList(
                 lucasId, new UserListCreationDTO("Best sci-fi of the 90s", "A curated list", UserListVisibility.PRIVATE));
@@ -516,12 +525,12 @@ class UserListServiceImplTest {
     void shouldMapWithEmptyPreviewAndZeroNestedListsCountWithoutQueryingItemsOnCreate() {
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), eq(List.of()), eq(0L), eq(0.0)))
+        when(userListMapper.userListToResponseDto(any(UserList.class), eq(List.of()), eq(0L), eq(0.0), anyBoolean()))
                 .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.createUserList(lucasId, new UserListCreationDTO("My list", null, null));
 
-        verify(userListMapper).userListToResponseDto(any(UserList.class), eq(List.of()), eq(0L), eq(0.0));
+        verify(userListMapper).userListToResponseDto(any(UserList.class), eq(List.of()), eq(0L), eq(0.0), anyBoolean());
         verifyNoInteractions(userListItemService);
     }
 
@@ -530,7 +539,7 @@ class UserListServiceImplTest {
     void shouldDefaultVisibilityToPublicWhenOmitted() {
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.createUserList(lucasId, new UserListCreationDTO("My list", null, null));
 
@@ -543,7 +552,7 @@ class UserListServiceImplTest {
     void shouldPersistANullDescriptionWhenOmitted() {
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.createUserList(lucasId, new UserListCreationDTO("My list", null, UserListVisibility.PUBLIC));
 
@@ -570,7 +579,7 @@ class UserListServiceImplTest {
 
         when(userListItemService.addItem(eq(lucasId), any(UUID.class), any(UserListItemCreationDTO.class)))
                 .thenReturn(movieItem, seriesItem);
-        when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble()))
+        when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
         UserListDetailedResponseDTO result = userListService.createUserListWithItems(
@@ -604,14 +613,14 @@ class UserListServiceImplTest {
         when(userListItemService.addItem(eq(lucasId), any(UUID.class), any(UserListItemCreationDTO.class)))
                 .thenReturn(buildItemResponseDto(movieRef));
         when(userListItemService.getWatchedPercentage(savedListId, lucasId)).thenReturn(100.0);
-        when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0)))
+        when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
         userListService.createUserListWithItems(
                 lucasId, new UserListBulkCreationDTO("My list", null, null, List.of(movieRef)));
 
         verify(userListItemService).getWatchedPercentage(savedListId, lucasId);
-        verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0));
+        verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean());
     }
 
     @Test
@@ -626,7 +635,7 @@ class UserListServiceImplTest {
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
         when(userListItemService.addItem(eq(lucasId), any(UUID.class), any(UserListItemCreationDTO.class)))
                 .thenReturn(buildItemResponseDto(movieRef));
-        when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble()))
+        when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
         userListService.createUserListWithItems(lucasId, new UserListBulkCreationDTO("My list", null, null, List.of(movieRef)));
@@ -666,7 +675,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         UserListResponseDTO result = userListService.updateUserList(
                 lucasId, existing.getId(), new UserListPatchDTO("New name", "New description", UserListVisibility.PRIVATE));
@@ -687,11 +696,11 @@ class UserListServiceImplTest {
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userListItemService.getPreviewItems(existing.getId())).thenReturn(previewItems);
         when(userListItemService.countNestedLists(existing.getId())).thenReturn(1L);
-        when(userListMapper.userListToResponseDto(existing, previewItems, 1L, 0.0)).thenReturn(buildResponseDto(existing));
+        when(userListMapper.userListToResponseDto(existing, previewItems, 1L, 0.0, false)).thenReturn(buildResponseDto(existing));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, null, null));
 
-        verify(userListMapper).userListToResponseDto(existing, previewItems, 1L, 0.0);
+        verify(userListMapper).userListToResponseDto(existing, previewItems, 1L, 0.0, false);
     }
 
     @Test
@@ -700,7 +709,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, null, null));
 
@@ -715,7 +724,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO("  New name  ", null, null));
 
@@ -728,7 +737,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO("Old name", null, null));
 
@@ -741,7 +750,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, "New description", null));
 
@@ -754,7 +763,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, "Old description", null));
 
@@ -767,7 +776,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, null, UserListVisibility.PRIVATE));
 
@@ -780,7 +789,7 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, null, UserListVisibility.PUBLIC));
 
@@ -843,6 +852,19 @@ class UserListServiceImplTest {
     }
 
     @Test
+    @DisplayName("[deleteUserList] Should Remove Items Referencing This List As A Nested Child - Before Deleting It")
+    void shouldRemoveItemsReferencingThisListAsANestedChildBeforeDeletingIt() {
+        UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+
+        userListService.deleteUserList(lucasId, list.getId());
+
+        InOrder inOrder = inOrder(userListItemService, userListRepository);
+        inOrder.verify(userListItemService).removeItemsReferencingChildList(list.getId());
+        inOrder.verify(userListRepository).delete(list);
+    }
+
+    @Test
     @DisplayName("[deleteUserList] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExistOnDelete() {
         UUID missingId = UUID.randomUUID();
@@ -853,6 +875,7 @@ class UserListServiceImplTest {
                 .hasMessage("List not found");
 
         verify(userListRepository, never()).delete(any());
+        verifyNoInteractions(userListItemService);
     }
 
     @Test
@@ -866,6 +889,7 @@ class UserListServiceImplTest {
                 .hasMessage("List not found");
 
         verify(userListRepository, never()).delete(any());
+        verifyNoInteractions(userListItemService);
     }
 
     // ---------- helpers ----------
@@ -903,13 +927,13 @@ class UserListServiceImplTest {
     private UserListResponseDTO buildResponseDto(UserList list) {
         return new UserListResponseDTO(
                 list.getId(), list.getName(), list.getDescription(),
-                list.getVisibility(), 0.0, list.getCreatedAt(), list.getUpdatedAt(), List.of(), 0L);
+                list.getVisibility(), 0.0, list.getCreatedAt(), list.getUpdatedAt(), List.of(), 0L, 0, false);
     }
 
     private UserListDetailedResponseDTO buildDetailedResponseDto(UserList list, List<UserListItemResponseDTO> items) {
         return new UserListDetailedResponseDTO(
                 list.getId(), list.getName(), list.getDescription(),
-                list.getVisibility(), 0.0, list.getCreatedAt(), list.getUpdatedAt(), items);
+                list.getVisibility(), 0.0, list.getCreatedAt(), list.getUpdatedAt(), items, 0, false);
     }
 
     private ContentRefCreationDTO buildContentRef(String tmdbId, ContentType type) {

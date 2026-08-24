@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
@@ -31,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -42,6 +44,7 @@ public class UserListServiceImpl implements UserListService {
     private final FollowerRepository followerRepository;
     private final UserListItemService userListItemService;
     private final UserListMapper userListMapper;
+    private final LikeService likeService;
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
@@ -66,19 +69,22 @@ public class UserListServiceImpl implements UserListService {
         Map<UUID, List<ContentRefDTO>> previewsByListId = userListItemService.getPreviewItemsByListIds(listIds);
         Map<UUID, Long> nestedListsCountByListId = userListItemService.countNestedListsByListIds(listIds);
         Map<UUID, Double> watchedPercentageByListId = userListItemService.getWatchedPercentagesByListIds(listIds, viewerId);
+        Set<UUID> likedListIds = likeService.getLikedListIds(viewerId, listIds);
 
         return lists.map(list -> userListMapper.userListToResponseDto(
                 list,
                 previewsByListId.getOrDefault(list.getId(), List.of()),
                 nestedListsCountByListId.getOrDefault(list.getId(), 0L),
-                watchedPercentageByListId.getOrDefault(list.getId(), 0.0)));
+                watchedPercentageByListId.getOrDefault(list.getId(), 0.0),
+                likedListIds.contains(list.getId())));
     }
 
     private UserListResponseDTO toResponseDto(UserList userList, UUID viewerId) {
         List<ContentRefDTO> previewItems = userListItemService.getPreviewItems(userList.getId());
         long nestedListsCount = userListItemService.countNestedLists(userList.getId());
         double watchedPercentage = userListItemService.getWatchedPercentage(userList.getId(), viewerId);
-        return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage);
+        boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(userList.getId())).contains(userList.getId());
+        return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage, likedByMe);
     }
 
     private void assertCanViewLists(User target, boolean isOwner, boolean viewerFollowsTarget) {
@@ -104,8 +110,9 @@ public class UserListServiceImpl implements UserListService {
 
         List<UserListItemResponseDTO> items = userListItemService.getItems(viewerId, listId);
         double watchedPercentage = userListItemService.getWatchedPercentage(listId, viewerId);
+        boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
 
-        return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage);
+        return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe);
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {
@@ -141,7 +148,7 @@ public class UserListServiceImpl implements UserListService {
                 .updatedAt(now)
                 .build();
 
-        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0);
+        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0, false);
     }
 
     @Override
@@ -166,7 +173,7 @@ public class UserListServiceImpl implements UserListService {
                 .toList();
         double watchedPercentage = userListItemService.getWatchedPercentage(savedList.getId(), userId);
 
-        return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage);
+        return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage, false);
     }
 
     private UserListItemResponseDTO addContentItem(UUID userId, UUID listId, ContentRefCreationDTO content) {
@@ -209,6 +216,7 @@ public class UserListServiceImpl implements UserListService {
     public void deleteUserList(UUID userId, UUID listId) {
         UserList userList = findOwnedList(userId, listId);
 
+        userListItemService.removeItemsReferencingChildList(listId);
         userListRepository.delete(userList);
     }
 
