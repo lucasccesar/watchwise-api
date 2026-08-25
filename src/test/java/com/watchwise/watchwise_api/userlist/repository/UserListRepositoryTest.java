@@ -213,6 +213,30 @@ class UserListRepositoryTest {
         assertThat(userListRepository.findById(saved.getId())).isEmpty();
     }
 
+    @Test
+    @DisplayName("[incrementLikesCount] Should Increase LikesCount By One - When Called")
+    void shouldIncreaseLikesCountByOneWhenIncrementLikesCountIsCalled() {
+        UserList saved = userListRepository.saveAndFlush(buildList(lucas, "My list", true));
+        entityManager.clear();
+
+        userListRepository.incrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        assertThat(userListRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[decrementLikesCount] Should Not Go Below Zero - When Already Zero")
+    void shouldNotGoBelowZeroWhenAlreadyZero() {
+        UserList saved = userListRepository.saveAndFlush(buildList(lucas, "My list", true));
+        entityManager.clear();
+
+        userListRepository.decrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        assertThat(userListRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(0);
+    }
+
     private UserList buildList(User user, String name, boolean isPublic) {
         return buildListWithVisibility(user, name, isPublic ? UserListVisibility.PUBLIC : UserListVisibility.PRIVATE);
     }

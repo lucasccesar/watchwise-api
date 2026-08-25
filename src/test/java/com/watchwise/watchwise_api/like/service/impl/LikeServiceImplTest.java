@@ -32,7 +32,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -224,6 +226,7 @@ class LikeServiceImplTest {
         assertThat(likeCaptor.getValue().getComment()).isNotNull();
         assertThat(likeCaptor.getValue().getDiaryEntry()).isNull();
         assertThat(likeCaptor.getValue().getCreatedAt()).isNotNull();
+        verify(commentRepository).incrementLikesCount(commentId);
     }
 
     @Test
@@ -248,6 +251,22 @@ class LikeServiceImplTest {
 
         verify(likeRepository, never()).saveAndFlush(any());
         verifyNoInteractions(commentRepository);
+    }
+
+    @Test
+    @DisplayName("[likeComment] Should Not Increment LikesCount - When Save Throws DataIntegrityViolationException")
+    void shouldNotIncrementLikesCountWhenSaveThrowsDataIntegrityViolationExceptionForComment() {
+        when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId))
+                .thenReturn(false)
+                .thenReturn(true);
+        when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(buildContentComment()));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.getReferenceById(commentId)).thenReturn(buildContentComment());
+        when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
+
+        likeService.likeComment(lucasId, commentId);
+
+        verify(commentRepository, never()).incrementLikesCount(any());
     }
 
     @Test
@@ -420,29 +439,23 @@ class LikeServiceImplTest {
     // ---------- unlikeComment ----------
 
     @Test
-    @DisplayName("[unlikeComment] Should Delete The Row - When It Exists")
-    void shouldDeleteTheRowWhenItExists() {
-        Like like = Like.builder()
-                .id(UUID.randomUUID())
-                .user(lucas)
-                .comment(buildContentComment())
-                .createdAt(LocalDateTime.now())
-                .build();
-        when(likeRepository.findByUserIdAndCommentId(lucasId, commentId)).thenReturn(Optional.of(like));
+    @DisplayName("[unlikeComment] Should Decrement Likes Count - When A Row Was Actually Deleted")
+    void shouldDecrementLikesCountWhenARowWasActuallyDeletedForComment() {
+        when(likeRepository.deleteByUserIdAndCommentId(lucasId, commentId)).thenReturn(1);
 
         likeService.unlikeComment(lucasId, commentId);
 
-        verify(likeRepository).delete(like);
+        verify(commentRepository).decrementLikesCount(commentId);
     }
 
     @Test
-    @DisplayName("[unlikeComment] Should Do Nothing - When The Row Does Not Exist")
-    void shouldDoNothingWhenTheRowDoesNotExistForComment() {
-        when(likeRepository.findByUserIdAndCommentId(lucasId, commentId)).thenReturn(Optional.empty());
+    @DisplayName("[unlikeComment] Should Not Decrement Likes Count - When No Row Was Deleted, Not Liked Or Already Unliked By A Concurrent Request")
+    void shouldNotDecrementLikesCountWhenNoRowWasDeletedForComment() {
+        when(likeRepository.deleteByUserIdAndCommentId(lucasId, commentId)).thenReturn(0);
 
         likeService.unlikeComment(lucasId, commentId);
 
-        verify(likeRepository, never()).delete(any());
+        verify(commentRepository, never()).decrementLikesCount(any());
     }
 
     // ---------- likeDiaryEntry ----------
@@ -462,6 +475,7 @@ class LikeServiceImplTest {
         assertThat(likeCaptor.getValue().getDiaryEntry()).isEqualTo(diaryEntry);
         assertThat(likeCaptor.getValue().getComment()).isNull();
         assertThat(likeCaptor.getValue().getCreatedAt()).isNotNull();
+        verify(diaryEntryRepository).incrementLikesCount(diaryEntryId);
     }
 
     @Test
@@ -486,6 +500,22 @@ class LikeServiceImplTest {
 
         verify(likeRepository, never()).saveAndFlush(any());
         verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[likeDiaryEntry] Should Not Increment LikesCount - When Save Throws DataIntegrityViolationException")
+    void shouldNotIncrementLikesCountWhenSaveThrowsDataIntegrityViolationExceptionForDiaryEntry() {
+        when(likeRepository.existsByUserIdAndDiaryEntryId(lucasId, diaryEntryId))
+                .thenReturn(false)
+                .thenReturn(true);
+        when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(diaryEntryRepository.getReferenceById(diaryEntryId)).thenReturn(diaryEntry);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
+
+        likeService.likeDiaryEntry(lucasId, diaryEntryId);
+
+        verify(diaryEntryRepository, never()).incrementLikesCount(any());
     }
 
     @Test
@@ -578,29 +608,23 @@ class LikeServiceImplTest {
     // ---------- unlikeDiaryEntry ----------
 
     @Test
-    @DisplayName("[unlikeDiaryEntry] Should Delete The Row - When It Exists")
-    void shouldDeleteTheRowWhenItExistsForDiaryEntry() {
-        Like like = Like.builder()
-                .id(UUID.randomUUID())
-                .user(lucas)
-                .diaryEntry(diaryEntry)
-                .createdAt(LocalDateTime.now())
-                .build();
-        when(likeRepository.findByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(Optional.of(like));
+    @DisplayName("[unlikeDiaryEntry] Should Decrement Likes Count - When A Row Was Actually Deleted")
+    void shouldDecrementLikesCountWhenARowWasActuallyDeletedForDiaryEntry() {
+        when(likeRepository.deleteByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(1);
 
         likeService.unlikeDiaryEntry(lucasId, diaryEntryId);
 
-        verify(likeRepository).delete(like);
+        verify(diaryEntryRepository).decrementLikesCount(diaryEntryId);
     }
 
     @Test
-    @DisplayName("[unlikeDiaryEntry] Should Do Nothing - When The Row Does Not Exist")
-    void shouldDoNothingWhenTheRowDoesNotExistForDiaryEntry() {
-        when(likeRepository.findByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(Optional.empty());
+    @DisplayName("[unlikeDiaryEntry] Should Not Decrement Likes Count - When No Row Was Deleted, Not Liked Or Already Unliked By A Concurrent Request")
+    void shouldNotDecrementLikesCountWhenNoRowWasDeletedForDiaryEntry() {
+        when(likeRepository.deleteByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(0);
 
         likeService.unlikeDiaryEntry(lucasId, diaryEntryId);
 
-        verify(likeRepository, never()).delete(any());
+        verify(diaryEntryRepository, never()).decrementLikesCount(any());
     }
 
     // ---------- likeList ----------
@@ -622,6 +646,7 @@ class LikeServiceImplTest {
         assertThat(likeCaptor.getValue().getComment()).isNull();
         assertThat(likeCaptor.getValue().getDiaryEntry()).isNull();
         assertThat(likeCaptor.getValue().getCreatedAt()).isNotNull();
+        verify(userListRepository).incrementLikesCount(listId);
     }
 
     @Test
@@ -767,31 +792,103 @@ class LikeServiceImplTest {
         assertThatThrownBy(() -> likeService.likeList(lucasId, listId)).isSameAs(exception);
     }
 
+    @Test
+    @DisplayName("[likeList] Should Not Increment LikesCount - When Save Throws DataIntegrityViolationException")
+    void shouldNotIncrementLikesCountWhenSaveThrowsDataIntegrityViolationExceptionForList() {
+        when(likeRepository.existsByUserIdAndListId(lucasId, listId))
+                .thenReturn(false)
+                .thenReturn(true);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
+
+        likeService.likeList(lucasId, listId);
+
+        verify(userListRepository, never()).incrementLikesCount(any());
+    }
+
     // ---------- unlikeList ----------
 
     @Test
-    @DisplayName("[unlikeList] Should Delete The Row - When It Exists")
-    void shouldDeleteTheRowWhenItExistsForList() {
-        Like like = Like.builder()
-                .id(UUID.randomUUID())
-                .user(lucas)
-                .list(scifi)
-                .createdAt(LocalDateTime.now())
-                .build();
-        when(likeRepository.findByUserIdAndListId(lucasId, listId)).thenReturn(Optional.of(like));
+    @DisplayName("[unlikeList] Should Decrement Likes Count - When A Row Was Actually Deleted")
+    void shouldDecrementLikesCountWhenARowWasActuallyDeletedForList() {
+        when(likeRepository.deleteByUserIdAndListId(lucasId, listId)).thenReturn(1);
 
         likeService.unlikeList(lucasId, listId);
 
-        verify(likeRepository).delete(like);
+        verify(userListRepository).decrementLikesCount(listId);
     }
 
     @Test
-    @DisplayName("[unlikeList] Should Do Nothing - When The Row Does Not Exist")
-    void shouldDoNothingWhenTheRowDoesNotExistForList() {
-        when(likeRepository.findByUserIdAndListId(lucasId, listId)).thenReturn(Optional.empty());
+    @DisplayName("[unlikeList] Should Not Decrement Likes Count - When No Row Was Deleted, Not Liked Or Already Unliked By A Concurrent Request")
+    void shouldNotDecrementLikesCountWhenNoRowWasDeletedForList() {
+        when(likeRepository.deleteByUserIdAndListId(lucasId, listId)).thenReturn(0);
 
         likeService.unlikeList(lucasId, listId);
 
-        verify(likeRepository, never()).delete(any());
+        verify(userListRepository, never()).decrementLikesCount(any());
+    }
+
+    // ---------- getLikedCommentIds / getLikedDiaryEntryIds / getLikedListIds ----------
+
+    @Test
+    @DisplayName("[getLikedCommentIds] Should Return Ids From The Repository - When The Id Collection Is Not Empty")
+    void shouldReturnIdsFromTheRepositoryWhenTheIdCollectionIsNotEmptyForComments() {
+        UUID otherCommentId = UUID.randomUUID();
+        when(likeRepository.findLikedCommentIds(lucasId, List.of(commentId, otherCommentId)))
+                .thenReturn(Set.of(commentId));
+
+        Set<UUID> result = likeService.getLikedCommentIds(lucasId, List.of(commentId, otherCommentId));
+
+        assertThat(result).containsExactly(commentId);
+    }
+
+    @Test
+    @DisplayName("[getLikedCommentIds] Should Return Empty Set Without Querying - When The Id Collection Is Empty")
+    void shouldReturnEmptySetWithoutQueryingWhenTheIdCollectionIsEmptyForComments() {
+        Set<UUID> result = likeService.getLikedCommentIds(lucasId, List.of());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(likeRepository);
+    }
+
+    @Test
+    @DisplayName("[getLikedDiaryEntryIds] Should Return Ids From The Repository - When The Id Collection Is Not Empty")
+    void shouldReturnIdsFromTheRepositoryWhenTheIdCollectionIsNotEmptyForDiaryEntries() {
+        when(likeRepository.findLikedDiaryEntryIds(lucasId, List.of(diaryEntryId))).thenReturn(Set.of(diaryEntryId));
+
+        Set<UUID> result = likeService.getLikedDiaryEntryIds(lucasId, List.of(diaryEntryId));
+
+        assertThat(result).containsExactly(diaryEntryId);
+    }
+
+    @Test
+    @DisplayName("[getLikedDiaryEntryIds] Should Return Empty Set Without Querying - When The Id Collection Is Empty")
+    void shouldReturnEmptySetWithoutQueryingWhenTheIdCollectionIsEmptyForDiaryEntries() {
+        Set<UUID> result = likeService.getLikedDiaryEntryIds(lucasId, List.of());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(likeRepository);
+    }
+
+    @Test
+    @DisplayName("[getLikedListIds] Should Return Ids From The Repository - When The Id Collection Is Not Empty")
+    void shouldReturnIdsFromTheRepositoryWhenTheIdCollectionIsNotEmptyForLists() {
+        when(likeRepository.findLikedListIds(lucasId, List.of(listId))).thenReturn(Set.of(listId));
+
+        Set<UUID> result = likeService.getLikedListIds(lucasId, List.of(listId));
+
+        assertThat(result).containsExactly(listId);
+    }
+
+    @Test
+    @DisplayName("[getLikedListIds] Should Return Empty Set Without Querying - When The Id Collection Is Empty")
+    void shouldReturnEmptySetWithoutQueryingWhenTheIdCollectionIsEmptyForLists() {
+        Set<UUID> result = likeService.getLikedListIds(lucasId, List.of());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(likeRepository);
     }
 }

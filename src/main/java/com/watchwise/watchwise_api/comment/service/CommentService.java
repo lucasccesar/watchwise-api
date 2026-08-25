@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public interface CommentService {
 
-    Page<CommentResponseDTO> getCommentsForContent(UUID contentId, Integer pageNumber, Integer pageSize);
+    Page<CommentResponseDTO> getCommentsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize);
 
     Page<CommentResponseDTO> getCommentsForList(UUID viewerId, UUID listId, Integer pageNumber, Integer pageSize);
 

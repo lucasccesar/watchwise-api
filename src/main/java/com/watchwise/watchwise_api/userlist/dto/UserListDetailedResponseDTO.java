@@ -14,6 +14,8 @@ public record UserListDetailedResponseDTO(
         Double watchedPercentage,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        List<UserListItemResponseDTO> items
+        List<UserListItemResponseDTO> items,
+        Integer likesCount,
+        Boolean likedByMe
 ) {
 }

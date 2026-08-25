@@ -10,10 +10,10 @@ import org.mapstruct.ReportingPolicy;
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR, uses = UserMapper.class)
 public interface CommentMapper {
 
-    @Mapping(source = "content.id", target = "contentId")
-    @Mapping(source = "list.id", target = "listId")
-    @Mapping(source = "diaryEntry.id", target = "diaryEntryId")
-    @Mapping(source = "parentComment.id", target = "parentCommentId")
-    CommentResponseDTO commentToResponseDto(Comment comment);
+    @Mapping(source = "comment.content.id", target = "contentId")
+    @Mapping(source = "comment.list.id", target = "listId")
+    @Mapping(source = "comment.diaryEntry.id", target = "diaryEntryId")
+    @Mapping(source = "comment.parentComment.id", target = "parentCommentId")
+    CommentResponseDTO commentToResponseDto(Comment comment, boolean likedByMe);
 
 }

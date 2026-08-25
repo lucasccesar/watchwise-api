@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -37,6 +38,7 @@ import org.springframework.data.domain.PageRequest;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,6 +73,9 @@ class CommentServiceImplTest {
 
     @Mock
     private CommentMapper commentMapper;
+
+    @Mock
+    private LikeService likeService;
 
     @InjectMocks
     private CommentServiceImpl commentService;
@@ -149,7 +154,9 @@ class CommentServiceImplTest {
 
         responseDto = new CommentResponseDTO(
                 UUID.randomUUID(), null, contentId, null, null, null, "Great movie!", false,
-                LocalDateTime.now(), LocalDateTime.now());
+                LocalDateTime.now(), LocalDateTime.now(), 0, false);
+
+        lenient().when(likeService.getLikedCommentIds(any(), any())).thenReturn(Set.of());
     }
 
     private Comment buildContentComment(Content content) {
@@ -197,9 +204,9 @@ class CommentServiceImplTest {
         when(contentRepository.existsById(contentId)).thenReturn(true);
         when(commentRepository.findByContentIdOrderByCreatedAtAsc(eq(contentId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(comment)));
-        when(commentMapper.commentToResponseDto(comment)).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(comment, false)).thenReturn(responseDto);
 
-        Page<CommentResponseDTO> result = commentService.getCommentsForContent(contentId, 1, 10);
+        Page<CommentResponseDTO> result = commentService.getCommentsForContent(lucasId, contentId, 1, 10);
 
         assertThat(result.getContent()).containsExactly(responseDto);
     }
@@ -211,10 +218,10 @@ class CommentServiceImplTest {
         when(commentRepository.findByContentIdOrderByCreatedAtAsc(eq(contentId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        Page<CommentResponseDTO> result = commentService.getCommentsForContent(contentId, 1, 10);
+        Page<CommentResponseDTO> result = commentService.getCommentsForContent(lucasId, contentId, 1, 10);
 
         assertThat(result.getContent()).isEmpty();
-        verify(commentMapper, never()).commentToResponseDto(any());
+        verify(commentMapper, never()).commentToResponseDto(any(), anyBoolean());
     }
 
     @Test
@@ -222,7 +229,7 @@ class CommentServiceImplTest {
     void shouldThrowNotFoundExceptionWhenContentDoesNotExistForListing() {
         when(contentRepository.existsById(contentId)).thenReturn(false);
 
-        assertThatThrownBy(() -> commentService.getCommentsForContent(contentId, 1, 10))
+        assertThatThrownBy(() -> commentService.getCommentsForContent(lucasId, contentId, 1, 10))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Content not found");
 
@@ -234,7 +241,7 @@ class CommentServiceImplTest {
     void shouldUseDefaultPageWhenPageNumberIsNull() {
         stubContentCommentsEmptyPage();
 
-        commentService.getCommentsForContent(contentId, null, 10);
+        commentService.getCommentsForContent(lucasId, contentId, null, 10);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE);
@@ -245,7 +252,7 @@ class CommentServiceImplTest {
     void shouldUseDefaultPageWhenPageNumberIsZero() {
         stubContentCommentsEmptyPage();
 
-        commentService.getCommentsForContent(contentId, 0, 10);
+        commentService.getCommentsForContent(lucasId, contentId, 0, 10);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE);
@@ -256,7 +263,7 @@ class CommentServiceImplTest {
     void shouldUsePageNumberMinusOneWhenPageNumberIsPositive() {
         stubContentCommentsEmptyPage();
 
-        commentService.getCommentsForContent(contentId, 3, 10);
+        commentService.getCommentsForContent(lucasId, contentId, 3, 10);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(2);
@@ -267,7 +274,7 @@ class CommentServiceImplTest {
     void shouldThrowBadRequestExceptionWhenPageNumberIsNegative() {
         when(contentRepository.existsById(contentId)).thenReturn(true);
 
-        assertThatThrownBy(() -> commentService.getCommentsForContent(contentId, -1, 10))
+        assertThatThrownBy(() -> commentService.getCommentsForContent(lucasId, contentId, -1, 10))
                 .isInstanceOf(BadRequestException.class);
 
         verify(commentRepository, never()).findByContentIdOrderByCreatedAtAsc(any(), any());
@@ -278,7 +285,7 @@ class CommentServiceImplTest {
     void shouldUseDefaultPageSizeWhenPageSizeIsNull() {
         stubContentCommentsEmptyPage();
 
-        commentService.getCommentsForContent(contentId, 1, null);
+        commentService.getCommentsForContent(lucasId, contentId, 1, null);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE_SIZE);
@@ -289,7 +296,7 @@ class CommentServiceImplTest {
     void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
         stubContentCommentsEmptyPage();
 
-        commentService.getCommentsForContent(contentId, 1, 1001);
+        commentService.getCommentsForContent(lucasId, contentId, 1, 1001);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE_SIZE);
@@ -300,7 +307,7 @@ class CommentServiceImplTest {
     void shouldUseProvidedPageSizeWhenPageSizeIsValid() {
         stubContentCommentsEmptyPage();
 
-        commentService.getCommentsForContent(contentId, 1, 25);
+        commentService.getCommentsForContent(lucasId, contentId, 1, 25);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(25);
@@ -311,7 +318,7 @@ class CommentServiceImplTest {
     void shouldUseProvidedPageSizeWhenPageSizeIsAtMaxLimit() {
         stubContentCommentsEmptyPage();
 
-        commentService.getCommentsForContent(contentId, 1, 1000);
+        commentService.getCommentsForContent(lucasId, contentId, 1, 1000);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(1000);
@@ -322,7 +329,7 @@ class CommentServiceImplTest {
     void shouldThrowBadRequestExceptionWhenPageSizeIsNegative() {
         when(contentRepository.existsById(contentId)).thenReturn(true);
 
-        assertThatThrownBy(() -> commentService.getCommentsForContent(contentId, 1, -5))
+        assertThatThrownBy(() -> commentService.getCommentsForContent(lucasId, contentId, 1, -5))
                 .isInstanceOf(BadRequestException.class);
 
         verify(commentRepository, never()).findByContentIdOrderByCreatedAtAsc(any(), any());
@@ -333,7 +340,7 @@ class CommentServiceImplTest {
     void shouldThrowBadRequestExceptionWhenPageSizeIsZero() {
         when(contentRepository.existsById(contentId)).thenReturn(true);
 
-        assertThatThrownBy(() -> commentService.getCommentsForContent(contentId, 1, 0))
+        assertThatThrownBy(() -> commentService.getCommentsForContent(lucasId, contentId, 1, 0))
                 .isInstanceOf(BadRequestException.class);
 
         verify(commentRepository, never()).findByContentIdOrderByCreatedAtAsc(any(), any());
@@ -353,7 +360,7 @@ class CommentServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(commentRepository.findByListIdOrderByCreatedAtAsc(eq(listId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(comment)));
-        when(commentMapper.commentToResponseDto(comment)).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(comment, false)).thenReturn(responseDto);
 
         Page<CommentResponseDTO> result = commentService.getCommentsForList(lucasId, listId, 1, 10);
 
@@ -369,7 +376,7 @@ class CommentServiceImplTest {
         Page<CommentResponseDTO> result = commentService.getCommentsForList(lucasId, listId, 1, 10);
 
         assertThat(result.getContent()).isEmpty();
-        verify(commentMapper, never()).commentToResponseDto(any());
+        verify(commentMapper, never()).commentToResponseDto(any(), anyBoolean());
     }
 
     @Test
@@ -466,7 +473,7 @@ class CommentServiceImplTest {
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
         when(commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(eq(diaryEntryId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(comment)));
-        when(commentMapper.commentToResponseDto(comment)).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(comment, false)).thenReturn(responseDto);
 
         Page<CommentResponseDTO> result = commentService.getCommentsForDiaryEntry(lucasId, diaryEntryId, 1, 10);
 
@@ -483,7 +490,7 @@ class CommentServiceImplTest {
         Page<CommentResponseDTO> result = commentService.getCommentsForDiaryEntry(lucasId, diaryEntryId, 1, 10);
 
         assertThat(result.getContent()).isEmpty();
-        verify(commentMapper, never()).commentToResponseDto(any());
+        verify(commentMapper, never()).commentToResponseDto(any(), anyBoolean());
     }
 
     @Test
@@ -559,7 +566,7 @@ class CommentServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(fightClub));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         CommentResponseDTO result = commentService.createCommentOnContent(
                 lucasId, contentId, new CommentCreationDTO("Great movie!", null, null));
@@ -582,7 +589,7 @@ class CommentServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(fightClub));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnContent(lucasId, contentId, new CommentCreationDTO("Ending spoiler", null, true));
 
@@ -611,7 +618,7 @@ class CommentServiceImplTest {
         when(commentRepository.findById(parent.getId())).thenReturn(Optional.of(parent));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnContent(lucasId, contentId, new CommentCreationDTO("Totally agree", parent.getId(), null));
 
@@ -665,7 +672,7 @@ class CommentServiceImplTest {
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         CommentResponseDTO result = commentService.createCommentOnList(
                 lucasId, listId, new CommentCreationDTO("Nice picks", null, null));
@@ -700,7 +707,7 @@ class CommentServiceImplTest {
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnList(marinaId, listId, new CommentCreationDTO("My own list", null, null));
 
@@ -717,7 +724,7 @@ class CommentServiceImplTest {
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnList(lucasId, listId, new CommentCreationDTO("Nice picks", null, null));
 
@@ -777,7 +784,7 @@ class CommentServiceImplTest {
         when(commentRepository.findById(parent.getId())).thenReturn(Optional.of(parent));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnList(lucasId, listId, new CommentCreationDTO("Totally agree", parent.getId(), null));
 
@@ -833,7 +840,7 @@ class CommentServiceImplTest {
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         CommentResponseDTO result = commentService.createCommentOnDiaryEntry(
                 lucasId, diaryEntryId, new CommentCreationDTO("Agreed", null, null));
@@ -867,7 +874,7 @@ class CommentServiceImplTest {
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
         when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnDiaryEntry(marinaId, diaryEntryId, new CommentCreationDTO("My own entry", null, null));
 
@@ -883,7 +890,7 @@ class CommentServiceImplTest {
                 .thenReturn(true);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnDiaryEntry(lucasId, diaryEntryId, new CommentCreationDTO("Agreed", null, null));
 
@@ -914,7 +921,7 @@ class CommentServiceImplTest {
         when(commentRepository.findById(parent.getId())).thenReturn(Optional.of(parent));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(commentMapper.commentToResponseDto(any(Comment.class))).thenReturn(responseDto);
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
         commentService.createCommentOnDiaryEntry(
                 lucasId, diaryEntryId, new CommentCreationDTO("Totally agree", parent.getId(), null));

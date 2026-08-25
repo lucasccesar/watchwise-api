@@ -249,6 +249,30 @@ class DiaryEntryRepositoryTest {
         assertThat(diaryEntryRepository.findById(saved.getId())).isEmpty();
     }
 
+    @Test
+    @DisplayName("[incrementLikesCount] Should Increase LikesCount By One - When Called")
+    void shouldIncreaseLikesCountByOneWhenIncrementLikesCountIsCalled() {
+        DiaryEntry saved = diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+        entityManager.clear();
+
+        diaryEntryRepository.incrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        assertThat(diaryEntryRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[decrementLikesCount] Should Not Go Below Zero - When Already Zero")
+    void shouldNotGoBelowZeroWhenAlreadyZero() {
+        DiaryEntry saved = diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+        entityManager.clear();
+
+        diaryEntryRepository.decrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        assertThat(diaryEntryRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(0);
+    }
+
     private DiaryEntry buildEntry(User user, Content content) {
         return buildEntry(user, content, 1);
     }

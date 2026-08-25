@@ -10,7 +10,7 @@ import org.mapstruct.ReportingPolicy;
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR, uses = ContentMapper.class)
 public interface DiaryEntryMapper {
 
-    @Mapping(source = "user.id", target = "userId")
-    DiaryEntryResponseDTO diaryEntryToResponseDto(DiaryEntry entry);
+    @Mapping(source = "entry.user.id", target = "userId")
+    DiaryEntryResponseDTO diaryEntryToResponseDto(DiaryEntry entry, boolean likedByMe);
 
 }

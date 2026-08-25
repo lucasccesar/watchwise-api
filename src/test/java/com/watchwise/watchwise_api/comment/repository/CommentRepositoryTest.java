@@ -361,6 +361,43 @@ class CommentRepositoryTest {
         assertThat(commentRepository.findById(reply.getId())).isEmpty();
     }
 
+    @Test
+    @DisplayName("[incrementLikesCount] Should Increase LikesCount By One - When Called")
+    void shouldIncreaseLikesCountByOneWhenIncrementLikesCountIsCalled() {
+        Comment saved = commentRepository.saveAndFlush(buildContentComment(lucas, fightClub, "Great movie!"));
+        entityManager.clear();
+
+        commentRepository.incrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        assertThat(commentRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[decrementLikesCount] Should Decrease LikesCount By One - When Greater Than Zero")
+    void shouldDecreaseLikesCountByOneWhenGreaterThanZero() {
+        Comment saved = commentRepository.saveAndFlush(buildContentComment(lucas, fightClub, "Great movie!"));
+        commentRepository.incrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        commentRepository.decrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        assertThat(commentRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("[decrementLikesCount] Should Not Go Below Zero - When Already Zero")
+    void shouldNotGoBelowZeroWhenAlreadyZero() {
+        Comment saved = commentRepository.saveAndFlush(buildContentComment(lucas, fightClub, "Great movie!"));
+        entityManager.clear();
+
+        commentRepository.decrementLikesCount(saved.getId());
+        entityManager.clear();
+
+        assertThat(commentRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(0);
+    }
+
     private Comment buildContentComment(User user, Content content, String text) {
         LocalDateTime now = LocalDateTime.now();
         return Comment.builder()

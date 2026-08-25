@@ -29,7 +29,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -251,43 +253,43 @@ class LikeRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndCommentId] Should Return The Like - When It Exists")
-    void shouldReturnTheLikeWhenItExistsByUserIdAndCommentId() {
-        Like saved = likeRepository.saveAndFlush(buildCommentLike(lucas, comment));
+    @DisplayName("[deleteByUserIdAndCommentId] Should Delete The Row And Return One - When It Exists")
+    void shouldDeleteTheRowAndReturnOneWhenItExistsByUserIdAndCommentId() {
+        likeRepository.saveAndFlush(buildCommentLike(lucas, comment));
         entityManager.clear();
 
-        Optional<Like> result = likeRepository.findByUserIdAndCommentId(lucas.getId(), comment.getId());
+        int deleted = likeRepository.deleteByUserIdAndCommentId(lucas.getId(), comment.getId());
 
-        assertThat(result).isPresent();
-        assertThat(result.get().getId()).isEqualTo(saved.getId());
+        assertThat(deleted).isEqualTo(1);
+        assertThat(likeRepository.existsByUserIdAndCommentId(lucas.getId(), comment.getId())).isFalse();
     }
 
     @Test
-    @DisplayName("[findByUserIdAndCommentId] Should Return Empty - When It Does Not Exist")
-    void shouldReturnEmptyWhenItDoesNotExistByUserIdAndCommentId() {
-        Optional<Like> result = likeRepository.findByUserIdAndCommentId(lucas.getId(), comment.getId());
+    @DisplayName("[deleteByUserIdAndCommentId] Should Return Zero - When It Does Not Exist")
+    void shouldReturnZeroWhenItDoesNotExistByUserIdAndCommentId() {
+        int deleted = likeRepository.deleteByUserIdAndCommentId(lucas.getId(), comment.getId());
 
-        assertThat(result).isEmpty();
+        assertThat(deleted).isZero();
     }
 
     @Test
-    @DisplayName("[findByUserIdAndDiaryEntryId] Should Return The Like - When It Exists")
-    void shouldReturnTheLikeWhenItExistsByUserIdAndDiaryEntryId() {
-        Like saved = likeRepository.saveAndFlush(buildDiaryEntryLike(lucas, diaryEntry));
+    @DisplayName("[deleteByUserIdAndDiaryEntryId] Should Delete The Row And Return One - When It Exists")
+    void shouldDeleteTheRowAndReturnOneWhenItExistsByUserIdAndDiaryEntryId() {
+        likeRepository.saveAndFlush(buildDiaryEntryLike(lucas, diaryEntry));
         entityManager.clear();
 
-        Optional<Like> result = likeRepository.findByUserIdAndDiaryEntryId(lucas.getId(), diaryEntry.getId());
+        int deleted = likeRepository.deleteByUserIdAndDiaryEntryId(lucas.getId(), diaryEntry.getId());
 
-        assertThat(result).isPresent();
-        assertThat(result.get().getId()).isEqualTo(saved.getId());
+        assertThat(deleted).isEqualTo(1);
+        assertThat(likeRepository.existsByUserIdAndDiaryEntryId(lucas.getId(), diaryEntry.getId())).isFalse();
     }
 
     @Test
-    @DisplayName("[findByUserIdAndDiaryEntryId] Should Return Empty - When It Does Not Exist")
-    void shouldReturnEmptyWhenItDoesNotExistByUserIdAndDiaryEntryId() {
-        Optional<Like> result = likeRepository.findByUserIdAndDiaryEntryId(lucas.getId(), diaryEntry.getId());
+    @DisplayName("[deleteByUserIdAndDiaryEntryId] Should Return Zero - When It Does Not Exist")
+    void shouldReturnZeroWhenItDoesNotExistByUserIdAndDiaryEntryId() {
+        int deleted = likeRepository.deleteByUserIdAndDiaryEntryId(lucas.getId(), diaryEntry.getId());
 
-        assertThat(result).isEmpty();
+        assertThat(deleted).isZero();
     }
 
     @Test
@@ -321,23 +323,23 @@ class LikeRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndListId] Should Return The Like - When It Exists")
-    void shouldReturnTheLikeWhenItExistsByUserIdAndListId() {
-        Like saved = likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+    @DisplayName("[deleteByUserIdAndListId] Should Delete The Row And Return One - When It Exists")
+    void shouldDeleteTheRowAndReturnOneWhenItExistsByUserIdAndListId() {
+        likeRepository.saveAndFlush(buildListLike(lucas, scifi));
         entityManager.clear();
 
-        Optional<Like> result = likeRepository.findByUserIdAndListId(lucas.getId(), scifi.getId());
+        int deleted = likeRepository.deleteByUserIdAndListId(lucas.getId(), scifi.getId());
 
-        assertThat(result).isPresent();
-        assertThat(result.get().getId()).isEqualTo(saved.getId());
+        assertThat(deleted).isEqualTo(1);
+        assertThat(likeRepository.existsByUserIdAndListId(lucas.getId(), scifi.getId())).isFalse();
     }
 
     @Test
-    @DisplayName("[findByUserIdAndListId] Should Return Empty - When It Does Not Exist")
-    void shouldReturnEmptyWhenItDoesNotExistByUserIdAndListId() {
-        Optional<Like> result = likeRepository.findByUserIdAndListId(lucas.getId(), scifi.getId());
+    @DisplayName("[deleteByUserIdAndListId] Should Return Zero - When It Does Not Exist")
+    void shouldReturnZeroWhenItDoesNotExistByUserIdAndListId() {
+        int deleted = likeRepository.deleteByUserIdAndListId(lucas.getId(), scifi.getId());
 
-        assertThat(result).isEmpty();
+        assertThat(deleted).isZero();
     }
 
     @Test
@@ -401,6 +403,55 @@ class LikeRepositoryTest {
         userRepository.flush();
 
         assertThat(likeRepository.findById(saved.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findLikedCommentIds] Should Return Only The Ids Liked By The Given User - Among The Ids Requested")
+    void shouldReturnOnlyTheIdsLikedByTheGivenUserAmongTheIdsRequestedForComments() {
+        Comment secondComment = commentRepository.save(buildComment(marina, fightClub));
+        Comment thirdComment = commentRepository.save(buildComment(marina, fightClub));
+        likeRepository.saveAndFlush(buildCommentLike(lucas, comment));
+        likeRepository.saveAndFlush(buildCommentLike(marina, secondComment));
+        entityManager.clear();
+
+        Set<UUID> result = likeRepository.findLikedCommentIds(
+                lucas.getId(), List.of(comment.getId(), secondComment.getId(), thirdComment.getId()));
+
+        assertThat(result).containsExactly(comment.getId());
+    }
+
+    @Test
+    @DisplayName("[findLikedCommentIds] Should Return Empty - When The User Liked None Of The Requested Ids")
+    void shouldReturnEmptyWhenTheUserLikedNoneOfTheRequestedIdsForComments() {
+        Set<UUID> result = likeRepository.findLikedCommentIds(lucas.getId(), List.of(comment.getId()));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findLikedDiaryEntryIds] Should Return Only The Ids Liked By The Given User - Among The Ids Requested")
+    void shouldReturnOnlyTheIdsLikedByTheGivenUserAmongTheIdsRequestedForDiaryEntries() {
+        DiaryEntry secondEntry = diaryEntryRepository.save(buildDiaryEntry(lucas, fightClub));
+        likeRepository.saveAndFlush(buildDiaryEntryLike(lucas, diaryEntry));
+        entityManager.clear();
+
+        Set<UUID> result = likeRepository.findLikedDiaryEntryIds(
+                lucas.getId(), List.of(diaryEntry.getId(), secondEntry.getId()));
+
+        assertThat(result).containsExactly(diaryEntry.getId());
+    }
+
+    @Test
+    @DisplayName("[findLikedListIds] Should Return Only The Ids Liked By The Given User - Among The Ids Requested")
+    void shouldReturnOnlyTheIdsLikedByTheGivenUserAmongTheIdsRequestedForLists() {
+        UserList secondList = userListRepository.save(buildList(marina, "Underrated horror"));
+        likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        entityManager.clear();
+
+        Set<UUID> result = likeRepository.findLikedListIds(
+                lucas.getId(), List.of(scifi.getId(), secondList.getId()));
+
+        assertThat(result).containsExactly(scifi.getId());
     }
 
     private Like buildCommentLike(User user, Comment comment) {

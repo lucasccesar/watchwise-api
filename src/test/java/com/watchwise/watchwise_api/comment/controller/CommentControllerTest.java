@@ -57,7 +57,7 @@ class CommentControllerTest {
     void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingCommentsForContent() {
         UUID contentId = UUID.randomUUID();
         CommentResponseDTO dto = buildResponseDto();
-        when(commentService.getCommentsForContent(contentId, 1, 10))
+        when(commentService.getCommentsForContent(currentUserId, contentId, 1, 10))
                 .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
 
         ResponseEntity<PageResponseDTO<CommentResponseDTO>> result = commentController.getCommentsForContent(contentId, 1, 10);
@@ -67,6 +67,18 @@ class CommentControllerTest {
         assertThat(result.getBody().page()).isEqualTo(1);
         assertThat(result.getBody().totalElements()).isEqualTo(1);
         assertThat(result.getBody().hasNext()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[getCommentsForContent] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingCommentsForContent() {
+        UUID contentId = UUID.randomUUID();
+        when(commentService.getCommentsForContent(currentUserId, contentId, 1, 10))
+                .thenReturn(new PageImpl<>(List.of(buildResponseDto()), PageRequest.of(0, 10), 1));
+
+        commentController.getCommentsForContent(contentId, 1, 10);
+
+        verify(commentService).getCommentsForContent(currentUserId, contentId, 1, 10);
     }
 
     @Test
@@ -222,6 +234,6 @@ class CommentControllerTest {
 
     private CommentResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
-        return new CommentResponseDTO(UUID.randomUUID(), null, UUID.randomUUID(), null, null, null, "Great movie!", false, now, now);
+        return new CommentResponseDTO(UUID.randomUUID(), null, UUID.randomUUID(), null, null, null, "Great movie!", false, now, now, 0, false);
     }
 }

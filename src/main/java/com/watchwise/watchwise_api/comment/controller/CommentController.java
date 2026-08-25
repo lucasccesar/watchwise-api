@@ -26,7 +26,7 @@ public class CommentController {
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
-        Page<CommentResponseDTO> comments = commentService.getCommentsForContent(contentId, page, size);
+        Page<CommentResponseDTO> comments = commentService.getCommentsForContent(getCurrentUserId(), contentId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(comments));
     }
 

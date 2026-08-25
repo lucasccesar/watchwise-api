@@ -15,6 +15,8 @@ public record CommentResponseDTO(
         String text,
         Boolean containsSpoiler,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        Integer likesCount,
+        Boolean likedByMe
 ) {
 }

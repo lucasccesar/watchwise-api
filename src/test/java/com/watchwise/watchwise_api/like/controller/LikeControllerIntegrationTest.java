@@ -227,7 +227,7 @@ class LikeControllerIntegrationTest {
         mockMvc.perform(postRequest(user, "/comments/" + comment.getId() + "/like"))
                 .andExpect(status().isNoContent());
 
-        assertThat(likeRepository.findByUserIdAndCommentId(user.id(), comment.getId())).isPresent();
+        assertThat(likeRepository.existsByUserIdAndCommentId(user.id(), comment.getId())).isTrue();
     }
 
     @Test
@@ -306,7 +306,7 @@ class LikeControllerIntegrationTest {
         mockMvc.perform(deleteRequest(user, "/comments/" + comment.getId() + "/like"))
                 .andExpect(status().isNoContent());
 
-        assertThat(likeRepository.findByUserIdAndCommentId(user.id(), comment.getId())).isEmpty();
+        assertThat(likeRepository.existsByUserIdAndCommentId(user.id(), comment.getId())).isFalse();
     }
 
     @Test
@@ -354,7 +354,7 @@ class LikeControllerIntegrationTest {
         mockMvc.perform(postRequest(user, "/diary/" + entry.getId() + "/like"))
                 .andExpect(status().isNoContent());
 
-        assertThat(likeRepository.findByUserIdAndDiaryEntryId(user.id(), entry.getId())).isPresent();
+        assertThat(likeRepository.existsByUserIdAndDiaryEntryId(user.id(), entry.getId())).isTrue();
     }
 
     @Test
@@ -419,7 +419,7 @@ class LikeControllerIntegrationTest {
         mockMvc.perform(deleteRequest(user, "/diary/" + entry.getId() + "/like"))
                 .andExpect(status().isNoContent());
 
-        assertThat(likeRepository.findByUserIdAndDiaryEntryId(user.id(), entry.getId())).isEmpty();
+        assertThat(likeRepository.existsByUserIdAndDiaryEntryId(user.id(), entry.getId())).isFalse();
     }
 
     @Test
@@ -466,7 +466,7 @@ class LikeControllerIntegrationTest {
         mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/like"))
                 .andExpect(status().isNoContent());
 
-        assertThat(likeRepository.findByUserIdAndListId(user.id(), list.getId())).isPresent();
+        assertThat(likeRepository.existsByUserIdAndListId(user.id(), list.getId())).isTrue();
     }
 
     @Test
@@ -556,7 +556,7 @@ class LikeControllerIntegrationTest {
         mockMvc.perform(deleteRequest(user, "/lists/" + list.getId() + "/like"))
                 .andExpect(status().isNoContent());
 
-        assertThat(likeRepository.findByUserIdAndListId(user.id(), list.getId())).isEmpty();
+        assertThat(likeRepository.existsByUserIdAndListId(user.id(), list.getId())).isFalse();
     }
 
     @Test

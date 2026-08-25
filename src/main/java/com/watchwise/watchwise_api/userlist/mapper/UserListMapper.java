@@ -13,8 +13,10 @@ import java.util.List;
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface UserListMapper {
 
-    UserListResponseDTO userListToResponseDto(UserList userList, List<ContentRefDTO> previewItems, long nestedListsCount, double watchedPercentage);
+    UserListResponseDTO userListToResponseDto(
+            UserList userList, List<ContentRefDTO> previewItems, long nestedListsCount, double watchedPercentage, boolean likedByMe);
 
-    UserListDetailedResponseDTO userListToDetailedResponseDto(UserList userList, List<UserListItemResponseDTO> items, double watchedPercentage);
+    UserListDetailedResponseDTO userListToDetailedResponseDto(
+            UserList userList, List<UserListItemResponseDTO> items, double watchedPercentage, boolean likedByMe);
 
 }

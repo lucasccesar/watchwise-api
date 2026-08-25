@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -13,6 +14,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
+
+    @Modifying
+    @Query("UPDATE DiaryEntry d SET d.likesCount = d.likesCount + 1 WHERE d.id = :id")
+    void incrementLikesCount(@Param("id") UUID id);
+
+    @Modifying
+    @Query("UPDATE DiaryEntry d SET d.likesCount = d.likesCount - 1 WHERE d.id = :id AND d.likesCount > 0")
+    void decrementLikesCount(@Param("id") UUID id);
 
     @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.content WHERE d.user.id = :userId ORDER BY d.createdAt DESC")
     Page<DiaryEntry> findByUserIdOrderByCreatedAtDesc(@Param("userId") UUID userId, Pageable pageable);

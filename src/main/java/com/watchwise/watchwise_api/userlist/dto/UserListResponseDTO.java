@@ -16,6 +16,8 @@ public record UserListResponseDTO(
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         List<ContentRefDTO> previewItems,
-        long nestedListsCount
+        long nestedListsCount,
+        Integer likesCount,
+        Boolean likedByMe
 ) {
 }

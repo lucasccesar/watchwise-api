@@ -21,8 +21,11 @@ import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -56,7 +59,9 @@ public class LikeServiceImpl implements LikeService {
                         .comment(commentRepository.getReferenceById(commentId))
                         .createdAt(LocalDateTime.now())
                         .build();
-                return likeRepository.saveAndFlush(like);
+                Like saved = likeRepository.saveAndFlush(like);
+                commentRepository.incrementLikesCount(commentId);
+                return saved;
             });
         } catch (DataIntegrityViolationException e) {
             if (!likeRepository.existsByUserIdAndCommentId(userId, commentId)) {
@@ -66,9 +71,11 @@ public class LikeServiceImpl implements LikeService {
     }
 
     @Override
+    @Transactional
     public void unlikeComment(UUID userId, UUID commentId) {
-        likeRepository.findByUserIdAndCommentId(userId, commentId)
-                .ifPresent(likeRepository::delete);
+        if (likeRepository.deleteByUserIdAndCommentId(userId, commentId) > 0) {
+            commentRepository.decrementLikesCount(commentId);
+        }
     }
 
     @Override
@@ -89,7 +96,9 @@ public class LikeServiceImpl implements LikeService {
                         .diaryEntry(diaryEntryRepository.getReferenceById(diaryEntryId))
                         .createdAt(LocalDateTime.now())
                         .build();
-                return likeRepository.saveAndFlush(like);
+                Like saved = likeRepository.saveAndFlush(like);
+                diaryEntryRepository.incrementLikesCount(diaryEntryId);
+                return saved;
             });
         } catch (DataIntegrityViolationException e) {
             if (!likeRepository.existsByUserIdAndDiaryEntryId(userId, diaryEntryId)) {
@@ -99,9 +108,11 @@ public class LikeServiceImpl implements LikeService {
     }
 
     @Override
+    @Transactional
     public void unlikeDiaryEntry(UUID userId, UUID diaryEntryId) {
-        likeRepository.findByUserIdAndDiaryEntryId(userId, diaryEntryId)
-                .ifPresent(likeRepository::delete);
+        if (likeRepository.deleteByUserIdAndDiaryEntryId(userId, diaryEntryId) > 0) {
+            diaryEntryRepository.decrementLikesCount(diaryEntryId);
+        }
     }
 
     @Override
@@ -123,7 +134,9 @@ public class LikeServiceImpl implements LikeService {
                         .list(userListRepository.getReferenceById(listId))
                         .createdAt(LocalDateTime.now())
                         .build();
-                return likeRepository.saveAndFlush(like);
+                Like saved = likeRepository.saveAndFlush(like);
+                userListRepository.incrementLikesCount(listId);
+                return saved;
             });
         } catch (DataIntegrityViolationException e) {
             if (!likeRepository.existsByUserIdAndListId(userId, listId)) {
@@ -133,9 +146,35 @@ public class LikeServiceImpl implements LikeService {
     }
 
     @Override
+    @Transactional
     public void unlikeList(UUID userId, UUID listId) {
-        likeRepository.findByUserIdAndListId(userId, listId)
-                .ifPresent(likeRepository::delete);
+        if (likeRepository.deleteByUserIdAndListId(userId, listId) > 0) {
+            userListRepository.decrementLikesCount(listId);
+        }
+    }
+
+    @Override
+    public Set<UUID> getLikedCommentIds(UUID userId, Collection<UUID> commentIds) {
+        if (commentIds.isEmpty()) {
+            return Set.of();
+        }
+        return likeRepository.findLikedCommentIds(userId, commentIds);
+    }
+
+    @Override
+    public Set<UUID> getLikedDiaryEntryIds(UUID userId, Collection<UUID> diaryEntryIds) {
+        if (diaryEntryIds.isEmpty()) {
+            return Set.of();
+        }
+        return likeRepository.findLikedDiaryEntryIds(userId, diaryEntryIds);
+    }
+
+    @Override
+    public Set<UUID> getLikedListIds(UUID userId, Collection<UUID> listIds) {
+        if (listIds.isEmpty()) {
+            return Set.of();
+        }
+        return likeRepository.findLikedListIds(userId, listIds);
     }
 
     private void assertListAcceptsLikes(UUID listId) {

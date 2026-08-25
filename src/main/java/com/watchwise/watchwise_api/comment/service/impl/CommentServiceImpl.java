@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
@@ -27,6 +28,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -41,20 +44,21 @@ public class CommentServiceImpl implements CommentService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final FollowerRepository followerRepository;
     private final CommentMapper commentMapper;
+    private final LikeService likeService;
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
 
     @Override
-    public Page<CommentResponseDTO> getCommentsForContent(UUID contentId, Integer pageNumber, Integer pageSize) {
+    public Page<CommentResponseDTO> getCommentsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize) {
         if (!contentRepository.existsById(contentId)) {
             throw new NotFoundException("Content not found");
         }
 
         PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
 
-        return commentRepository.findByContentIdOrderByCreatedAtAsc(contentId, pageRequest)
-                .map(commentMapper::commentToResponseDto);
+        Page<Comment> comments = commentRepository.findByContentIdOrderByCreatedAtAsc(contentId, pageRequest);
+        return mapToResponseDtos(comments, viewerId);
     }
 
     @Override
@@ -66,8 +70,8 @@ public class CommentServiceImpl implements CommentService {
 
         PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
 
-        return commentRepository.findByListIdOrderByCreatedAtAsc(listId, pageRequest)
-                .map(commentMapper::commentToResponseDto);
+        Page<Comment> comments = commentRepository.findByListIdOrderByCreatedAtAsc(listId, pageRequest);
+        return mapToResponseDtos(comments, viewerId);
     }
 
     @Override
@@ -79,8 +83,15 @@ public class CommentServiceImpl implements CommentService {
 
         PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
 
-        return commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(diaryEntryId, pageRequest)
-                .map(commentMapper::commentToResponseDto);
+        Page<Comment> comments = commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(diaryEntryId, pageRequest);
+        return mapToResponseDtos(comments, viewerId);
+    }
+
+    private Page<CommentResponseDTO> mapToResponseDtos(Page<Comment> comments, UUID viewerId) {
+        List<UUID> commentIds = comments.getContent().stream().map(Comment::getId).toList();
+        Set<UUID> likedCommentIds = likeService.getLikedCommentIds(viewerId, commentIds);
+
+        return comments.map(comment -> commentMapper.commentToResponseDto(comment, likedCommentIds.contains(comment.getId())));
     }
 
     @Override
@@ -95,7 +106,7 @@ public class CommentServiceImpl implements CommentService {
                 .content(content)
                 .build();
 
-        return commentMapper.commentToResponseDto(commentRepository.save(comment));
+        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
     }
 
     @Override
@@ -113,7 +124,7 @@ public class CommentServiceImpl implements CommentService {
                 .list(list)
                 .build();
 
-        return commentMapper.commentToResponseDto(commentRepository.save(comment));
+        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
     }
 
     @Override
@@ -130,7 +141,7 @@ public class CommentServiceImpl implements CommentService {
                 .diaryEntry(diaryEntry)
                 .build();
 
-        return commentMapper.commentToResponseDto(commentRepository.save(comment));
+        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
     }
 
     @Override
