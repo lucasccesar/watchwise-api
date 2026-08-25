@@ -192,6 +192,36 @@ class FollowerRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByFollowedIdAndStatus] Should Return Entries Ordered By Most Recently Created First - When Multiple Entries Exist")
+    void shouldReturnEntriesOrderedByMostRecentlyCreatedFirstWhenMultipleEntriesExistOnFindByFollowedIdAndStatus() {
+        LocalDateTime now = LocalDateTime.now();
+        followerRepository.save(buildFollowerWithCreatedAt(lucas, joao, FollowStatus.ACCEPTED, now.minusMinutes(1)));
+        followerRepository.saveAndFlush(buildFollowerWithCreatedAt(marina, joao, FollowStatus.ACCEPTED, now));
+        entityManager.clear();
+
+        Page<Follower> result = followerRepository.findByFollowedIdAndStatus(joao.getId(), FollowStatus.ACCEPTED, PageRequest.of(0, 10));
+
+        assertThat(result.getContent())
+                .extracting(follower -> follower.getFollower().getId())
+                .containsExactly(marina.getId(), lucas.getId());
+    }
+
+    @Test
+    @DisplayName("[findByFollowerIdAndStatus] Should Return Entries Ordered By Most Recently Created First - When Multiple Entries Exist")
+    void shouldReturnEntriesOrderedByMostRecentlyCreatedFirstWhenMultipleEntriesExistOnFindByFollowerIdAndStatus() {
+        LocalDateTime now = LocalDateTime.now();
+        followerRepository.save(buildFollowerWithCreatedAt(lucas, joao, FollowStatus.ACCEPTED, now.minusMinutes(1)));
+        followerRepository.saveAndFlush(buildFollowerWithCreatedAt(lucas, marina, FollowStatus.ACCEPTED, now));
+        entityManager.clear();
+
+        Page<Follower> result = followerRepository.findByFollowerIdAndStatus(lucas.getId(), FollowStatus.ACCEPTED, PageRequest.of(0, 10));
+
+        assertThat(result.getContent())
+                .extracting(follower -> follower.getFollowed().getId())
+                .containsExactly(marina.getId(), joao.getId());
+    }
+
+    @Test
     @DisplayName("[acceptAllPendingFollowRequestsFor] Should Accept Only Pending Requests Targeting The Given User - When Called")
     void shouldAcceptOnlyPendingRequestsTargetingTheGivenUserWhenCalled() {
         Follower pendingForJoao = followerRepository.save(buildFollower(lucas, joao, FollowStatus.PENDING));
@@ -235,11 +265,15 @@ class FollowerRepositoryTest {
     }
 
     private Follower buildFollower(User follower, User followed, FollowStatus status) {
+        return buildFollowerWithCreatedAt(follower, followed, status, LocalDateTime.now());
+    }
+
+    private Follower buildFollowerWithCreatedAt(User follower, User followed, FollowStatus status, LocalDateTime createdAt) {
         return Follower.builder()
                 .follower(follower)
                 .followed(followed)
                 .status(status)
-                .createdAt(LocalDateTime.now())
+                .createdAt(createdAt)
                 .build();
     }
 
