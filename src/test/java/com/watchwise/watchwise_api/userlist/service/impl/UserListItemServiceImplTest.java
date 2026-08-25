@@ -817,14 +817,8 @@ class UserListItemServiceImplTest {
         when(contentRepository.getReferenceById(contentA.getId())).thenReturn(contentA);
         when(contentRepository.getReferenceById(contentB.getId())).thenReturn(contentB);
 
-        List<UserListItem> persisted = new ArrayList<>();
-        when(userListItemRepository.countByUserListId(listId))
-                .thenAnswer(invocation -> (long) persisted.size());
-        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> {
-            UserListItem item = invocation.getArgument(0);
-            persisted.add(item);
-            return item;
-        });
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
+        when(userListItemRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
         when(userListItemMapper.userListItemToResponseDto(any(UserListItem.class))).thenAnswer(invocation -> {
             UserListItem item = invocation.getArgument(0);
             return new UserListItemResponseDTO(UUID.randomUUID(), null, null, item.getPosition(), null, LocalDateTime.now(), LocalDateTime.now());
@@ -836,19 +830,22 @@ class UserListItemServiceImplTest {
         assertThat(result).hasSize(2);
         assertThat(result.get(0).position()).isEqualTo(1);
         assertThat(result.get(1).position()).isEqualTo(2);
-        assertThat(persisted).extracting(UserListItem::getContent).containsExactly(contentA, contentB);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<UserListItem>> savedItemsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(userListItemRepository).saveAll(savedItemsCaptor.capture());
+        assertThat(savedItemsCaptor.getValue()).extracting(UserListItem::getContent).containsExactly(contentA, contentB);
     }
 
     @Test
-    @DisplayName("[addItems] Should Throw ConflictException And Stop - When An Item Duplicates Another Already Inserted In The Same Call")
-    void shouldThrowConflictExceptionAndStopWhenAnItemDuplicatesAnotherAlreadyInsertedInTheSameCall() {
+    @DisplayName("[addItems] Should Throw ConflictException - When Two Items In The Same Call Resolve To The Same Content")
+    void shouldThrowConflictExceptionWhenTwoItemsInTheSameCallResolveToTheSameContent() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
-        when(userListItemRepository.save(any(UserListItem.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0))
+        when(userListItemRepository.saveAll(anyList()))
                 .thenThrow(buildDataIntegrityViolationException("uq_user_list_items_user_list_id_content_id"));
 
         assertThatThrownBy(() -> userListItemService.addItems(lucasId, listId,
@@ -856,7 +853,7 @@ class UserListItemServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("This content is already in the list");
 
-        verify(userListItemRepository, times(2)).save(any(UserListItem.class));
+        verify(userListItemRepository).saveAll(anyList());
     }
 
     @Test

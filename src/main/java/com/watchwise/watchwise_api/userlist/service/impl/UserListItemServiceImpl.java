@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
@@ -173,11 +174,31 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
-        findOwnedList(userId, listId);
+        UserList userList = findOwnedList(userId, listId);
+        assertListIsNotLockedAsListOfLists(listId);
 
-        return userListItemBulkCreationDTO.items().stream()
-                .map(content -> addItem(userId, listId, new UserListItemCreationDTO(content, null, null, null)))
-                .toList();
+        int position = (int) userListItemRepository.countByUserListId(listId) + 1;
+        LocalDateTime now = LocalDateTime.now();
+
+        List<UserListItem> newItems = new ArrayList<>();
+        for (ContentRefCreationDTO content : userListItemBulkCreationDTO.items()) {
+            ContentRefDTO contentRef = contentService.getOrCreateReference(content);
+            newItems.add(UserListItem.builder()
+                    .userList(userList)
+                    .content(contentRepository.getReferenceById(contentRef.id()))
+                    .position(position++)
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build());
+        }
+
+        try {
+            List<UserListItem> saved = userListItemRepository.saveAll(newItems);
+            userListItemRepository.flush();
+            return saved.stream().map(userListItemMapper::userListItemToResponseDto).toList();
+        } catch (DataIntegrityViolationException e) {
+            throw mapUniqueConstraintViolation(e);
+        }
     }
 
     @Override

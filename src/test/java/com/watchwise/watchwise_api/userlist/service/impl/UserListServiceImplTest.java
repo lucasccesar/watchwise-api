@@ -15,7 +15,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
-import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
@@ -83,7 +83,7 @@ class UserListServiceImplTest {
     private ArgumentCaptor<UserList> listCaptor;
 
     @Captor
-    private ArgumentCaptor<UserListItemCreationDTO> itemCaptor;
+    private ArgumentCaptor<UserListItemBulkCreationDTO> itemsCaptor;
 
     @Captor
     private ArgumentCaptor<PageRequest> pageRequestCaptor;
@@ -577,8 +577,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO movieItem = buildItemResponseDto(movieRef);
         UserListItemResponseDTO seriesItem = buildItemResponseDto(seriesRef);
 
-        when(userListItemService.addItem(eq(lucasId), any(UUID.class), any(UserListItemCreationDTO.class)))
-                .thenReturn(movieItem, seriesItem);
+        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(List.of(movieItem, seriesItem));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
@@ -591,12 +591,8 @@ class UserListServiceImplTest {
         verify(userListRepository).save(listCaptor.capture());
         assertThat(listCaptor.getValue().getVisibility()).isEqualTo(UserListVisibility.PRIVATE);
 
-        verify(userListItemService, times(2)).addItem(eq(lucasId), any(UUID.class), itemCaptor.capture());
-        List<UserListItemCreationDTO> capturedItems = itemCaptor.getAllValues();
-        assertThat(capturedItems.get(0).content()).isEqualTo(movieRef);
-        assertThat(capturedItems.get(0).childListId()).isNull();
-        assertThat(capturedItems.get(0).position()).isNull();
-        assertThat(capturedItems.get(1).content()).isEqualTo(seriesRef);
+        verify(userListItemService).addItems(eq(lucasId), any(UUID.class), itemsCaptor.capture());
+        assertThat(itemsCaptor.getValue().items()).containsExactly(movieRef, seriesRef);
     }
 
     @Test
@@ -610,8 +606,8 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItem(eq(lucasId), any(UUID.class), any(UserListItemCreationDTO.class)))
-                .thenReturn(buildItemResponseDto(movieRef));
+        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(List.of(buildItemResponseDto(movieRef)));
         when(userListItemService.getWatchedPercentage(savedListId, lucasId)).thenReturn(100.0);
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
@@ -633,8 +629,8 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItem(eq(lucasId), any(UUID.class), any(UserListItemCreationDTO.class)))
-                .thenReturn(buildItemResponseDto(movieRef));
+        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(List.of(buildItemResponseDto(movieRef)));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
@@ -645,8 +641,8 @@ class UserListServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createUserListWithItems] Should Propagate Exception - When Adding An Item Fails")
-    void shouldPropagateExceptionWhenAddingAnItemFails() {
+    @DisplayName("[createUserListWithItems] Should Propagate Exception - When Adding Items Fails")
+    void shouldPropagateExceptionWhenAddingItemsFails() {
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> {
             UserList list = invocation.getArgument(0);
@@ -655,8 +651,7 @@ class UserListServiceImplTest {
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
         ContentRefCreationDTO duplicateRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItem(eq(lucasId), any(UUID.class), any(UserListItemCreationDTO.class)))
-                .thenReturn(buildItemResponseDto(movieRef))
+        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
                 .thenThrow(new ConflictException("This content is already in the list"));
 
         assertThatThrownBy(() -> userListService.createUserListWithItems(

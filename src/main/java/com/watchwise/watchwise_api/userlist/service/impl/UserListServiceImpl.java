@@ -3,7 +3,6 @@ package com.watchwise.watchwise_api.userlist.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
-import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -13,7 +12,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
-import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
@@ -168,16 +167,11 @@ public class UserListServiceImpl implements UserListService {
 
         UserList savedList = userListRepository.save(userList);
 
-        List<UserListItemResponseDTO> items = userListBulkCreationDTO.items().stream()
-                .map(content -> addContentItem(userId, savedList.getId(), content))
-                .toList();
+        List<UserListItemResponseDTO> items = userListItemService.addItems(
+                userId, savedList.getId(), new UserListItemBulkCreationDTO(userListBulkCreationDTO.items()));
         double watchedPercentage = userListItemService.getWatchedPercentage(savedList.getId(), userId);
 
         return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage, false);
-    }
-
-    private UserListItemResponseDTO addContentItem(UUID userId, UUID listId, ContentRefCreationDTO content) {
-        return userListItemService.addItem(userId, listId, new UserListItemCreationDTO(content, null, null, null));
     }
 
     @Override
