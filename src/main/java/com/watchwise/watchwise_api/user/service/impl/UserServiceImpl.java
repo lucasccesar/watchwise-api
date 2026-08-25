@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
@@ -23,7 +24,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,10 +43,8 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
     private final FollowerService followerService;
+    private final PageRequestFactory pageRequestFactory;
 
-    static final int DEFAULT_PAGE = 0;
-    static final int DEFAULT_PAGE_SIZE = 20;
-    static final int MAX_PAGE_SIZE = 1000;
     static final int MIN_USERNAME_LENGTH = 3;
 
     @Override
@@ -222,7 +220,7 @@ public class UserServiceImpl implements UserService {
             throw new BadRequestException("Username must be provided");
         }
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize, null, null);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize, null, null);
 
         return userRepository
                 .findByUsernameStartingWithIgnoreCase(trimmedUsername, escapeLikeWildcards(trimmedUsername), pageRequest)
@@ -231,43 +229,6 @@ public class UserServiceImpl implements UserService {
 
     private String escapeLikeWildcards(String value) {
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-    }
-
-    public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize, String sortBy, String sortDirection) {
-        int queryPageNumber;
-        int queryPageSize;
-        Sort sort = null;
-
-        if (pageNumber != null && pageNumber > 0) {
-            queryPageNumber = pageNumber - 1;
-        } else if (pageNumber == null || pageNumber == 0) {
-            queryPageNumber = DEFAULT_PAGE;
-        } else {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-
-        if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
-        } else if (pageSize <= 0) {
-            throw new BadRequestException("Page size must be greater than 0");
-        } else {
-            queryPageSize = pageSize;
-        }
-
-        if (!(sortBy == null)) {
-            if (sortDirection == null || !sortDirection.equals("desc")) {
-                sort = Sort.by(Sort.Order.asc(sortBy));
-            } else {
-                sort = Sort.by(Sort.Order.desc(sortBy));
-            }
-        }
-
-        if (sort == null) {
-            return PageRequest.of(queryPageNumber, queryPageSize);
-        }
-        return PageRequest.of(queryPageNumber, queryPageSize, sort);
     }
 
     @Override

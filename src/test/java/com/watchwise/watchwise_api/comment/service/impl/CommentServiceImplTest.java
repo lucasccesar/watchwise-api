@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -30,6 +31,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -76,6 +78,9 @@ class CommentServiceImplTest {
 
     @Mock
     private LikeService likeService;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @InjectMocks
     private CommentServiceImpl commentService;
@@ -244,7 +249,7 @@ class CommentServiceImplTest {
         commentService.getCommentsForContent(lucasId, contentId, null, 10);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -255,7 +260,7 @@ class CommentServiceImplTest {
         commentService.getCommentsForContent(lucasId, contentId, 0, 10);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -288,7 +293,7 @@ class CommentServiceImplTest {
         commentService.getCommentsForContent(lucasId, contentId, 1, null);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -299,7 +304,7 @@ class CommentServiceImplTest {
         commentService.getCommentsForContent(lucasId, contentId, 1, 1001);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.MAX_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
     @Test
@@ -460,8 +465,8 @@ class CommentServiceImplTest {
         commentService.getCommentsForList(lucasId, listId, null, null);
 
         verify(commentRepository).findByListIdOrderByCreatedAtAsc(eq(listId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE);
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     // ---------- getCommentsForDiaryEntry ----------
@@ -554,8 +559,8 @@ class CommentServiceImplTest {
         commentService.getCommentsForDiaryEntry(lucasId, diaryEntryId, null, null);
 
         verify(commentRepository).findByDiaryEntryIdOrderByCreatedAtAsc(eq(diaryEntryId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE);
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     // ---------- createCommentOnContent ----------

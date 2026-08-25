@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -20,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -48,6 +50,9 @@ class FollowerServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @InjectMocks
     private FollowerServiceImpl followerService;
@@ -393,7 +398,7 @@ class FollowerServiceImplTest {
         followerService.getFollowers(UUID.randomUUID(), followedId, null, 10);
 
         verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -404,7 +409,7 @@ class FollowerServiceImplTest {
         followerService.getFollowers(UUID.randomUUID(), followedId, 0, 10);
 
         verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -437,7 +442,7 @@ class FollowerServiceImplTest {
         followerService.getFollowers(UUID.randomUUID(), followedId, 1, null);
 
         verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -448,7 +453,7 @@ class FollowerServiceImplTest {
         followerService.getFollowers(UUID.randomUUID(), followedId, 1, 1001);
 
         verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowerServiceImpl.MAX_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
     @Test
@@ -597,8 +602,8 @@ class FollowerServiceImplTest {
         followerService.getFollowing(UUID.randomUUID(), followedId, null, null);
 
         verify(followerRepository).findByFollowerIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE);
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -635,8 +640,8 @@ class FollowerServiceImplTest {
         followerService.getPendingFollowRequests(followedId, null, null);
 
         verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.PENDING), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE);
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test

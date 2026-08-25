@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
@@ -27,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -62,6 +64,9 @@ class UserServiceImplTest {
 
     @Mock
     private FollowerService followerService;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @InjectMocks
     private UserServiceImpl userService;
@@ -453,7 +458,7 @@ class UserServiceImplTest {
         userService.getUsersByUsername("john", null, 10);
 
         verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
-        assertEquals(UserServiceImpl.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
+        assertEquals(PageRequestFactory.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
     }
 
     @Test
@@ -464,7 +469,7 @@ class UserServiceImplTest {
         userService.getUsersByUsername("john", 0, 10);
 
         verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
-        assertEquals(UserServiceImpl.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
+        assertEquals(PageRequestFactory.DEFAULT_PAGE, pageRequestCaptor.getValue().getPageNumber());
     }
 
     @Test
@@ -495,7 +500,7 @@ class UserServiceImplTest {
         userService.getUsersByUsername("john", 1, null);
 
         verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
-        assertEquals(UserServiceImpl.DEFAULT_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
+        assertEquals(PageRequestFactory.DEFAULT_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
     }
 
     @Test
@@ -506,7 +511,7 @@ class UserServiceImplTest {
         userService.getUsersByUsername("john", 1, 1001);
 
         verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
-        assertEquals(UserServiceImpl.MAX_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
+        assertEquals(PageRequestFactory.MAX_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.followedperson.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
@@ -28,10 +29,7 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
     private final UserRepository userRepository;
     private final FollowerRepository followerRepository;
     private final NewTransactionExecutor newTransactionExecutor;
-
-    static final int DEFAULT_PAGE = 0;
-    static final int DEFAULT_PAGE_SIZE = 20;
-    static final int MAX_PAGE_SIZE = 1000;
+    private final PageRequestFactory pageRequestFactory;
 
     @Override
     public void followPerson(UUID userId, String personTmdbId) {
@@ -80,7 +78,7 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
 
         assertCanViewFollowedPeople(viewerId, targetUserId, target);
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         return followedPersonRepository.findByUserId(targetUserId, pageRequest)
                 .map(FollowedPerson::getPersonTmdbId);
     }
@@ -96,31 +94,6 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
         if (!viewerFollowsTarget) {
             throw new ForbiddenException("This user profile is private");
         }
-    }
-
-    public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize) {
-        int queryPageNumber;
-        int queryPageSize;
-
-        if (pageNumber != null && pageNumber > 0) {
-            queryPageNumber = pageNumber - 1;
-        } else if (pageNumber == null || pageNumber == 0) {
-            queryPageNumber = DEFAULT_PAGE;
-        } else {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-
-        if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
-        } else if (pageSize <= 0) {
-            throw new BadRequestException("Page size must be greater than 0");
-        } else {
-            queryPageSize = pageSize;
-        }
-
-        return PageRequest.of(queryPageNumber, queryPageSize);
     }
 
 }

@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -28,10 +29,7 @@ public class FollowerServiceImpl implements FollowerService {
     private final FollowerRepository followerRepository;
     private final UserRepository userRepository;
     private final UserMapper userMapper;
-
-    static final int DEFAULT_PAGE = 0;
-    static final int DEFAULT_PAGE_SIZE = 20;
-    static final int MAX_PAGE_SIZE = 1000;
+    private final PageRequestFactory pageRequestFactory;
 
     @Override
     public FollowStatus followUser(UUID followerId, UUID followedId) {
@@ -98,7 +96,7 @@ public class FollowerServiceImpl implements FollowerService {
 
         assertCanViewFollowGraph(viewerId, targetUserId, target);
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         return followerRepository.findByFollowedIdAndStatus(targetUserId, FollowStatus.ACCEPTED, pageRequest)
                 .map(follow -> userMapper.userToPublicUserDto(follow.getFollower()));
     }
@@ -110,14 +108,14 @@ public class FollowerServiceImpl implements FollowerService {
 
         assertCanViewFollowGraph(viewerId, targetUserId, target);
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         return followerRepository.findByFollowerIdAndStatus(targetUserId, FollowStatus.ACCEPTED, pageRequest)
                 .map(follow -> userMapper.userToPublicUserDto(follow.getFollowed()));
     }
 
     @Override
     public Page<PublicUserDTO> getPendingFollowRequests(UUID targetUserId, Integer pageNumber, Integer pageSize) {
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         return followerRepository.findByFollowedIdAndStatus(targetUserId, FollowStatus.PENDING, pageRequest)
                 .map(follow -> userMapper.userToPublicUserDto(follow.getFollower()));
     }
@@ -155,30 +153,5 @@ public class FollowerServiceImpl implements FollowerService {
             return cve.getConstraintName();
         }
         return null;
-    }
-
-    public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize) {
-        int queryPageNumber;
-        int queryPageSize;
-
-        if (pageNumber != null && pageNumber > 0) {
-            queryPageNumber = pageNumber - 1;
-        } else if (pageNumber == null || pageNumber == 0) {
-            queryPageNumber = DEFAULT_PAGE;
-        } else {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-
-        if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
-        } else if (pageSize <= 0) {
-            throw new BadRequestException("Page size must be greater than 0");
-        } else {
-            queryPageSize = pageSize;
-        }
-
-        return PageRequest.of(queryPageNumber, queryPageSize);
     }
 }

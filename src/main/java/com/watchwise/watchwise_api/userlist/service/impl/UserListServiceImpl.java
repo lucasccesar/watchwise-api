@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.userlist.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -44,10 +45,7 @@ public class UserListServiceImpl implements UserListService {
     private final UserListItemService userListItemService;
     private final UserListMapper userListMapper;
     private final LikeService likeService;
-
-    static final int DEFAULT_PAGE = 0;
-    static final int DEFAULT_PAGE_SIZE = 20;
-    static final int MAX_PAGE_SIZE = 1000;
+    private final PageRequestFactory pageRequestFactory;
 
     @Override
     public Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize) {
@@ -59,7 +57,7 @@ public class UserListServiceImpl implements UserListService {
 
         assertCanViewLists(target, isOwner, viewerFollowsTarget);
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         Page<UserList> lists = isOwner
                 ? userListRepository.findByUserId(userId, pageRequest)
@@ -224,30 +222,5 @@ public class UserListServiceImpl implements UserListService {
         }
 
         return userList;
-    }
-
-    public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize) {
-        int queryPageNumber;
-        int queryPageSize;
-
-        if (pageNumber != null && pageNumber > 0) {
-            queryPageNumber = pageNumber - 1;
-        } else if (pageNumber == null || pageNumber == 0) {
-            queryPageNumber = DEFAULT_PAGE;
-        } else {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-
-        if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
-        } else if (pageSize <= 0) {
-            throw new BadRequestException("Page size must be greater than 0");
-        } else {
-            queryPageSize = pageSize;
-        }
-
-        return PageRequest.of(queryPageNumber, queryPageSize);
     }
 }

@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -41,10 +42,8 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private final ContentService contentService;
     private final FollowerRepository followerRepository;
     private final WatchlistEntryMapper watchlistEntryMapper;
+    private final PageRequestFactory pageRequestFactory;
 
-    static final int DEFAULT_PAGE = 0;
-    static final int DEFAULT_PAGE_SIZE = 20;
-    static final int MAX_PAGE_SIZE = 1000;
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
     @Override
@@ -56,7 +55,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
 
         assertCanViewWatchlist(viewerId, userId, target);
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         return watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, type, pageRequest)
                 .map(watchlistEntryMapper::watchlistEntryToResponseDto);
@@ -220,30 +219,5 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         if (type != ContentType.MOVIE && type != ContentType.SERIES) {
             throw new BadRequestException("type must be MOVIE or SERIES");
         }
-    }
-
-    public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize) {
-        int queryPageNumber;
-        int queryPageSize;
-
-        if (pageNumber != null && pageNumber > 0) {
-            queryPageNumber = pageNumber - 1;
-        } else if (pageNumber == null || pageNumber == 0) {
-            queryPageNumber = DEFAULT_PAGE;
-        } else {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-
-        if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
-        } else if (pageSize <= 0) {
-            throw new BadRequestException("Page size must be greater than 0");
-        } else {
-            queryPageSize = pageSize;
-        }
-
-        return PageRequest.of(queryPageNumber, queryPageSize);
     }
 }

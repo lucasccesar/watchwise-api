@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -65,10 +66,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final WatchlistEntryService watchlistEntryService;
     private final DroppedEntryRepository droppedEntryRepository;
     private final LikeService likeService;
-
-    static final int DEFAULT_PAGE = 0;
-    static final int DEFAULT_PAGE_SIZE = 20;
-    static final int MAX_PAGE_SIZE = 1000;
+    private final PageRequestFactory pageRequestFactory;
 
     @Override
     public Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize) {
@@ -77,7 +75,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         assertCanViewDiary(viewerId, userId, target);
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         Page<DiaryEntry> entries = year != null
                 ? diaryEntryRepository.findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
@@ -474,31 +472,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         return entry;
-    }
-
-    public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize) {
-        int queryPageNumber;
-        int queryPageSize;
-
-        if (pageNumber != null && pageNumber > 0) {
-            queryPageNumber = pageNumber - 1;
-        } else if (pageNumber == null || pageNumber == 0) {
-            queryPageNumber = DEFAULT_PAGE;
-        } else {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-
-        if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
-        } else if (pageSize <= 0) {
-            throw new BadRequestException("Page size must be greater than 0");
-        } else {
-            queryPageSize = pageSize;
-        }
-
-        return PageRequest.of(queryPageNumber, queryPageSize);
     }
 
     private record CompletionSignal(DiaryEntry completedSeason, DiaryEntry completedSeries) {

@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -33,6 +34,7 @@ import org.mockito.Captor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -75,6 +77,9 @@ class UserListServiceImplTest {
 
     @Mock
     private LikeService likeService;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @InjectMocks
     private UserListServiceImpl userListService;
@@ -297,7 +302,7 @@ class UserListServiceImplTest {
         userListService.getUserLists(lucasId, lucasId, null, 10);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(UserListServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -308,7 +313,7 @@ class UserListServiceImplTest {
         userListService.getUserLists(lucasId, lucasId, 0, 10);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(UserListServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -341,7 +346,7 @@ class UserListServiceImplTest {
         userListService.getUserLists(lucasId, lucasId, 1, null);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(UserListServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -352,7 +357,7 @@ class UserListServiceImplTest {
         userListService.getUserLists(lucasId, lucasId, 1, 1001);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(UserListServiceImpl.MAX_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
     @Test

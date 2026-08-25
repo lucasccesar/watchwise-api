@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.dropped.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -44,10 +45,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
     private final DroppedEntryMapper droppedEntryMapper;
     private final NewTransactionExecutor newTransactionExecutor;
     private final WatchlistEntryService watchlistEntryService;
-
-    static final int DEFAULT_PAGE = 0;
-    static final int DEFAULT_PAGE_SIZE = 20;
-    static final int MAX_PAGE_SIZE = 1000;
+    private final PageRequestFactory pageRequestFactory;
 
     @Override
     public Page<DroppedEntryResponseDTO> getDropped(UUID viewerId, UUID userId, ContentType type, Integer pageNumber, Integer pageSize) {
@@ -58,7 +56,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
 
         assertCanViewDropped(viewerId, userId, target);
 
-        PageRequest pageRequest = buildPageRequest(pageNumber, pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         return droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, pageRequest)
                 .map(droppedEntryMapper::droppedEntryToResponseDto);
@@ -137,30 +135,5 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
         if (type != ContentType.MOVIE && type != ContentType.SERIES) {
             throw new BadRequestException("type must be MOVIE or SERIES");
         }
-    }
-
-    public PageRequest buildPageRequest(Integer pageNumber, Integer pageSize) {
-        int queryPageNumber;
-        int queryPageSize;
-
-        if (pageNumber != null && pageNumber > 0) {
-            queryPageNumber = pageNumber - 1;
-        } else if (pageNumber == null || pageNumber == 0) {
-            queryPageNumber = DEFAULT_PAGE;
-        } else {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-
-        if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
-        } else if (pageSize <= 0) {
-            throw new BadRequestException("Page size must be greater than 0");
-        } else {
-            queryPageSize = pageSize;
-        }
-
-        return PageRequest.of(queryPageNumber, queryPageSize);
     }
 }

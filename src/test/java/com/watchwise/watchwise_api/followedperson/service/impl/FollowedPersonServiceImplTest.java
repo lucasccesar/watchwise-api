@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.followedperson.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
@@ -18,6 +19,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -55,6 +57,9 @@ class FollowedPersonServiceImplTest {
 
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @InjectMocks
     private FollowedPersonServiceImpl followedPersonService;
@@ -312,7 +317,7 @@ class FollowedPersonServiceImplTest {
         followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, null, 10);
 
         verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -323,7 +328,7 @@ class FollowedPersonServiceImplTest {
         followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 0, 10);
 
         verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -356,7 +361,7 @@ class FollowedPersonServiceImplTest {
         followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, null);
 
         verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -367,7 +372,7 @@ class FollowedPersonServiceImplTest {
         followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 1001);
 
         verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowedPersonServiceImpl.MAX_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
     @Test

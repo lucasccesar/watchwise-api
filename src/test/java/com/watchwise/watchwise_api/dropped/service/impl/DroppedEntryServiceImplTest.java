@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.dropped.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -28,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -73,6 +75,9 @@ class DroppedEntryServiceImplTest {
 
     @Mock
     private WatchlistEntryService watchlistEntryService;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @InjectMocks
     private DroppedEntryServiceImpl droppedEntryService;
@@ -220,7 +225,7 @@ class DroppedEntryServiceImplTest {
         droppedEntryService.getDropped(lucasId, lucasId, ContentType.MOVIE, null, 10);
 
         verify(droppedEntryRepository).findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(DroppedEntryServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -231,7 +236,7 @@ class DroppedEntryServiceImplTest {
         droppedEntryService.getDropped(lucasId, lucasId, ContentType.MOVIE, 0, 10);
 
         verify(droppedEntryRepository).findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(DroppedEntryServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -264,7 +269,7 @@ class DroppedEntryServiceImplTest {
         droppedEntryService.getDropped(lucasId, lucasId, ContentType.MOVIE, 1, null);
 
         verify(droppedEntryRepository).findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DroppedEntryServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -275,7 +280,7 @@ class DroppedEntryServiceImplTest {
         droppedEntryService.getDropped(lucasId, lucasId, ContentType.MOVIE, 1, 1001);
 
         verify(droppedEntryRepository).findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DroppedEntryServiceImpl.MAX_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
     @Test

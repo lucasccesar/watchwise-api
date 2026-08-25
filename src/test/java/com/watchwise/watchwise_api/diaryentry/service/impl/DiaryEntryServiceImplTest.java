@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -40,6 +41,7 @@ import org.mockito.Captor;
 import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -105,6 +107,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private LikeService likeService;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @InjectMocks
     private DiaryEntryServiceImpl diaryEntryService;
@@ -287,7 +292,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.getDiaryEntries(lucasId, lucasId, null, null, 10);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(DiaryEntryServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -298,7 +303,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 0, 10);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(DiaryEntryServiceImpl.DEFAULT_PAGE);
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
     @Test
@@ -331,7 +336,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DiaryEntryServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
     @Test
@@ -342,7 +347,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 1001);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DiaryEntryServiceImpl.MAX_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
     @Test
