@@ -488,6 +488,78 @@ class DiaryEntryServiceImplTest {
         assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(3);
     }
 
+    @Test
+    @DisplayName("[createDiaryEntry] Should Ignore IsRewatch And Set WatchNumber To 1 - When No Prior Entry Exists And Content Type Is EPISODE")
+    void shouldIgnoreIsRewatchAndSetWatchNumberToOneWhenNoPriorEntryExistsAndContentTypeIsEpisode() {
+        Content episode = buildEpisode("900", 1, 1);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, episode.getId())).thenReturn(0);
+        DiaryEntry savedEntry = buildEntry(lucas, episode);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "900", 1, 1, null, null),
+                null, null, null, true, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Ignore IsRewatch And Set WatchNumber To 1 - When No Prior Entry Exists And Content Type Is SEASON")
+    void shouldIgnoreIsRewatchAndSetWatchNumberToOneWhenNoPriorEntryExistsAndContentTypeIsSeason() {
+        Content season = buildSeason("900", 1);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "900", 1, null, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(0);
+        DiaryEntry savedEntry = buildEntry(lucas, season);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null),
+                null, null, null, true, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Honor IsRewatch And Set WatchNumber To 2 - When No Prior Entry Exists But Content Type Is SERIES")
+    void shouldHonorIsRewatchAndSetWatchNumberToTwoWhenNoPriorEntryExistsButContentTypeIsSeries() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(series.getId(), "900", ContentType.SERIES, null, null, null, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(0);
+        DiaryEntry savedEntry = buildEntry(lucas, series);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
+                null, null, null, true, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(2);
+    }
+
     // ---------- createDiaryEntry: watchlist/dropped removal side effect ----------
 
     @Test

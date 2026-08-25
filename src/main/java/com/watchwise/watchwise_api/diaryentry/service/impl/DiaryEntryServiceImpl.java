@@ -182,7 +182,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         assertWatchedInTheaterAllowed(content.getType(), watchedInTheater);
 
         int maxWatchNumber = diaryEntryRepository.findMaxWatchNumber(user.getId(), content.getId());
-        int watchNumber = Math.max(maxWatchNumber + 1, Boolean.TRUE.equals(requestedIsRewatch) ? 2 : 1);
+        boolean honorRewatchFlag = Boolean.TRUE.equals(requestedIsRewatch)
+                && !(maxWatchNumber == 0 && participatesInCompletionTracking(content.getType()));
+        int watchNumber = Math.max(maxWatchNumber + 1, honorRewatchFlag ? 2 : 1);
 
         LocalDateTime now = LocalDateTime.now();
 
@@ -260,6 +262,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (watchedInTheater != null && contentType != ContentType.MOVIE) {
             throw new BadRequestException("watchedInTheater can only be set for content of type MOVIE");
         }
+    }
+
+    private boolean participatesInCompletionTracking(ContentType contentType) {
+        return contentType == ContentType.EPISODE || contentType == ContentType.SEASON;
     }
 
     @Override
