@@ -1154,6 +1154,58 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When FinaleEpisodeNumber Exceeds Max")
+    void shouldReturnBadRequestAndNotPersistWhenFinaleEpisodeNumberExceedsMax() throws Exception {
+        RegisteredUser user = registerUser("bulkfinaleepisodemax");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "914", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 101
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When FinaleSeasonNumber Exceeds Max")
+    void shouldReturnBadRequestAndNotPersistWhenFinaleSeasonNumberExceedsMax() throws Exception {
+        RegisteredUser user = registerUser("bulkfinaleseasonmax");
+        String body = """
+                {
+                    "content": { "type": "SERIES", "tmdbId": "915" },
+                    "finaleSeasonNumber": 101
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When A SeasonFinaleEpisodeNumbers Map Value Exceeds Max")
+    void shouldReturnBadRequestAndNotPersistWhenASeasonFinaleEpisodeNumbersMapValueExceedsMax() throws Exception {
+        RegisteredUser user = registerUser("bulkseasonmapvaluemax");
+        String body = """
+                {
+                    "content": { "type": "SERIES", "tmdbId": "916" },
+                    "finaleSeasonNumber": 2,
+                    "seasonFinaleEpisodeNumbers": { "1": 5, "2": 101 }
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When The Content Type Is MOVIE")
     void shouldReturnBadRequestAndNotPersistWhenTheContentTypeIsMovieOnBulk() throws Exception {
         RegisteredUser user = registerUser("bulkmovietype");
