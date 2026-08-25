@@ -1,6 +1,5 @@
 package com.watchwise.watchwise_api.common.security;
 
-import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -52,12 +51,12 @@ public class JwtCookieAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private boolean isSessionStillValid(UUID userId, String token) {
-        Optional<User> user = userRepository.findById(userId);
-        if (user.isEmpty()) {
+        Optional<UserRepository.SessionsInvalidatedAtView> view = userRepository.findSessionsInvalidatedAtById(userId);
+        if (view.isEmpty()) {
             return false;
         }
 
-        LocalDateTime sessionsInvalidatedAt = user.get().getSessionsInvalidatedAt();
+        LocalDateTime sessionsInvalidatedAt = view.get().getSessionsInvalidatedAt();
         if (sessionsInvalidatedAt == null) {
             return true;
         }

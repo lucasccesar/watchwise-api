@@ -20,6 +20,13 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("update User u set u.sessionsInvalidatedAt = :at where u.id = :userId")
     void markSessionsInvalidatedAt(@Param("userId") UUID userId, @Param("at") LocalDateTime at);
 
+    Optional<SessionsInvalidatedAtView> findSessionsInvalidatedAtById(UUID id);
+
+    interface SessionsInvalidatedAtView {
+        UUID getId();
+        LocalDateTime getSessionsInvalidatedAt();
+    }
+
     Optional<User> findByUsernameIgnoreCaseOrEmailIgnoreCase(String username, String email);
 
     Optional<User> findByEmailIgnoreCase(String email);

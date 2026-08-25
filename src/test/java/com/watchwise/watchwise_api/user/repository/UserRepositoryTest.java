@@ -16,7 +16,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -144,6 +146,39 @@ class UserRepositoryTest {
     @DisplayName("[findByEmailIgnoreCase] Should Return Empty - When No User Has That Email")
     void shouldReturnEmptyWhenNoUserHasThatEmail() {
         Optional<User> result = userRepository.findByEmailIgnoreCase("nobody@email.com");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findSessionsInvalidatedAtById] Should Return A View With A Null Value - When The User Exists But Never Had Sessions Invalidated")
+    void shouldReturnAViewWithANullValueWhenTheUserExistsButNeverHadSessionsInvalidated() {
+        User user = userRepository.findByUsernameIgnoreCase("lucas").orElseThrow();
+
+        Optional<UserRepository.SessionsInvalidatedAtView> result = userRepository.findSessionsInvalidatedAtById(user.getId());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getSessionsInvalidatedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("[findSessionsInvalidatedAtById] Should Return The Stored Value - When The User Has Sessions Invalidated")
+    void shouldReturnTheStoredValueWhenTheUserHasSessionsInvalidated() {
+        User user = userRepository.findByUsernameIgnoreCase("lucas").orElseThrow();
+        LocalDateTime invalidatedAt = LocalDateTime.now().minusMinutes(5).truncatedTo(ChronoUnit.MICROS);
+        userRepository.markSessionsInvalidatedAt(user.getId(), invalidatedAt);
+
+        Optional<UserRepository.SessionsInvalidatedAtView> result = userRepository.findSessionsInvalidatedAtById(user.getId());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getSessionsInvalidatedAt()).isEqualTo(invalidatedAt);
+    }
+
+    @Test
+    @DisplayName("[findSessionsInvalidatedAtById] Should Return Empty - When No User Has That Id, Not Confused With A Null Stored Value")
+    void shouldReturnEmptyWhenNoUserHasThatIdNotConfusedWithANullStoredValue() {
+        Optional<UserRepository.SessionsInvalidatedAtView> result =
+                userRepository.findSessionsInvalidatedAtById(UUID.randomUUID());
 
         assertThat(result).isEmpty();
     }

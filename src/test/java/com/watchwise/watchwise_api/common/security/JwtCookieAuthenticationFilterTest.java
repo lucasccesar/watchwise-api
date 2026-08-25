@@ -66,7 +66,7 @@ class JwtCookieAuthenticationFilterTest {
     @DisplayName("[doFilterInternal] Should Authenticate - When Token Is Valid And User Never Had Sessions Invalidated")
     void shouldAuthenticateWhenTokenIsValidAndUserNeverHadSessionsInvalidated() throws Exception {
         user.setSessionsInvalidatedAt(null);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findSessionsInvalidatedAtById(userId)).thenReturn(Optional.of(sessionsInvalidatedAtView(userId, user.getSessionsInvalidatedAt())));
 
         filter.doFilterInternal(request, response, filterChain);
 
@@ -80,7 +80,7 @@ class JwtCookieAuthenticationFilterTest {
     void shouldAuthenticateWhenTokenWasIssuedAfterSessionsWereInvalidated() throws Exception {
         LocalDateTime invalidatedAt = LocalDateTime.now().minusMinutes(5);
         user.setSessionsInvalidatedAt(invalidatedAt);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findSessionsInvalidatedAtById(userId)).thenReturn(Optional.of(sessionsInvalidatedAtView(userId, user.getSessionsInvalidatedAt())));
         when(jwtService.extractIssuedAt(TOKEN)).thenReturn(toDate(invalidatedAt.plusMinutes(1)));
 
         filter.doFilterInternal(request, response, filterChain);
@@ -93,7 +93,7 @@ class JwtCookieAuthenticationFilterTest {
     void shouldNotAuthenticateWhenTokenWasIssuedBeforeSessionsWereInvalidated() throws Exception {
         LocalDateTime invalidatedAt = LocalDateTime.now();
         user.setSessionsInvalidatedAt(invalidatedAt);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findSessionsInvalidatedAtById(userId)).thenReturn(Optional.of(sessionsInvalidatedAtView(userId, user.getSessionsInvalidatedAt())));
         when(jwtService.extractIssuedAt(TOKEN)).thenReturn(toDate(invalidatedAt.minusMinutes(1)));
 
         filter.doFilterInternal(request, response, filterChain);
@@ -107,7 +107,7 @@ class JwtCookieAuthenticationFilterTest {
     void shouldNotAuthenticateWhenTokenWasIssuedExactlyWhenSessionsWereInvalidated() throws Exception {
         LocalDateTime invalidatedAt = LocalDateTime.now();
         user.setSessionsInvalidatedAt(invalidatedAt);
-        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(userRepository.findSessionsInvalidatedAtById(userId)).thenReturn(Optional.of(sessionsInvalidatedAtView(userId, user.getSessionsInvalidatedAt())));
         when(jwtService.extractIssuedAt(TOKEN)).thenReturn(toDate(invalidatedAt));
 
         filter.doFilterInternal(request, response, filterChain);
@@ -118,7 +118,7 @@ class JwtCookieAuthenticationFilterTest {
     @Test
     @DisplayName("[doFilterInternal] Should Not Authenticate - When The User No Longer Exists")
     void shouldNotAuthenticateWhenTheUserNoLongerExists() throws Exception {
-        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+        when(userRepository.findSessionsInvalidatedAtById(userId)).thenReturn(Optional.empty());
 
         filter.doFilterInternal(request, response, filterChain);
 
@@ -134,10 +134,24 @@ class JwtCookieAuthenticationFilterTest {
         filter.doFilterInternal(request, response, filterChain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-        verify(userRepository, org.mockito.Mockito.never()).findById(any());
+        verify(userRepository, org.mockito.Mockito.never()).findSessionsInvalidatedAtById(any());
     }
 
     private Date toDate(LocalDateTime localDateTime) {
         return Date.from(localDateTime.atZone(ZoneId.systemDefault()).toInstant());
+    }
+
+    private UserRepository.SessionsInvalidatedAtView sessionsInvalidatedAtView(UUID id, LocalDateTime sessionsInvalidatedAt) {
+        return new UserRepository.SessionsInvalidatedAtView() {
+            @Override
+            public UUID getId() {
+                return id;
+            }
+
+            @Override
+            public LocalDateTime getSessionsInvalidatedAt() {
+                return sessionsInvalidatedAt;
+            }
+        };
     }
 }
