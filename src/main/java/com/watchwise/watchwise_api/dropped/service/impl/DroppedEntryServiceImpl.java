@@ -47,6 +47,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
+    static final int MAX_PAGE_SIZE = 1000;
 
     @Override
     public Page<DroppedEntryResponseDTO> getDropped(UUID viewerId, UUID userId, ContentType type, Integer pageNumber, Integer pageSize) {
@@ -150,14 +151,14 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
             throw new BadRequestException("Page number must be greater than or equal to 0");
         }
 
-        if (pageSize == null || pageSize > 1000) {
+        if (pageSize == null) {
             queryPageSize = DEFAULT_PAGE_SIZE;
+        } else if (pageSize > MAX_PAGE_SIZE) {
+            queryPageSize = MAX_PAGE_SIZE;
+        } else if (pageSize <= 0) {
+            throw new BadRequestException("Page size must be greater than 0");
         } else {
-            if (pageSize <= 0) {
-                throw new BadRequestException("Page size must be greater than 0");
-            } else {
-                queryPageSize = pageSize;
-            }
+            queryPageSize = pageSize;
         }
 
         return PageRequest.of(queryPageNumber, queryPageSize);

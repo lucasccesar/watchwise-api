@@ -499,14 +499,14 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getUsersByUsername] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getUsersByUsername] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubRepositoryReturningEmptyPage();
 
         userService.getUsersByUsername("john", 1, 1001);
 
         verify(userRepository).findByUsernameStartingWithIgnoreCase(anyString(), anyString(), pageRequestCaptor.capture());
-        assertEquals(UserServiceImpl.DEFAULT_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
+        assertEquals(UserServiceImpl.MAX_PAGE_SIZE, pageRequestCaptor.getValue().getPageSize());
     }
 
     @Test

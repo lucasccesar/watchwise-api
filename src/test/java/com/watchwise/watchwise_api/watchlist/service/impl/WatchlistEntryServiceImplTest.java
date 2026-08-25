@@ -278,14 +278,14 @@ class WatchlistEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getWatchlist] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getWatchlist] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubEmptyWatchlistPage();
 
         watchlistEntryService.getWatchlist(lucasId, lucasId, ContentType.MOVIE, 1, 1001);
 
         verify(watchlistEntryRepository).findByUserIdAndTypeOrderByPositionAsc(eq(lucasId), eq(ContentType.MOVIE), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(WatchlistEntryServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(WatchlistEntryServiceImpl.MAX_PAGE_SIZE);
     }
 
     @Test

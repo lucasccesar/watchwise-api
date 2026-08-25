@@ -441,14 +441,14 @@ class FollowerServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getFollowers] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getFollowers] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubFollowersEmptyPage();
 
         followerService.getFollowers(UUID.randomUUID(), followedId, 1, 1001);
 
         verify(followerRepository).findByFollowedIdAndStatus(eq(followedId), eq(FollowStatus.ACCEPTED), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowerServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowerServiceImpl.MAX_PAGE_SIZE);
     }
 
     @Test

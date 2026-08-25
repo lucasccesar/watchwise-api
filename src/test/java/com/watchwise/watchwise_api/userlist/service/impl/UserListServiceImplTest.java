@@ -345,14 +345,14 @@ class UserListServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getUserLists] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getUserLists] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubEmptyOwnListsPage();
 
         userListService.getUserLists(lucasId, lucasId, 1, 1001);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(UserListServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(UserListServiceImpl.MAX_PAGE_SIZE);
     }
 
     @Test

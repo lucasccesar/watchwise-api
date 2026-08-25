@@ -335,14 +335,14 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDiaryEntries] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getDiaryEntries] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubEmptyDiaryPage();
 
         diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 1001);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DiaryEntryServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DiaryEntryServiceImpl.MAX_PAGE_SIZE);
     }
 
     @Test

@@ -46,6 +46,7 @@ public class UserServiceImpl implements UserService {
 
     static final int DEFAULT_PAGE = 0;
     static final int DEFAULT_PAGE_SIZE = 20;
+    static final int MAX_PAGE_SIZE = 1000;
     static final int MIN_USERNAME_LENGTH = 3;
 
     @Override
@@ -245,14 +246,14 @@ public class UserServiceImpl implements UserService {
             throw new BadRequestException("Page number must be greater than or equal to 0");
         }
 
-        if (pageSize == null || pageSize > 1000) {
+        if (pageSize == null) {
             queryPageSize = DEFAULT_PAGE_SIZE;
+        } else if (pageSize > MAX_PAGE_SIZE) {
+            queryPageSize = MAX_PAGE_SIZE;
+        } else if (pageSize <= 0) {
+            throw new BadRequestException("Page size must be greater than 0");
         } else {
-            if (pageSize <= 0) {
-                throw new BadRequestException("Page size must be greater than 0");
-            } else {
-                queryPageSize = pageSize;
-            }
+            queryPageSize = pageSize;
         }
 
         if (!(sortBy == null)) {

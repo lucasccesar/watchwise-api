@@ -292,14 +292,14 @@ class CommentServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getCommentsForContent] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getCommentsForContent] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubContentCommentsEmptyPage();
 
         commentService.getCommentsForContent(lucasId, contentId, 1, 1001);
 
         verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(CommentServiceImpl.MAX_PAGE_SIZE);
     }
 
     @Test

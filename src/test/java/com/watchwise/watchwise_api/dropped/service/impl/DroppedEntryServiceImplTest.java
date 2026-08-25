@@ -268,14 +268,14 @@ class DroppedEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDropped] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getDropped] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubEmptyDroppedPage();
 
         droppedEntryService.getDropped(lucasId, lucasId, ContentType.MOVIE, 1, 1001);
 
         verify(droppedEntryRepository).findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DroppedEntryServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(DroppedEntryServiceImpl.MAX_PAGE_SIZE);
     }
 
     @Test

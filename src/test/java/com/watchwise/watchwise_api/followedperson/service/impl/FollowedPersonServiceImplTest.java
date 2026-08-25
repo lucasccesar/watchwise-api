@@ -360,14 +360,14 @@ class FollowedPersonServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getFollowedPeople] Should Use Default Page Size - When Page Size Exceeds Limit")
-    void shouldUseDefaultPageSizeWhenPageSizeExceedsLimit() {
+    @DisplayName("[getFollowedPeople] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubFollowedPeopleEmptyPage();
 
         followedPersonService.getFollowedPeople(UUID.randomUUID(), userId, 1, 1001);
 
         verify(followedPersonRepository).findByUserId(eq(userId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowedPersonServiceImpl.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(FollowedPersonServiceImpl.MAX_PAGE_SIZE);
     }
 
     @Test
