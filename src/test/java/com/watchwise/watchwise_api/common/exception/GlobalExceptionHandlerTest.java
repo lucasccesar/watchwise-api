@@ -45,6 +45,22 @@ class GlobalExceptionHandlerTest {
                 );
     }
 
+    @Test
+    @DisplayName("[handleUnexpectedException] Should Return Generic 500 ApiError Without Leaking The Exception Message - When An Unmapped Exception Is Thrown")
+    void shouldReturnGeneric500ApiErrorWithoutLeakingTheExceptionMessageWhenAnUnmappedExceptionIsThrown() {
+        HttpServletRequest servletRequest = new MockHttpServletRequest("GET", "/some/path");
+        RuntimeException exception = new RuntimeException("sensitive internal detail: connection string leaked here");
+
+        ApiError apiError = handler.handleUnexpectedException(exception, servletRequest).getBody();
+
+        assertThat(apiError).isNotNull();
+        assertThat(apiError.status()).isEqualTo(500);
+        assertThat(apiError.error()).isEqualTo("Internal Server Error");
+        assertThat(apiError.message()).isEqualTo("An unexpected error occurred");
+        assertThat(apiError.message()).doesNotContain("sensitive internal detail");
+        assertThat(apiError.path()).isEqualTo("/some/path");
+    }
+
     private void dummyMethod(String argument) {
     }
 }
