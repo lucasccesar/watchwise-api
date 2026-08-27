@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.user.dto;
 
-import com.watchwise.watchwise_api.common.dto.GenreWatchTimeDTO;
+import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,7 +15,6 @@ public record PublicUserProfileDTO(
         LocalDateTime createdAt,
         long totalMinutesWatched,
         long minutesWatchedLast30Days,
-        List<GenreWatchTimeDTO> genreMinutesWatched,
-        List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days
+        List<GenreCountDTO> genreCounts
 ) {
 }

@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.user.dto;
 
-import com.watchwise.watchwise_api.common.dto.GenreWatchTimeDTO;
+import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -17,12 +17,11 @@ public record UserResponseDTO(
         LocalDateTime updatedAt,
         long totalMinutesWatched,
         long minutesWatchedLast30Days,
-        List<GenreWatchTimeDTO> genreMinutesWatched,
-        List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days
+        List<GenreCountDTO> genreCounts
 ) {
     public UserResponseDTO(UUID id, String username, String email, String description, String profilePicture,
             Boolean isProfilePublic, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this(id, username, email, description, profilePicture, isProfilePublic, createdAt, updatedAt,
-                0L, 0L, List.of(), List.of());
+                0L, 0L, List.of());
     }
 }

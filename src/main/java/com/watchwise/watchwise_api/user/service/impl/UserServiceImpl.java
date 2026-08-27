@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.user.service.impl;
 
-import com.watchwise.watchwise_api.common.dto.GenreWatchTimeDTO;
+import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
@@ -212,7 +212,7 @@ public class UserServiceImpl implements UserService {
 
         WatchStats stats = computeWatchStats(id);
         return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.genreMinutesWatched(), stats.genreMinutesWatchedLast30Days());
+                stats.genreCounts());
     }
 
     @Override
@@ -286,7 +286,7 @@ public class UserServiceImpl implements UserService {
 
     private UserResponseDTO toUserResponseDto(User user, WatchStats stats) {
         return userMapper.userToUserResponseDto(user, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.genreMinutesWatched(), stats.genreMinutesWatchedLast30Days());
+                stats.genreCounts());
     }
 
     private WatchStats computeWatchStats(UUID userId) {
@@ -296,22 +296,19 @@ public class UserServiceImpl implements UserService {
         long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
         long minutesWatchedLast30Days = diaryEntryRepository
                 .sumRuntimeMinutesByUserIdAndWatchedDateBetween(userId, windowStart, windowEnd);
-        List<GenreWatchTimeDTO> genreMinutesWatched = toGenreWatchTimeDtos(
-                diaryEntryRepository.sumRuntimeMinutesByGenreAndUserId(userId));
-        List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days = toGenreWatchTimeDtos(
-                diaryEntryRepository.sumRuntimeMinutesByGenreAndUserIdAndWatchedDateBetween(userId, windowStart, windowEnd));
+        List<GenreCountDTO> genreCounts = toGenreCountDtos(
+                diaryEntryRepository.countDistinctTitlesByGenreAndUserId(userId));
 
-        return new WatchStats(totalMinutesWatched, minutesWatchedLast30Days, genreMinutesWatched, genreMinutesWatchedLast30Days);
+        return new WatchStats(totalMinutesWatched, minutesWatchedLast30Days, genreCounts);
     }
 
-    private List<GenreWatchTimeDTO> toGenreWatchTimeDtos(List<DiaryEntryRepository.GenreMinutes> rows) {
+    private List<GenreCountDTO> toGenreCountDtos(List<DiaryEntryRepository.GenreCount> rows) {
         return rows.stream()
-                .map(row -> new GenreWatchTimeDTO(row.getGenre(), row.getMinutes()))
+                .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
                 .toList();
     }
 
-    private record WatchStats(long totalMinutesWatched, long minutesWatchedLast30Days,
-            List<GenreWatchTimeDTO> genreMinutesWatched, List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days) {
-        static final WatchStats EMPTY = new WatchStats(0L, 0L, List.of(), List.of());
+    private record WatchStats(long totalMinutesWatched, long minutesWatchedLast30Days, List<GenreCountDTO> genreCounts) {
+        static final WatchStats EMPTY = new WatchStats(0L, 0L, List.of());
     }
 }

@@ -135,38 +135,22 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
 
     @Query(value = """
-            SELECT genre AS genre, SUM(c.runtime_minutes) AS minutes
+            SELECT genre AS genre,
+                   COUNT(DISTINCT CASE WHEN c.type = 'MOVIE' THEN c.id::text ELSE c.series_tmdb_id END) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
             CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'MOVIE' THEN c.genres ELSE sc.genres END) AS genre
             WHERE d.user_id = :userId
             AND c.type IN ('MOVIE', 'EPISODE')
-            AND c.runtime_minutes IS NOT NULL
             GROUP BY genre
-            ORDER BY minutes DESC
+            ORDER BY count DESC
             """, nativeQuery = true)
-    List<GenreMinutes> sumRuntimeMinutesByGenreAndUserId(@Param("userId") UUID userId);
+    List<GenreCount> countDistinctTitlesByGenreAndUserId(@Param("userId") UUID userId);
 
-    @Query(value = """
-            SELECT genre AS genre, SUM(c.runtime_minutes) AS minutes
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'MOVIE' THEN c.genres ELSE sc.genres END) AS genre
-            WHERE d.user_id = :userId
-            AND c.type IN ('MOVIE', 'EPISODE')
-            AND c.runtime_minutes IS NOT NULL
-            AND d.watched_date BETWEEN :start AND :end
-            GROUP BY genre
-            ORDER BY minutes DESC
-            """, nativeQuery = true)
-    List<GenreMinutes> sumRuntimeMinutesByGenreAndUserIdAndWatchedDateBetween(
-            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
-
-    interface GenreMinutes {
+    interface GenreCount {
         String getGenre();
-        Long getMinutes();
+        Long getCount();
     }
 
 }

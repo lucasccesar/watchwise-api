@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.user.mapper;
 
-import com.watchwise.watchwise_api.common.dto.GenreWatchTimeDTO;
+import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
@@ -170,9 +170,9 @@ class UserMapperTest {
                 .updatedAt(updatedAt)
                 .build();
 
-        List<GenreWatchTimeDTO> genres = List.of(new GenreWatchTimeDTO("Action", 120L));
+        List<GenreCountDTO> genres = List.of(new GenreCountDTO("Action", 5L));
 
-        UserResponseDTO result = userMapper.userToUserResponseDto(user, 500L, 90L, genres, genres);
+        UserResponseDTO result = userMapper.userToUserResponseDto(user, 500L, 90L, genres);
 
         assertThat(result.id()).isEqualTo(id);
         assertThat(result.username()).isEqualTo("JohnDoe");
@@ -184,8 +184,7 @@ class UserMapperTest {
         assertThat(result.updatedAt()).isEqualTo(updatedAt);
         assertThat(result.totalMinutesWatched()).isEqualTo(500L);
         assertThat(result.minutesWatchedLast30Days()).isEqualTo(90L);
-        assertThat(result.genreMinutesWatched()).isEqualTo(genres);
-        assertThat(result.genreMinutesWatchedLast30Days()).isEqualTo(genres);
+        assertThat(result.genreCounts()).isEqualTo(genres);
     }
 
     @Test
@@ -193,7 +192,7 @@ class UserMapperTest {
     void shouldMapAllFieldsWhenMappingUserToPublicUserProfileDto() {
         UUID id = UUID.randomUUID();
         LocalDateTime createdAt = LocalDateTime.now().minusDays(1);
-        List<GenreWatchTimeDTO> genres = List.of(new GenreWatchTimeDTO("Drama", 60L));
+        List<GenreCountDTO> genres = List.of(new GenreCountDTO("Drama", 3L));
 
         User user = User.builder()
                 .id(id)
@@ -204,7 +203,7 @@ class UserMapperTest {
                 .createdAt(createdAt)
                 .build();
 
-        PublicUserProfileDTO result = userMapper.userToPublicUserProfileDto(user, 300L, 45L, genres, List.of());
+        PublicUserProfileDTO result = userMapper.userToPublicUserProfileDto(user, 300L, 45L, genres);
 
         assertThat(result.id()).isEqualTo(id);
         assertThat(result.username()).isEqualTo("JaneDoe");
@@ -214,7 +213,6 @@ class UserMapperTest {
         assertThat(result.createdAt()).isEqualTo(createdAt);
         assertThat(result.totalMinutesWatched()).isEqualTo(300L);
         assertThat(result.minutesWatchedLast30Days()).isEqualTo(45L);
-        assertThat(result.genreMinutesWatched()).isEqualTo(genres);
-        assertThat(result.genreMinutesWatchedLast30Days()).isEmpty();
+        assertThat(result.genreCounts()).isEqualTo(genres);
     }
 }

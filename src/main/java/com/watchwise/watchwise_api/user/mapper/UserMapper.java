@@ -1,6 +1,6 @@
 package com.watchwise.watchwise_api.user.mapper;
 
-import com.watchwise.watchwise_api.common.dto.GenreWatchTimeDTO;
+import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
@@ -23,14 +23,14 @@ public interface UserMapper {
     User postUserDtoToUser(PostUserDTO postUserDTO);
 
     UserResponseDTO userToUserResponseDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            List<GenreWatchTimeDTO> genreMinutesWatched, List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days);
+            List<GenreCountDTO> genreCounts);
 
     UserPreviewDTO userToUserPreviewDto(User user);
 
     PublicUserDTO userToPublicUserDto(User user);
 
     PublicUserProfileDTO userToPublicUserProfileDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            List<GenreWatchTimeDTO> genreMinutesWatched, List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days);
+            List<GenreCountDTO> genreCounts);
 
     @AfterMapping
     default void applyDefaults(@MappingTarget User.UserBuilder builder, PostUserDTO dto) {

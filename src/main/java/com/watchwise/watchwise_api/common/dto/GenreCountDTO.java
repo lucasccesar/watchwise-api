@@ -1,7 +1,7 @@
 package com.watchwise.watchwise_api.common.dto;
 
-public record GenreWatchTimeDTO(
+public record GenreCountDTO(
         String genre,
-        long minutes
+        long count
 ) {
 }

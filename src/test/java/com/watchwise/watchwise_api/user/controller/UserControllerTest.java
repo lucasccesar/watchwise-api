@@ -325,7 +325,6 @@ class UserControllerTest {
                 LocalDateTime.now(),
                 0L,
                 0L,
-                List.of(),
                 List.of()
         );
         when(userService.getUserById(id)).thenReturn(publicUserDTO);
