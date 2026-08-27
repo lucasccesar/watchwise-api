@@ -4,6 +4,11 @@ import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -24,6 +29,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -67,8 +75,16 @@ class UserControllerIntegrationTest {
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @Autowired
+    private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private ContentRepository contentRepository;
+
     @BeforeEach
     void setUp() {
+        diaryEntryRepository.deleteAll();
+        contentRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
@@ -83,6 +99,27 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("meuser"))
                 .andExpect(jsonPath("$.email").value("meuser@email.com"));
+    }
+
+    @Test
+    @DisplayName("[getCurrentUser] Should Include Watch Time Stats - When Diary Has A Movie Entry With RuntimeMinutes And Genres")
+    void shouldIncludeWatchTimeStatsWhenDiaryHasAMovieEntryWithRuntimeMinutesAndGenres() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("statsuser", "statsuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        User statsUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("statsuser", "statsuser")
+                .orElseThrow();
+
+        seedMovieWatch(statsUser, "550", 139, List.of("Drama"), LocalDate.now());
+
+        mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalMinutesWatched").value(139))
+                .andExpect(jsonPath("$.minutesWatchedLast30Days").value(139))
+                .andExpect(jsonPath("$.genreMinutesWatched[0].genre").value("Drama"))
+                .andExpect(jsonPath("$.genreMinutesWatched[0].minutes").value(139));
     }
 
     @Test
@@ -605,7 +642,7 @@ class UserControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserById] Should Return PublicUserDTO - When User Exists And Profile Is Public")
+    @DisplayName("[getUserById] Should Return PublicUserProfileDTO - When User Exists And Profile Is Public")
     void shouldReturnPublicUserDtoWhenUserExistsAndProfileIsPublic() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("viewerpublic", "viewerpublic@email.com");
 
@@ -620,7 +657,37 @@ class UserControllerIntegrationTest {
                 .andExpect(jsonPath("$.id").value(targetUser.getId().toString()))
                 .andExpect(jsonPath("$.username").value("targetpublic"))
                 .andExpect(jsonPath("$.isProfilePublic").value(true))
-                .andExpect(jsonPath("$.email").doesNotExist());
+                .andExpect(jsonPath("$.email").doesNotExist())
+                .andExpect(jsonPath("$.totalMinutesWatched").value(0))
+                .andExpect(jsonPath("$.genreMinutesWatched").isEmpty());
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Include Watch Time Stats - When Target User's Diary Has An Episode Entry")
+    void shouldIncludeWatchTimeStatsWhenTargetUsersDiaryHasAnEpisodeEntry() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("viewerstats", "viewerstats@email.com");
+
+        mockMvc.perform(registerRequest("targetstats", "targetstats@email.com"))
+                .andExpect(status().isCreated());
+        User targetUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("targetstats", "targetstats")
+                .orElseThrow();
+
+        Content series = contentRepository.save(Content.builder()
+                .tmdbId("1399").type(ContentType.SERIES).genres(List.of("Drama", "Action"))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(1).type(ContentType.EPISODE).runtimeMinutes(55)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(targetUser).content(episode).watchNumber(1).watchedDate(LocalDate.now())
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        contentRepository.saveAndFlush(series);
+
+        mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalMinutesWatched").value(55))
+                .andExpect(jsonPath("$.genreMinutesWatched[*].genre", org.hamcrest.Matchers.containsInAnyOrder("Drama", "Action")));
     }
 
     @Test
@@ -814,6 +881,15 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").param("username", "nomatch").cookie(otherViewerAccessToken))
                 .andExpect(status().isOk());
+    }
+
+    private void seedMovieWatch(User user, String tmdbId, int runtimeMinutes, List<String> genres, LocalDate watchedDate) {
+        Content movie = contentRepository.save(Content.builder()
+                .tmdbId(tmdbId).type(ContentType.MOVIE).runtimeMinutes(runtimeMinutes).genres(genres)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(user).content(movie).watchNumber(1).watchedDate(watchedDate)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
     }
 
     private Cookie registerAndGetAccessToken(String username, String email) throws Exception {

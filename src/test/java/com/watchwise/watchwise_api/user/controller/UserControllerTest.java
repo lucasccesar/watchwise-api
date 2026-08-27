@@ -8,7 +8,7 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
-import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -313,20 +313,24 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("[getUserById] Should Return PublicUserDTO - When Id Exists")
+    @DisplayName("[getUserById] Should Return PublicUserProfileDTO - When Id Exists")
     void shouldReturnPublicUserDtoWhenIdExists() {
         UUID id = UUID.randomUUID();
-        PublicUserDTO publicUserDTO = new PublicUserDTO(
+        PublicUserProfileDTO publicUserDTO = new PublicUserProfileDTO(
                 id,
                 "JaneDoe",
                 "Some description",
                 "https://picture.com/pic.png",
                 true,
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                0L,
+                0L,
+                List.of(),
+                List.of()
         );
         when(userService.getUserById(id)).thenReturn(publicUserDTO);
 
-        ResponseEntity<PublicUserDTO> result = userController.getUserById(id);
+        ResponseEntity<PublicUserProfileDTO> result = userController.getUserById(id);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(publicUserDTO);
@@ -337,7 +341,7 @@ class UserControllerTest {
     @DisplayName("[getUserById] Should Check Rate Limit Before Querying - When Called")
     void shouldCheckRateLimitBeforeQueryingWhenGetUserByIdCalled() {
         UUID id = UUID.randomUUID();
-        when(userService.getUserById(id)).thenReturn(mock(PublicUserDTO.class));
+        when(userService.getUserById(id)).thenReturn(mock(PublicUserProfileDTO.class));
 
         userController.getUserById(id);
 
@@ -364,7 +368,7 @@ class UserControllerTest {
     void shouldShareTheSameThrottleKeyWhenCalledByTheSameUser() {
         UUID targetId = UUID.randomUUID();
         when(userService.getUsersByUsername(any(), any(), any())).thenReturn(Page.empty());
-        when(userService.getUserById(targetId)).thenReturn(mock(PublicUserDTO.class));
+        when(userService.getUserById(targetId)).thenReturn(mock(PublicUserProfileDTO.class));
 
         userController.getUsersByUsername("jane", null, null);
         userController.getUserById(targetId);

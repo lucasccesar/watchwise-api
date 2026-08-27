@@ -4,7 +4,7 @@ import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
-import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -17,7 +17,7 @@ public interface UserService {
 
     UserResponseDTO saveNewUser(PostUserDTO postUserDTO);
 
-    PublicUserDTO getUserById(UUID id);
+    PublicUserProfileDTO getUserById(UUID id);
 
     UserResponseDTO getCurrentUser(UUID id);
 

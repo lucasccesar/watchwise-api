@@ -7,7 +7,7 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
-import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.service.UserService;
@@ -105,10 +105,10 @@ public class UserController {
     }
 
     @GetMapping("/{userId}")
-    public ResponseEntity<PublicUserDTO> getUserById(@PathVariable UUID userId) {
+    public ResponseEntity<PublicUserProfileDTO> getUserById(@PathVariable UUID userId) {
         requestThrottler.checkAllowed(profileScanKey(), profileScanMaxRequests, Duration.ofMinutes(profileScanWindowMinutes));
 
-        PublicUserDTO user = userService.getUserById(userId);
+        PublicUserProfileDTO user = userService.getUserById(userId);
         return ResponseEntity.ok(user);
     }
 

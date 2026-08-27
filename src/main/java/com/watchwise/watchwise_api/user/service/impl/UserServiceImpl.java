@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.user.service.impl;
 
+import com.watchwise.watchwise_api.common.dto.GenreWatchTimeDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
@@ -7,12 +8,13 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
-import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
+import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -30,7 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,8 +48,10 @@ public class UserServiceImpl implements UserService {
     private final RefreshTokenService refreshTokenService;
     private final FollowerService followerService;
     private final PageRequestFactory pageRequestFactory;
+    private final DiaryEntryRepository diaryEntryRepository;
 
     static final int MIN_USERNAME_LENGTH = 3;
+    static final int WATCH_TIME_WINDOW_DAYS = 30;
 
     @Override
     public UserResponseDTO saveNewUser(PostUserDTO postUserDTO) {
@@ -64,7 +70,8 @@ public class UserServiceImpl implements UserService {
         mapperUser.setUpdatedAt(now);
 
         try {
-            return userMapper.userToUserResponseDto(userRepository.save(mapperUser));
+            User saved = userRepository.save(mapperUser);
+            return toUserResponseDto(saved, WatchStats.EMPTY);
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -78,7 +85,8 @@ public class UserServiceImpl implements UserService {
 
         UserResponseDTO response;
         try {
-            response = userMapper.userToUserResponseDto(userRepository.saveAndFlush(user));
+            User saved = userRepository.saveAndFlush(user);
+            response = toUserResponseDto(saved, computeWatchStats(saved.getId()));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -195,21 +203,23 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public PublicUserDTO getUserById(UUID id) {
+    public PublicUserProfileDTO getUserById(UUID id) {
     User foundUser = userRepository.findById(id).orElseThrow(()->new NotFoundException("User not found"));
 
         if (!Boolean.TRUE.equals(foundUser.getIsProfilePublic())) {
             throw new ForbiddenException("This user profile is private");
         }
 
-        return userMapper.userToPublicUserDto(foundUser);
+        WatchStats stats = computeWatchStats(id);
+        return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
+                stats.genreMinutesWatched(), stats.genreMinutesWatchedLast30Days());
     }
 
     @Override
     public UserResponseDTO getCurrentUser(UUID id) {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
 
-        return userMapper.userToUserResponseDto(user);
+        return toUserResponseDto(user, computeWatchStats(id));
     }
 
     @Override
@@ -246,12 +256,13 @@ public class UserServiceImpl implements UserService {
             throw new ForbiddenException("Email not verified");
         }
 
-        return userMapper.userToUserResponseDto(user);
+        return toUserResponseDto(user, computeWatchStats(user.getId()));
     }
 
     @Override
     public Optional<UserResponseDTO> findByEmail(String email) {
-        return userRepository.findByEmailIgnoreCase(email.trim()).map(userMapper::userToUserResponseDto);
+        return userRepository.findByEmailIgnoreCase(email.trim())
+                .map(user -> toUserResponseDto(user, computeWatchStats(user.getId())));
     }
 
     @Override
@@ -271,5 +282,36 @@ public class UserServiceImpl implements UserService {
             return cve.getConstraintName();
         }
         return null;
+    }
+
+    private UserResponseDTO toUserResponseDto(User user, WatchStats stats) {
+        return userMapper.userToUserResponseDto(user, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
+                stats.genreMinutesWatched(), stats.genreMinutesWatchedLast30Days());
+    }
+
+    private WatchStats computeWatchStats(UUID userId) {
+        LocalDate windowStart = LocalDate.now().minusDays(WATCH_TIME_WINDOW_DAYS);
+        LocalDate windowEnd = LocalDate.now();
+
+        long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
+        long minutesWatchedLast30Days = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndWatchedDateBetween(userId, windowStart, windowEnd);
+        List<GenreWatchTimeDTO> genreMinutesWatched = toGenreWatchTimeDtos(
+                diaryEntryRepository.sumRuntimeMinutesByGenreAndUserId(userId));
+        List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days = toGenreWatchTimeDtos(
+                diaryEntryRepository.sumRuntimeMinutesByGenreAndUserIdAndWatchedDateBetween(userId, windowStart, windowEnd));
+
+        return new WatchStats(totalMinutesWatched, minutesWatchedLast30Days, genreMinutesWatched, genreMinutesWatchedLast30Days);
+    }
+
+    private List<GenreWatchTimeDTO> toGenreWatchTimeDtos(List<DiaryEntryRepository.GenreMinutes> rows) {
+        return rows.stream()
+                .map(row -> new GenreWatchTimeDTO(row.getGenre(), row.getMinutes()))
+                .toList();
+    }
+
+    private record WatchStats(long totalMinutesWatched, long minutesWatchedLast30Days,
+            List<GenreWatchTimeDTO> genreMinutesWatched, List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days) {
+        static final WatchStats EMPTY = new WatchStats(0L, 0L, List.of(), List.of());
     }
 }

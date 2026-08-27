@@ -273,6 +273,101 @@ class DiaryEntryRepositoryTest {
         assertThat(diaryEntryRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(0);
     }
 
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserId] Should Sum Only Movie And Episode Entries - When Diary Has Mixed Content Types")
+    void shouldSumOnlyMovieAndEpisodeEntriesWhenSummingRuntimeMinutes() {
+        Content movieWithRuntime = contentRepository.save(buildContent("550", ContentType.MOVIE, 139, null));
+        Content episodeWithRuntime = contentRepository.save(buildEpisode("1399", 1, 1, 55));
+        Content season = contentRepository.save(buildSeason("1399", 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movieWithRuntime));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episodeWithRuntime));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, season));
+
+        long result = diaryEntryRepository.sumRuntimeMinutesByUserId(lucas.getId());
+
+        assertThat(result).isEqualTo(194L);
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserId] Should Treat Missing RuntimeMinutes As Zero - When Content Has No Runtime Set")
+    void shouldTreatMissingRuntimeMinutesAsZeroWhenSummingRuntimeMinutes() {
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+
+        long result = diaryEntryRepository.sumRuntimeMinutesByUserId(lucas.getId());
+
+        assertThat(result).isZero();
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserIdAndWatchedDateBetween] Should Exclude Entries Outside The Window Or With No WatchedDate")
+    void shouldExcludeEntriesOutsideTheWindowOrWithNoWatchedDateWhenSummingRuntimeMinutes() {
+        Content insideWindow = contentRepository.save(buildContent("550", ContentType.MOVIE, 100, null));
+        Content outsideWindow = contentRepository.save(buildContent("680", ContentType.MOVIE, 90, null));
+        DiaryEntry insideEntry = buildEntry(lucas, insideWindow);
+        insideEntry.setWatchedDate(LocalDate.of(2024, 6, 15));
+        diaryEntryRepository.saveAndFlush(insideEntry);
+        DiaryEntry outsideEntry = buildEntry(lucas, outsideWindow);
+        outsideEntry.setWatchedDate(LocalDate.of(2024, 1, 1));
+        diaryEntryRepository.saveAndFlush(outsideEntry);
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, buildEpisode("1399", 1, 1, 30)));
+
+        long result = diaryEntryRepository.sumRuntimeMinutesByUserIdAndWatchedDateBetween(
+                lucas.getId(), LocalDate.of(2024, 6, 1), LocalDate.of(2024, 6, 30));
+
+        assertThat(result).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByGenreAndUserId] Should Group By Genre - When Movie Has Genres Of Its Own")
+    void shouldGroupByGenreWhenMovieHasGenresOfItsOwn() {
+        Content movie = contentRepository.save(buildContent("550", ContentType.MOVIE, 139, List.of("Drama", "Thriller")));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
+
+        List<DiaryEntryRepository.GenreMinutes> result = diaryEntryRepository.sumRuntimeMinutesByGenreAndUserId(lucas.getId());
+
+        assertThat(result).extracting(DiaryEntryRepository.GenreMinutes::getGenre).containsExactlyInAnyOrder("Drama", "Thriller");
+        assertThat(result).allSatisfy(row -> assertThat(row.getMinutes()).isEqualTo(139L));
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByGenreAndUserId] Should Resolve Genres From The Series Content - When Entry Is An Episode")
+    void shouldResolveGenresFromTheSeriesContentWhenEntryIsAnEpisode() {
+        contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+
+        List<DiaryEntryRepository.GenreMinutes> result = diaryEntryRepository.sumRuntimeMinutesByGenreAndUserId(lucas.getId());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getGenre()).isEqualTo("Drama");
+        assertThat(result.get(0).getMinutes()).isEqualTo(55L);
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByGenreAndUserId] Should Omit Content - When Genres And Series Are Both Missing")
+    void shouldOmitContentWhenGenresAndSeriesAreBothMissing() {
+        Content episodeWithoutSeriesContent = contentRepository.save(buildEpisode("9999", 1, 1, 40));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episodeWithoutSeriesContent));
+
+        List<DiaryEntryRepository.GenreMinutes> result = diaryEntryRepository.sumRuntimeMinutesByGenreAndUserId(lucas.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByGenreAndUserIdAndWatchedDateBetween] Should Exclude Entries Outside The Window")
+    void shouldExcludeEntriesOutsideTheWindowWhenSummingRuntimeMinutesByGenre() {
+        Content movie = contentRepository.save(buildContent("550", ContentType.MOVIE, 139, List.of("Drama")));
+        DiaryEntry entry = buildEntry(lucas, movie);
+        entry.setWatchedDate(LocalDate.of(2024, 1, 1));
+        diaryEntryRepository.saveAndFlush(entry);
+
+        List<DiaryEntryRepository.GenreMinutes> result = diaryEntryRepository.sumRuntimeMinutesByGenreAndUserIdAndWatchedDateBetween(
+                lucas.getId(), LocalDate.of(2024, 6, 1), LocalDate.of(2024, 6, 30));
+
+        assertThat(result).isEmpty();
+    }
+
     private DiaryEntry buildEntry(User user, Content content) {
         return buildEntry(user, content, 1);
     }
@@ -304,6 +399,31 @@ class DiaryEntryRepositoryTest {
                 .seriesTmdbId(seriesTmdbId)
                 .seasonNumber(seasonNumber)
                 .episodeNumber(episodeNumber)
+                .type(ContentType.EPISODE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildContent(String tmdbId, ContentType type, Integer runtimeMinutes, List<String> genres) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .tmdbId(tmdbId)
+                .type(type)
+                .runtimeMinutes(runtimeMinutes)
+                .genres(genres)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildEpisode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, Integer runtimeMinutes) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .runtimeMinutes(runtimeMinutes)
                 .type(ContentType.EPISODE)
                 .createdAt(now)
                 .updatedAt(now)

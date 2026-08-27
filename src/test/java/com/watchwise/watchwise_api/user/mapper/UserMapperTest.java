@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.user.mapper;
 
+import com.watchwise.watchwise_api.common.dto.GenreWatchTimeDTO;
 import com.watchwise.watchwise_api.user.dto.PostUserDTO;
+import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -167,7 +170,9 @@ class UserMapperTest {
                 .updatedAt(updatedAt)
                 .build();
 
-        UserResponseDTO result = userMapper.userToUserResponseDto(user);
+        List<GenreWatchTimeDTO> genres = List.of(new GenreWatchTimeDTO("Action", 120L));
+
+        UserResponseDTO result = userMapper.userToUserResponseDto(user, 500L, 90L, genres, genres);
 
         assertThat(result.id()).isEqualTo(id);
         assertThat(result.username()).isEqualTo("JohnDoe");
@@ -177,5 +182,39 @@ class UserMapperTest {
         assertThat(result.isProfilePublic()).isTrue();
         assertThat(result.createdAt()).isEqualTo(createdAt);
         assertThat(result.updatedAt()).isEqualTo(updatedAt);
+        assertThat(result.totalMinutesWatched()).isEqualTo(500L);
+        assertThat(result.minutesWatchedLast30Days()).isEqualTo(90L);
+        assertThat(result.genreMinutesWatched()).isEqualTo(genres);
+        assertThat(result.genreMinutesWatchedLast30Days()).isEqualTo(genres);
+    }
+
+    @Test
+    @DisplayName("[userToPublicUserProfileDto] Should Map All Fields - When Mapping User To PublicUserProfileDTO")
+    void shouldMapAllFieldsWhenMappingUserToPublicUserProfileDto() {
+        UUID id = UUID.randomUUID();
+        LocalDateTime createdAt = LocalDateTime.now().minusDays(1);
+        List<GenreWatchTimeDTO> genres = List.of(new GenreWatchTimeDTO("Drama", 60L));
+
+        User user = User.builder()
+                .id(id)
+                .username("JaneDoe")
+                .description("Some description")
+                .profilePicture("https://picture.com/pic.png")
+                .isProfilePublic(true)
+                .createdAt(createdAt)
+                .build();
+
+        PublicUserProfileDTO result = userMapper.userToPublicUserProfileDto(user, 300L, 45L, genres, List.of());
+
+        assertThat(result.id()).isEqualTo(id);
+        assertThat(result.username()).isEqualTo("JaneDoe");
+        assertThat(result.description()).isEqualTo("Some description");
+        assertThat(result.profilePicture()).isEqualTo("https://picture.com/pic.png");
+        assertThat(result.isProfilePublic()).isTrue();
+        assertThat(result.createdAt()).isEqualTo(createdAt);
+        assertThat(result.totalMinutesWatched()).isEqualTo(300L);
+        assertThat(result.minutesWatchedLast30Days()).isEqualTo(45L);
+        assertThat(result.genreMinutesWatched()).isEqualTo(genres);
+        assertThat(result.genreMinutesWatchedLast30Days()).isEmpty();
     }
 }

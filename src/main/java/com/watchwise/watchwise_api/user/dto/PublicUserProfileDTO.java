@@ -6,23 +6,16 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
-public record UserResponseDTO(
+public record PublicUserProfileDTO(
         UUID id,
         String username,
-        String email,
         String description,
         String profilePicture,
         Boolean isProfilePublic,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt,
         long totalMinutesWatched,
         long minutesWatchedLast30Days,
         List<GenreWatchTimeDTO> genreMinutesWatched,
         List<GenreWatchTimeDTO> genreMinutesWatchedLast30Days
 ) {
-    public UserResponseDTO(UUID id, String username, String email, String description, String profilePicture,
-            Boolean isProfilePublic, LocalDateTime createdAt, LocalDateTime updatedAt) {
-        this(id, username, email, description, profilePicture, isProfilePublic, createdAt, updatedAt,
-                0L, 0L, List.of(), List.of());
-    }
 }
