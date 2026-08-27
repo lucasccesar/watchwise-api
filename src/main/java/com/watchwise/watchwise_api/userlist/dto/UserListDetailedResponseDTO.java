@@ -16,6 +16,9 @@ public record UserListDetailedResponseDTO(
         LocalDateTime updatedAt,
         List<UserListItemResponseDTO> items,
         Integer likesCount,
-        Boolean likedByMe
+        Boolean likedByMe,
+        long itemsCount,
+        long commentsCount,
+        long totalRuntimeMinutes
 ) {
 }

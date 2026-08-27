@@ -288,6 +288,70 @@ class UserListItemServiceImplTest {
         verifyNoInteractions(userListItemRepository);
     }
 
+    // ---------- getItemsCount / getItemsCountByListIds ----------
+
+    @Test
+    @DisplayName("[getItemsCount] Should Return The Repository Count - When List Has Items")
+    void shouldReturnTheRepositoryCountWhenListHasItems() {
+        when(userListItemRepository.countAllItemsByUserListIdIn(List.of(listId)))
+                .thenReturn(List.of(buildUserListCount(listId, 5L)));
+
+        long result = userListItemService.getItemsCount(listId);
+
+        assertThat(result).isEqualTo(5L);
+    }
+
+    @Test
+    @DisplayName("[getItemsCount] Should Return Zero - When List Has No Items")
+    void shouldReturnZeroWhenListHasNoItems() {
+        when(userListItemRepository.countAllItemsByUserListIdIn(List.of(listId))).thenReturn(List.of());
+
+        long result = userListItemService.getItemsCount(listId);
+
+        assertThat(result).isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("[getItemsCountByListIds] Should Return Empty Map - When No List Ids Are Given")
+    void shouldReturnEmptyMapWhenNoListIdsAreGivenForItemsCount() {
+        Map<UUID, Long> result = userListItemService.getItemsCountByListIds(List.of());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userListItemRepository);
+    }
+
+    // ---------- getTotalRuntimeMinutes / getTotalRuntimeMinutesByListIds ----------
+
+    @Test
+    @DisplayName("[getTotalRuntimeMinutes] Should Return The Repository Sum - When List Has Content Items With Runtime")
+    void shouldReturnTheRepositorySumWhenListHasContentItemsWithRuntime() {
+        when(userListItemRepository.sumRuntimeMinutesByUserListIdIn(List.of(listId)))
+                .thenReturn(List.of(buildUserListSum(listId, 240L)));
+
+        long result = userListItemService.getTotalRuntimeMinutes(listId);
+
+        assertThat(result).isEqualTo(240L);
+    }
+
+    @Test
+    @DisplayName("[getTotalRuntimeMinutes] Should Return Zero - When List Has No Content Items")
+    void shouldReturnZeroWhenListHasNoContentItemsForRuntime() {
+        when(userListItemRepository.sumRuntimeMinutesByUserListIdIn(List.of(listId))).thenReturn(List.of());
+
+        long result = userListItemService.getTotalRuntimeMinutes(listId);
+
+        assertThat(result).isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("[getTotalRuntimeMinutesByListIds] Should Return Empty Map - When No List Ids Are Given")
+    void shouldReturnEmptyMapWhenNoListIdsAreGivenForTotalRuntimeMinutes() {
+        Map<UUID, Long> result = userListItemService.getTotalRuntimeMinutesByListIds(List.of());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userListItemRepository);
+    }
+
     // ---------- getWatchedPercentage / getWatchedPercentagesByListIds ----------
 
     @Test
@@ -1318,6 +1382,20 @@ class UserListItemServiceImplTest {
         org.hibernate.exception.ConstraintViolationException cve =
                 new org.hibernate.exception.ConstraintViolationException("constraint violated", null, constraintName);
         return new DataIntegrityViolationException("db error", cve);
+    }
+
+    private UserListItemRepository.UserListSum buildUserListSum(UUID userListId, long total) {
+        return new UserListItemRepository.UserListSum() {
+            @Override
+            public UUID getUserListId() {
+                return userListId;
+            }
+
+            @Override
+            public long getTotal() {
+                return total;
+            }
+        };
     }
 
     private UserListItemRepository.UserListCount buildUserListCount(UUID userListId, long count) {

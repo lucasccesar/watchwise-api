@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.userlist.service.impl;
 
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
@@ -30,10 +31,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -46,6 +49,7 @@ public class UserListServiceImpl implements UserListService {
     private final UserListMapper userListMapper;
     private final LikeService likeService;
     private final PageRequestFactory pageRequestFactory;
+    private final CommentRepository commentRepository;
 
     @Override
     public Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize) {
@@ -68,13 +72,30 @@ public class UserListServiceImpl implements UserListService {
         Map<UUID, Long> nestedListsCountByListId = userListItemService.countNestedListsByListIds(listIds);
         Map<UUID, Double> watchedPercentageByListId = userListItemService.getWatchedPercentagesByListIds(listIds, viewerId);
         Set<UUID> likedListIds = likeService.getLikedListIds(viewerId, listIds);
+        Map<UUID, Long> itemsCountByListId = userListItemService.getItemsCountByListIds(listIds);
+        Map<UUID, Long> totalRuntimeMinutesByListId = userListItemService.getTotalRuntimeMinutesByListIds(listIds);
+        Map<UUID, Long> commentsCountByListId = commentsCountByListIds(listIds);
 
         return lists.map(list -> userListMapper.userListToResponseDto(
                 list,
                 previewsByListId.getOrDefault(list.getId(), List.of()),
                 nestedListsCountByListId.getOrDefault(list.getId(), 0L),
                 watchedPercentageByListId.getOrDefault(list.getId(), 0.0),
-                likedListIds.contains(list.getId())));
+                likedListIds.contains(list.getId()),
+                itemsCountByListId.getOrDefault(list.getId(), 0L),
+                commentsCountByListId.getOrDefault(list.getId(), 0L),
+                totalRuntimeMinutesByListId.getOrDefault(list.getId(), 0L)));
+    }
+
+    private Map<UUID, Long> commentsCountByListIds(Collection<UUID> listIds) {
+        if (listIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return commentRepository.countByListIdIn(listIds).stream()
+                .collect(Collectors.toMap(
+                        CommentRepository.ListCommentCount::getListId,
+                        CommentRepository.ListCommentCount::getCount));
     }
 
     private UserListResponseDTO toResponseDto(UserList userList, UUID viewerId) {
@@ -82,7 +103,11 @@ public class UserListServiceImpl implements UserListService {
         long nestedListsCount = userListItemService.countNestedLists(userList.getId());
         double watchedPercentage = userListItemService.getWatchedPercentage(userList.getId(), viewerId);
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(userList.getId())).contains(userList.getId());
-        return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage, likedByMe);
+        long itemsCount = userListItemService.getItemsCount(userList.getId());
+        long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(userList.getId());
+        long commentsCount = commentRepository.countByListId(userList.getId());
+        return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage, likedByMe,
+                itemsCount, commentsCount, totalRuntimeMinutes);
     }
 
     private void assertCanViewLists(User target, boolean isOwner, boolean viewerFollowsTarget) {
@@ -109,8 +134,11 @@ public class UserListServiceImpl implements UserListService {
         List<UserListItemResponseDTO> items = userListItemService.getItems(viewerId, listId);
         double watchedPercentage = userListItemService.getWatchedPercentage(listId, viewerId);
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
+        long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
+        long commentsCount = commentRepository.countByListId(listId);
 
-        return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe);
+        return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe,
+                items.size(), commentsCount, totalRuntimeMinutes);
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {
@@ -146,7 +174,7 @@ public class UserListServiceImpl implements UserListService {
                 .updatedAt(now)
                 .build();
 
-        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0, false);
+        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0, false, 0L, 0L, 0L);
     }
 
     @Override
@@ -169,8 +197,13 @@ public class UserListServiceImpl implements UserListService {
         List<UserListItemResponseDTO> items = userListItemService.addItems(
                 userId, savedList.getId(), new UserListItemBulkCreationDTO(userListBulkCreationDTO.items()));
         double watchedPercentage = userListItemService.getWatchedPercentage(savedList.getId(), userId);
+        long totalRuntimeMinutes = items.stream()
+                .filter(item -> item.content() != null && item.content().runtimeMinutes() != null)
+                .mapToLong(item -> item.content().runtimeMinutes())
+                .sum();
 
-        return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage, false);
+        return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage, false,
+                items.size(), 0L, totalRuntimeMinutes);
     }
 
     @Override

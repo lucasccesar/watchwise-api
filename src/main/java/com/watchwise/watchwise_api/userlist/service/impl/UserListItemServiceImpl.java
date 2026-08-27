@@ -140,6 +140,40 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     @Override
+    public long getItemsCount(UUID listId) {
+        return getItemsCountByListIds(List.of(listId)).getOrDefault(listId, 0L);
+    }
+
+    @Override
+    public Map<UUID, Long> getItemsCountByListIds(Collection<UUID> listIds) {
+        if (listIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return userListItemRepository.countAllItemsByUserListIdIn(listIds).stream()
+                .collect(Collectors.toMap(
+                        UserListItemRepository.UserListCount::getUserListId,
+                        UserListItemRepository.UserListCount::getCount));
+    }
+
+    @Override
+    public long getTotalRuntimeMinutes(UUID listId) {
+        return getTotalRuntimeMinutesByListIds(List.of(listId)).getOrDefault(listId, 0L);
+    }
+
+    @Override
+    public Map<UUID, Long> getTotalRuntimeMinutesByListIds(Collection<UUID> listIds) {
+        if (listIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return userListItemRepository.sumRuntimeMinutesByUserListIdIn(listIds).stream()
+                .collect(Collectors.toMap(
+                        UserListItemRepository.UserListSum::getUserListId,
+                        UserListItemRepository.UserListSum::getTotal));
+    }
+
+    @Override
     @Transactional
     public UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO) {
         UserList userList = findOwnedList(userId, listId);

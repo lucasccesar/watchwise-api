@@ -14,9 +14,11 @@ import java.util.List;
 public interface UserListMapper {
 
     UserListResponseDTO userListToResponseDto(
-            UserList userList, List<ContentRefDTO> previewItems, long nestedListsCount, double watchedPercentage, boolean likedByMe);
+            UserList userList, List<ContentRefDTO> previewItems, long nestedListsCount, double watchedPercentage, boolean likedByMe,
+            long itemsCount, long commentsCount, long totalRuntimeMinutes);
 
     UserListDetailedResponseDTO userListToDetailedResponseDto(
-            UserList userList, List<UserListItemResponseDTO> items, double watchedPercentage, boolean likedByMe);
+            UserList userList, List<UserListItemResponseDTO> items, double watchedPercentage, boolean likedByMe,
+            long itemsCount, long commentsCount, long totalRuntimeMinutes);
 
 }

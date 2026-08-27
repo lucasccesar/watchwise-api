@@ -384,6 +384,52 @@ class UserListItemRepositoryTest {
     }
 
     @Test
+    @DisplayName("[countAllItemsByUserListIdIn] Should Count Content And Nested List Items Together - When Several Lists Are Requested")
+    void shouldCountContentAndNestedListItemsTogetherWhenSeveralListsAreRequested() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.save(buildChildListItem(scifi, horror, 2));
+        entityManager.clear();
+
+        List<UserListItemRepository.UserListCount> result = userListItemRepository.countAllItemsByUserListIdIn(List.of(scifi.getId()));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getUserListId()).isEqualTo(scifi.getId());
+        assertThat(result.get(0).getCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserListIdIn] Should Sum Only Content Items With RuntimeMinutes - When Several Lists Are Requested")
+    void shouldSumOnlyContentItemsWithRuntimeMinutesWhenSeveralListsAreRequested() {
+        Content withRuntime = contentRepository.save(buildContent("770", ContentType.MOVIE, 90));
+        Content withoutRuntime = contentRepository.save(buildContent("880", ContentType.MOVIE, null));
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.save(buildContentItem(scifi, withRuntime, 1));
+        userListItemRepository.save(buildContentItem(scifi, withoutRuntime, 2));
+        userListItemRepository.saveAndFlush(buildChildListItem(nestedList, horror, 1));
+        entityManager.clear();
+
+        List<UserListItemRepository.UserListSum> result = userListItemRepository.sumRuntimeMinutesByUserListIdIn(
+                List.of(scifi.getId(), nestedList.getId()));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getUserListId()).isEqualTo(scifi.getId());
+        assertThat(result.get(0).getTotal()).isEqualTo(90L);
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserListIdIn] Should Return Empty List - When No List Has Content Items")
+    void shouldReturnEmptyListWhenNoListHasContentItems() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.saveAndFlush(buildChildListItem(nestedList, horror, 1));
+        entityManager.clear();
+
+        List<UserListItemRepository.UserListSum> result = userListItemRepository.sumRuntimeMinutesByUserListIdIn(List.of(nestedList.getId()));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     @DisplayName("[deleteAll] Should Cascade Delete UserListItem Rows - When The Owning List Is Deleted")
     void shouldCascadeDeleteUserListItemRowsWhenTheOwningListIsDeleted() {
         UserListItem saved = userListItemRepository.saveAndFlush(buildContentItem(scifi, fightClub, 1));
@@ -447,6 +493,17 @@ class UserListItemRepositoryTest {
                 .user(user)
                 .name(name)
                 .visibility(UserListVisibility.PUBLIC)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildContent(String tmdbId, ContentType type, Integer runtimeMinutes) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .tmdbId(tmdbId)
+                .type(type)
+                .runtimeMinutes(runtimeMinutes)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

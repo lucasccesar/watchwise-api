@@ -18,6 +18,9 @@ public record UserListResponseDTO(
         List<ContentRefDTO> previewItems,
         long nestedListsCount,
         Integer likesCount,
-        Boolean likedByMe
+        Boolean likedByMe,
+        long itemsCount,
+        long commentsCount,
+        long totalRuntimeMinutes
 ) {
 }

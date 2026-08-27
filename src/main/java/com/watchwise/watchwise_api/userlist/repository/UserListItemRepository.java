@@ -92,9 +92,29 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     List<UserListCount> countWatchedContentItemsByUserListIdIn(
             @Param("userListIds") Collection<UUID> userListIds, @Param("ownerId") UUID ownerId);
 
+    @Query("""
+            SELECT uli.userList.id AS userListId, COUNT(uli) AS count FROM UserListItem uli
+            WHERE uli.userList.id IN :userListIds
+            GROUP BY uli.userList.id
+            """)
+    List<UserListCount> countAllItemsByUserListIdIn(@Param("userListIds") Collection<UUID> userListIds);
+
+    @Query("""
+            SELECT uli.userList.id AS userListId, COALESCE(SUM(uli.content.runtimeMinutes), 0) AS total FROM UserListItem uli
+            WHERE uli.userList.id IN :userListIds
+            AND uli.content.id IS NOT NULL
+            GROUP BY uli.userList.id
+            """)
+    List<UserListSum> sumRuntimeMinutesByUserListIdIn(@Param("userListIds") Collection<UUID> userListIds);
+
     interface UserListCount {
         UUID getUserListId();
         long getCount();
+    }
+
+    interface UserListSum {
+        UUID getUserListId();
+        long getTotal();
     }
 
 }

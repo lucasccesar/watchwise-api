@@ -27,6 +27,14 @@ public interface UserListItemService {
 
     Map<UUID, Double> getWatchedPercentagesByListIds(Collection<UUID> listIds, UUID ownerId);
 
+    long getItemsCount(UUID listId);
+
+    Map<UUID, Long> getItemsCountByListIds(Collection<UUID> listIds);
+
+    long getTotalRuntimeMinutes(UUID listId);
+
+    Map<UUID, Long> getTotalRuntimeMinutesByListIds(Collection<UUID> listIds);
+
     UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO);
 
     List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);

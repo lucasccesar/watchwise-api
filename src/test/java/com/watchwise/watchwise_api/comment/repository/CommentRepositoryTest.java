@@ -30,6 +30,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -359,6 +360,38 @@ class CommentRepositoryTest {
         commentRepository.flush();
 
         assertThat(commentRepository.findById(reply.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[countByListId] Should Return The Number Of Comments On That List")
+    void shouldReturnTheNumberOfCommentsOnThatList() {
+        commentRepository.save(buildListComment(lucas, scifi, "Nice picks"));
+        commentRepository.saveAndFlush(buildListComment(marina, scifi, "Agreed"));
+        entityManager.clear();
+
+        assertThat(commentRepository.countByListId(scifi.getId())).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("[countByListId] Should Return Zero - When List Has No Comments")
+    void shouldReturnZeroWhenListHasNoComments() {
+        assertThat(commentRepository.countByListId(scifi.getId())).isZero();
+    }
+
+    @Test
+    @DisplayName("[countByListIdIn] Should Count Comments Per List - When Several Lists Are Requested")
+    void shouldCountCommentsPerListWhenSeveralListsAreRequested() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        commentRepository.save(buildListComment(lucas, scifi, "Nice picks"));
+        commentRepository.save(buildListComment(marina, scifi, "Agreed"));
+        commentRepository.saveAndFlush(buildContentComment(lucas, fightClub, "Not this one"));
+        entityManager.clear();
+
+        List<CommentRepository.ListCommentCount> result = commentRepository.countByListIdIn(List.of(scifi.getId(), horror.getId()));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getListId()).isEqualTo(scifi.getId());
+        assertThat(result.get(0).getCount()).isEqualTo(2L);
     }
 
     @Test
