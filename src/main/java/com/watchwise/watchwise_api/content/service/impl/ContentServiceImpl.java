@@ -16,6 +16,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -33,7 +35,7 @@ public class ContentServiceImpl implements ContentService {
 
         Optional<Content> existing = findExisting(normalized);
         if (existing.isPresent()) {
-            assertNoFinaleMismatch(existing.get(), normalized);
+            assertNoMetadataMismatch(existing.get(), normalized);
             return contentMapper.contentToContentRefDto(existing.get());
         }
 
@@ -66,12 +68,24 @@ public class ContentServiceImpl implements ContentService {
                 dto.seasonNumber(),
                 dto.episodeNumber(),
                 dto.isSeasonFinale(),
-                dto.isSeriesFinale()
+                dto.isSeriesFinale(),
+                dto.runtimeMinutes(),
+                normalizeGenres(dto.genres())
         );
     }
 
     private String trimOrNull(String value) {
         return value == null ? null : value.trim();
+    }
+
+    private List<String> normalizeGenres(List<String> genres) {
+        if (genres == null) {
+            return null;
+        }
+        return genres.stream()
+                .map(String::trim)
+                .sorted(Comparator.naturalOrder())
+                .toList();
     }
 
     private void clearPreviousSeriesFinale(String seriesTmdbId, Integer newSeasonNumber) {
@@ -97,19 +111,25 @@ public class ContentServiceImpl implements ContentService {
                 });
     }
 
-    private void assertNoFinaleMismatch(Content existing, ContentRefCreationDTO normalized) {
+    private void assertNoMetadataMismatch(Content existing, ContentRefCreationDTO normalized) {
         if (normalized.isSeasonFinale() != null && !normalized.isSeasonFinale().equals(existing.getIsSeasonFinale())) {
             throw new ConflictException("This content is already registered with a different isSeasonFinale value");
         }
         if (normalized.isSeriesFinale() != null && !normalized.isSeriesFinale().equals(existing.getIsSeriesFinale())) {
             throw new ConflictException("This content is already registered with a different isSeriesFinale value");
         }
+        if (normalized.runtimeMinutes() != null && !normalized.runtimeMinutes().equals(existing.getRuntimeMinutes())) {
+            throw new ConflictException("This content is already registered with a different runtimeMinutes value");
+        }
+        if (normalized.genres() != null && !normalized.genres().isEmpty() && !normalized.genres().equals(existing.getGenres())) {
+            throw new ConflictException("This content is already registered with a different genres value");
+        }
     }
 
     private Content resolveConcurrentCreation(ContentRefCreationDTO dto, DataIntegrityViolationException e) {
         Optional<Content> existing = findExisting(dto);
         if (existing.isPresent()) {
-            assertNoFinaleMismatch(existing.get(), dto);
+            assertNoMetadataMismatch(existing.get(), dto);
             return existing.get();
         }
 
@@ -155,6 +175,9 @@ public class ContentServiceImpl implements ContentService {
                 if (dto.isSeasonFinale() != null || dto.isSeriesFinale() != null) {
                     throw new BadRequestException("isSeasonFinale and isSeriesFinale must not be provided when type is MOVIE or SERIES");
                 }
+                if (dto.runtimeMinutes() != null && dto.type() != ContentType.MOVIE) {
+                    throw new BadRequestException("runtimeMinutes must not be provided when type is SERIES");
+                }
             }
             case SEASON -> {
                 if (StringUtils.isEmpty(dto.seriesTmdbId()) || dto.seasonNumber() == null) {
@@ -166,6 +189,12 @@ public class ContentServiceImpl implements ContentService {
                 if (dto.isSeasonFinale() != null) {
                     throw new BadRequestException("isSeasonFinale must not be provided when type is SEASON");
                 }
+                if (dto.runtimeMinutes() != null) {
+                    throw new BadRequestException("runtimeMinutes must not be provided when type is SEASON");
+                }
+                if (dto.genres() != null) {
+                    throw new BadRequestException("genres must not be provided when type is SEASON");
+                }
             }
             case EPISODE -> {
                 if (StringUtils.isEmpty(dto.seriesTmdbId()) || dto.seasonNumber() == null || dto.episodeNumber() == null) {
@@ -173,6 +202,9 @@ public class ContentServiceImpl implements ContentService {
                 }
                 if (dto.tmdbId() != null) {
                     throw new BadRequestException("tmdbId must not be provided when type is EPISODE");
+                }
+                if (dto.genres() != null) {
+                    throw new BadRequestException("genres must not be provided when type is EPISODE");
                 }
             }
         }

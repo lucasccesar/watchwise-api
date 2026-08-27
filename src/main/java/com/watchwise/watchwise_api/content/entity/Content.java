@@ -2,8 +2,11 @@ package com.watchwise.watchwise_api.content.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -47,6 +50,15 @@ public class Content {
     @Column(name = "is_series_finale")
     @Setter
     private Boolean isSeriesFinale;
+
+    @Column(name = "runtime_minutes")
+    @Setter
+    private Integer runtimeMinutes;
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "genres")
+    @Setter
+    private List<String> genres;
 
     @Column(name = "created_at", nullable = false)
     @Setter

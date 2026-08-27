@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -851,6 +852,136 @@ class ContentServiceImplTest {
                 .isSameAs(exception);
 
         verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Accept RuntimeMinutes - When Type Is Movie")
+    void shouldAcceptRuntimeMinutesWhenTypeIsMovie() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null, 139, null);
+        Content mapped = Content.builder().tmdbId("100").type(ContentType.MOVIE).runtimeMinutes(139).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).runtimeMinutes(139).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null, 139, null);
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Series And RuntimeMinutes Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeriesAndRuntimeMinutesIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, 45, null);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("runtimeMinutes must not be provided when type is SERIES");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Season And RuntimeMinutes Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeasonAndRuntimeMinutesIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 1, null, null, null, 45, null);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("runtimeMinutes must not be provided when type is SEASON");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different RuntimeMinutes Value")
+    void shouldThrowConflictExceptionWhenExistingContentHasADifferentRuntimeMinutesValue() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null, 139, null);
+        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).runtimeMinutes(120).build();
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This content is already registered with a different runtimeMinutes value");
+
+        verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Accept Genres - When Type Is Series")
+    void shouldAcceptGenresWhenTypeIsSeries() {
+        List<String> genres = List.of("Drama", "Thriller");
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, genres);
+        Content mapped = Content.builder().tmdbId("300").type(ContentType.SERIES).genres(genres).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).genres(genres).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null, null, genres);
+
+        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.empty());
+        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Season And Genres Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeasonAndGenresIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 1, null, null, null, null, List.of("Drama"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("genres must not be provided when type is SEASON");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Episode And Genres Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsEpisodeAndGenresIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 3, null, null, null, List.of("Drama"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("genres must not be provided when type is EPISODE");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different Genres Value")
+    void shouldThrowConflictExceptionWhenExistingContentHasADifferentGenresValue() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, List.of("Drama"));
+        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).genres(List.of("Comedy")).build();
+
+        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This content is already registered with a different genres value");
+
+        verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Not Throw Conflict - When Genres Are Resent In A Different Order")
+    void shouldNotThrowConflictWhenGenresAreResentInADifferentOrder() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, List.of("Thriller", "Drama"));
+        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).genres(List.of("Drama", "Thriller")).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existing.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null, null, List.of("Drama", "Thriller"));
+
+        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.of(existing));
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {
