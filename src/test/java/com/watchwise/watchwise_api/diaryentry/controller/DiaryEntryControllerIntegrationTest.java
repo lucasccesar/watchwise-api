@@ -317,6 +317,52 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getDiaryEntries] Should Only Return Entries Of The Given Type - When Type Is Provided")
+    void shouldOnlyReturnEntriesOfTheGivenTypeWhenTypeIsProvided() throws Exception {
+        RegisteredUser user = registerUser("getdiarytype");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("550", ContentType.MOVIE);
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(1).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        persistEntry(entity, movie);
+        persistEntry(entity, episode);
+
+        mockMvc.perform(getDiaryRequest(user, user.id()).param("type", "EPISODE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].content.type").value("EPISODE"));
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Only Return Entries With A Review - When HasReview Is True")
+    void shouldOnlyReturnEntriesWithAReviewWhenHasReviewIsTrue() throws Exception {
+        RegisteredUser user = registerUser("getdiaryhasreview");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content withReview = persistContent("550", ContentType.MOVIE);
+        Content withoutReview = persistContent("680", ContentType.MOVIE);
+        DiaryEntry reviewedEntry = persistEntry(entity, withReview);
+        reviewedEntry.setComment("Great movie");
+        diaryEntryRepository.save(reviewedEntry);
+        persistEntry(entity, withoutReview);
+
+        mockMvc.perform(getDiaryRequest(user, user.id()).param("hasReview", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].content.tmdbId").value("550"));
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Return BadRequest - When Year Is Combined With DateFrom")
+    void shouldReturnBadRequestWhenYearIsCombinedWithDateFrom() throws Exception {
+        RegisteredUser user = registerUser("getdiaryyeardatefrom");
+
+        mockMvc.perform(getDiaryRequest(user, user.id()).param("year", "2024").param("dateFrom", "2024-06-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("year cannot be combined with dateFrom/dateTo"));
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Return NotFound - When Target User Does Not Exist")
     void shouldReturnNotFoundWhenTargetUserDoesNotExist() throws Exception {
         RegisteredUser viewer = registerUser("getdiarynotfound");

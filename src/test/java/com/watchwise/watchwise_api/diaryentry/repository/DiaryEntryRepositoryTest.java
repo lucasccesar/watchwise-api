@@ -120,7 +120,7 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc] Should Return Only Entries Watched In That Year With Content Already Initialized")
+    @DisplayName("[findByUserIdWithFilters] Should Return Only Entries Watched In That Date Range With Content Already Initialized")
     void shouldReturnOnlyEntriesWatchedInThatYear() {
         DiaryEntry watchedIn2024 = buildEntry(lucas, fightClub);
         watchedIn2024.setWatchedDate(LocalDate.of(2024, 6, 1));
@@ -130,8 +130,8 @@ class DiaryEntryRepositoryTest {
         diaryEntryRepository.saveAndFlush(watchedIn2025);
         entityManager.clear();
 
-        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
-                lucas.getId(), LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), PageRequest.of(0, 10));
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
+                lucas.getId(), null, LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
                 .containsExactly(fightClub.getId());
@@ -140,15 +140,59 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc] Should Exclude Entries With No Watched Date")
+    @DisplayName("[findByUserIdWithFilters] Should Exclude Entries With No Watched Date - When A Date Range Is Given")
     void shouldExcludeEntriesWithNoWatchedDate() {
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
         entityManager.clear();
 
-        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
-                lucas.getId(), LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), PageRequest.of(0, 10));
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
+                lucas.getId(), null, LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findByUserIdWithFilters] Should Filter By Content Type")
+    void shouldFilterByContentType() {
+        Content episode = buildEpisode("1399", 1, 1);
+        contentRepository.save(episode);
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
+                lucas.getId(), ContentType.EPISODE, null, null, null, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(entry -> entry.getContent().getType())
+                .containsExactly(ContentType.EPISODE);
+    }
+
+    @Test
+    @DisplayName("[findByUserIdWithFilters] Should Filter By HasReview")
+    void shouldFilterByHasReview() {
+        DiaryEntry withReview = buildEntry(lucas, fightClub);
+        withReview.setComment("Great movie");
+        diaryEntryRepository.saveAndFlush(withReview);
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, pulpFiction));
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
+                lucas.getId(), null, null, null, true, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
+                .containsExactly(fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserIdWithFilters] Should Return All Entries - When No Filter Is Given")
+    void shouldReturnAllEntriesWhenNoFilterIsGiven() {
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
+                lucas.getId(), null, null, null, null, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).hasSize(1);
     }
 
     @Test

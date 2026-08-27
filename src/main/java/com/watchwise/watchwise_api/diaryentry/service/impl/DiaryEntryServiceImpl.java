@@ -69,17 +69,25 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final PageRequestFactory pageRequestFactory;
 
     @Override
-    public Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize) {
+    public Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
+            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
         assertCanViewDiary(viewerId, userId, target);
 
+        if (year != null && (dateFrom != null || dateTo != null)) {
+            throw new BadRequestException("year cannot be combined with dateFrom/dateTo");
+        }
+
+        LocalDate effectiveDateFrom = dateFrom != null ? dateFrom : (year != null ? startOfYear(year) : null);
+        LocalDate effectiveDateTo = dateTo != null ? dateTo : (year != null ? endOfYear(year) : null);
+        boolean hasExtraFilters = type != null || effectiveDateFrom != null || effectiveDateTo != null || hasReview != null;
+
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
-        Page<DiaryEntry> entries = year != null
-                ? diaryEntryRepository.findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
-                        userId, startOfYear(year), endOfYear(year), pageRequest)
+        Page<DiaryEntry> entries = hasExtraFilters
+                ? diaryEntryRepository.findByUserIdWithFilters(userId, type, effectiveDateFrom, effectiveDateTo, hasReview, pageRequest)
                 : diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(userId, pageRequest);
 
         List<UUID> entryIds = entries.getContent().stream().map(DiaryEntry::getId).toList();

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.repository;
 
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -29,13 +30,20 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     @Query("""
             SELECT d FROM DiaryEntry d JOIN FETCH d.content
             WHERE d.user.id = :userId
-            AND d.watchedDate BETWEEN :watchedDateStart AND :watchedDateEnd
+            AND (:type IS NULL OR d.content.type = :type)
+            AND (:watchedDateStart IS NULL OR d.watchedDate >= :watchedDateStart)
+            AND (:watchedDateEnd IS NULL OR d.watchedDate <= :watchedDateEnd)
+            AND (:hasReview IS NULL
+                 OR (:hasReview = TRUE AND d.comment IS NOT NULL)
+                 OR (:hasReview = FALSE AND d.comment IS NULL))
             ORDER BY d.createdAt DESC
             """)
-    Page<DiaryEntry> findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
+    Page<DiaryEntry> findByUserIdWithFilters(
             @Param("userId") UUID userId,
+            @Param("type") ContentType type,
             @Param("watchedDateStart") LocalDate watchedDateStart,
             @Param("watchedDateEnd") LocalDate watchedDateEnd,
+            @Param("hasReview") Boolean hasReview,
             Pageable pageable);
 
     List<DiaryEntry> findByUserIdAndContentIdAndWatchNumberGreaterThan(UUID userId, UUID contentId, Integer watchNumber);

@@ -74,11 +74,11 @@ class DiaryEntryControllerTest {
     void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingDiaryEntries() {
         UUID targetUserId = UUID.randomUUID();
         DiaryEntryResponseDTO dto = buildResponseDto();
-        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, 2024, 1, 10))
+        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, 2024, 1, 10, null, null, null, null))
                 .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
 
         ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> result =
-                diaryEntryController.getDiaryEntries(targetUserId, 2024, 1, 10);
+                diaryEntryController.getDiaryEntries(targetUserId, 2024, 1, 10, null, null, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody().content()).containsExactly(dto);
@@ -91,12 +91,12 @@ class DiaryEntryControllerTest {
     @DisplayName("[getDiaryEntries] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingDiaryEntries() {
         UUID targetUserId = UUID.randomUUID();
-        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, null, null, null))
+        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, null, null, null, null, null, null, null))
                 .thenReturn(Page.empty());
 
-        diaryEntryController.getDiaryEntries(targetUserId, null, null, null);
+        diaryEntryController.getDiaryEntries(targetUserId, null, null, null, null, null, null, null);
 
-        verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, null, null);
+        verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, null, null, null, null, null, null);
     }
 
     @Test

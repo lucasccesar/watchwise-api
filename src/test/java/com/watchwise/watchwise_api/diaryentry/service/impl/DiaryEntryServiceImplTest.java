@@ -65,6 +65,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
@@ -171,7 +172,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new PageImpl<>(List.of(entry)));
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(dto);
 
-        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10);
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, null);
 
         assertThat(result.getContent()).containsExactly(dto);
     }
@@ -183,7 +184,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10);
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, null);
 
         assertThat(result.getContent()).isEmpty();
         verify(diaryEntryMapper, never()).diaryEntryToResponseDto(any(), anyBoolean());
@@ -194,7 +195,7 @@ class DiaryEntryServiceImplTest {
     void shouldThrowNotFoundExceptionWhenUserDoesNotExist() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10))
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, null))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("User not found");
 
@@ -209,7 +210,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(marinaId, lucasId, null, 1, 10);
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(marinaId, lucasId, null, 1, 10, null, null, null, null);
 
         assertThat(result.getContent()).isEmpty();
         verifyNoInteractions(followerRepository);
@@ -225,7 +226,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(marinaId, lucasId, null, 1, 10);
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(marinaId, lucasId, null, 1, 10, null, null, null, null);
 
         assertThat(result.getContent()).isEmpty();
     }
@@ -238,7 +239,7 @@ class DiaryEntryServiceImplTest {
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(marinaId, lucasId, null, 1, 10))
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(marinaId, lucasId, null, 1, 10, null, null, null, null))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
@@ -249,14 +250,14 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[getDiaryEntries] Should Query By Watched Date Range - When Year Is Provided")
     void shouldQueryByWatchedDateRangeWhenYearIsProvided() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
-                eq(lucasId), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), any(PageRequest.class)))
+        when(diaryEntryRepository.findByUserIdWithFilters(
+                eq(lucasId), isNull(), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), isNull(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, 2024, 1, 10);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, 2024, 1, 10, null, null, null, null);
 
-        verify(diaryEntryRepository).findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(
-                eq(lucasId), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), any(PageRequest.class));
+        verify(diaryEntryRepository).findByUserIdWithFilters(
+                eq(lucasId), isNull(), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), isNull(), any(PageRequest.class));
         verify(diaryEntryRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
     }
 
@@ -267,10 +268,51 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, null);
 
         verify(diaryEntryRepository, never())
-                .findByUserIdAndWatchedDateBetweenOrderByCreatedAtDesc(any(), any(), any(), any());
+                .findByUserIdWithFilters(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Throw BadRequestException - When Year Is Combined With DateFrom")
+    void shouldThrowBadRequestExceptionWhenYearIsCombinedWithDateFrom() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, 2024, 1, 10, null, LocalDate.of(2024, 6, 1), null, null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("year cannot be combined with dateFrom/dateTo");
+
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Query With Filters - When Type Is Provided")
+    void shouldQueryWithFiltersWhenTypeIsProvided() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findByUserIdWithFilters(
+                eq(lucasId), eq(ContentType.EPISODE), isNull(), isNull(), isNull(), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, ContentType.EPISODE, null, null, null);
+
+        verify(diaryEntryRepository).findByUserIdWithFilters(
+                eq(lucasId), eq(ContentType.EPISODE), isNull(), isNull(), isNull(), any(PageRequest.class));
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Query With Filters - When HasReview Is Provided")
+    void shouldQueryWithFiltersWhenHasReviewIsProvided() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findByUserIdWithFilters(
+                eq(lucasId), isNull(), isNull(), isNull(), eq(true), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, true);
+
+        verify(diaryEntryRepository).findByUserIdWithFilters(
+                eq(lucasId), isNull(), isNull(), isNull(), eq(true), any(PageRequest.class));
     }
 
     @Test
@@ -278,7 +320,7 @@ class DiaryEntryServiceImplTest {
     void shouldThrowBadRequestExceptionWhenYearIsOutOfRange() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, Integer.MAX_VALUE, 1, 10))
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, Integer.MAX_VALUE, 1, 10, null, null, null, null))
                 .isInstanceOf(BadRequestException.class);
 
         verifyNoInteractions(diaryEntryRepository);
@@ -289,7 +331,7 @@ class DiaryEntryServiceImplTest {
     void shouldUseDefaultPageWhenPageNumberIsNull() {
         stubEmptyDiaryPage();
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, null, 10);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, null, 10, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
@@ -300,7 +342,7 @@ class DiaryEntryServiceImplTest {
     void shouldUseDefaultPageWhenPageNumberIsZero() {
         stubEmptyDiaryPage();
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 0, 10);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 0, 10, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
@@ -311,7 +353,7 @@ class DiaryEntryServiceImplTest {
     void shouldUsePageNumberMinusOneWhenPageNumberIsPositive() {
         stubEmptyDiaryPage();
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 3, 10);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 3, 10, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(2);
@@ -322,7 +364,7 @@ class DiaryEntryServiceImplTest {
     void shouldThrowBadRequestExceptionWhenPageNumberIsNegative() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, -1, 10))
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, -1, 10, null, null, null, null))
                 .isInstanceOf(BadRequestException.class);
 
         verify(diaryEntryRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
@@ -333,7 +375,7 @@ class DiaryEntryServiceImplTest {
     void shouldUseDefaultPageSizeWhenPageSizeIsNull() {
         stubEmptyDiaryPage();
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, null);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, null, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
@@ -344,7 +386,7 @@ class DiaryEntryServiceImplTest {
     void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubEmptyDiaryPage();
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 1001);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 1001, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
@@ -355,7 +397,7 @@ class DiaryEntryServiceImplTest {
     void shouldUseProvidedPageSizeWhenPageSizeIsValid() {
         stubEmptyDiaryPage();
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 25);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 25, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(25);
@@ -366,7 +408,7 @@ class DiaryEntryServiceImplTest {
     void shouldUseProvidedPageSizeWhenPageSizeIsAtMaxLimit() {
         stubEmptyDiaryPage();
 
-        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 1000);
+        diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 1000, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdOrderByCreatedAtDesc(eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(1000);
@@ -377,7 +419,7 @@ class DiaryEntryServiceImplTest {
     void shouldThrowBadRequestExceptionWhenPageSizeIsNegative() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, -5))
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, -5, null, null, null, null))
                 .isInstanceOf(BadRequestException.class);
 
         verify(diaryEntryRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
@@ -388,7 +430,7 @@ class DiaryEntryServiceImplTest {
     void shouldThrowBadRequestExceptionWhenPageSizeIsZero() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
 
-        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 0))
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 0, null, null, null, null))
                 .isInstanceOf(BadRequestException.class);
 
         verify(diaryEntryRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());

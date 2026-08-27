@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.diaryentry.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
@@ -19,6 +20,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,9 +46,14 @@ public class DiaryEntryController {
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) ContentType type,
+            @RequestParam(required = false) LocalDate dateFrom,
+            @RequestParam(required = false) LocalDate dateTo,
+            @RequestParam(required = false) Boolean hasReview
     ) {
-        Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(getCurrentUserId(), userId, year, page, size);
+        Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(
+                getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview);
         return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 
