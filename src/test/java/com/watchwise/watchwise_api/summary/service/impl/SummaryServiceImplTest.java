@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -19,7 +20,9 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
@@ -39,7 +42,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
@@ -105,6 +110,14 @@ class SummaryServiceImplTest {
         lenient().when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(any(), any(), any()))
                 .thenReturn(Page.empty());
         lenient().when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(any(), any(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.findSeriesInProgressByUserId(any(), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+        lenient().when(diaryEntryRepository.countByUserIdAndWatchedDateBetween(any(), any(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(any(), any(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
         lenient().when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(any(), any()))
                 .thenReturn(List.of());
@@ -316,6 +329,131 @@ class SummaryServiceImplTest {
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
 
         assertThat(result.recentEpisodes()).containsExactly(episodeDto);
+    }
+
+    // ---------- getHomeSummary ----------
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Throw NotFoundException - When User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenUserDoesNotExistForHomeSummary() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summaryService.getHomeSummary(lucasId, lucasId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateForHomeSummary() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> summaryService.getHomeSummary(marinaId, lucasId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Return Totals, Next Episodes, Rolling 30-Day Stats And Genre Counts From The Repository")
+    void shouldReturnTotalsNextEpisodesRollingStatsAndGenreCountsForHomeSummary() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.sumRuntimeMinutesByUserId(lucasId)).thenReturn(9000L);
+        when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(42L);
+        when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(128L);
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 8, 6, LocalDate.of(2024, 5, 1));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(diaryEntryRepository.countByUserIdAndWatchedDateBetween(eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
+                .thenReturn(List.of(dailyWatchCount(LocalDate.of(2024, 5, 1), 3)));
+        when(diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(
+                eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
+                .thenReturn(List.of(genreCount("Action", 2)));
+        when(diaryEntryRepository.countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(
+                eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
+                .thenReturn(List.of(genreCount("Drama", 5)));
+
+        HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
+
+        assertThat(result.totalMinutesWatched()).isEqualTo(9000L);
+        assertThat(result.totalMoviesWatched()).isEqualTo(42L);
+        assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
+        assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1)));
+        assertThat(result.watchCountByDayLast30Days()).containsExactly(new DailyWatchCountDTO(LocalDate.of(2024, 5, 1), 3));
+        assertThat(result.genreCountsMoviesLast30Days()).containsExactly(new GenreCountDTO("Action", 2));
+        assertThat(result.genreCountsEpisodesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Merge Recent Movies And Episodes By CreatedAt Descending, Capped At Four")
+    void shouldMergeRecentMoviesAndEpisodesByCreatedAtDescendingForHomeSummary() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movieContent = buildContent("100", ContentType.MOVIE);
+        Content episodeContent = buildContent("1399", ContentType.EPISODE);
+        LocalDateTime now = LocalDateTime.now();
+        DiaryEntry oldestMovie = buildDiaryEntry(movieContent, now.minusDays(3));
+        DiaryEntry newestMovie = buildDiaryEntry(movieContent, now.minusHours(1));
+        DiaryEntry oldestEpisode = buildDiaryEntry(episodeContent, now.minusDays(2));
+        DiaryEntry newestEpisode = buildDiaryEntry(episodeContent, now);
+
+        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), any()))
+                .thenReturn(List.of(oldestMovie, newestMovie));
+        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.EPISODE), any()))
+                .thenReturn(List.of(oldestEpisode, newestEpisode));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
+                .thenAnswer(invocation -> {
+                    DiaryEntry entry = invocation.getArgument(0);
+                    return new DiaryEntryResponseDTO(entry.getId(), lucasId, null, null, null, null, 1, null, null, false,
+                            entry.getCreatedAt(), entry.getCreatedAt(), 0, false);
+                });
+
+        HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
+
+        assertThat(result.recentlyWatched()).extracting(DiaryEntryResponseDTO::id)
+                .containsExactly(newestEpisode.getId(), newestMovie.getId(), oldestEpisode.getId(), oldestMovie.getId());
+    }
+
+    private DiaryEntryRepository.SeriesInProgress seriesInProgress(
+            String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
+        return new DiaryEntryRepository.SeriesInProgress() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Integer getMaxSeasonNumber() {
+                return maxSeasonNumber;
+            }
+
+            @Override
+            public Integer getMaxEpisodeNumber() {
+                return maxEpisodeNumber;
+            }
+
+            @Override
+            public LocalDate getLastWatchedDate() {
+                return lastWatchedDate;
+            }
+        };
+    }
+
+    private DiaryEntryRepository.DailyWatchCount dailyWatchCount(LocalDate watchedDate, long count) {
+        return new DiaryEntryRepository.DailyWatchCount() {
+            @Override
+            public LocalDate getWatchedDate() {
+                return watchedDate;
+            }
+
+            @Override
+            public long getCount() {
+                return count;
+            }
+        };
     }
 
     @Test

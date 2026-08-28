@@ -231,4 +231,48 @@ class SummaryControllerIntegrationTest {
         mockMvc.perform(getSummaryRequest(viewer, target.id()).param("type", "MOVIE"))
                 .andExpect(status().isOk());
     }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Return Totals Computed From Persisted Diary Entries - When Called")
+    void shouldReturnTotalsComputedFromPersistedDiaryEntriesWhenGettingHomeSummary() throws Exception {
+        RegisteredUser user = registerUser("homesummaryok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("550", ContentType.MOVIE, 139);
+        persistEntry(entity, movie);
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/home").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalMinutesWatched").value(139))
+                .andExpect(jsonPath("$.totalMoviesWatched").value(1));
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Return NotFound - When Target User Does Not Exist")
+    void shouldReturnNotFoundWhenTargetUserDoesNotExistForHomeSummary() throws Exception {
+        RegisteredUser viewer = registerUser("homesummarynotfound");
+
+        mockMvc.perform(get("/users/" + UUID.randomUUID() + "/summary/home").cookie(viewer.accessToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForHomeSummary() throws Exception {
+        RegisteredUser user = registerUser("homesummarynoauth");
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/home"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Return Forbidden - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldReturnForbiddenWhenTargetProfileIsPrivateForHomeSummary() throws Exception {
+        RegisteredUser viewer = registerUser("homesummaryforbiddenviewer");
+        RegisteredUser target = registerUser("homesummaryforbiddentarget", false);
+
+        mockMvc.perform(get("/users/" + target.id() + "/summary/home").cookie(viewer.accessToken()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
 }

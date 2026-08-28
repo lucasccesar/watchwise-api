@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -23,8 +24,10 @@ import com.watchwise.watchwise_api.summary.dto.CountryCountDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyMinutesDTO;
 import com.watchwise.watchwise_api.summary.dto.DayOfWeekCountDTO;
 import com.watchwise.watchwise_api.summary.dto.DecadeCountDTO;
+import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeScoreDTO;
+import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.LongestWatchedItemDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthCountDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
@@ -65,6 +68,8 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int RECENT_REVIEWS_LIMIT = 5;
     private static final int RECENT_ACTIVITY_LIMIT = 6;
     private static final int WATCH_TIME_WINDOW_DAYS = 30;
+    private static final int HOME_NEXT_EPISODES_LIMIT = 6;
+    private static final int HOME_RECENTLY_WATCHED_LIMIT = 4;
     private static final int MONTH_TOP_LIMIT = 6;
     private static final int YEAR_TOP_LIMIT = 10;
     private static final int ALL_TIME_TOP_LIMIT = 10;
@@ -109,6 +114,60 @@ public class SummaryServiceImpl implements SummaryService {
         List<RecentActivityItemDTO> recentActivity = computeRecentActivity(userId, type);
 
         return new SummaryResponseDTO(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews, recentActivity);
+    }
+
+    @Override
+    public HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewSummary(viewerId, userId, target);
+
+        long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
+        long totalMoviesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.MOVIE);
+        long totalEpisodesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.EPISODE);
+
+        List<SeriesInProgressResponseDTO> nextEpisodes = diaryEntryRepository
+                .findSeriesInProgressByUserId(userId, PageRequest.of(0, HOME_NEXT_EPISODES_LIMIT))
+                .map(row -> new SeriesInProgressResponseDTO(
+                        row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate()))
+                .getContent();
+
+        LocalDate windowEnd = LocalDate.now();
+        LocalDate windowStart = windowEnd.minusDays(WATCH_TIME_WINDOW_DAYS);
+
+        List<DailyWatchCountDTO> watchCountByDayLast30Days = diaryEntryRepository
+                .countByUserIdAndWatchedDateBetween(userId, windowStart, windowEnd).stream()
+                .map(row -> new DailyWatchCountDTO(row.getWatchedDate(), row.getCount()))
+                .toList();
+
+        List<GenreCountDTO> genreCountsMoviesLast30Days = diaryEntryRepository
+                .countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(userId, windowStart, windowEnd).stream()
+                .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
+                .toList();
+        List<GenreCountDTO> genreCountsEpisodesLast30Days = diaryEntryRepository
+                .countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, windowStart, windowEnd).stream()
+                .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
+                .toList();
+
+        List<DiaryEntryResponseDTO> recentlyWatched = computeRecentlyWatched(userId);
+
+        return new HomeSummaryResponseDTO(totalMinutesWatched, totalMoviesWatched, totalEpisodesWatched, nextEpisodes,
+                watchCountByDayLast30Days, genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, recentlyWatched);
+    }
+
+    private List<DiaryEntryResponseDTO> computeRecentlyWatched(UUID userId) {
+        PageRequest topN = PageRequest.of(0, HOME_RECENTLY_WATCHED_LIMIT);
+
+        Stream<DiaryEntry> movies = diaryEntryRepository
+                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, ContentType.MOVIE, topN).stream();
+        Stream<DiaryEntry> episodes = diaryEntryRepository
+                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, ContentType.EPISODE, topN).stream();
+
+        return Stream.concat(movies, episodes)
+                .sorted(Comparator.comparing(DiaryEntry::getCreatedAt).reversed())
+                .limit(HOME_RECENTLY_WATCHED_LIMIT)
+                .map(this::toDiaryEntryResponseDto)
+                .toList();
     }
 
     @Override

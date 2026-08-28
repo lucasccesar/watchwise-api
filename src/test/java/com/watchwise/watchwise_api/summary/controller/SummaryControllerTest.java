@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
@@ -80,6 +81,31 @@ class SummaryControllerTest {
         summaryController.getSummary(targetUserId, ContentType.SERIES);
 
         verify(summaryService).getSummary(currentUserId, targetUserId, ContentType.SERIES);
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenGettingHomeSummary() {
+        UUID targetUserId = UUID.randomUUID();
+        HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
+        when(summaryService.getHomeSummary(currentUserId, targetUserId)).thenReturn(dto);
+
+        ResponseEntity<HomeSummaryResponseDTO> result = summaryController.getHomeSummary(targetUserId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingHomeSummary() {
+        UUID targetUserId = UUID.randomUUID();
+        HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
+        when(summaryService.getHomeSummary(currentUserId, targetUserId)).thenReturn(dto);
+
+        summaryController.getHomeSummary(targetUserId);
+
+        verify(summaryService).getHomeSummary(currentUserId, targetUserId);
     }
 
     @Test

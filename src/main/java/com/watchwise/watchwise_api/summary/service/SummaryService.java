@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.summary.service;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
@@ -13,6 +14,8 @@ import java.util.UUID;
 public interface SummaryService {
 
     SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type);
+
+    HomeSummaryResponseDTO getHomeSummary(UUID viewerId, UUID userId);
 
     MonthInReviewResponseDTO getMonthInReview(UUID viewerId, UUID userId, ContentType type, YearMonth month);
 

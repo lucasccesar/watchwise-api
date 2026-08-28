@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
@@ -33,6 +34,12 @@ public class SummaryController {
     ) {
         SummaryResponseDTO summary = summaryService.getSummary(getCurrentUserId(), userId, type);
         return ResponseEntity.ok(summary);
+    }
+
+    @GetMapping("/users/{userId}/summary/home")
+    public ResponseEntity<HomeSummaryResponseDTO> getHomeSummary(@PathVariable UUID userId) {
+        HomeSummaryResponseDTO response = summaryService.getHomeSummary(getCurrentUserId(), userId);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/users/{userId}/summary/month")
