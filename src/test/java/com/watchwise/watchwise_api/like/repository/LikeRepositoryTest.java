@@ -22,6 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -452,6 +454,41 @@ class LikeRepositoryTest {
                 lucas.getId(), List.of(scifi.getId(), secondList.getId()));
 
         assertThat(result).containsExactly(scifi.getId());
+    }
+
+    @Test
+    @DisplayName("[findLikedListsByUserId] Should Return The Lists Liked By The User Most Recently Liked First")
+    void shouldReturnTheListsLikedByTheUserMostRecentlyLikedFirst() {
+        UserList secondList = userListRepository.save(buildList(marina, "Underrated horror"));
+        Like olderLike = buildListLike(lucas, scifi);
+        olderLike.setCreatedAt(LocalDateTime.now().minusDays(1));
+        likeRepository.saveAndFlush(olderLike);
+        likeRepository.saveAndFlush(buildListLike(lucas, secondList));
+        entityManager.clear();
+
+        Page<UserList> result = likeRepository.findLikedListsByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(UserList::getId)
+                .containsExactly(secondList.getId(), scifi.getId());
+    }
+
+    @Test
+    @DisplayName("[findLikedListsByUserId] Should Exclude Lists Liked By Other Users")
+    void shouldExcludeListsLikedByOtherUsers() {
+        likeRepository.saveAndFlush(buildListLike(marina, scifi));
+        entityManager.clear();
+
+        Page<UserList> result = likeRepository.findLikedListsByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findLikedListsByUserId] Should Return Empty Page - When User Has Liked No List")
+    void shouldReturnEmptyPageWhenUserHasLikedNoList() {
+        Page<UserList> result = likeRepository.findLikedListsByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
     }
 
     private Like buildCommentLike(User user, Comment comment) {

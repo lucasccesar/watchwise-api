@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -55,6 +56,7 @@ public class UserListServiceImpl implements UserListService {
     private final LikeService likeService;
     private final PageRequestFactory pageRequestFactory;
     private final CommentRepository commentRepository;
+    private final LikeRepository likeRepository;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
     private static final Set<String> GENERIC_SORT_FIELDS = Set.of("rank", "updatedAt", "name", "likesCount");
@@ -94,6 +96,18 @@ public class UserListServiceImpl implements UserListService {
                     : userListRepository.findByUserIdAndVisibilityIn(userId, visibilities, pageRequest);
         }
 
+        return mapToResponseDtoPage(lists, viewerId);
+    }
+
+    @Override
+    public Page<UserListResponseDTO> getLikedLists(UUID userId, Integer pageNumber, Integer pageSize) {
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        Page<UserList> lists = likeRepository.findLikedListsByUserId(userId, pageRequest);
+
+        return mapToResponseDtoPage(lists, userId);
+    }
+
+    private Page<UserListResponseDTO> mapToResponseDtoPage(Page<UserList> lists, UUID viewerId) {
         List<UUID> listIds = lists.getContent().stream().map(UserList::getId).toList();
         Map<UUID, List<ContentRefDTO>> previewsByListId = userListItemService.getPreviewItemsByListIds(listIds);
         Map<UUID, Long> nestedListsCountByListId = userListItemService.countNestedListsByListIds(listIds);

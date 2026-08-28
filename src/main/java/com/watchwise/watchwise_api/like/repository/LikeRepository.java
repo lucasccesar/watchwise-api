@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.like.repository;
 
 import com.watchwise.watchwise_api.like.entity.Like;
+import com.watchwise.watchwise_api.userlist.entity.UserList;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -38,5 +41,8 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
 
     @Query("SELECT l.list.id FROM Like l WHERE l.user.id = :userId AND l.list.id IN :listIds")
     Set<UUID> findLikedListIds(@Param("userId") UUID userId, @Param("listIds") Collection<UUID> listIds);
+
+    @Query("SELECT l.list FROM Like l WHERE l.user.id = :userId AND l.list IS NOT NULL ORDER BY l.createdAt DESC")
+    Page<UserList> findLikedListsByUserId(@Param("userId") UUID userId, Pageable pageable);
 
 }

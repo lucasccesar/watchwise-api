@@ -86,6 +86,29 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getLikedLists] Should Return Ok With The Service Result Wrapped In A Page Envelope - When Called")
+    void shouldReturnOkWithTheServiceResultWrappedInAPageEnvelopeWhenGettingLikedLists() {
+        UserListResponseDTO dto = buildResponseDto();
+        Page<UserListResponseDTO> page = new PageImpl<>(List.of(dto));
+        when(userListService.getLikedLists(currentUserId, 1, 10)).thenReturn(page);
+
+        ResponseEntity<PageResponseDTO<UserListResponseDTO>> result = userListController.getLikedLists(1, 10);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody().content()).containsExactly(dto);
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingLikedLists() {
+        when(userListService.getLikedLists(currentUserId, 1, 10)).thenReturn(Page.empty());
+
+        userListController.getLikedLists(1, 10);
+
+        verify(userListService).getLikedLists(currentUserId, 1, 10);
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenGettingUserListById() {
         UUID listId = UUID.randomUUID();

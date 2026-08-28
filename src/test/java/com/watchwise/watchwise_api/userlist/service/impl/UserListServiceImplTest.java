@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -83,6 +84,9 @@ class UserListServiceImplTest {
 
     @Mock
     private CommentRepository commentRepository;
+
+    @Mock
+    private LikeRepository likeRepository;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -489,6 +493,107 @@ class UserListServiceImplTest {
         userListService.getUserLists(lucasId, lucasId, 1, 10, "commentsCount", null);
 
         verify(userListRepository).findByUserIdOrderByCommentsCount(eq(lucasId), any(), eq("ASC"), any(PageRequest.class));
+    }
+
+    // ---------- getLikedLists ----------
+
+    @Test
+    @DisplayName("[getLikedLists] Should Return Mapped Page - When User Has Liked Lists")
+    void shouldReturnMappedPageWhenUserHasLikedLists() {
+        UserList list = buildList(marina, "Marina's list", null, UserListVisibility.PUBLIC);
+        UserListResponseDTO dto = buildResponseDto(list);
+        when(likeRepository.findLikedListsByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(list)));
+        when(userListItemService.getPreviewItemsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.countNestedListsByListIds(List.of(list.getId()))).thenReturn(Map.of());
+        when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of());
+        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 0.0, false, 0L, 0L, 0L)).thenReturn(dto);
+
+        Page<UserListResponseDTO> result = userListService.getLikedLists(lucasId, 1, 10);
+
+        assertThat(result.getContent()).containsExactly(dto);
+        verifyNoInteractions(userRepository);
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Return Empty Page - When User Has Not Liked Any List")
+    void shouldReturnEmptyPageWhenUserHasNotLikedAnyList() {
+        when(likeRepository.findLikedListsByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        Page<UserListResponseDTO> result = userListService.getLikedLists(lucasId, 1, 10);
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Use Default Page - When Page Number Is Null")
+    void shouldUseDefaultPageWhenPageNumberIsNullForLikedLists() {
+        when(likeRepository.findLikedListsByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        userListService.getLikedLists(lucasId, null, 10);
+
+        verify(likeRepository).findLikedListsByUserId(eq(lucasId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isZero();
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Use Page Number Minus One - When Page Number Is Positive")
+    void shouldUsePageNumberMinusOneWhenPageNumberIsPositiveForLikedLists() {
+        when(likeRepository.findLikedListsByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        userListService.getLikedLists(lucasId, 3, 10);
+
+        verify(likeRepository).findLikedListsByUserId(eq(lucasId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Throw BadRequestException - When Page Number Is Negative")
+    void shouldThrowBadRequestExceptionWhenPageNumberIsNegativeForLikedLists() {
+        assertThatThrownBy(() -> userListService.getLikedLists(lucasId, -1, 10))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(likeRepository);
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Use Default Page Size - When Page Size Is Null")
+    void shouldUseDefaultPageSizeWhenPageSizeIsNullForLikedLists() {
+        when(likeRepository.findLikedListsByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        userListService.getLikedLists(lucasId, 1, null);
+
+        verify(likeRepository).findLikedListsByUserId(eq(lucasId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimitForLikedLists() {
+        when(likeRepository.findLikedListsByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        userListService.getLikedLists(lucasId, 1, 1001);
+
+        verify(likeRepository).findLikedListsByUserId(eq(lucasId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Throw BadRequestException - When Page Size Is Negative")
+    void shouldThrowBadRequestExceptionWhenPageSizeIsNegativeForLikedLists() {
+        assertThatThrownBy(() -> userListService.getLikedLists(lucasId, 1, -5))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(likeRepository);
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Throw BadRequestException - When Page Size Is Zero")
+    void shouldThrowBadRequestExceptionWhenPageSizeIsZeroForLikedLists() {
+        assertThatThrownBy(() -> userListService.getLikedLists(lucasId, 1, 0))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(likeRepository);
     }
 
     // ---------- getUserListById ----------

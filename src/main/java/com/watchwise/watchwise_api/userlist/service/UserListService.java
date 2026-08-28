@@ -15,6 +15,8 @@ public interface UserListService {
     Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize,
             String sortBy, String sortDirection);
 
+    Page<UserListResponseDTO> getLikedLists(UUID userId, Integer pageNumber, Integer pageSize);
+
     UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
             String sortBy, String sortDirection);
 

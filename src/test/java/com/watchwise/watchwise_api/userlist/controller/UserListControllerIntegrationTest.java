@@ -10,6 +10,8 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.entity.Like;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -82,6 +84,9 @@ class UserListControllerIntegrationTest {
     private FollowerRepository followerRepository;
 
     @Autowired
+    private LikeRepository likeRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -89,6 +94,7 @@ class UserListControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        likeRepository.deleteAll();
         userListItemRepository.deleteAll();
         userListRepository.deleteAll();
         contentRepository.deleteAll();
@@ -155,6 +161,18 @@ class UserListControllerIntegrationTest {
 
     private MockHttpServletRequestBuilder getUserListByIdRequest(RegisteredUser viewer, UUID listId) {
         return get("/lists/" + listId).cookie(viewer.accessToken());
+    }
+
+    private MockHttpServletRequestBuilder getLikedListsRequest(RegisteredUser viewer) {
+        return get("/users/me/liked-lists").cookie(viewer.accessToken());
+    }
+
+    private Like persistLike(User user, UserList list) {
+        return likeRepository.save(Like.builder()
+                .user(user)
+                .list(list)
+                .createdAt(LocalDateTime.now())
+                .build());
     }
 
     private MockHttpServletRequestBuilder createRequest(RegisteredUser actor, String body) {
@@ -504,6 +522,62 @@ class UserListControllerIntegrationTest {
         RegisteredUser user = registerUser("getlistsnoauth");
 
         mockMvc.perform(get("/users/" + user.id() + "/lists"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ---------- GET /users/me/liked-lists ----------
+
+    @Test
+    @DisplayName("[getLikedLists] Should Return Only The Lists The Viewer Liked - When Called")
+    void shouldReturnOnlyTheListsTheViewerLikedWhenCalled() throws Exception {
+        RegisteredUser viewer = registerUser("likedlistsviewer");
+        RegisteredUser owner = registerUser("likedlistsowner");
+        User viewerEntity = userRepository.findById(viewer.id()).orElseThrow();
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList likedList = persistList(ownerEntity, "Liked list", true);
+        persistList(ownerEntity, "Not liked list", true);
+        persistLike(viewerEntity, likedList);
+
+        mockMvc.perform(getLikedListsRequest(viewer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].name").value("Liked list"));
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Return Empty Content - When The Viewer Has Liked No List")
+    void shouldReturnEmptyContentWhenTheViewerHasLikedNoList() throws Exception {
+        RegisteredUser viewer = registerUser("likedlistsempty");
+
+        mockMvc.perform(getLikedListsRequest(viewer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Return Lists Most Recently Liked First - When The Viewer Liked Multiple Lists")
+    void shouldReturnListsMostRecentlyLikedFirstWhenTheViewerLikedMultipleLists() throws Exception {
+        RegisteredUser viewer = registerUser("likedlistsorder");
+        RegisteredUser owner = registerUser("likedlistsorderowner");
+        User viewerEntity = userRepository.findById(viewer.id()).orElseThrow();
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList olderLiked = persistList(ownerEntity, "Older liked", true);
+        UserList newerLiked = persistList(ownerEntity, "Newer liked", true);
+        Like olderLike = persistLike(viewerEntity, olderLiked);
+        olderLike.setCreatedAt(LocalDateTime.now().minusDays(1));
+        likeRepository.save(olderLike);
+        persistLike(viewerEntity, newerLiked);
+
+        mockMvc.perform(getLikedListsRequest(viewer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Newer liked"))
+                .andExpect(jsonPath("$.content[1].name").value("Older liked"));
+    }
+
+    @Test
+    @DisplayName("[getLikedLists] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForLikedLists() throws Exception {
+        mockMvc.perform(get("/users/me/liked-lists"))
                 .andExpect(status().isUnauthorized());
     }
 
