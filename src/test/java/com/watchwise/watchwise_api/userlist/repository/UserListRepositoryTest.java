@@ -248,6 +248,10 @@ class UserListRepositoryTest {
         userListRepository.saveAndFlush(third);
         entityManager.clear();
 
+        UserList movedFirst = userListRepository.findById(first.getId()).orElseThrow();
+        movedFirst.setRank(4);
+        userListRepository.saveAndFlush(movedFirst);
+
         userListRepository.parkRanksInRange(lucas.getId(), 2, 3, 1_000_000_000);
         userListRepository.settleParkedRanks(lucas.getId(), 1_000_000_000, -1);
         entityManager.clear();

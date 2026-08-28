@@ -320,7 +320,7 @@ class DiaryEntryRepositoryTest {
     @Test
     @DisplayName("[sumRuntimeMinutesByUserId] Should Sum Only Movie And Episode Entries - When Diary Has Mixed Content Types")
     void shouldSumOnlyMovieAndEpisodeEntriesWhenSummingRuntimeMinutes() {
-        Content movieWithRuntime = contentRepository.save(buildContent("550", ContentType.MOVIE, 139, null));
+        Content movieWithRuntime = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, null));
         Content episodeWithRuntime = contentRepository.save(buildEpisode("1399", 1, 1, 55));
         Content season = contentRepository.save(buildSeason("1399", 1));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, movieWithRuntime));
@@ -345,15 +345,16 @@ class DiaryEntryRepositoryTest {
     @Test
     @DisplayName("[sumRuntimeMinutesByUserIdAndWatchedDateBetween] Should Exclude Entries Outside The Window Or With No WatchedDate")
     void shouldExcludeEntriesOutsideTheWindowOrWithNoWatchedDateWhenSummingRuntimeMinutes() {
-        Content insideWindow = contentRepository.save(buildContent("550", ContentType.MOVIE, 100, null));
-        Content outsideWindow = contentRepository.save(buildContent("680", ContentType.MOVIE, 90, null));
+        Content insideWindow = contentRepository.save(buildContent("9001", ContentType.MOVIE, 100, null));
+        Content outsideWindow = contentRepository.save(buildContent("9002", ContentType.MOVIE, 90, null));
         DiaryEntry insideEntry = buildEntry(lucas, insideWindow);
         insideEntry.setWatchedDate(LocalDate.of(2024, 6, 15));
         diaryEntryRepository.saveAndFlush(insideEntry);
         DiaryEntry outsideEntry = buildEntry(lucas, outsideWindow);
         outsideEntry.setWatchedDate(LocalDate.of(2024, 1, 1));
         diaryEntryRepository.saveAndFlush(outsideEntry);
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, buildEpisode("1399", 1, 1, 30)));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 30));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
 
         long result = diaryEntryRepository.sumRuntimeMinutesByUserIdAndWatchedDateBetween(
                 lucas.getId(), LocalDate.of(2024, 6, 1), LocalDate.of(2024, 6, 30));
@@ -364,7 +365,7 @@ class DiaryEntryRepositoryTest {
     @Test
     @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Group By Genre - When Movie Has Genres Of Its Own")
     void shouldGroupByGenreWhenMovieHasGenresOfItsOwn() {
-        Content movie = contentRepository.save(buildContent("550", ContentType.MOVIE, 139, List.of("Drama", "Thriller")));
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama", "Thriller")));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
 
         List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
@@ -405,7 +406,7 @@ class DiaryEntryRepositoryTest {
     @Test
     @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Count Each Movie Once - When User Rewatched It")
     void shouldCountEachMovieOnceWhenUserRewatchedIt() {
-        Content movie = contentRepository.save(buildContent("550", ContentType.MOVIE, 139, List.of("Drama")));
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama")));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie, 2));
 
@@ -499,6 +500,117 @@ class DiaryEntryRepositoryTest {
                 diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserIdAndContentType] Should Sum Only Entries Of The Given Content Type")
+    void shouldSumOnlyEntriesOfTheGivenContentType() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 100, List.of("Drama")));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 40));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+
+        long result = diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucas.getId(), ContentType.MOVIE);
+
+        assertThat(result).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween] Should Sum Only Entries In Range And Of The Given Type")
+    void shouldSumOnlyEntriesInRangeAndOfTheGivenType() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 100, List.of("Drama")));
+        DiaryEntry inRange = buildEntry(lucas, movie);
+        inRange.setWatchedDate(LocalDate.of(2024, 6, 1));
+        diaryEntryRepository.saveAndFlush(inRange);
+        DiaryEntry outOfRange = buildEntry(lucas, movie, 2);
+        outOfRange.setWatchedDate(LocalDate.of(2023, 6, 1));
+        diaryEntryRepository.saveAndFlush(outOfRange);
+
+        long result = diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
+                lucas.getId(), ContentType.MOVIE, LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+
+        assertThat(result).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForMovies] Should Count Only Movie Titles")
+    void shouldCountOnlyMovieTitles() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama")));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
+        contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(lucas.getId());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Count Each Series Once Resolving Genres From The Series Content")
+    void shouldCountEachSeriesOnceResolvingGenresFromTheSeriesContentForSummary() {
+        contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+        Content episode1 = contentRepository.save(buildEpisode("1399", 1, 1, 55));
+        Content episode2 = contentRepository.save(buildEpisode("1399", 1, 2, 55));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode2));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(lucas.getId());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getGenre()).isEqualTo("Drama");
+        assertThat(result.get(0).getCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countByUserIdAndContentTypeGroupByScore] Should Group By Score Ignoring Entries Without A Score")
+    void shouldGroupByScoreIgnoringEntriesWithoutAScore() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE));
+        Content pulp = contentRepository.save(buildContent("9002", ContentType.MOVIE));
+        DiaryEntry scored = buildEntry(lucas, movie);
+        scored.setScore(8);
+        diaryEntryRepository.saveAndFlush(scored);
+        DiaryEntry unscored = buildEntry(lucas, pulp);
+        diaryEntryRepository.saveAndFlush(unscored);
+
+        List<DiaryEntryRepository.ScoreCount> result =
+                diaryEntryRepository.countByUserIdAndContentTypeGroupByScore(lucas.getId(), ContentType.MOVIE);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getScore()).isEqualTo(8);
+        assertThat(result.get(0).getCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[findTopByUserIdAndContentTypeOrderByCreatedAtDesc] Should Return Only Entries Of The Given Type Most Recently Created First")
+    void shouldReturnOnlyEntriesOfTheGivenTypeMostRecentlyCreatedFirst() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE));
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        DiaryEntry olderMovie = buildEntry(lucas, movie);
+        olderMovie.setCreatedAt(LocalDateTime.now().minusDays(1));
+        diaryEntryRepository.saveAndFlush(olderMovie);
+        DiaryEntry newerMovie = buildEntry(lucas, movie, 2);
+        diaryEntryRepository.saveAndFlush(newerMovie);
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
+
+        List<DiaryEntry> result = diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                lucas.getId(), ContentType.MOVIE, PageRequest.of(0, 10));
+
+        assertThat(result).extracting(DiaryEntry::getId).containsExactly(newerMovie.getId(), olderMovie.getId());
+    }
+
+    @Test
+    @DisplayName("[findTopByUserIdAndContentTypeOrderByCreatedAtDesc] Should Respect The Pageable Limit")
+    void shouldRespectThePageableLimitForFindTopByUserIdAndContentType() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie, 2));
+
+        List<DiaryEntry> result = diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                lucas.getId(), ContentType.MOVIE, PageRequest.of(0, 1));
+
+        assertThat(result).hasSize(1);
     }
 
     private DiaryEntry buildEntry(User user, Content content) {

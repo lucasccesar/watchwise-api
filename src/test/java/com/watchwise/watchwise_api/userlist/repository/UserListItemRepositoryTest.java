@@ -388,7 +388,7 @@ class UserListItemRepositoryTest {
     void shouldCountContentAndNestedListItemsTogetherWhenSeveralListsAreRequested() {
         UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
         userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
-        userListItemRepository.save(buildChildListItem(scifi, horror, 2));
+        userListItemRepository.saveAndFlush(buildChildListItem(scifi, horror, 2));
         entityManager.clear();
 
         List<UserListItemRepository.UserListCount> result = userListItemRepository.countAllItemsByUserListIdIn(List.of(scifi.getId()));
