@@ -15,6 +15,9 @@ public record PublicUserProfileDTO(
         LocalDateTime createdAt,
         long totalMinutesWatched,
         long minutesWatchedLast30Days,
-        List<GenreCountDTO> genreCounts
+        List<GenreCountDTO> genreCounts,
+        String banner,
+        long followersCount,
+        long followingCount
 ) {
 }

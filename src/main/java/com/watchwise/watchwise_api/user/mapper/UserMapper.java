@@ -23,14 +23,14 @@ public interface UserMapper {
     User postUserDtoToUser(PostUserDTO postUserDTO);
 
     UserResponseDTO userToUserResponseDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            List<GenreCountDTO> genreCounts);
+            List<GenreCountDTO> genreCounts, long followersCount, long followingCount);
 
     UserPreviewDTO userToUserPreviewDto(User user);
 
     PublicUserDTO userToPublicUserDto(User user);
 
     PublicUserProfileDTO userToPublicUserProfileDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            List<GenreCountDTO> genreCounts);
+            List<GenreCountDTO> genreCounts, long followersCount, long followingCount);
 
     @AfterMapping
     default void applyDefaults(@MappingTarget User.UserBuilder builder, PostUserDTO dto) {

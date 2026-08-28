@@ -18,6 +18,11 @@ public record PostUserDTO(
         String password,
         @Size(max=280) String description,
         @Size(max=2048) @URL String profilePicture,
-        Boolean isProfilePublic
+        Boolean isProfilePublic,
+        @Size(max=2048) @URL String banner
 ) {
+    public PostUserDTO(String username, String email, String password, String description,
+            String profilePicture, Boolean isProfilePublic) {
+        this(username, email, password, description, profilePicture, isProfilePublic, null);
+    }
 }

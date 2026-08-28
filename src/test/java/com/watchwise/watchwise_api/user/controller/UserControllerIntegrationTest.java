@@ -9,6 +9,9 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -81,10 +84,14 @@ class UserControllerIntegrationTest {
     @Autowired
     private ContentRepository contentRepository;
 
+    @Autowired
+    private FollowerRepository followerRepository;
+
     @BeforeEach
     void setUp() {
         diaryEntryRepository.deleteAll();
         contentRepository.deleteAll();
+        followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
@@ -123,6 +130,24 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getCurrentUser] Should Include Followers And Following Counts - When User Has Accepted Followers")
+    void shouldIncludeFollowersAndFollowingCountsWhenUserHasAcceptedFollowers() throws Exception {
+        Cookie accessTokenCookie = registerAndGetAccessToken("followcountuser", "followcountuser@email.com");
+        User followCountUser = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("followcountuser", "followcountuser")
+                .orElseThrow();
+        User follower = userRepository.save(buildUser("followerof", "followerof@email.com"));
+        User followed = userRepository.save(buildUser("followedby", "followedby@email.com"));
+        persistFollow(follower, followCountUser, FollowStatus.ACCEPTED);
+        persistFollow(followCountUser, followed, FollowStatus.ACCEPTED);
+
+        mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.followersCount").value(1))
+                .andExpect(jsonPath("$.followingCount").value(1));
+    }
+
+    @Test
     @DisplayName("[getCurrentUser] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetCurrentUser() throws Exception {
         mockMvc.perform(get("/users/me"))
@@ -145,6 +170,21 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("johndoe"))
                 .andExpect(jsonPath("$.description").value("Updated bio"));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Update Banner - When Request Is Valid")
+    void shouldUpdateBannerWhenRequestIsValid() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("bannerupdateuser", "bannerupdateuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessTokenCookie = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(patchMeRequest(accessTokenCookie, csrfCookie, "{ \"banner\": \"https://picture.com/banner.png\" }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.banner").value("https://picture.com/banner.png"));
     }
 
     @Test
@@ -891,6 +931,27 @@ class UserControllerIntegrationTest {
         diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user).content(movie).watchNumber(1).watchedDate(watchedDate)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+    }
+
+    private User buildUser(String username, String email) {
+        LocalDateTime now = LocalDateTime.now();
+        return User.builder()
+                .username(username)
+                .email(email)
+                .password(passwordEncoder.encode("Password123"))
+                .isProfilePublic(true)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private void persistFollow(User follower, User followed, FollowStatus status) {
+        followerRepository.save(Follower.builder()
+                .follower(follower)
+                .followed(followed)
+                .status(status)
+                .createdAt(LocalDateTime.now())
+                .build());
     }
 
     private Cookie registerAndGetAccessToken(String username, String email) throws Exception {

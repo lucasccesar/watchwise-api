@@ -165,6 +165,7 @@ class UserMapperTest {
                 .password("Password123")
                 .description("Some description")
                 .profilePicture("https://picture.com/pic.png")
+                .banner("https://picture.com/banner.png")
                 .isProfilePublic(true)
                 .createdAt(createdAt)
                 .updatedAt(updatedAt)
@@ -172,19 +173,22 @@ class UserMapperTest {
 
         List<GenreCountDTO> genres = List.of(new GenreCountDTO("Action", 5L));
 
-        UserResponseDTO result = userMapper.userToUserResponseDto(user, 500L, 90L, genres);
+        UserResponseDTO result = userMapper.userToUserResponseDto(user, 500L, 90L, genres, 12L, 7L);
 
         assertThat(result.id()).isEqualTo(id);
         assertThat(result.username()).isEqualTo("JohnDoe");
         assertThat(result.email()).isEqualTo("john.doe@email.com");
         assertThat(result.description()).isEqualTo("Some description");
         assertThat(result.profilePicture()).isEqualTo("https://picture.com/pic.png");
+        assertThat(result.banner()).isEqualTo("https://picture.com/banner.png");
         assertThat(result.isProfilePublic()).isTrue();
         assertThat(result.createdAt()).isEqualTo(createdAt);
         assertThat(result.updatedAt()).isEqualTo(updatedAt);
         assertThat(result.totalMinutesWatched()).isEqualTo(500L);
         assertThat(result.minutesWatchedLast30Days()).isEqualTo(90L);
         assertThat(result.genreCounts()).isEqualTo(genres);
+        assertThat(result.followersCount()).isEqualTo(12L);
+        assertThat(result.followingCount()).isEqualTo(7L);
     }
 
     @Test
@@ -199,20 +203,24 @@ class UserMapperTest {
                 .username("JaneDoe")
                 .description("Some description")
                 .profilePicture("https://picture.com/pic.png")
+                .banner("https://picture.com/banner.png")
                 .isProfilePublic(true)
                 .createdAt(createdAt)
                 .build();
 
-        PublicUserProfileDTO result = userMapper.userToPublicUserProfileDto(user, 300L, 45L, genres);
+        PublicUserProfileDTO result = userMapper.userToPublicUserProfileDto(user, 300L, 45L, genres, 20L, 15L);
 
         assertThat(result.id()).isEqualTo(id);
         assertThat(result.username()).isEqualTo("JaneDoe");
         assertThat(result.description()).isEqualTo("Some description");
         assertThat(result.profilePicture()).isEqualTo("https://picture.com/pic.png");
+        assertThat(result.banner()).isEqualTo("https://picture.com/banner.png");
         assertThat(result.isProfilePublic()).isTrue();
         assertThat(result.createdAt()).isEqualTo(createdAt);
         assertThat(result.totalMinutesWatched()).isEqualTo(300L);
         assertThat(result.minutesWatchedLast30Days()).isEqualTo(45L);
         assertThat(result.genreCounts()).isEqualTo(genres);
+        assertThat(result.followersCount()).isEqualTo(20L);
+        assertThat(result.followingCount()).isEqualTo(15L);
     }
 }

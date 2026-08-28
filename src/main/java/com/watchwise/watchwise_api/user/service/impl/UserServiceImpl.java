@@ -9,6 +9,8 @@ import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
@@ -49,6 +51,7 @@ public class UserServiceImpl implements UserService {
     private final FollowerService followerService;
     private final PageRequestFactory pageRequestFactory;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final FollowerRepository followerRepository;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -71,7 +74,7 @@ public class UserServiceImpl implements UserService {
 
         try {
             User saved = userRepository.save(mapperUser);
-            return toUserResponseDto(saved, WatchStats.EMPTY);
+            return toUserResponseDto(saved, ProfileStats.EMPTY);
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -86,7 +89,7 @@ public class UserServiceImpl implements UserService {
         UserResponseDTO response;
         try {
             User saved = userRepository.saveAndFlush(user);
-            response = toUserResponseDto(saved, computeWatchStats(saved.getId()));
+            response = toUserResponseDto(saved, computeProfileStats(saved.getId()));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -150,6 +153,10 @@ public class UserServiceImpl implements UserService {
             user.setProfilePicture(patchUserDTO.profilePicture());
         }
 
+        if (patchUserDTO.banner() != null && !patchUserDTO.banner().equals(user.getBanner())) {
+            user.setBanner(patchUserDTO.banner());
+        }
+
         if (patchUserDTO.isProfilePublic() != null && !patchUserDTO.isProfilePublic().equals(user.getIsProfilePublic())) {
             boolean becamePublic = Boolean.TRUE.equals(patchUserDTO.isProfilePublic()) && !Boolean.TRUE.equals(user.getIsProfilePublic());
             user.setIsProfilePublic(patchUserDTO.isProfilePublic());
@@ -210,16 +217,16 @@ public class UserServiceImpl implements UserService {
             throw new ForbiddenException("This user profile is private");
         }
 
-        WatchStats stats = computeWatchStats(id);
+        ProfileStats stats = computeProfileStats(id);
         return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.genreCounts());
+                stats.genreCounts(), stats.followersCount(), stats.followingCount());
     }
 
     @Override
     public UserResponseDTO getCurrentUser(UUID id) {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
 
-        return toUserResponseDto(user, computeWatchStats(id));
+        return toUserResponseDto(user, computeProfileStats(id));
     }
 
     @Override
@@ -256,13 +263,13 @@ public class UserServiceImpl implements UserService {
             throw new ForbiddenException("Email not verified");
         }
 
-        return toUserResponseDto(user, computeWatchStats(user.getId()));
+        return toUserResponseDto(user, computeProfileStats(user.getId()));
     }
 
     @Override
     public Optional<UserResponseDTO> findByEmail(String email) {
         return userRepository.findByEmailIgnoreCase(email.trim())
-                .map(user -> toUserResponseDto(user, computeWatchStats(user.getId())));
+                .map(user -> toUserResponseDto(user, computeProfileStats(user.getId())));
     }
 
     @Override
@@ -284,12 +291,12 @@ public class UserServiceImpl implements UserService {
         return null;
     }
 
-    private UserResponseDTO toUserResponseDto(User user, WatchStats stats) {
+    private UserResponseDTO toUserResponseDto(User user, ProfileStats stats) {
         return userMapper.userToUserResponseDto(user, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.genreCounts());
+                stats.genreCounts(), stats.followersCount(), stats.followingCount());
     }
 
-    private WatchStats computeWatchStats(UUID userId) {
+    private ProfileStats computeProfileStats(UUID userId) {
         LocalDate windowStart = LocalDate.now().minusDays(WATCH_TIME_WINDOW_DAYS);
         LocalDate windowEnd = LocalDate.now();
 
@@ -298,8 +305,10 @@ public class UserServiceImpl implements UserService {
                 .sumRuntimeMinutesByUserIdAndWatchedDateBetween(userId, windowStart, windowEnd);
         List<GenreCountDTO> genreCounts = toGenreCountDtos(
                 diaryEntryRepository.countDistinctTitlesByGenreAndUserId(userId));
+        long followersCount = followerRepository.countByFollowedIdAndStatus(userId, FollowStatus.ACCEPTED);
+        long followingCount = followerRepository.countByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
 
-        return new WatchStats(totalMinutesWatched, minutesWatchedLast30Days, genreCounts);
+        return new ProfileStats(totalMinutesWatched, minutesWatchedLast30Days, genreCounts, followersCount, followingCount);
     }
 
     private List<GenreCountDTO> toGenreCountDtos(List<DiaryEntryRepository.GenreCount> rows) {
@@ -308,7 +317,8 @@ public class UserServiceImpl implements UserService {
                 .toList();
     }
 
-    private record WatchStats(long totalMinutesWatched, long minutesWatchedLast30Days, List<GenreCountDTO> genreCounts) {
-        static final WatchStats EMPTY = new WatchStats(0L, 0L, List.of());
+    private record ProfileStats(long totalMinutesWatched, long minutesWatchedLast30Days, List<GenreCountDTO> genreCounts,
+            long followersCount, long followingCount) {
+        static final ProfileStats EMPTY = new ProfileStats(0L, 0L, List.of(), 0L, 0L);
     }
 }

@@ -207,6 +207,40 @@ class FollowerRepositoryTest {
     }
 
     @Test
+    @DisplayName("[countByFollowedIdAndStatus] Should Count Only Accepted Followers Of The Given User")
+    void shouldCountOnlyAcceptedFollowersOfTheGivenUser() {
+        followerRepository.save(buildFollower(lucas, joao, FollowStatus.ACCEPTED));
+        followerRepository.save(buildFollower(marina, joao, FollowStatus.PENDING));
+        followerRepository.saveAndFlush(buildFollower(lucas, marina, FollowStatus.ACCEPTED));
+        entityManager.clear();
+
+        assertThat(followerRepository.countByFollowedIdAndStatus(joao.getId(), FollowStatus.ACCEPTED)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countByFollowedIdAndStatus] Should Return Zero - When No One Follows The Given User")
+    void shouldReturnZeroWhenNoOneFollowsTheGivenUser() {
+        assertThat(followerRepository.countByFollowedIdAndStatus(joao.getId(), FollowStatus.ACCEPTED)).isZero();
+    }
+
+    @Test
+    @DisplayName("[countByFollowerIdAndStatus] Should Count Only Users The Given User Accepted-Follows")
+    void shouldCountOnlyUsersTheGivenUserAcceptedFollows() {
+        followerRepository.save(buildFollower(lucas, joao, FollowStatus.ACCEPTED));
+        followerRepository.save(buildFollower(lucas, marina, FollowStatus.PENDING));
+        followerRepository.saveAndFlush(buildFollower(marina, joao, FollowStatus.ACCEPTED));
+        entityManager.clear();
+
+        assertThat(followerRepository.countByFollowerIdAndStatus(lucas.getId(), FollowStatus.ACCEPTED)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countByFollowerIdAndStatus] Should Return Zero - When The Given User Follows No One")
+    void shouldReturnZeroWhenTheGivenUserFollowsNoOne() {
+        assertThat(followerRepository.countByFollowerIdAndStatus(lucas.getId(), FollowStatus.ACCEPTED)).isZero();
+    }
+
+    @Test
     @DisplayName("[findByFollowerIdAndStatus] Should Return Entries Ordered By Most Recently Created First - When Multiple Entries Exist")
     void shouldReturnEntriesOrderedByMostRecentlyCreatedFirstWhenMultipleEntriesExistOnFindByFollowerIdAndStatus() {
         LocalDateTime now = LocalDateTime.now();

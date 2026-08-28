@@ -21,6 +21,10 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
 
     boolean existsByFollowerIdAndFollowedIdAndStatus(UUID followerId, UUID followedId, FollowStatus status);
 
+    long countByFollowedIdAndStatus(UUID followedId, FollowStatus status);
+
+    long countByFollowerIdAndStatus(UUID followerId, FollowStatus status);
+
     @Query("""
             SELECT f FROM Follower f JOIN FETCH f.follower
             WHERE f.followed.id = :followedId AND f.status = :status

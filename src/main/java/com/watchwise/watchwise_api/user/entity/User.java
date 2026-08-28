@@ -40,6 +40,10 @@ public class User {
     @Builder.Default
     private String profilePicture = "https://default-image.png";
 
+    @Column(length = 2048)
+    @Setter
+    private String banner;
+
     @Column(name = "is_profile_public", nullable = false)
     @Setter
     @Builder.Default
