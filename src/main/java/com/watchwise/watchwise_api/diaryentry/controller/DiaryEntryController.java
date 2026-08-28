@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +55,16 @@ public class DiaryEntryController {
     ) {
         Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(
                 getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview);
+        return ResponseEntity.ok(PageResponseDTO.of(entries));
+    }
+
+    @GetMapping("/users/{userId}/series-in-progress")
+    public ResponseEntity<PageResponseDTO<SeriesInProgressResponseDTO>> getSeriesInProgress(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<SeriesInProgressResponseDTO> entries = diaryEntryService.getSeriesInProgress(getCurrentUserId(), userId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 

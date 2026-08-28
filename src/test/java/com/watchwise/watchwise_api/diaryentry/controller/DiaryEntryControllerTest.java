@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,6 +98,35 @@ class DiaryEntryControllerTest {
         diaryEntryController.getDiaryEntries(targetUserId, null, null, null, null, null, null, null);
 
         verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, null, null, null, null, null, null);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Page Envelope With Content And Metadata - When Called")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingSeriesInProgress() {
+        UUID targetUserId = UUID.randomUUID();
+        SeriesInProgressResponseDTO dto = new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1));
+        when(diaryEntryService.getSeriesInProgress(currentUserId, targetUserId, 1, 10))
+                .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
+
+        ResponseEntity<PageResponseDTO<SeriesInProgressResponseDTO>> result =
+                diaryEntryController.getSeriesInProgress(targetUserId, 1, 10);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody().content()).containsExactly(dto);
+        assertThat(result.getBody().page()).isEqualTo(1);
+        assertThat(result.getBody().totalElements()).isEqualTo(1);
+        assertThat(result.getBody().hasNext()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingSeriesInProgress() {
+        UUID targetUserId = UUID.randomUUID();
+        when(diaryEntryService.getSeriesInProgress(currentUserId, targetUserId, null, null)).thenReturn(Page.empty());
+
+        diaryEntryController.getSeriesInProgress(targetUserId, null, null);
+
+        verify(diaryEntryService).getSeriesInProgress(currentUserId, targetUserId, null, null);
     }
 
     @Test

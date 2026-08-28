@@ -160,6 +160,10 @@ class DiaryEntryControllerIntegrationTest {
         return get("/users/" + targetUserId + "/diary").cookie(viewer.accessToken());
     }
 
+    private MockHttpServletRequestBuilder getSeriesInProgressRequest(RegisteredUser viewer, UUID targetUserId) {
+        return get("/users/" + targetUserId + "/series-in-progress").cookie(viewer.accessToken());
+    }
+
     private MockHttpServletRequestBuilder createRequest(RegisteredUser actor, String body) {
         return post("/diary")
                 .cookie(actor.accessToken(), actor.csrfToken())
@@ -419,6 +423,83 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(getDiaryRequest(target, target.id()))
                 .andExpect(status().isOk());
+    }
+
+    // ---------- GET /users/{userId}/series-in-progress ----------
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return The Series - When User Watched An Episode But Has Not Completed It")
+    void shouldReturnTheSeriesWhenUserWatchedAnEpisodeButHasNotCompletedIt() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogressok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(3).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        persistEntry(entity, episode);
+
+        mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.content[0].maxSeasonNumber").value(1))
+                .andExpect(jsonPath("$.content[0].maxEpisodeNumber").value(3));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Empty Content - When User Has No Series In Progress")
+    void shouldReturnEmptyContentWhenUserHasNoSeriesInProgress() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogressempty");
+
+        mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Exclude The Series - When User Already Completed It")
+    void shouldExcludeTheSeriesWhenUserAlreadyCompletedIt() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogresscompleted");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(3).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content series = persistContent("1399", ContentType.SERIES);
+        persistEntry(entity, episode);
+        persistEntry(entity, series);
+
+        mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return NotFound - When Target User Does Not Exist")
+    void shouldReturnNotFoundWhenTargetUserDoesNotExistForSeriesInProgress() throws Exception {
+        RegisteredUser viewer = registerUser("seriesinprogressnotfound");
+
+        mockMvc.perform(getSeriesInProgressRequest(viewer, UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForSeriesInProgress() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogressnoauth");
+
+        mockMvc.perform(get("/users/" + user.id() + "/series-in-progress"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Forbidden - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldReturnForbiddenWhenTargetProfileIsPrivateAndViewerIsNotAnAcceptedFollowerForSeriesInProgress() throws Exception {
+        RegisteredUser viewer = registerUser("seriesinprogressforbiddenviewer");
+        RegisteredUser target = registerUser("seriesinprogressforbiddentarget", false);
+
+        mockMvc.perform(getSeriesInProgressRequest(viewer, target.id()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
     }
 
     // ---------- POST /diary ----------

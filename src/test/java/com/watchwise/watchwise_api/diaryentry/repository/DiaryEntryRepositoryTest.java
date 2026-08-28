@@ -426,6 +426,81 @@ class DiaryEntryRepositoryTest {
         assertThat(result).isEmpty();
     }
 
+    @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Return Series - When User Has Watched Episodes But Not Completed It")
+    void shouldReturnSeriesWhenUserHasWatchedEpisodesButNotCompletedIt() {
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 3));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+
+        Page<DiaryEntryRepository.SeriesInProgress> result =
+                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).hasSize(1);
+        DiaryEntryRepository.SeriesInProgress row = result.getContent().get(0);
+        assertThat(row.getSeriesTmdbId()).isEqualTo("1399");
+        assertThat(row.getMaxSeasonNumber()).isEqualTo(1);
+        assertThat(row.getMaxEpisodeNumber()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Exclude Series - When User Already Has A SERIES Completion Entry For It")
+    void shouldExcludeSeriesWhenUserAlreadyHasASeriesCompletionEntryForIt() {
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 3));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
+
+        Page<DiaryEntryRepository.SeriesInProgress> result =
+                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Report The Furthest Watched Season And Episode - When Multiple Episodes Are Watched")
+    void shouldReportTheFurthestWatchedSeasonAndEpisodeWhenMultipleEpisodesAreWatched() {
+        Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content secondEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondEpisode));
+
+        Page<DiaryEntryRepository.SeriesInProgress> result =
+                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).hasSize(1);
+        DiaryEntryRepository.SeriesInProgress row = result.getContent().get(0);
+        assertThat(row.getMaxSeasonNumber()).isEqualTo(2);
+        assertThat(row.getMaxEpisodeNumber()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Order By Last Watched Date Descending - When Multiple Series Are In Progress")
+    void shouldOrderByLastWatchedDateDescendingWhenMultipleSeriesAreInProgress() {
+        Content olderSeriesEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content newerSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        DiaryEntry olderEntry = buildEntry(lucas, olderSeriesEpisode);
+        olderEntry.setWatchedDate(LocalDate.of(2024, 1, 1));
+        diaryEntryRepository.saveAndFlush(olderEntry);
+        DiaryEntry newerEntry = buildEntry(lucas, newerSeriesEpisode);
+        newerEntry.setWatchedDate(LocalDate.of(2024, 6, 1));
+        diaryEntryRepository.saveAndFlush(newerEntry);
+
+        Page<DiaryEntryRepository.SeriesInProgress> result =
+                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(DiaryEntryRepository.SeriesInProgress::getSeriesTmdbId)
+                .containsExactly("1396", "1399");
+    }
+
+    @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Return Empty Page - When User Has No Episode Entries")
+    void shouldReturnEmptyPageWhenUserHasNoEpisodeEntries() {
+        Page<DiaryEntryRepository.SeriesInProgress> result =
+                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
     private DiaryEntry buildEntry(User user, Content content) {
         return buildEntry(user, content, 1);
     }

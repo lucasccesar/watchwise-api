@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -434,6 +435,185 @@ class DiaryEntryServiceImplTest {
                 .isInstanceOf(BadRequestException.class);
 
         verify(diaryEntryRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
+    }
+
+    // ---------- getSeriesInProgress ----------
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Mapped Page - When Viewer Is The Profile Owner")
+    void shouldReturnMappedPageWhenViewerIsTheProfileOwnerForSeriesInProgress() {
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 8, 6, LocalDate.of(2024, 5, 1));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
+
+        assertThat(result.getContent())
+                .containsExactly(new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1)));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Empty Page - When User Has No Series In Progress")
+    void shouldReturnEmptyPageWhenUserHasNoSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Throw NotFoundException - When User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenUserDoesNotExistForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Entries - When Target Profile Is Public And Viewer Is A Different User")
+    void shouldReturnEntriesWhenTargetProfileIsPublicAndViewerIsADifferentUserForSeriesInProgress() {
+        lucas.setIsProfilePublic(true);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(marinaId, lucasId, 1, 10);
+
+        assertThat(result.getContent()).isEmpty();
+        verifyNoInteractions(followerRepository);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateAndViewerIsNotAnAcceptedFollowerForSeriesInProgress() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(marinaId, lucasId, 1, 10))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Use Default Page - When Page Number Is Null")
+    void shouldUseDefaultPageWhenPageNumberIsNullForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, null, 10);
+
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
+        assertThat(captor.getValue().getPageNumber()).isZero();
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Use Page Number Minus One - When Page Number Is Positive")
+    void shouldUsePageNumberMinusOneWhenPageNumberIsPositiveForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 3, 10);
+
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
+        assertThat(captor.getValue().getPageNumber()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Throw BadRequestException - When Page Number Is Negative")
+    void shouldThrowBadRequestExceptionWhenPageNumberIsNegativeForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, -1, 10))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(diaryEntryRepository, never()).findSeriesInProgressByUserId(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Use Default Page Size - When Page Size Is Null")
+    void shouldUseDefaultPageSizeWhenPageSizeIsNullForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, null);
+
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
+        assertThat(captor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
+    void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimitForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+
+        diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 1001);
+
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
+        assertThat(captor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Throw BadRequestException - When Page Size Is Negative")
+    void shouldThrowBadRequestExceptionWhenPageSizeIsNegativeForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, -5))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(diaryEntryRepository, never()).findSeriesInProgressByUserId(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Throw BadRequestException - When Page Size Is Zero")
+    void shouldThrowBadRequestExceptionWhenPageSizeIsZeroForSeriesInProgress() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 0))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(diaryEntryRepository, never()).findSeriesInProgressByUserId(any(), any());
+    }
+
+    private DiaryEntryRepository.SeriesInProgress seriesInProgress(
+            String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
+        return new DiaryEntryRepository.SeriesInProgress() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Integer getMaxSeasonNumber() {
+                return maxSeasonNumber;
+            }
+
+            @Override
+            public Integer getMaxEpisodeNumber() {
+                return maxEpisodeNumber;
+            }
+
+            @Override
+            public LocalDate getLastWatchedDate() {
+                return lastWatchedDate;
+            }
+        };
     }
 
     // ---------- createDiaryEntry ----------
