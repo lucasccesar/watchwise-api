@@ -3,8 +3,10 @@ package com.watchwise.watchwise_api.content.controller;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -31,6 +33,9 @@ class ContentControllerTest {
 
     @Mock
     private ContentService contentService;
+
+    @Mock
+    private ContentStatsService contentStatsService;
 
     @Mock
     private RequestThrottler requestThrottler;
@@ -77,6 +82,35 @@ class ContentControllerTest {
         contentController.getOrCreateReference(dto);
 
         verify(contentService).getOrCreateReference(dto);
+    }
+
+    @Test
+    @DisplayName("[getStats] Should Return Ok With Stats - When Service Resolves Them")
+    void shouldReturnOkWithStatsWhenServiceResolvesThem() {
+        UUID contentId = UUID.randomUUID();
+        ContentStatsResponseDTO stats = new ContentStatsResponseDTO(contentId, 8.2, 10, 4, 6);
+        when(contentStatsService.getStats(contentId)).thenReturn(stats);
+
+        ResponseEntity<ContentStatsResponseDTO> result = contentController.getStats(contentId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(stats);
+    }
+
+    @Test
+    @DisplayName("[getStatsBatch] Should Return Ok With The List From The Service - When Called With Multiple Ids")
+    void shouldReturnOkWithTheListFromTheServiceWhenCalledWithMultipleIds() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        List<ContentStatsResponseDTO> stats = List.of(
+                new ContentStatsResponseDTO(first, 8.2, 10, 4, 6),
+                new ContentStatsResponseDTO(second, null, 0, 0, 0));
+        when(contentStatsService.getStatsBatch(List.of(first, second))).thenReturn(stats);
+
+        ResponseEntity<List<ContentStatsResponseDTO>> result = contentController.getStatsBatch(List.of(first, second));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(stats);
     }
 
 }

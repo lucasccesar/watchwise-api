@@ -25,7 +25,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -348,6 +351,58 @@ class ContentControllerIntegrationTest {
                 .andExpect(status().isForbidden());
 
         assertThat(contentRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getStats] Should Return Zeroed Stats - When Content Has No Diary Entries Or Comments")
+    void shouldReturnZeroedStatsWhenContentHasNoDiaryEntriesOrComments() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("550").type(ContentType.MOVIE)
+                .createdAt(java.time.LocalDateTime.now()).updatedAt(java.time.LocalDateTime.now()).build());
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/stats").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.averageScore").doesNotExist())
+                .andExpect(jsonPath("$.playsCount").value(0))
+                .andExpect(jsonPath("$.reviewsCount").value(0))
+                .andExpect(jsonPath("$.commentsCount").value(0));
+    }
+
+    @Test
+    @DisplayName("[getStats] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForStats() throws Exception {
+        mockMvc.perform(get("/contents/" + UUID.randomUUID() + "/stats"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getStatsBatch] Should Return One Entry Per Requested Id, Preserving Order - When Called")
+    void shouldReturnOneEntryPerRequestedIdPreservingOrderWhenCalled() throws Exception {
+        Content first = contentRepository.save(Content.builder()
+                .tmdbId("550").type(ContentType.MOVIE)
+                .createdAt(java.time.LocalDateTime.now()).updatedAt(java.time.LocalDateTime.now()).build());
+        Content second = contentRepository.save(Content.builder()
+                .tmdbId("680").type(ContentType.MOVIE)
+                .createdAt(java.time.LocalDateTime.now()).updatedAt(java.time.LocalDateTime.now()).build());
+
+        mockMvc.perform(get("/contents/stats")
+                        .cookie(accessTokenCookie)
+                        .param("ids", first.getId().toString(), second.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].contentId").value(first.getId().toString()))
+                .andExpect(jsonPath("$[1].contentId").value(second.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("[getStatsBatch] Should Return BadRequest - When Ids Exceed The Batch Limit")
+    void shouldReturnBadRequestWhenIdsExceedTheBatchLimit() throws Exception {
+        String[] ids = java.util.stream.Stream.generate(() -> UUID.randomUUID().toString())
+                .limit(101)
+                .toArray(String[]::new);
+
+        mockMvc.perform(get("/contents/stats").cookie(accessTokenCookie).param("ids", ids))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Cannot request stats for more than 100 contents at once"));
     }
 
     private MockHttpServletRequestBuilder referenceRequest(String body) {

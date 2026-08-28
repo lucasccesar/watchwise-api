@@ -616,6 +616,62 @@ class DiaryEntryServiceImplTest {
         };
     }
 
+    // ---------- getReviewsForContent ----------
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Throw NotFoundException - When Content Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenContentDoesNotExistForReviews() {
+        UUID contentId = UUID.randomUUID();
+        when(contentRepository.existsById(contentId)).thenReturn(false);
+
+        assertThatThrownBy(() -> diaryEntryService.getReviewsForContent(lucasId, contentId, 1, 10))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Content not found");
+
+        verify(diaryEntryRepository, never()).findReviewsByContentId(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return Mapped Page - When Content Has Reviews Visible To The Viewer")
+    void shouldReturnMappedPageWhenContentHasReviewsVisibleToTheViewer() {
+        DiaryEntry entry = buildEntry(marina, fightClub);
+        entry.setComment("Great movie");
+        DiaryEntryResponseDTO dto = buildResponseDto(entry);
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(entry)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(dto);
+
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
+
+        assertThat(result.getContent()).containsExactly(dto);
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return Empty Page - When Content Has No Visible Reviews")
+    void shouldReturnEmptyPageWhenContentHasNoVisibleReviews() {
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Use Default Page - When Page Number Is Null")
+    void shouldUseDefaultPageWhenPageNumberIsNullForReviews() {
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), null, 10);
+
+        verify(diaryEntryRepository).findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isZero();
+    }
+
     // ---------- createDiaryEntry ----------
 
     @Test

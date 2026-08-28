@@ -130,6 +130,32 @@ class DiaryEntryControllerTest {
     }
 
     @Test
+    @DisplayName("[getReviewsForContent] Should Return Page Envelope With Content And Metadata - When Called")
+    void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingReviewsForContent() {
+        UUID contentId = UUID.randomUUID();
+        DiaryEntryResponseDTO dto = buildResponseDto();
+        when(diaryEntryService.getReviewsForContent(currentUserId, contentId, 1, 10))
+                .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
+
+        ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> result =
+                diaryEntryController.getReviewsForContent(contentId, 1, 10);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody().content()).containsExactly(dto);
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingReviewsForContent() {
+        UUID contentId = UUID.randomUUID();
+        when(diaryEntryService.getReviewsForContent(currentUserId, contentId, null, null)).thenReturn(Page.empty());
+
+        diaryEntryController.getReviewsForContent(contentId, null, null);
+
+        verify(diaryEntryService).getReviewsForContent(currentUserId, contentId, null, null);
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Return Created With The Service Result - When Called")
     void shouldReturnCreatedWithTheServiceResultWhenCreatingDiaryEntry() {
         DiaryEntryCreationDTO creationDTO = minimalCreationDto();

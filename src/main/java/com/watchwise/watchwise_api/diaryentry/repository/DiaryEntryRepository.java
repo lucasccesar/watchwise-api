@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -666,5 +667,61 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             """)
     List<DiaryEntry> findEpisodeEntriesBySeriesForUser(
             @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
+
+    // --- Content stats (aggregated across all users, GET /contents/{contentId}/stats) ---
+
+    @Query("""
+            SELECT d.content.id AS contentId, AVG(d.score) AS averageScore, COUNT(d) AS playsCount,
+                   SUM(CASE WHEN d.comment IS NOT NULL THEN 1L ELSE 0L END) AS reviewsCount
+            FROM DiaryEntry d
+            WHERE d.content.id IN :contentIds
+            AND d.user.isProfilePublic = true
+            GROUP BY d.content.id
+            """)
+    List<ContentStats> findContentStatsByContentIdIn(@Param("contentIds") Collection<UUID> contentIds);
+
+    interface ContentStats {
+        UUID getContentId();
+        Double getAverageScore();
+        long getPlaysCount();
+        long getReviewsCount();
+    }
+
+    // --- Reviews scoped by Content, across all users (GET /contents/{contentId}/reviews) ---
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user u
+            WHERE d.content.id = :contentId
+            AND d.comment IS NOT NULL
+            AND (u.isProfilePublic = true
+                 OR u.id = :viewerId
+                 OR EXISTS (
+                     SELECT 1 FROM Follower f
+                     WHERE f.follower.id = :viewerId AND f.followed.id = u.id
+                     AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                 ))
+            ORDER BY d.createdAt DESC
+            """)
+    Page<DiaryEntry> findReviewsByContentId(
+            @Param("contentId") UUID contentId, @Param("viewerId") UUID viewerId, Pageable pageable);
+
+    // --- Home summary (GET /users/{userId}/summary/home) ---
+
+    @Query("""
+            SELECT d.watchedDate AS watchedDate, COUNT(d) AS count FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
+                                    com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
+            AND d.watchedDate BETWEEN :start AND :end
+            GROUP BY d.watchedDate
+            ORDER BY d.watchedDate
+            """)
+    List<DailyWatchCount> countByUserIdAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    interface DailyWatchCount {
+        LocalDate getWatchedDate();
+        long getCount();
+    }
 
 }

@@ -58,6 +58,16 @@ public class DiaryEntryController {
         return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 
+    @GetMapping("/contents/{contentId}/reviews")
+    public ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> getReviewsForContent(
+            @PathVariable UUID contentId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<DiaryEntryResponseDTO> reviews = diaryEntryService.getReviewsForContent(getCurrentUserId(), contentId, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(reviews));
+    }
+
     @GetMapping("/users/{userId}/series-in-progress")
     public ResponseEntity<PageResponseDTO<SeriesInProgressResponseDTO>> getSeriesInProgress(
             @PathVariable UUID userId,

@@ -110,6 +110,21 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate()));
     }
 
+    @Override
+    public Page<DiaryEntryResponseDTO> getReviewsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize) {
+        if (!contentRepository.existsById(contentId)) {
+            throw new NotFoundException("Content not found");
+        }
+
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        Page<DiaryEntry> reviews = diaryEntryRepository.findReviewsByContentId(contentId, viewerId, pageRequest);
+
+        List<UUID> entryIds = reviews.getContent().stream().map(DiaryEntry::getId).toList();
+        Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
+
+        return reviews.map(entry -> diaryEntryMapper.diaryEntryToResponseDto(entry, likedEntryIds.contains(entry.getId())));
+    }
+
     private void assertCanViewDiary(UUID viewerId, UUID targetUserId, User target) {
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;

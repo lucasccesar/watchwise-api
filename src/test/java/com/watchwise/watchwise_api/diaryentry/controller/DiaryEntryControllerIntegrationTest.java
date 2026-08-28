@@ -502,6 +502,79 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value("This user profile is private"));
     }
 
+    // ---------- GET /contents/{contentId}/reviews ----------
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return Only Entries With A Comment - When Content Has Reviews And Plain Watches")
+    void shouldReturnOnlyEntriesWithACommentWhenContentHasReviewsAndPlainWatches() throws Exception {
+        RegisteredUser viewer = registerUser("reviewscontentviewer");
+        RegisteredUser reviewer = registerUser("reviewscontentreviewer");
+        User reviewerEntity = userRepository.findById(reviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+        DiaryEntry withReview = persistEntry(reviewerEntity, fightClub);
+        withReview.setComment("Great movie");
+        diaryEntryRepository.save(withReview);
+        persistEntry(reviewerEntity, persistContent("680", ContentType.MOVIE));
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].comment").value("Great movie"));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Exclude Reviews From Private Users The Viewer Does Not Follow")
+    void shouldExcludeReviewsFromPrivateUsersTheViewerDoesNotFollow() throws Exception {
+        RegisteredUser viewer = registerUser("reviewsprivateviewer");
+        RegisteredUser privateReviewer = registerUser("reviewsprivatereviewer", false);
+        User privateReviewerEntity = userRepository.findById(privateReviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+        DiaryEntry withReview = persistEntry(privateReviewerEntity, fightClub);
+        withReview.setComment("Secret review");
+        diaryEntryRepository.save(withReview);
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Include Reviews From Private Users The Viewer Follows With Accepted Status")
+    void shouldIncludeReviewsFromPrivateUsersTheViewerFollowsWithAcceptedStatus() throws Exception {
+        RegisteredUser viewer = registerUser("reviewsacceptedviewer");
+        RegisteredUser privateReviewer = registerUser("reviewsacceptedreviewer", false);
+        persistFollow(viewer.id(), privateReviewer.id(), FollowStatus.ACCEPTED);
+        User privateReviewerEntity = userRepository.findById(privateReviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+        DiaryEntry withReview = persistEntry(privateReviewerEntity, fightClub);
+        withReview.setComment("Visible review");
+        diaryEntryRepository.save(withReview);
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].comment").value("Visible review"));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return NotFound - When Content Does Not Exist")
+    void shouldReturnNotFoundWhenContentDoesNotExistForReviews() throws Exception {
+        RegisteredUser viewer = registerUser("reviewsnotfound");
+
+        mockMvc.perform(get("/contents/" + UUID.randomUUID() + "/reviews").cookie(viewer.accessToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Content not found"));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForReviews() throws Exception {
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews"))
+                .andExpect(status().isUnauthorized());
+    }
+
     // ---------- POST /diary ----------
 
     @Test

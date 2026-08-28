@@ -25,6 +25,16 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
         long getCount();
     }
 
+    long countByContentId(UUID contentId);
+
+    @Query("SELECT c.content.id AS contentId, COUNT(c) AS count FROM Comment c WHERE c.content.id IN :contentIds GROUP BY c.content.id")
+    List<ContentCommentCount> countByContentIdIn(@Param("contentIds") Collection<UUID> contentIds);
+
+    interface ContentCommentCount {
+        UUID getContentId();
+        long getCount();
+    }
+
     @Modifying
     @Query("UPDATE Comment c SET c.likesCount = c.likesCount + 1 WHERE c.id = :id")
     void incrementLikesCount(@Param("id") UUID id);
