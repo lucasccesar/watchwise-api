@@ -60,6 +60,15 @@ public class Content {
     @Setter
     private List<String> genres;
 
+    @Column(name = "release_year")
+    @Setter
+    private Integer releaseYear;
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "countries")
+    @Setter
+    private List<String> countries;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;

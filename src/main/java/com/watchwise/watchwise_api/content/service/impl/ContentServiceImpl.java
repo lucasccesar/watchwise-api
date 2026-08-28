@@ -70,7 +70,9 @@ public class ContentServiceImpl implements ContentService {
                 dto.isSeasonFinale(),
                 dto.isSeriesFinale(),
                 dto.runtimeMinutes(),
-                normalizeGenres(dto.genres())
+                normalizeGenres(dto.genres()),
+                dto.releaseYear(),
+                normalizeCountries(dto.countries())
         );
     }
 
@@ -84,6 +86,16 @@ public class ContentServiceImpl implements ContentService {
         }
         return genres.stream()
                 .map(String::trim)
+                .sorted(Comparator.naturalOrder())
+                .toList();
+    }
+
+    private List<String> normalizeCountries(List<String> countries) {
+        if (countries == null) {
+            return null;
+        }
+        return countries.stream()
+                .map(country -> country.trim().toUpperCase())
                 .sorted(Comparator.naturalOrder())
                 .toList();
     }
@@ -123,6 +135,12 @@ public class ContentServiceImpl implements ContentService {
         }
         if (normalized.genres() != null && !normalized.genres().isEmpty() && !normalized.genres().equals(existing.getGenres())) {
             throw new ConflictException("This content is already registered with a different genres value");
+        }
+        if (normalized.releaseYear() != null && !normalized.releaseYear().equals(existing.getReleaseYear())) {
+            throw new ConflictException("This content is already registered with a different releaseYear value");
+        }
+        if (normalized.countries() != null && !normalized.countries().isEmpty() && !normalized.countries().equals(existing.getCountries())) {
+            throw new ConflictException("This content is already registered with a different countries value");
         }
     }
 
@@ -195,6 +213,12 @@ public class ContentServiceImpl implements ContentService {
                 if (dto.genres() != null) {
                     throw new BadRequestException("genres must not be provided when type is SEASON");
                 }
+                if (dto.releaseYear() != null) {
+                    throw new BadRequestException("releaseYear must not be provided when type is SEASON");
+                }
+                if (dto.countries() != null) {
+                    throw new BadRequestException("countries must not be provided when type is SEASON");
+                }
             }
             case EPISODE -> {
                 if (StringUtils.isEmpty(dto.seriesTmdbId()) || dto.seasonNumber() == null || dto.episodeNumber() == null) {
@@ -205,6 +229,12 @@ public class ContentServiceImpl implements ContentService {
                 }
                 if (dto.genres() != null) {
                     throw new BadRequestException("genres must not be provided when type is EPISODE");
+                }
+                if (dto.releaseYear() != null) {
+                    throw new BadRequestException("releaseYear must not be provided when type is EPISODE");
+                }
+                if (dto.countries() != null) {
+                    throw new BadRequestException("countries must not be provided when type is EPISODE");
                 }
             }
         }

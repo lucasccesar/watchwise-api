@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.repository;
 
+import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import org.springframework.data.domain.Page;
@@ -298,5 +299,372 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             """)
     List<DiaryEntry> findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("contentType") ContentType contentType, Pageable pageable);
+
+    // --- Month/Year in Review + All Time Stats aggregations ---
+
+    @Query("""
+            SELECT MIN(d.watchedDate) FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
+                                    com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
+            """)
+    Optional<LocalDate> findMinWatchedDateByUserId(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            ORDER BY d.watchedDate DESC, d.createdAt DESC
+            """)
+    List<DiaryEntry> findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
+
+    @Query("""
+            SELECT COUNT(d) FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            """)
+    long countByUserIdAndContentTypeAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query("""
+            SELECT COUNT(d) FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            """)
+    long countByUserIdAndContentType(@Param("userId") UUID userId, @Param("contentType") ContentType contentType);
+
+    @Query("""
+            SELECT MIN(d.watchedDate) FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            """)
+    Optional<LocalDate> findMinWatchedDateByUserIdAndContentTypeAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query("""
+            SELECT MAX(d.watchedDate) FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            """)
+    Optional<LocalDate> findMaxWatchedDateByUserIdAndContentTypeAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query("""
+            SELECT d.watchedDate AS watchedDate, COALESCE(SUM(d.content.runtimeMinutes), 0) AS minutes FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            GROUP BY d.watchedDate
+            ORDER BY d.watchedDate
+            """)
+    List<DailyMinutes> sumRuntimeMinutesByUserIdAndContentTypeGroupByWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    interface DailyMinutes {
+        LocalDate getWatchedDate();
+        Long getMinutes();
+    }
+
+    @Query(value = """
+            SELECT EXTRACT(ISODOW FROM d.watched_date)::int AS dayOfWeek, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'MOVIE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY dayOfWeek
+            ORDER BY dayOfWeek
+            """, nativeQuery = true)
+    List<DayOfWeekCount> countByUserIdAndWatchedDateBetweenGroupByDayOfWeekForMovies(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query(value = """
+            SELECT EXTRACT(ISODOW FROM d.watched_date)::int AS dayOfWeek, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY dayOfWeek
+            ORDER BY dayOfWeek
+            """, nativeQuery = true)
+    List<DayOfWeekCount> countByUserIdAndWatchedDateBetweenGroupByDayOfWeekForEpisodes(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    interface DayOfWeekCount {
+        Integer getDayOfWeek();
+        Long getCount();
+    }
+
+    @Query(value = """
+            SELECT EXTRACT(MONTH FROM d.watched_date)::int AS month, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'MOVIE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY month
+            ORDER BY month
+            """, nativeQuery = true)
+    List<MonthCount> countByUserIdAndWatchedDateBetweenGroupByMonthForMovies(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query(value = """
+            SELECT EXTRACT(MONTH FROM d.watched_date)::int AS month, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY month
+            ORDER BY month
+            """, nativeQuery = true)
+    List<MonthCount> countByUserIdAndWatchedDateBetweenGroupByMonthForEpisodes(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    interface MonthCount {
+        Integer getMonth();
+        Long getCount();
+    }
+
+    @Query(value = """
+            SELECT EXTRACT(YEAR FROM d.watched_date)::int AS year, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'MOVIE'
+            GROUP BY year
+            ORDER BY year
+            """, nativeQuery = true)
+    List<YearCount> countByUserIdGroupByYearForMovies(@Param("userId") UUID userId);
+
+    @Query(value = """
+            SELECT EXTRACT(YEAR FROM d.watched_date)::int AS year, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            GROUP BY year
+            ORDER BY year
+            """, nativeQuery = true)
+    List<YearCount> countByUserIdGroupByYearForEpisodes(@Param("userId") UUID userId);
+
+    interface YearCount {
+        Integer getYear();
+        Long getCount();
+    }
+
+    @Query("""
+            SELECT d.score AS score, COUNT(d) AS count FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            AND d.score IS NOT NULL
+            GROUP BY d.score
+            """)
+    List<ScoreCount> countByUserIdAndContentTypeAndWatchedDateBetweenGroupByScore(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query(value = """
+            SELECT genre AS genre, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            CROSS JOIN LATERAL unnest(c.genres) AS genre
+            WHERE d.user_id = :userId
+            AND c.type = 'MOVIE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY genre
+            ORDER BY count DESC
+            """, nativeQuery = true)
+    List<GenreCount> countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query(value = """
+            SELECT genre AS genre, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(sc.genres) AS genre
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY genre
+            ORDER BY count DESC
+            """, nativeQuery = true)
+    List<GenreCount> countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query(value = """
+            SELECT genre AS genre, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            CROSS JOIN LATERAL unnest(c.genres) AS genre
+            WHERE d.user_id = :userId
+            AND c.type = 'MOVIE'
+            GROUP BY genre
+            ORDER BY count DESC
+            """, nativeQuery = true)
+    List<GenreCount> countEntriesByGenreAndUserIdForMovies(@Param("userId") UUID userId);
+
+    @Query(value = """
+            SELECT genre AS genre, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(sc.genres) AS genre
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            GROUP BY genre
+            ORDER BY count DESC
+            """, nativeQuery = true)
+    List<GenreCount> countEntriesByGenreAndUserIdForSeries(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            AND d.score IS NOT NULL
+            ORDER BY d.score DESC, d.watchedDate DESC
+            """)
+    List<DiaryEntry> findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            AND d.score IS NOT NULL
+            ORDER BY d.score ASC, d.watchedDate DESC
+            """)
+    List<DiaryEntry> findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
+                                    com.watchwise.watchwise_api.content.entity.ContentType.SERIES)
+            AND d.score IS NOT NULL
+            ORDER BY d.score DESC, d.watchedDate DESC
+            """)
+    List<DiaryEntry> findTopRatedByUserId(@Param("userId") UUID userId, Pageable pageable);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
+                                    com.watchwise.watchwise_api.content.entity.ContentType.SERIES)
+            AND d.score IS NOT NULL
+            ORDER BY d.score ASC, d.watchedDate DESC
+            """)
+    List<DiaryEntry> findBottomRatedByUserId(@Param("userId") UUID userId, Pageable pageable);
+
+    @Query(value = """
+            SELECT c.series_tmdb_id AS seriesTmdbId, COALESCE(SUM(c.runtime_minutes), 0) AS totalMinutes
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY c.series_tmdb_id
+            ORDER BY totalMinutes DESC
+            """, nativeQuery = true)
+    List<SeriesRuntime> sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
+
+    interface SeriesRuntime {
+        String getSeriesTmdbId();
+        Long getTotalMinutes();
+    }
+
+    @Query(value = """
+            SELECT DISTINCT c.*
+            FROM contents c
+            JOIN diary_entries d ON d.content_id = c.id
+            WHERE d.user_id = :userId
+            AND c.type = 'MOVIE'
+            AND d.watched_date BETWEEN :start AND :end
+            ORDER BY c.runtime_minutes DESC NULLS LAST
+            """, nativeQuery = true)
+    List<Content> findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
+
+    @Query(value = """
+            SELECT c.id AS contentId, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type IN ('MOVIE', 'SERIES')
+            GROUP BY c.id
+            ORDER BY count DESC
+            """, nativeQuery = true)
+    List<ContentWatchCount> countDiaryEntriesGroupByContentId(@Param("userId") UUID userId, Pageable pageable);
+
+    interface ContentWatchCount {
+        UUID getContentId();
+        Long getCount();
+    }
+
+    @Query(value = """
+            SELECT ((CASE WHEN c.type = 'MOVIE' THEN c.release_year ELSE sc.release_year END) / 10) * 10 AS decade,
+                   COUNT(DISTINCT CASE WHEN c.type = 'MOVIE' THEN c.id::text ELSE c.series_tmdb_id END) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            WHERE d.user_id = :userId
+            AND c.type IN ('MOVIE', 'EPISODE')
+            AND (CASE WHEN c.type = 'MOVIE' THEN c.release_year ELSE sc.release_year END) IS NOT NULL
+            GROUP BY decade
+            ORDER BY decade
+            """, nativeQuery = true)
+    List<DecadeCount> countDistinctTitlesByDecadeAndUserId(@Param("userId") UUID userId);
+
+    interface DecadeCount {
+        Integer getDecade();
+        Long getCount();
+    }
+
+    @Query(value = """
+            SELECT country AS country,
+                   COUNT(DISTINCT CASE WHEN c.type = 'MOVIE' THEN c.id::text ELSE c.series_tmdb_id END) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'MOVIE' THEN c.countries ELSE sc.countries END) AS country
+            WHERE d.user_id = :userId
+            AND c.type IN ('MOVIE', 'EPISODE')
+            GROUP BY country
+            ORDER BY count DESC
+            """, nativeQuery = true)
+    List<CountryCount> countDistinctTitlesByCountryAndUserId(@Param("userId") UUID userId);
+
+    interface CountryCount {
+        String getCountry();
+        Long getCount();
+    }
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND d.content.seriesTmdbId = :seriesTmdbId
+            """)
+    List<DiaryEntry> findEpisodeEntriesBySeriesForUser(
+            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
 
 }

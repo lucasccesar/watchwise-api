@@ -8,18 +8,26 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
+import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
+import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +41,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,6 +49,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -66,7 +76,16 @@ class SummaryServiceImplTest {
     private DroppedEntryRepository droppedEntryRepository;
 
     @Mock
+    private ContentRepository contentRepository;
+
+    @Mock
     private ContentMapper contentMapper;
+
+    @Mock
+    private DiaryEntryMapper diaryEntryMapper;
+
+    @Mock
+    private Top5EntryRepository top5EntryRepository;
 
     @InjectMocks
     private SummaryServiceImpl summaryService;
@@ -87,6 +106,10 @@ class SummaryServiceImplTest {
                 .thenReturn(Page.empty());
         lenient().when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(any(), any(), any()))
                 .thenReturn(List.of());
+        lenient().when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(any(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryMapper.diaryEntryToResponseDto(any(), anyBoolean()))
+                .thenAnswer(invocation -> buildDiaryEntryResponseDto());
     }
 
     @Test
@@ -293,6 +316,264 @@ class SummaryServiceImplTest {
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
 
         assertThat(result.recentEpisodes()).containsExactly(episodeDto);
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Throw NotFoundException - When User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenUserDoesNotExistForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summaryService.getMonthInReview(lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateForMonthInReview() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> summaryService.getMonthInReview(marinaId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8)))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Throw BadRequestException - When Type Is Not MOVIE Or SERIES")
+    void shouldThrowBadRequestExceptionWhenTypeIsInvalidForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> summaryService.getMonthInReview(lucasId, lucasId, ContentType.EPISODE, YearMonth.of(2026, 8)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("type must be one of: MOVIE, SERIES");
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Throw BadRequestException - When Month Is Null")
+    void shouldThrowBadRequestExceptionWhenMonthIsNull() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> summaryService.getMonthInReview(lucasId, lucasId, ContentType.MOVIE, null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("month must be provided");
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Only Populate TopLongestMovies - When Type Is MOVIE")
+    void shouldOnlyPopulateTopLongestMoviesWhenTypeIsMovieForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movie = buildContent("100", ContentType.MOVIE);
+        movie.setRuntimeMinutes(120);
+        when(diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(eq(lucasId), any(), any(), any()))
+                .thenReturn(List.of(movie));
+        when(contentMapper.contentToContentRefDto(movie))
+                .thenReturn(new ContentRefDTO(movie.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null, 120, null));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.topLongestMovies()).hasSize(1);
+        assertThat(result.topSeriesByWatchTime()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Only Populate TopSeriesByWatchTime - When Type Is SERIES")
+    void shouldOnlyPopulateTopSeriesByWatchTimeWhenTypeIsSeriesForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(eq(lucasId), any(), any(), any()))
+                .thenReturn(List.of(seriesRuntime("1399", 320L)));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(lucasId, lucasId, ContentType.SERIES, YearMonth.of(2026, 8));
+
+        assertThat(result.topSeriesByWatchTime()).hasSize(1);
+        assertThat(result.topSeriesByWatchTime().getFirst().seriesTmdbId()).isEqualTo("1399");
+        assertThat(result.topLongestMovies()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Promote Top5 Members First - When Ranking TopRated")
+    void shouldPromoteTop5MembersFirstWhenRankingTopRatedForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content contentA = buildContent("a", ContentType.MOVIE);
+        Content contentB = buildContent("b", ContentType.MOVIE);
+        DiaryEntry entryA = buildDiaryEntry(contentA, LocalDateTime.now());
+        DiaryEntry entryB = buildDiaryEntry(contentB, LocalDateTime.now());
+        when(diaryEntryRepository.findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(eq(lucasId), eq(ContentType.MOVIE), any(), any(), any()))
+                .thenReturn(List.of(entryA, entryB));
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of(buildTop5Entry(contentB)));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.topRated()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Throw NotFoundException - When User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenUserDoesNotExistForYearInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summaryService.getYearInReview(lucasId, lucasId, ContentType.MOVIE, 2026))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateForYearInReview() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> summaryService.getYearInReview(marinaId, lucasId, ContentType.MOVIE, 2026))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Throw BadRequestException - When Year Is Null")
+    void shouldThrowBadRequestExceptionWhenYearIsNull() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> summaryService.getYearInReview(lucasId, lucasId, ContentType.MOVIE, null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("year must be provided");
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Compute Average Minutes Per Week As Seven Times The Daily Average")
+    void shouldComputeAverageMinutesPerWeekAsSevenTimesTheDailyAverage() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(eq(lucasId), eq(ContentType.MOVIE), any(), any()))
+                .thenReturn(3650L);
+
+        YearInReviewResponseDTO result = summaryService.getYearInReview(lucasId, lucasId, ContentType.MOVIE, 2026);
+
+        assertThat(result.averageMinutesPerWeek()).isEqualTo(result.averageMinutesPerDay() * 7);
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Throw NotFoundException - When User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenUserDoesNotExistForAllTimeStats() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summaryService.getAllTimeStats(lucasId, lucasId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateForAllTimeStats() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> summaryService.getAllTimeStats(marinaId, lucasId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Return Total Movie And Episode Counts From The Repository")
+    void shouldReturnTotalMovieAndEpisodeCountsFromTheRepository() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(42L);
+        when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(128L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserId(lucasId)).thenReturn(9000L);
+
+        AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
+
+        assertThat(result.totalMoviesWatched()).isEqualTo(42L);
+        assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
+        assertThat(result.totalMinutesWatched()).isEqualTo(9000L);
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Throw NotFoundException - When User Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenUserDoesNotExistForEpisodeRatingsGrid() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsGrid(lucasId, lucasId, "1399"))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateForEpisodeRatingsGrid() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsGrid(marinaId, lucasId, "1399"))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Throw BadRequestException - When SeriesTmdbId Is Blank")
+    void shouldThrowBadRequestExceptionWhenSeriesTmdbIdIsBlank() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsGrid(lucasId, lucasId, ""))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("seriesTmdbId must be provided");
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Use The Highest WatchNumber Score - When An Episode Was Rewatched")
+    void shouldUseTheHighestWatchNumberScoreWhenAnEpisodeWasRewatched() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content episode = Content.builder()
+                .id(UUID.randomUUID())
+                .type(ContentType.EPISODE)
+                .seriesTmdbId("1399")
+                .seasonNumber(1)
+                .episodeNumber(1)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        DiaryEntry firstWatch = DiaryEntry.builder().id(UUID.randomUUID()).content(episode).score(6).watchNumber(1)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        DiaryEntry rewatch = DiaryEntry.builder().id(UUID.randomUUID()).content(episode).score(9).watchNumber(2)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(diaryEntryRepository.findEpisodeEntriesBySeriesForUser(lucasId, "1399")).thenReturn(List.of(firstWatch, rewatch));
+
+        EpisodeRatingsGridResponseDTO result = summaryService.getEpisodeRatingsGrid(lucasId, lucasId, "1399");
+
+        assertThat(result.episodes()).hasSize(1);
+        assertThat(result.episodes().getFirst().score()).isEqualTo(9);
+    }
+
+    private DiaryEntryRepository.SeriesRuntime seriesRuntime(String seriesTmdbId, long totalMinutes) {
+        return new DiaryEntryRepository.SeriesRuntime() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Long getTotalMinutes() {
+                return totalMinutes;
+            }
+        };
+    }
+
+    private Top5Entry buildTop5Entry(Content content) {
+        return Top5Entry.builder()
+                .id(UUID.randomUUID())
+                .content(content)
+                .type(ContentType.MOVIE)
+                .position(1)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
     }
 
     private DiaryEntryRepository.GenreCount genreCount(String genre, long count) {

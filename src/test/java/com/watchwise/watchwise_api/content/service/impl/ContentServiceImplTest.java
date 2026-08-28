@@ -970,6 +970,84 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Season And ReleaseYear Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeasonAndReleaseYearIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 1, null, null, null, null, null, 1999, null);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("releaseYear must not be provided when type is SEASON");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Episode And ReleaseYear Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsEpisodeAndReleaseYearIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 3, null, null, null, null, 1999, null);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("releaseYear must not be provided when type is EPISODE");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Season And Countries Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeasonAndCountriesIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 1, null, null, null, null, null, null, List.of("US"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("countries must not be provided when type is SEASON");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Episode And Countries Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsEpisodeAndCountriesIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 3, null, null, null, null, null, List.of("US"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("countries must not be provided when type is EPISODE");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different ReleaseYear Value")
+    void shouldThrowConflictExceptionWhenExistingContentHasADifferentReleaseYearValue() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("301", ContentType.MOVIE, null, null, null, null, null, null, null, 1999, null);
+        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("301").type(ContentType.MOVIE).releaseYear(2005).build();
+
+        when(contentRepository.findByTmdbIdAndType("301", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This content is already registered with a different releaseYear value");
+
+        verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different Countries Value")
+    void shouldThrowConflictExceptionWhenExistingContentHasADifferentCountriesValue() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("302", ContentType.SERIES, null, null, null, null, null, null, null, null, List.of("US"));
+        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("302").type(ContentType.SERIES).countries(List.of("GB")).build();
+
+        when(contentRepository.findByTmdbIdAndType("302", ContentType.SERIES)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This content is already registered with a different countries value");
+
+        verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Not Throw Conflict - When Genres Are Resent In A Different Order")
     void shouldNotThrowConflictWhenGenresAreResentInADifferentOrder() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, List.of("Thriller", "Drama"));

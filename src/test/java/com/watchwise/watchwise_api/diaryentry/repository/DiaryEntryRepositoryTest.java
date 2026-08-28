@@ -613,6 +613,200 @@ class DiaryEntryRepositoryTest {
         assertThat(result).hasSize(1);
     }
 
+    @Test
+    @DisplayName("[countByUserIdAndWatchedDateBetweenGroupByDayOfWeekForMovies] Should Use ISO Day Of Week Numbering - When Entry Watched On A Wednesday")
+    void shouldUseIsoDayOfWeekNumberingWhenEntryWatchedOnAWednesday() {
+        LocalDate wednesday = LocalDate.of(2026, 8, 26);
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, fightClub), wednesday));
+
+        List<DiaryEntryRepository.DayOfWeekCount> result = diaryEntryRepository
+                .countByUserIdAndWatchedDateBetweenGroupByDayOfWeekForMovies(lucas.getId(), wednesday.minusDays(7), wednesday.plusDays(7));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getDayOfWeek()).isEqualTo(3);
+        assertThat(result.getFirst().getCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countByUserIdAndWatchedDateBetweenGroupByMonthForMovies] Should Group By Calendar Month - When Entries Span Different Months")
+    void shouldGroupByCalendarMonthWhenEntriesSpanDifferentMonths() {
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, fightClub), LocalDate.of(2026, 3, 10)));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, pulpFiction), LocalDate.of(2026, 8, 1)));
+
+        List<DiaryEntryRepository.MonthCount> result = diaryEntryRepository
+                .countByUserIdAndWatchedDateBetweenGroupByMonthForMovies(lucas.getId(), LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31));
+
+        assertThat(result).extracting(DiaryEntryRepository.MonthCount::getMonth).containsExactlyInAnyOrder(3, 8);
+    }
+
+    @Test
+    @DisplayName("[countByUserIdGroupByYearForMovies] Should Group By Calendar Year - When Entries Span Different Years")
+    void shouldGroupByCalendarYearWhenEntriesSpanDifferentYears() {
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, fightClub), LocalDate.of(2024, 5, 1)));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, pulpFiction), LocalDate.of(2026, 5, 1)));
+
+        List<DiaryEntryRepository.YearCount> result = diaryEntryRepository.countByUserIdGroupByYearForMovies(lucas.getId());
+
+        assertThat(result).extracting(DiaryEntryRepository.YearCount::getYear).containsExactlyInAnyOrder(2024, 2026);
+    }
+
+    @Test
+    @DisplayName("[countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween] Should Count Every Entry - When The Same Genre Is Watched Twice")
+    void shouldCountEveryEntryWhenTheSameGenreIsWatchedTwice() {
+        contentRepository.deleteAll();
+        Content drama1 = contentRepository.save(buildContent("1", ContentType.MOVIE, null, List.of("Drama")));
+        Content drama2 = contentRepository.save(buildContent("2", ContentType.MOVIE, null, List.of("Drama")));
+        LocalDate today = LocalDate.now();
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, drama1), today));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, drama2), today));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository
+                .countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(lucas.getId(), today.minusDays(1), today.plusDays(1));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getGenre()).isEqualTo("Drama");
+        assertThat(result.getFirst().getCount()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByDecadeAndUserId] Should Bucket By Decade - When Movie And Series Have Different Release Years")
+    void shouldBucketByDecadeWhenMovieAndSeriesHaveDifferentReleaseYears() {
+        contentRepository.deleteAll();
+        Content movie90s = contentRepository.save(buildContentWithReleaseYear("1", ContentType.MOVIE, 1994));
+        Content series = contentRepository.save(buildContentWithReleaseYear("2", ContentType.SERIES, 2011));
+        Content episode = contentRepository.save(buildEpisode("2", 1, 1));
+        LocalDate today = LocalDate.now();
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, movie90s), today));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, episode), today));
+        entityManager.flush();
+
+        List<DiaryEntryRepository.DecadeCount> result = diaryEntryRepository.countDistinctTitlesByDecadeAndUserId(lucas.getId());
+
+        assertThat(result).extracting(DiaryEntryRepository.DecadeCount::getDecade).containsExactlyInAnyOrder(1990, 2010);
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByCountryAndUserId] Should Unnest Countries - When Movie Has Multiple Production Countries")
+    void shouldUnnestCountriesWhenMovieHasMultipleProductionCountries() {
+        contentRepository.deleteAll();
+        Content coProduction = contentRepository.save(buildContentWithCountries("1", ContentType.MOVIE, List.of("US", "GB")));
+        LocalDate today = LocalDate.now();
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, coProduction), today));
+
+        List<DiaryEntryRepository.CountryCount> result = diaryEntryRepository.countDistinctTitlesByCountryAndUserId(lucas.getId());
+
+        assertThat(result).extracting(DiaryEntryRepository.CountryCount::getCountry).containsExactlyInAnyOrder("US", "GB");
+    }
+
+    @Test
+    @DisplayName("[findTopRatedByUserIdAndContentTypeAndWatchedDateBetween] Should Order By Score Descending - When Multiple Rated Entries Exist")
+    void shouldOrderByScoreDescendingWhenMultipleRatedEntriesExist() {
+        LocalDate today = LocalDate.now();
+        DiaryEntry lowScore = withWatchedDate(buildEntry(lucas, fightClub), today);
+        lowScore.setScore(4);
+        DiaryEntry highScore = withWatchedDate(buildEntry(lucas, pulpFiction), today);
+        highScore.setScore(9);
+        diaryEntryRepository.save(lowScore);
+        diaryEntryRepository.save(highScore);
+
+        List<DiaryEntry> result = diaryEntryRepository.findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                lucas.getId(), ContentType.MOVIE, today.minusDays(1), today.plusDays(1), PageRequest.of(0, 10));
+
+        assertThat(result).extracting(DiaryEntry::getScore).containsExactly(9, 4);
+    }
+
+    @Test
+    @DisplayName("[findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc] Should Order By Runtime Descending Without Duplicates - When The Same Movie Is Watched Twice")
+    void shouldOrderByRuntimeDescendingWithoutDuplicatesWhenTheSameMovieIsWatchedTwice() {
+        contentRepository.deleteAll();
+        Content longMovie = contentRepository.save(buildContent("1", ContentType.MOVIE, 180, null));
+        Content shortMovie = contentRepository.save(buildContent("2", ContentType.MOVIE, 90, null));
+        LocalDate today = LocalDate.now();
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, longMovie), today));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, longMovie, 2), today));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, shortMovie), today));
+
+        List<Content> result = diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
+                lucas.getId(), today.minusDays(1), today.plusDays(1), PageRequest.of(0, 10));
+
+        assertThat(result).extracting(Content::getTmdbId).containsExactly("1", "2");
+    }
+
+    @Test
+    @DisplayName("[sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween] Should Sum Episode Runtime Per Series - When Multiple Episodes Watched")
+    void shouldSumEpisodeRuntimePerSeriesWhenMultipleEpisodesWatched() {
+        contentRepository.deleteAll();
+        Content episode1 = contentRepository.save(buildEpisode("1399", 1, 1, 55));
+        Content episode2 = contentRepository.save(buildEpisode("1399", 1, 2, 58));
+        LocalDate today = LocalDate.now();
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, episode1), today));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, episode2), today));
+
+        List<DiaryEntryRepository.SeriesRuntime> result = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(
+                        lucas.getId(), today.minusDays(1), today.plusDays(1), PageRequest.of(0, 10));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getSeriesTmdbId()).isEqualTo("1399");
+        assertThat(result.getFirst().getTotalMinutes()).isEqualTo(113L);
+    }
+
+    @Test
+    @DisplayName("[countDiaryEntriesGroupByContentId] Should Count Rewatches - When The Same Content Is Logged Twice")
+    void shouldCountRewatchesWhenTheSameContentIsLoggedTwice() {
+        diaryEntryRepository.save(buildEntry(lucas, fightClub, 1));
+        diaryEntryRepository.save(buildEntry(lucas, fightClub, 2));
+
+        List<DiaryEntryRepository.ContentWatchCount> result = diaryEntryRepository
+                .countDiaryEntriesGroupByContentId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getContentId()).isEqualTo(fightClub.getId());
+        assertThat(result.getFirst().getCount()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("[findEpisodeEntriesBySeriesForUser] Should Return Only Episodes Of That Series - When User Has Entries For Other Series")
+    void shouldReturnOnlyEpisodesOfThatSeriesWhenUserHasEntriesForOtherSeries() {
+        contentRepository.deleteAll();
+        Content targetEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content otherEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        diaryEntryRepository.save(buildEntry(lucas, targetEpisode));
+        diaryEntryRepository.save(buildEntry(lucas, otherEpisode));
+
+        List<DiaryEntry> result = diaryEntryRepository.findEpisodeEntriesBySeriesForUser(lucas.getId(), "1399");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getContent().getSeriesTmdbId()).isEqualTo("1399");
+    }
+
+    private DiaryEntry withWatchedDate(DiaryEntry entry, LocalDate watchedDate) {
+        entry.setWatchedDate(watchedDate);
+        return entry;
+    }
+
+    private Content buildContentWithReleaseYear(String tmdbId, ContentType type, Integer releaseYear) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .tmdbId(tmdbId)
+                .type(type)
+                .releaseYear(releaseYear)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildContentWithCountries(String tmdbId, ContentType type, List<String> countries) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .tmdbId(tmdbId)
+                .type(type)
+                .countries(countries)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
     private DiaryEntry buildEntry(User user, Content content) {
         return buildEntry(user, content, 1);
     }
