@@ -2,10 +2,12 @@ package com.watchwise.watchwise_api.userlist.service.impl;
 
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
@@ -25,6 +27,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -32,11 +35,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -51,8 +56,13 @@ public class UserListServiceImpl implements UserListService {
     private final PageRequestFactory pageRequestFactory;
     private final CommentRepository commentRepository;
 
+    static final int RANK_PARK_OFFSET = 1_000_000_000;
+    private static final Set<String> GENERIC_SORT_FIELDS = Set.of("rank", "updatedAt", "name", "likesCount");
+    private static final Set<String> AGGREGATE_SORT_FIELDS = Set.of("itemsCount", "commentsCount");
+
     @Override
-    public Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize) {
+    public Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize,
+            String sortBy, String sortDirection) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
@@ -61,11 +71,28 @@ public class UserListServiceImpl implements UserListService {
 
         assertCanViewLists(target, isOwner, viewerFollowsTarget);
 
-        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        if (sortBy != null && !GENERIC_SORT_FIELDS.contains(sortBy) && !AGGREGATE_SORT_FIELDS.contains(sortBy)) {
+            throw new BadRequestException("sortBy must be one of: rank, updatedAt, name, likesCount, itemsCount, commentsCount");
+        }
 
-        Page<UserList> lists = isOwner
-                ? userListRepository.findByUserId(userId, pageRequest)
-                : userListRepository.findByUserIdAndVisibilityIn(userId, visibleVisibilitiesFor(viewerFollowsTarget), pageRequest);
+        List<UserListVisibility> visibilities = isOwner
+                ? List.of(UserListVisibility.values())
+                : visibleVisibilitiesFor(viewerFollowsTarget);
+
+        Page<UserList> lists;
+        if (sortBy != null && AGGREGATE_SORT_FIELDS.contains(sortBy)) {
+            PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+            String direction = "desc".equals(sortDirection) ? "DESC" : "ASC";
+            List<String> visibilityNames = visibilities.stream().map(Enum::name).toList();
+            lists = "itemsCount".equals(sortBy)
+                    ? userListRepository.findByUserIdOrderByItemsCount(userId, visibilityNames, direction, pageRequest)
+                    : userListRepository.findByUserIdOrderByCommentsCount(userId, visibilityNames, direction, pageRequest);
+        } else {
+            PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize, sortBy, sortDirection);
+            lists = isOwner
+                    ? userListRepository.findByUserId(userId, pageRequest)
+                    : userListRepository.findByUserIdAndVisibilityIn(userId, visibilities, pageRequest);
+        }
 
         List<UUID> listIds = lists.getContent().stream().map(UserList::getId).toList();
         Map<UUID, List<ContentRefDTO>> previewsByListId = userListItemService.getPreviewItemsByListIds(listIds);
@@ -124,21 +151,61 @@ public class UserListServiceImpl implements UserListService {
                 : List.of(UserListVisibility.PUBLIC);
     }
 
+    private static final Set<String> ITEM_SORT_FIELDS = Set.of("position", "dateAdded", "duration");
+
     @Override
-    public UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId) {
+    public UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
+            String sortBy, String sortDirection) {
         UserList userList = userListRepository.findById(listId)
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
         assertListIsVisibleTo(viewerId, userList);
 
-        List<UserListItemResponseDTO> items = userListItemService.getItems(viewerId, listId);
+        if (sortBy != null && !ITEM_SORT_FIELDS.contains(sortBy)) {
+            throw new BadRequestException("sortBy must be one of: position, dateAdded, duration");
+        }
+
+        List<UserListItemResponseDTO> allItems = userListItemService.getItems(viewerId, listId);
+        List<UserListItemResponseDTO> items = filterAndSortItems(allItems, type, genre, sortBy, sortDirection);
         double watchedPercentage = userListItemService.getWatchedPercentage(listId, viewerId);
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
         long commentsCount = commentRepository.countByListId(listId);
 
         return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe,
-                items.size(), commentsCount, totalRuntimeMinutes);
+                allItems.size(), commentsCount, totalRuntimeMinutes);
+    }
+
+    private List<UserListItemResponseDTO> filterAndSortItems(List<UserListItemResponseDTO> items, ContentType type,
+            String genre, String sortBy, String sortDirection) {
+        Stream<UserListItemResponseDTO> stream = items.stream();
+
+        if (type != null) {
+            stream = stream.filter(item -> item.content() != null && item.content().type() == type);
+        }
+        if (genre != null) {
+            stream = stream.filter(item -> item.content() != null
+                    && item.content().genres() != null && item.content().genres().contains(genre));
+        }
+
+        List<UserListItemResponseDTO> filtered = stream.toList();
+
+        if (sortBy == null) {
+            return filtered;
+        }
+
+        Comparator<UserListItemResponseDTO> comparator = switch (sortBy) {
+            case "dateAdded" -> Comparator.comparing(UserListItemResponseDTO::createdAt);
+            case "duration" -> Comparator.comparing(item -> item.content() != null && item.content().runtimeMinutes() != null
+                    ? item.content().runtimeMinutes() : 0);
+            default -> Comparator.comparing(UserListItemResponseDTO::position, Comparator.nullsLast(Comparator.naturalOrder()));
+        };
+
+        if ("desc".equals(sortDirection)) {
+            comparator = comparator.reversed();
+        }
+
+        return filtered.stream().sorted(comparator).toList();
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {
@@ -170,6 +237,7 @@ public class UserListServiceImpl implements UserListService {
                 .name(userListCreationDTO.name())
                 .description(userListCreationDTO.description())
                 .visibility(userListCreationDTO.visibility() != null ? userListCreationDTO.visibility() : UserListVisibility.PUBLIC)
+                .rank((int) userListRepository.countByUserIdAndRankIsNotNull(userId) + 1)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -188,6 +256,7 @@ public class UserListServiceImpl implements UserListService {
                 .name(userListBulkCreationDTO.name())
                 .description(userListBulkCreationDTO.description())
                 .visibility(userListBulkCreationDTO.visibility() != null ? userListBulkCreationDTO.visibility() : UserListVisibility.PUBLIC)
+                .rank((int) userListRepository.countByUserIdAndRankIsNotNull(userId) + 1)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -214,7 +283,48 @@ public class UserListServiceImpl implements UserListService {
         applyPatch(userList, userListPatchDTO);
         userList.setUpdatedAt(LocalDateTime.now());
 
-        return toResponseDto(userListRepository.save(userList), userId);
+        try {
+            if (userListPatchDTO.rank() != null) {
+                applyRankChange(userList, userListPatchDTO.rank());
+            }
+            return toResponseDto(userListRepository.saveAndFlush(userList), userId);
+        } catch (DataIntegrityViolationException e) {
+            throw new ConflictException("List could not be reordered due to a concurrent update");
+        }
+    }
+
+    private void applyRankChange(UserList userList, int newRank) {
+        UUID userId = userList.getUser().getId();
+
+        if (userList.getRank() == null) {
+            long rankedCount = userListRepository.countByUserIdAndRankIsNotNull(userId);
+            userList.setRank((int) rankedCount + 1);
+            userListRepository.saveAndFlush(userList);
+        }
+
+        long currentCount = userListRepository.countByUserIdAndRankIsNotNull(userId);
+        int oldRank = userList.getRank();
+
+        if (newRank > currentCount) {
+            throw new BadRequestException("rank cannot be greater than " + currentCount + ", the last rank among your lists");
+        }
+
+        if (newRank == oldRank) {
+            return;
+        }
+
+        userList.setRank((int) currentCount + 1);
+        userListRepository.saveAndFlush(userList);
+
+        boolean movingForward = newRank < oldRank;
+        int rangeStart = movingForward ? newRank : oldRank + 1;
+        int rangeEnd = movingForward ? oldRank - 1 : newRank;
+        int shiftDelta = movingForward ? 1 : -1;
+
+        userListRepository.parkRanksInRange(userId, rangeStart, rangeEnd, RANK_PARK_OFFSET);
+        userListRepository.settleParkedRanks(userId, RANK_PARK_OFFSET, shiftDelta);
+
+        userList.setRank(newRank);
     }
 
     private void applyPatch(UserList userList, UserListPatchDTO userListPatchDTO) {

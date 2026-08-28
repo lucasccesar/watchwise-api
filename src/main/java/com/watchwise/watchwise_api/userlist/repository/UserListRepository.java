@@ -29,4 +29,60 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
     @Query("UPDATE UserList u SET u.likesCount = u.likesCount - 1 WHERE u.id = :id AND u.likesCount > 0")
     void decrementLikesCount(@Param("id") UUID id);
 
+    long countByUserIdAndRankIsNotNull(UUID userId);
+
+    @Modifying
+    @Query("UPDATE UserList ul SET ul.rank = ul.rank + :offset WHERE ul.user.id = :userId AND ul.rank >= :rangeStart AND ul.rank <= :rangeEnd")
+    void parkRanksInRange(
+            @Param("userId") UUID userId,
+            @Param("rangeStart") int rangeStart, @Param("rangeEnd") int rangeEnd, @Param("offset") int offset);
+
+    @Modifying
+    @Query("UPDATE UserList ul SET ul.rank = ul.rank - :offset + :delta WHERE ul.user.id = :userId AND ul.rank > :offset")
+    void settleParkedRanks(
+            @Param("userId") UUID userId,
+            @Param("offset") int offset, @Param("delta") int delta);
+
+    @Query(value = """
+            SELECT ul.* FROM user_lists ul
+            LEFT JOIN user_list_items uli ON uli.user_list_id = ul.id
+            WHERE ul.user_id = :userId
+            AND ul.visibility IN (:visibilities)
+            GROUP BY ul.id
+            ORDER BY
+              CASE WHEN :sortDirection = 'ASC' THEN COUNT(uli.id) END ASC,
+              CASE WHEN :sortDirection = 'DESC' THEN COUNT(uli.id) END DESC,
+              ul.created_at DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM user_lists ul
+            WHERE ul.user_id = :userId
+            AND ul.visibility IN (:visibilities)
+            """,
+            nativeQuery = true)
+    Page<UserList> findByUserIdOrderByItemsCount(
+            @Param("userId") UUID userId, @Param("visibilities") List<String> visibilities,
+            @Param("sortDirection") String sortDirection, Pageable pageable);
+
+    @Query(value = """
+            SELECT ul.* FROM user_lists ul
+            LEFT JOIN comments c ON c.list_id = ul.id
+            WHERE ul.user_id = :userId
+            AND ul.visibility IN (:visibilities)
+            GROUP BY ul.id
+            ORDER BY
+              CASE WHEN :sortDirection = 'ASC' THEN COUNT(c.id) END ASC,
+              CASE WHEN :sortDirection = 'DESC' THEN COUNT(c.id) END DESC,
+              ul.created_at DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM user_lists ul
+            WHERE ul.user_id = :userId
+            AND ul.visibility IN (:visibilities)
+            """,
+            nativeQuery = true)
+    Page<UserList> findByUserIdOrderByCommentsCount(
+            @Param("userId") UUID userId, @Param("visibilities") List<String> visibilities,
+            @Param("sortDirection") String sortDirection, Pageable pageable);
+
 }

@@ -21,6 +21,7 @@ public record UserListResponseDTO(
         Boolean likedByMe,
         long itemsCount,
         long commentsCount,
-        long totalRuntimeMinutes
+        long totalRuntimeMinutes,
+        Integer rank
 ) {
 }

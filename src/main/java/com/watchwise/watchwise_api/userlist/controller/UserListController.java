@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
@@ -27,9 +28,11 @@ public class UserListController {
     public ResponseEntity<PageResponseDTO<UserListResponseDTO>> getUserLists(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortDirection
     ) {
-        Page<UserListResponseDTO> lists = userListService.getUserLists(getCurrentUserId(), userId, page, size);
+        Page<UserListResponseDTO> lists = userListService.getUserLists(getCurrentUserId(), userId, page, size, sortBy, sortDirection);
         return ResponseEntity.ok(PageResponseDTO.of(lists));
     }
 
@@ -48,8 +51,14 @@ public class UserListController {
     }
 
     @GetMapping("/lists/{listId}")
-    public ResponseEntity<UserListDetailedResponseDTO> getUserListById(@PathVariable UUID listId) {
-        UserListDetailedResponseDTO list = userListService.getUserListById(getCurrentUserId(), listId);
+    public ResponseEntity<UserListDetailedResponseDTO> getUserListById(
+            @PathVariable UUID listId,
+            @RequestParam(required = false) ContentType type,
+            @RequestParam(required = false) String genre,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortDirection
+    ) {
+        UserListDetailedResponseDTO list = userListService.getUserListById(getCurrentUserId(), listId, type, genre, sortBy, sortDirection);
         return ResponseEntity.ok(list);
     }
 

@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.userlist.service;
 
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
@@ -11,9 +12,11 @@ import java.util.UUID;
 
 public interface UserListService {
 
-    Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize);
+    Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize,
+            String sortBy, String sortDirection);
 
-    UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId);
+    UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
+            String sortBy, String sortDirection);
 
     UserListResponseDTO createUserList(UUID userId, UserListCreationDTO userListCreationDTO);
 

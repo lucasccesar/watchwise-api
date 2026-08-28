@@ -49,4 +49,8 @@ public class UserList {
     @Setter
     @Builder.Default
     private Integer likesCount = 0;
+
+    @Column(name = "rank")
+    @Setter
+    private Integer rank;
 }

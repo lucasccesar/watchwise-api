@@ -1,8 +1,12 @@
 package com.watchwise.watchwise_api.userlist.repository;
 
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -48,6 +52,12 @@ class UserListRepositoryTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private ContentRepository contentRepository;
+
+    @Autowired
+    private com.watchwise.watchwise_api.userlist.repository.UserListItemRepository userListItemRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -56,7 +66,9 @@ class UserListRepositoryTest {
 
     @BeforeEach
     void setUp() {
+        userListItemRepository.deleteAll();
         userListRepository.deleteAll();
+        contentRepository.deleteAll();
         userRepository.deleteAll();
 
         lucas = userRepository.save(buildUser("lucas", "lucas@email.com"));
@@ -211,6 +223,75 @@ class UserListRepositoryTest {
         userRepository.flush();
 
         assertThat(userListRepository.findById(saved.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[countByUserIdAndRankIsNotNull] Should Count Only Ranked Lists")
+    void shouldCountOnlyRankedLists() {
+        UserList ranked = buildList(lucas, "Ranked", true);
+        ranked.setRank(1);
+        userListRepository.save(ranked);
+        userListRepository.saveAndFlush(buildList(lucas, "Unranked", true));
+        entityManager.clear();
+
+        assertThat(userListRepository.countByUserIdAndRankIsNotNull(lucas.getId())).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[parkRanksInRange][settleParkedRanks] Should Shift Ranks Forward - When Moving A List Backward")
+    void shouldShiftRanksForwardWhenMovingAListBackward() {
+        UserList first = buildRankedList(lucas, "First", 1);
+        UserList second = buildRankedList(lucas, "Second", 2);
+        UserList third = buildRankedList(lucas, "Third", 3);
+        userListRepository.save(first);
+        userListRepository.save(second);
+        userListRepository.saveAndFlush(third);
+        entityManager.clear();
+
+        userListRepository.parkRanksInRange(lucas.getId(), 2, 3, 1_000_000_000);
+        userListRepository.settleParkedRanks(lucas.getId(), 1_000_000_000, -1);
+        entityManager.clear();
+
+        assertThat(userListRepository.findById(second.getId()).orElseThrow().getRank()).isEqualTo(1);
+        assertThat(userListRepository.findById(third.getId()).orElseThrow().getRank()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[findByUserIdOrderByItemsCount] Should Order Lists By Item Count Ascending")
+    void shouldOrderListsByItemCountAscending() {
+        UserList fewItems = userListRepository.save(buildList(lucas, "Few items", true));
+        UserList manyItems = userListRepository.saveAndFlush(buildList(lucas, "Many items", true));
+        Content movie = contentRepository.save(Content.builder()
+                .tmdbId("550").type(ContentType.MOVIE).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content anotherMovie = contentRepository.save(Content.builder()
+                .tmdbId("680").type(ContentType.MOVIE).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        userListItemRepository.save(buildContentItem(fewItems, movie, 1));
+        userListItemRepository.save(buildContentItem(manyItems, movie, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(manyItems, anotherMovie, 2));
+        entityManager.clear();
+
+        Page<UserList> result = userListRepository.findByUserIdOrderByItemsCount(
+                lucas.getId(), List.of("PUBLIC", "FOLLOWERS", "PRIVATE"), "ASC", PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(UserList::getId).containsExactly(fewItems.getId(), manyItems.getId());
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    private UserListItem buildContentItem(UserList userList, Content content, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        return UserListItem.builder()
+                .userList(userList)
+                .content(content)
+                .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private UserList buildRankedList(User user, String name, int rank) {
+        UserList list = buildList(user, name, true);
+        list.setRank(rank);
+        return list;
     }
 
     @Test

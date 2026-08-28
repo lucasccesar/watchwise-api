@@ -66,9 +66,9 @@ class UserListControllerTest {
         UUID targetUserId = UUID.randomUUID();
         UserListResponseDTO dto = buildResponseDto();
         Page<UserListResponseDTO> page = new PageImpl<>(List.of(dto));
-        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10)).thenReturn(page);
+        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10, null, null)).thenReturn(page);
 
-        ResponseEntity<PageResponseDTO<UserListResponseDTO>> result = userListController.getUserLists(targetUserId, 1, 10);
+        ResponseEntity<PageResponseDTO<UserListResponseDTO>> result = userListController.getUserLists(targetUserId, 1, 10, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody().content()).containsExactly(dto);
@@ -78,11 +78,11 @@ class UserListControllerTest {
     @DisplayName("[getUserLists] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingUserLists() {
         UUID targetUserId = UUID.randomUUID();
-        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10)).thenReturn(Page.empty());
+        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10, null, null)).thenReturn(Page.empty());
 
-        userListController.getUserLists(targetUserId, 1, 10);
+        userListController.getUserLists(targetUserId, 1, 10, null, null);
 
-        verify(userListService).getUserLists(currentUserId, targetUserId, 1, 10);
+        verify(userListService).getUserLists(currentUserId, targetUserId, 1, 10, null, null);
     }
 
     @Test
@@ -90,9 +90,9 @@ class UserListControllerTest {
     void shouldReturnOkWithTheServiceResultWhenGettingUserListById() {
         UUID listId = UUID.randomUUID();
         UserListDetailedResponseDTO dto = buildDetailedResponseDto();
-        when(userListService.getUserListById(currentUserId, listId)).thenReturn(dto);
+        when(userListService.getUserListById(currentUserId, listId, null, null, null, null)).thenReturn(dto);
 
-        ResponseEntity<UserListDetailedResponseDTO> result = userListController.getUserListById(listId);
+        ResponseEntity<UserListDetailedResponseDTO> result = userListController.getUserListById(listId, null, null, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -102,11 +102,11 @@ class UserListControllerTest {
     @DisplayName("[getUserListById] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingUserListById() {
         UUID listId = UUID.randomUUID();
-        when(userListService.getUserListById(currentUserId, listId)).thenReturn(buildDetailedResponseDto());
+        when(userListService.getUserListById(currentUserId, listId, null, null, null, null)).thenReturn(buildDetailedResponseDto());
 
-        userListController.getUserListById(listId);
+        userListController.getUserListById(listId, null, null, null, null);
 
-        verify(userListService).getUserListById(currentUserId, listId);
+        verify(userListService).getUserListById(currentUserId, listId, null, null, null, null);
     }
 
     @Test
@@ -207,7 +207,7 @@ class UserListControllerTest {
 
     private UserListResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
-        return new UserListResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(), 0L, 0, false, 0L, 0L, 0L);
+        return new UserListResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(), 0L, 0, false, 0L, 0L, 0L, 1);
     }
 
     private UserListDetailedResponseDTO buildDetailedResponseDto() {
@@ -216,7 +216,7 @@ class UserListControllerTest {
                 UUID.randomUUID(),
                 new ContentRefDTO(UUID.randomUUID(), "100", ContentType.MOVIE, null, null, null, null, null, now, now),
                 null, 1, null, now, now);
-        return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(item), 0, false, 1L, 0L, 0L);
+        return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(item), 0, false, 1L, 0L, 0L, 1);
     }
 
     private ContentRefCreationDTO buildContentRef() {
