@@ -4,6 +4,7 @@ target/
 CLAUDE.md
 docs/
 .claude
+graphify-out/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
