@@ -177,6 +177,16 @@ class Top5EntryControllerIntegrationTest {
                 """.formatted(tmdbId, positionField);
     }
 
+    private String contentBody(String tmdbId, Integer position, String customPosterUrl) {
+        String positionField = position == null ? "" : (", \"position\": " + position);
+        String posterField = customPosterUrl == null ? "" : (", \"customPosterUrl\": \"" + customPosterUrl + "\"");
+        return """
+                {
+                    "tmdbId": "%s"%s%s
+                }
+                """.formatted(tmdbId, positionField, posterField);
+    }
+
     private Top5Entry persistEntry(User user, Content content, ContentType type, int position) {
         LocalDateTime now = LocalDateTime.now();
         return top5EntryRepository.save(Top5Entry.builder()
@@ -327,6 +337,20 @@ class Top5EntryControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         assertThat(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(entity.getId(), ContentType.MOVIE))
                 .hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[insertEntry] Should Persist CustomPosterUrl - When Provided")
+    void shouldPersistCustomPosterUrlWhenProvidedOnInsert() throws Exception {
+        RegisteredUser user = registerUser("inserttop5poster");
+
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null, "https://example.com/poster.png")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/poster.png"));
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        var entries = top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(entity.getId(), ContentType.MOVIE);
+        assertThat(entries.get(0).getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
     }
 
     @Test

@@ -1059,4 +1059,31 @@ class UserListItemControllerIntegrationTest {
 
         assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl()).isNull();
     }
+
+    @Test
+    @DisplayName("[addItem] Should Return BadRequest - When CustomPosterUrl Is Not A Valid Url")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsNotAValidUrlOnAdd() throws Exception {
+        RegisteredUser user = registerUser("additemposterinvalid");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+
+        mockMvc.perform(addItemRequest(user, list.getId(), contentItemBody("550", null, null, "not-a-url")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return BadRequest - When CustomPosterUrl Is Not A Valid Url")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsNotAValidUrlOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemposterinvalid");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        UserListItem item = persistContentItem(list, persistContent("550"), 1);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, null, "not-a-url")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+    }
 }
