@@ -11,12 +11,31 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
+
+    // --- Feed (GET /feed) ---
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user
+            WHERE d.user.id IN :userIds
+            AND (
+                CAST(:cursorCreatedAt AS timestamp) IS NULL
+                OR d.createdAt < :cursorCreatedAt
+                OR (d.createdAt = :cursorCreatedAt AND (:cursorId IS NULL OR d.id < :cursorId))
+            )
+            ORDER BY d.createdAt DESC, d.id DESC
+            """)
+    List<DiaryEntry> findFeedCandidates(
+            @Param("userIds") Collection<UUID> userIds,
+            @Param("cursorCreatedAt") LocalDateTime cursorCreatedAt,
+            @Param("cursorId") UUID cursorId,
+            Pageable pageable);
 
     @Modifying
     @Query("UPDATE DiaryEntry d SET d.likesCount = d.likesCount + 1 WHERE d.id = :id")

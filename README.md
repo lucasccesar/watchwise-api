@@ -84,6 +84,7 @@ JPA) / Mapper (MapStruct) → Entity`.
 | Followers | `GET /users/{userId}/followers`, `GET /users/{userId}/following`, `POST/DELETE /users/{userId}/follow`, `GET /users/me/follow-requests`, `POST /users/me/follow-requests/{requesterId}/accept`, `DELETE /users/me/follow-requests/{requesterId}` |
 | Followed people (TMDB) | `POST/DELETE /users/me/follow-people/{personTmdbId}`, `GET /users/{userId}/follow-people` |
 | Content | `POST /contents/reference` |
+| Feed | `GET /feed` |
 
 A API é protegida por autenticação por padrão: toda rota exige uma sessão válida, exceto `/auth/**`
 (necessária para obter essa sessão) e `/error`.

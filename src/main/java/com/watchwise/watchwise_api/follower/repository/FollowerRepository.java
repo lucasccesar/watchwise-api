@@ -10,10 +10,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface FollowerRepository extends JpaRepository<Follower, UUID> {
+
+    @Query("SELECT f.followed.id FROM Follower f WHERE f.follower.id = :followerId AND f.status = :status")
+    List<UUID> findFollowedIdsByFollowerIdAndStatus(@Param("followerId") UUID followerId, @Param("status") FollowStatus status);
 
     Optional<Follower> findByFollowerIdAndFollowedId(UUID followerId, UUID followedId);
 
