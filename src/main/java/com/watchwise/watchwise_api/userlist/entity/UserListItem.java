@@ -40,6 +40,10 @@ public class UserListItem {
     @Setter
     private String description;
 
+    @Column(name = "custom_poster_url", length = 2048)
+    @Setter
+    private String customPosterUrl;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;
