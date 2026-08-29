@@ -163,6 +163,18 @@ class UserListControllerIntegrationTest {
         return get("/lists/" + listId).cookie(viewer.accessToken());
     }
 
+    private MockHttpServletRequestBuilder getUserListByIdRequest(
+            RegisteredUser viewer, UUID listId, String sortBy, String sortDirection) {
+        MockHttpServletRequestBuilder request = get("/lists/" + listId).cookie(viewer.accessToken());
+        if (sortBy != null) {
+            request = request.param("sortBy", sortBy);
+        }
+        if (sortDirection != null) {
+            request = request.param("sortDirection", sortDirection);
+        }
+        return request;
+    }
+
     private MockHttpServletRequestBuilder getLikedListsRequest(RegisteredUser viewer) {
         return get("/users/me/liked-lists").cookie(viewer.accessToken());
     }
@@ -265,10 +277,14 @@ class UserListControllerIntegrationTest {
     }
 
     private UserListItem persistContentItem(UserList list, String tmdbId, int position) {
+        return persistContentItem(list, tmdbId, ContentType.MOVIE, position);
+    }
+
+    private UserListItem persistContentItem(UserList list, String tmdbId, ContentType type, int position) {
         LocalDateTime now = LocalDateTime.now();
         Content content = contentRepository.save(Content.builder()
                 .tmdbId(tmdbId)
-                .type(ContentType.MOVIE)
+                .type(type)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -279,6 +295,20 @@ class UserListControllerIntegrationTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
+    }
+
+    private void logEpisode(RegisteredUser actor, String seriesTmdbId, int seasonNumber, int episodeNumber, int score) throws Exception {
+        mockMvc.perform(post("/diary")
+                        .cookie(actor.accessToken(), actor.csrfToken())
+                        .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "content": { "type": "EPISODE", "seriesTmdbId": "%s", "seasonNumber": %d, "episodeNumber": %d },
+                                    "score": %d
+                                }
+                                """.formatted(seriesTmdbId, seasonNumber, episodeNumber, score)))
+                .andExpect(status().isCreated());
     }
 
     private UserListItem persistNestedListItem(UserList list, UserList childList, int position) {
@@ -652,6 +682,48 @@ class UserListControllerIntegrationTest {
         mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.watchedPercentage").value(0.0));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Sort By Episode Average Rating - Using Only The Owner's Ratings, Unrated Items Last")
+    void shouldSortByEpisodeAverageRatingUsingOnlyTheOwnersRatingsUnratedItemsLast() throws Exception {
+        RegisteredUser owner = registerUser("getbyidepisodeavgowner");
+        RegisteredUser viewer = registerUser("getbyidepisodeavgviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+        persistContentItem(list, "100", ContentType.SERIES, 1);
+        persistContentItem(list, "200", ContentType.SERIES, 2);
+        persistContentItem(list, "300", ContentType.MOVIE, 3);
+
+        logEpisode(owner, "100", 1, 1, 4);
+        logEpisode(owner, "100", 1, 2, 6);
+        logEpisode(owner, "200", 1, 1, 10);
+        logEpisode(owner, "200", 1, 2, 8);
+        logEpisode(viewer, "100", 1, 1, 10);
+        logEpisode(viewer, "100", 1, 2, 10);
+
+        mockMvc.perform(getUserListByIdRequest(owner, list.getId(), "episodeAvgRating", "desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].content.tmdbId").value("200"))
+                .andExpect(jsonPath("$.items[1].content.tmdbId").value("100"))
+                .andExpect(jsonPath("$.items[2].content.tmdbId").value("300"));
+
+        mockMvc.perform(getUserListByIdRequest(owner, list.getId(), "episodeAvgRating", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].content.tmdbId").value("100"))
+                .andExpect(jsonPath("$.items[1].content.tmdbId").value("200"))
+                .andExpect(jsonPath("$.items[2].content.tmdbId").value("300"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return BadRequest - When Item SortBy Is Unknown")
+    void shouldReturnBadRequestWhenItemSortByIsUnknown() throws Exception {
+        RegisteredUser user = registerUser("getbyidunknownsort");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId(), "unknownField", null))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

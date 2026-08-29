@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
@@ -35,10 +37,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -57,6 +62,7 @@ public class UserListServiceImpl implements UserListService {
     private final PageRequestFactory pageRequestFactory;
     private final CommentRepository commentRepository;
     private final LikeRepository likeRepository;
+    private final DiaryEntryRepository diaryEntryRepository;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
     private static final Set<String> GENERIC_SORT_FIELDS = Set.of("rank", "updatedAt", "name", "likesCount");
@@ -165,7 +171,7 @@ public class UserListServiceImpl implements UserListService {
                 : List.of(UserListVisibility.PUBLIC);
     }
 
-    private static final Set<String> ITEM_SORT_FIELDS = Set.of("position", "dateAdded", "duration");
+    private static final Set<String> ITEM_SORT_FIELDS = Set.of("position", "dateAdded", "duration", "episodeAvgRating");
 
     @Override
     public UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
@@ -176,11 +182,12 @@ public class UserListServiceImpl implements UserListService {
         assertListIsVisibleTo(viewerId, userList);
 
         if (sortBy != null && !ITEM_SORT_FIELDS.contains(sortBy)) {
-            throw new BadRequestException("sortBy must be one of: position, dateAdded, duration");
+            throw new BadRequestException("sortBy must be one of: position, dateAdded, duration, episodeAvgRating");
         }
 
         List<UserListItemResponseDTO> allItems = userListItemService.getItems(viewerId, listId);
-        List<UserListItemResponseDTO> items = filterAndSortItems(allItems, type, genre, sortBy, sortDirection);
+        List<UserListItemResponseDTO> items = filterAndSortItems(
+                allItems, type, genre, sortBy, sortDirection, userList.getUser().getId());
         double watchedPercentage = userListItemService.getWatchedPercentage(listId, viewerId);
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
@@ -191,7 +198,7 @@ public class UserListServiceImpl implements UserListService {
     }
 
     private List<UserListItemResponseDTO> filterAndSortItems(List<UserListItemResponseDTO> items, ContentType type,
-            String genre, String sortBy, String sortDirection) {
+            String genre, String sortBy, String sortDirection, UUID ownerId) {
         Stream<UserListItemResponseDTO> stream = items.stream();
 
         if (type != null) {
@@ -208,6 +215,17 @@ public class UserListServiceImpl implements UserListService {
             return filtered;
         }
 
+        if ("episodeAvgRating".equals(sortBy)) {
+            Map<UUID, Double> ratingsByItemId = computeEpisodeAverageRatings(ownerId, filtered);
+            Comparator<Double> valueComparator = "desc".equals(sortDirection)
+                    ? Comparator.<Double>naturalOrder().reversed()
+                    : Comparator.naturalOrder();
+            Comparator<UserListItemResponseDTO> ratingComparator = Comparator.comparing(
+                    (UserListItemResponseDTO item) -> ratingsByItemId.get(item.id()),
+                    Comparator.nullsLast(valueComparator));
+            return filtered.stream().sorted(ratingComparator).toList();
+        }
+
         Comparator<UserListItemResponseDTO> comparator = switch (sortBy) {
             case "dateAdded" -> Comparator.comparing(UserListItemResponseDTO::createdAt);
             case "duration" -> Comparator.comparing(item -> item.content() != null && item.content().runtimeMinutes() != null
@@ -220,6 +238,63 @@ public class UserListServiceImpl implements UserListService {
         }
 
         return filtered.stream().sorted(comparator).toList();
+    }
+
+    private Map<UUID, Double> computeEpisodeAverageRatings(UUID ownerId, List<UserListItemResponseDTO> items) {
+        Set<String> seriesTmdbIds = items.stream()
+                .map(UserListItemResponseDTO::content)
+                .filter(content -> content != null
+                        && (content.type() == ContentType.SERIES || content.type() == ContentType.SEASON
+                                || content.type() == ContentType.EPISODE))
+                .map(content -> content.type() == ContentType.SERIES ? content.tmdbId() : content.seriesTmdbId())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        if (seriesTmdbIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<DiaryEntry> scoredEpisodes =
+                diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(ownerId, seriesTmdbIds);
+
+        Map<String, List<Integer>> scoresBySeries = new HashMap<>();
+        Map<String, List<Integer>> scoresBySeason = new HashMap<>();
+        Map<String, List<Integer>> scoresByEpisode = new HashMap<>();
+
+        for (DiaryEntry entry : scoredEpisodes) {
+            String seriesTmdbId = entry.getContent().getSeriesTmdbId();
+            Integer seasonNumber = entry.getContent().getSeasonNumber();
+            Integer episodeNumber = entry.getContent().getEpisodeNumber();
+            String seasonKey = seriesTmdbId + "|" + seasonNumber;
+            String episodeKey = seasonKey + "|" + episodeNumber;
+
+            scoresBySeries.computeIfAbsent(seriesTmdbId, key -> new ArrayList<>()).add(entry.getScore());
+            scoresBySeason.computeIfAbsent(seasonKey, key -> new ArrayList<>()).add(entry.getScore());
+            scoresByEpisode.computeIfAbsent(episodeKey, key -> new ArrayList<>()).add(entry.getScore());
+        }
+
+        Map<UUID, Double> result = new HashMap<>();
+        for (UserListItemResponseDTO item : items) {
+            ContentRefDTO content = item.content();
+            if (content == null) {
+                continue;
+            }
+
+            List<Integer> scores = switch (content.type()) {
+                case SERIES -> scoresBySeries.get(content.tmdbId());
+                case SEASON -> scoresBySeason.get(content.seriesTmdbId() + "|" + content.seasonNumber());
+                case EPISODE -> scoresByEpisode.get(
+                        content.seriesTmdbId() + "|" + content.seasonNumber() + "|" + content.episodeNumber());
+                default -> null;
+            };
+
+            if (scores != null && !scores.isEmpty()) {
+                double average = scores.stream().mapToInt(Integer::intValue).average().orElseThrow();
+                result.put(item.id(), average);
+            }
+        }
+
+        return result;
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {

@@ -700,6 +700,18 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     List<DiaryEntry> findEpisodeEntriesBySeriesForUser(
             @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
 
+    // --- List item sort by episode average rating (GET /lists/{listId}?sortBy=episodeAvgRating) ---
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND d.content.seriesTmdbId IN :seriesTmdbIds
+            AND d.score IS NOT NULL
+            """)
+    List<DiaryEntry> findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(
+            @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
     // --- Delete all diary entries for a series, every watchNumber (DELETE /diary/series/{seriesTmdbId}) ---
     // Episode side reuses findEpisodeEntriesBySeriesForUser above (same filter, already unscoped by watchNumber).
 
