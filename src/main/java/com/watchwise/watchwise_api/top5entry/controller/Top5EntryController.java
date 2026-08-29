@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.top5entry.controller;
 
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryPatchDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
 import jakarta.validation.Valid;
@@ -45,6 +46,16 @@ public class Top5EntryController {
     ) {
         top5EntryService.removeEntry(getCurrentUserId(), type.toContentType(), top5EntryId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/me/top5/{type}/{top5EntryId}")
+    public ResponseEntity<Top5EntryResponseDTO> updateEntry(
+            @PathVariable MovieOrSeriesType type,
+            @PathVariable UUID top5EntryId,
+            @Valid @RequestBody Top5EntryPatchDTO top5EntryPatchDTO
+    ) {
+        Top5EntryResponseDTO updated = top5EntryService.updateEntry(getCurrentUserId(), type.toContentType(), top5EntryId, top5EntryPatchDTO);
+        return ResponseEntity.ok(updated);
     }
 
     private UUID getCurrentUserId() {

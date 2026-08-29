@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryPatchDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
 import org.junit.jupiter.api.AfterEach;
@@ -98,6 +99,32 @@ class Top5EntryControllerTest {
         top5EntryController.insertEntry(MovieOrSeriesType.MOVIE, creationDTO);
 
         verify(top5EntryService).insertEntry(currentUserId, ContentType.MOVIE, creationDTO);
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenUpdatingEntry() {
+        UUID top5EntryId = UUID.randomUUID();
+        Top5EntryPatchDTO patchDTO = new Top5EntryPatchDTO("https://example.com/new.png");
+        Top5EntryResponseDTO dto = buildResponseDto();
+        when(top5EntryService.updateEntry(currentUserId, ContentType.MOVIE, top5EntryId, patchDTO)).thenReturn(dto);
+
+        ResponseEntity<Top5EntryResponseDTO> result = top5EntryController.updateEntry(MovieOrSeriesType.MOVIE, top5EntryId, patchDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenUpdatingEntry() {
+        UUID top5EntryId = UUID.randomUUID();
+        Top5EntryPatchDTO patchDTO = new Top5EntryPatchDTO("https://example.com/new.png");
+        when(top5EntryService.updateEntry(currentUserId, ContentType.MOVIE, top5EntryId, patchDTO)).thenReturn(buildResponseDto());
+
+        top5EntryController.updateEntry(MovieOrSeriesType.MOVIE, top5EntryId, patchDTO);
+
+        verify(top5EntryService).updateEntry(currentUserId, ContentType.MOVIE, top5EntryId, patchDTO);
     }
 
     @Test

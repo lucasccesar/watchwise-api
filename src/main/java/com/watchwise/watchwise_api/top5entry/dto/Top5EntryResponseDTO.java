@@ -12,6 +12,11 @@ public record Top5EntryResponseDTO(
         ContentRefDTO content,
         Integer position,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String customPosterUrl
 ) {
+    public Top5EntryResponseDTO(UUID id, ContentType type, ContentRefDTO content, Integer position,
+            LocalDateTime createdAt, LocalDateTime updatedAt) {
+        this(id, type, content, position, createdAt, updatedAt, null);
+    }
 }

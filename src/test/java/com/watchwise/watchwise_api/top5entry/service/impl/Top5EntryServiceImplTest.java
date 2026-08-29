@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryPatchDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
@@ -234,6 +235,25 @@ class Top5EntryServiceImplTest {
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
         assertThat(contentRefCreationCaptor.getValue())
                 .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null));
+    }
+
+    @Test
+    @DisplayName("[insertEntry] Should Persist CustomPosterUrl - When Provided")
+    void shouldPersistCustomPosterUrlWhenProvided() {
+        Top5Entry savedEntry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        stubContentResolution(fightClub, ContentType.MOVIE);
+        when(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of());
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        when(top5EntryRepository.save(any(Top5Entry.class))).thenReturn(savedEntry);
+        when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
+
+        top5EntryService.insertEntry(lucasId, ContentType.MOVIE,
+                new Top5EntryCreationDTO(fightClub.getTmdbId(), null, "https://example.com/poster.png"));
+
+        verify(top5EntryRepository).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
     }
 
     @Test
@@ -606,6 +626,95 @@ class Top5EntryServiceImplTest {
                 .hasMessage("Top 5 entry not found");
 
         verify(top5EntryRepository, never()).delete(any());
+    }
+
+    // ---------- updateEntry ----------
+
+    @Test
+    @DisplayName("[updateEntry] Should Update CustomPosterUrl - When A Different Value Is Provided")
+    void shouldUpdateCustomPosterUrlWhenADifferentValueIsProvided() {
+        Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        entry.setCustomPosterUrl("https://example.com/old.png");
+        when(top5EntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(top5EntryRepository.save(any(Top5Entry.class))).thenReturn(entry);
+        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
+
+        top5EntryService.updateEntry(lucasId, ContentType.MOVIE, entry.getId(),
+                new Top5EntryPatchDTO("https://example.com/new.png"));
+
+        verify(top5EntryRepository).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/new.png");
+        verify(top5EntryRepository, times(1)).flush();
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Not Save - When CustomPosterUrl Is Null")
+    void shouldNotSaveWhenCustomPosterUrlIsNullOnUpdate() {
+        Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        entry.setCustomPosterUrl("https://example.com/old.png");
+        when(top5EntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
+
+        top5EntryService.updateEntry(lucasId, ContentType.MOVIE, entry.getId(), new Top5EntryPatchDTO(null));
+
+        verify(top5EntryRepository, never()).save(any());
+        verify(top5EntryRepository, never()).flush();
+        assertThat(entry.getCustomPosterUrl()).isEqualTo("https://example.com/old.png");
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Throw BadRequestException - When Type Is Season")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeasonOnUpdate() {
+        assertThatThrownBy(() -> top5EntryService.updateEntry(
+                lucasId, ContentType.SEASON, UUID.randomUUID(), new Top5EntryPatchDTO("https://example.com/x.png")))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(top5EntryRepository);
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Throw NotFoundException - When Entry Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenEntryDoesNotExistOnUpdate() {
+        UUID missingId = UUID.randomUUID();
+        when(top5EntryRepository.findById(missingId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> top5EntryService.updateEntry(
+                lucasId, ContentType.MOVIE, missingId, new Top5EntryPatchDTO("https://example.com/x.png")))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Top 5 entry not found");
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Throw NotFoundException - When Entry Belongs To A Different User")
+    void shouldThrowNotFoundExceptionWhenEntryBelongsToADifferentUserOnUpdate() {
+        User marina = User.builder()
+                .id(marinaId)
+                .username("marina")
+                .email("marina@email.com")
+                .password("hashed_password")
+                .isProfilePublic(true)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        Top5Entry marinasEntry = buildEntry(marina, fightClub, ContentType.MOVIE, 1);
+        when(top5EntryRepository.findById(marinasEntry.getId())).thenReturn(Optional.of(marinasEntry));
+
+        assertThatThrownBy(() -> top5EntryService.updateEntry(
+                lucasId, ContentType.MOVIE, marinasEntry.getId(), new Top5EntryPatchDTO("https://example.com/x.png")))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Top 5 entry not found");
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Throw NotFoundException - When Entry Type Does Not Match Path Type")
+    void shouldThrowNotFoundExceptionWhenEntryTypeDoesNotMatchPathTypeOnUpdate() {
+        Top5Entry movieEntry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        when(top5EntryRepository.findById(movieEntry.getId())).thenReturn(Optional.of(movieEntry));
+
+        assertThatThrownBy(() -> top5EntryService.updateEntry(
+                lucasId, ContentType.SERIES, movieEntry.getId(), new Top5EntryPatchDTO("https://example.com/x.png")))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Top 5 entry not found");
     }
 
     // ---------- helpers ----------

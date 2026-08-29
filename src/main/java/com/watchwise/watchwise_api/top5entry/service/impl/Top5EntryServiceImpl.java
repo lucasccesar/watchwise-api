@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryPatchDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
@@ -93,6 +94,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
                 .content(content)
                 .type(type)
                 .position(finalPosition)
+                .customPosterUrl(top5EntryCreationDTO.customPosterUrl())
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -111,12 +113,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     public void removeEntry(UUID userId, ContentType type, UUID top5EntryId) {
         validateType(type);
 
-        Top5Entry entry = top5EntryRepository.findById(top5EntryId)
-                .orElseThrow(() -> new NotFoundException("Top 5 entry not found"));
-
-        if (!entry.getUser().getId().equals(userId) || entry.getType() != type) {
-            throw new NotFoundException("Top 5 entry not found");
-        }
+        Top5Entry entry = findOwnedEntry(userId, type, top5EntryId);
 
         int removedPosition = entry.getPosition();
         top5EntryRepository.delete(entry);
@@ -131,6 +128,34 @@ public class Top5EntryServiceImpl implements Top5EntryService {
             top5EntryRepository.save(remaining);
             top5EntryRepository.flush();
         }
+    }
+
+    @Override
+    @Transactional
+    public Top5EntryResponseDTO updateEntry(UUID userId, ContentType type, UUID top5EntryId, Top5EntryPatchDTO top5EntryPatchDTO) {
+        validateType(type);
+
+        Top5Entry entry = findOwnedEntry(userId, type, top5EntryId);
+
+        if (top5EntryPatchDTO.customPosterUrl() != null) {
+            entry.setCustomPosterUrl(top5EntryPatchDTO.customPosterUrl());
+            entry.setUpdatedAt(LocalDateTime.now());
+            top5EntryRepository.save(entry);
+            top5EntryRepository.flush();
+        }
+
+        return top5EntryMapper.top5EntryToResponseDto(entry);
+    }
+
+    private Top5Entry findOwnedEntry(UUID userId, ContentType type, UUID top5EntryId) {
+        Top5Entry entry = top5EntryRepository.findById(top5EntryId)
+                .orElseThrow(() -> new NotFoundException("Top 5 entry not found"));
+
+        if (!entry.getUser().getId().equals(userId) || entry.getType() != type) {
+            throw new NotFoundException("Top 5 entry not found");
+        }
+
+        return entry;
     }
 
     private int resolvePosition(Integer requestedPosition, int currentCount) {
