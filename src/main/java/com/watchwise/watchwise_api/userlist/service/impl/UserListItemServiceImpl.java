@@ -62,7 +62,8 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         if (item.getChildList() != null && !isVisibleTo(viewerId, item.getChildList())) {
             return new UserListItemResponseDTO(
-                    dto.id(), dto.content(), null, dto.position(), dto.description(), dto.createdAt(), dto.updatedAt());
+                    dto.id(), dto.content(), null, dto.position(), dto.description(), dto.createdAt(), dto.updatedAt(),
+                    dto.customPosterUrl());
         }
 
         return dto;
@@ -190,6 +191,7 @@ public class UserListItemServiceImpl implements UserListItemService {
             assertListIsNotLockedAsListOfLists(listId);
             ContentRefDTO contentRef = contentService.getOrCreateReference(userListItemCreationDTO.content());
             builder.content(contentRepository.getReferenceById(contentRef.id()));
+            builder.customPosterUrl(userListItemCreationDTO.customPosterUrl());
         } else {
             assertListIsNotLockedAsContentList(listId);
             builder.childList(resolveChildList(userId, listId, userListItemCreationDTO.childListId()));
@@ -241,12 +243,18 @@ public class UserListItemServiceImpl implements UserListItemService {
         findOwnedList(userId, listId);
         UserListItem item = findOwnedItem(listId, itemId);
 
+        if (userListItemPatchDTO.customPosterUrl() != null && item.getChildList() != null) {
+            throw new BadRequestException("customPosterUrl is only allowed on content items");
+        }
+
         boolean descriptionChanged = userListItemPatchDTO.description() != null
                 && !userListItemPatchDTO.description().equals(item.getDescription());
         boolean positionChanged = userListItemPatchDTO.position() != null
                 && !userListItemPatchDTO.position().equals(item.getPosition());
+        boolean customPosterUrlChanged = userListItemPatchDTO.customPosterUrl() != null
+                && !userListItemPatchDTO.customPosterUrl().equals(item.getCustomPosterUrl());
 
-        if (!descriptionChanged && !positionChanged) {
+        if (!descriptionChanged && !positionChanged && !customPosterUrlChanged) {
             return userListItemMapper.userListItemToResponseDto(item);
         }
 
@@ -257,6 +265,9 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         if (descriptionChanged) {
             item.setDescription(userListItemPatchDTO.description());
+        }
+        if (customPosterUrlChanged) {
+            item.setCustomPosterUrl(userListItemPatchDTO.customPosterUrl());
         }
         item.setUpdatedAt(LocalDateTime.now());
 
@@ -329,6 +340,10 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         if (hasContent == hasChildList) {
             throw new BadRequestException("Exactly one of content or childListId must be provided");
+        }
+
+        if (hasChildList && userListItemCreationDTO.customPosterUrl() != null) {
+            throw new BadRequestException("customPosterUrl is only allowed on content items");
         }
     }
 

@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
+import org.hibernate.validator.constraints.URL;
 
 import java.util.UUID;
 
@@ -11,6 +12,10 @@ public record UserListItemCreationDTO(
         @Valid ContentRefCreationDTO content,
         UUID childListId,
         @Min(1) Integer position,
-        @Size(max = 400) String description
+        @Size(max = 400) String description,
+        @Size(max = 2048) @URL String customPosterUrl
 ) {
+    public UserListItemCreationDTO(ContentRefCreationDTO content, UUID childListId, Integer position, String description) {
+        this(content, childListId, position, description, null);
+    }
 }

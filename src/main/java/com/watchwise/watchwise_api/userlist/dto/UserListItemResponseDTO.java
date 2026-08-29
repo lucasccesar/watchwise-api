@@ -12,6 +12,11 @@ public record UserListItemResponseDTO(
         Integer position,
         String description,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String customPosterUrl
 ) {
+    public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
+            String description, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        this(id, content, childList, position, description, createdAt, updatedAt, null);
+    }
 }

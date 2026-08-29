@@ -451,6 +451,36 @@ class UserListItemServiceImplTest {
     }
 
     @Test
+    @DisplayName("[addItem] Should Persist CustomPosterUrl - When Content Item Provides One")
+    void shouldPersistCustomPosterUrlWhenContentItemProvidesOne() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        stubContentResolution(fightClub, ContentType.MOVIE);
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userListItemService.addItem(lucasId, listId,
+                new UserListItemCreationDTO(contentRefCreation("550"), null, null, null, "https://example.com/poster.png"));
+
+        verify(userListItemRepository).save(itemCaptor.capture());
+        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Throw BadRequestException - When CustomPosterUrl Is Provided With ChildListId")
+    void shouldThrowBadRequestExceptionWhenCustomPosterUrlIsProvidedWithChildListId() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+
+        assertThatThrownBy(() -> userListItemService.addItem(lucasId, listId,
+                new UserListItemCreationDTO(null, UUID.randomUUID(), null, null, "https://example.com/poster.png")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("customPosterUrl is only allowed on content items");
+
+        verifyNoInteractions(userListItemRepository, contentService);
+    }
+
+    @Test
     @DisplayName("[addItem] Should Insert At Next Free Position - When List Already Has Items And No Position Given")
     void shouldInsertAtNextFreePositionWhenListAlreadyHasItemsAndNoPositionGiven() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
@@ -990,6 +1020,53 @@ class UserListItemServiceImplTest {
 
         verify(userListItemRepository, never()).save(any());
         verify(userListItemRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Change CustomPosterUrl - When A Different Value Is Provided")
+    void shouldChangeCustomPosterUrlWhenADifferentValueIsProvided() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        item.setCustomPosterUrl("https://example.com/old.png");
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userListItemService.updateItem(lucasId, listId, item.getId(),
+                new UserListItemPatchDTO(null, null, "https://example.com/new.png"));
+
+        verify(userListItemRepository).save(itemCaptor.capture());
+        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/new.png");
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Not Save - When Same CustomPosterUrl Value Is Provided")
+    void shouldNotSaveWhenSameCustomPosterUrlValueIsProvided() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        item.setCustomPosterUrl("https://example.com/same.png");
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+
+        userListItemService.updateItem(lucasId, listId, item.getId(),
+                new UserListItemPatchDTO(null, null, "https://example.com/same.png"));
+
+        verify(userListItemRepository, never()).save(any());
+        verify(userListItemRepository, never()).flush();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Throw BadRequestException - When CustomPosterUrl Is Provided Against A ChildList Item")
+    void shouldThrowBadRequestExceptionWhenCustomPosterUrlIsProvidedAgainstAChildListItem() {
+        UserList childList = buildUserList(UUID.randomUUID(), lucas, "Nested", UserListVisibility.PUBLIC);
+        UserListItem item = buildChildListItem(scifi, childList, 1);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+
+        assertThatThrownBy(() -> userListItemService.updateItem(lucasId, listId, item.getId(),
+                new UserListItemPatchDTO(null, null, "https://example.com/x.png")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("customPosterUrl is only allowed on content items");
+
+        verify(userListItemRepository, never()).save(any());
     }
 
     @Test
