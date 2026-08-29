@@ -24,6 +24,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     @Query("""
             SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user
             WHERE d.user.id IN :userIds
+            AND d.ignore = false
             AND (
                 CAST(:cursorCreatedAt AS timestamp) IS NULL
                 OR d.createdAt < :cursorCreatedAt

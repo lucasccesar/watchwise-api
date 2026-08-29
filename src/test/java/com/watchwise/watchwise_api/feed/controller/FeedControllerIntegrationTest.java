@@ -150,10 +150,15 @@ class FeedControllerIntegrationTest {
     }
 
     private void persistDiaryEntry(User user, Content content, LocalDateTime createdAt) {
+        persistDiaryEntry(user, content, createdAt, false);
+    }
+
+    private void persistDiaryEntry(User user, Content content, LocalDateTime createdAt, boolean ignore) {
         diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
                 .content(content)
                 .watchNumber(1)
+                .ignore(ignore)
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
                 .build());
@@ -203,6 +208,31 @@ class FeedControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[1].eventType").value("DROPPED"))
                 .andExpect(jsonPath("$.content[2].eventType").value("DIARY_ENTRY"))
                 .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Not Include Ignored DiaryEntry Rows - When A Bulk-Logged Episode Is Marked Ignore")
+    void shouldNotIncludeIgnoredDiaryEntryRowsWhenABulkLoggedEpisodeIsMarkedIgnore() throws Exception {
+        RegisteredUser viewer = registerUser("feedignoreviewer");
+        RegisteredUser followed = registerUser("feedignorefollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        LocalDateTime now = LocalDateTime.now();
+
+        Content episode = contentRepository.save(Content.builder()
+                .type(ContentType.EPISODE).seriesTmdbId("900").seasonNumber(1).episodeNumber(1)
+                .createdAt(now).updatedAt(now).build());
+        Content season = contentRepository.save(Content.builder()
+                .type(ContentType.SEASON).seriesTmdbId("900").seasonNumber(1)
+                .createdAt(now).updatedAt(now).build());
+        persistDiaryEntry(followedEntity, episode, now.minusMinutes(1), true);
+        persistDiaryEntry(followedEntity, season, now, false);
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].content.type").value("SEASON"));
     }
 
     @Test

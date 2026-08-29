@@ -407,7 +407,7 @@ class SummaryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
                 .thenAnswer(invocation -> {
                     DiaryEntry entry = invocation.getArgument(0);
-                    return new DiaryEntryResponseDTO(entry.getId(), lucasId, null, null, null, null, 1, null, null, false,
+                    return new DiaryEntryResponseDTO(entry.getId(), lucasId, null, null, null, null, 1, null, null, false, false,
                             entry.getCreatedAt(), entry.getCreatedAt(), 0, false);
                 });
 
@@ -788,6 +788,6 @@ class SummaryServiceImplTest {
     private DiaryEntryResponseDTO buildDiaryEntryResponseDto() {
         LocalDateTime now = LocalDateTime.now();
         ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), null, ContentType.EPISODE, "1399", 1, 1, null, null, now, now);
-        return new DiaryEntryResponseDTO(UUID.randomUUID(), lucasId, content, null, null, null, 1, null, null, false, now, now, 0, false);
+        return new DiaryEntryResponseDTO(UUID.randomUUID(), lucasId, content, null, null, null, 1, null, null, false, false, now, now, 0, false);
     }
 }

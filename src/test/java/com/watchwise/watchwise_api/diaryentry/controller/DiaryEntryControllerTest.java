@@ -313,7 +313,7 @@ class DiaryEntryControllerTest {
         LocalDateTime now = LocalDateTime.now();
         ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null, now, now);
         return new DiaryEntryResponseDTO(
-                UUID.randomUUID(), currentUserId, content, null, null, null, 1, null, null, false, now, now, 0, false);
+                UUID.randomUUID(), currentUserId, content, null, null, null, 1, null, null, false, false, now, now, 0, false);
     }
 
     private DiaryEntryCreationResultDTO buildCreationResultDto() {
