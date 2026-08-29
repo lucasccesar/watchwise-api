@@ -193,6 +193,42 @@ class UserListItemControllerIntegrationTest {
                 """.formatted(childListId, positionField);
     }
 
+    private String contentItemBody(String tmdbId, Integer position, String description, String customPosterUrl) {
+        String positionField = position == null ? "null" : String.valueOf(position);
+        String descriptionField = description == null ? "null" : "\"" + description + "\"";
+        String posterField = customPosterUrl == null ? "null" : "\"" + customPosterUrl + "\"";
+        return """
+                {
+                    "content": { "tmdbId": "%s", "type": "MOVIE" },
+                    "position": %s,
+                    "description": %s,
+                    "customPosterUrl": %s
+                }
+                """.formatted(tmdbId, positionField, descriptionField, posterField);
+    }
+
+    private String patchItemBody(Integer position, String description, String customPosterUrl) {
+        String positionField = position == null ? "null" : String.valueOf(position);
+        String descriptionField = description == null ? "null" : "\"" + description + "\"";
+        String posterField = customPosterUrl == null ? "null" : "\"" + customPosterUrl + "\"";
+        return """
+                {
+                    "position": %s,
+                    "description": %s,
+                    "customPosterUrl": %s
+                }
+                """.formatted(positionField, descriptionField, posterField);
+    }
+
+    private String childListItemBodyWithPoster(UUID childListId, String customPosterUrl) {
+        return """
+                {
+                    "childListId": "%s",
+                    "customPosterUrl": "%s"
+                }
+                """.formatted(childListId, customPosterUrl);
+    }
+
     private String bothProvidedBody(String tmdbId, UUID childListId) {
         return """
                 {
@@ -960,5 +996,67 @@ class UserListItemControllerIntegrationTest {
         mockMvc.perform(delete("/lists/" + UUID.randomUUID() + "/items/" + UUID.randomUUID())
                         .cookie(user.accessToken()))
                 .andExpect(status().isForbidden());
+    }
+
+    // ---------- customPosterUrl ----------
+
+    @Test
+    @DisplayName("[addItem] Should Persist CustomPosterUrl - When Content Item Provides One")
+    void shouldPersistCustomPosterUrlWhenContentItemProvidesOne() throws Exception {
+        RegisteredUser user = registerUser("additemposter");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+
+        mockMvc.perform(addItemRequest(user, list.getId(), contentItemBody("550", null, null, "https://example.com/poster.png")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/poster.png"));
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId()).get(0).getCustomPosterUrl())
+                .isEqualTo("https://example.com/poster.png");
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Return BadRequest - When CustomPosterUrl Is Provided With ChildListId")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsProvidedWithChildListId() throws Exception {
+        RegisteredUser user = registerUser("additemposterchild");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList parent = persistList(entity, "Parent", true);
+        UserList child = persistList(entity, "Child", true);
+
+        mockMvc.perform(addItemRequest(user, parent.getId(), childListItemBodyWithPoster(child.getId(), "https://example.com/x.png")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Change CustomPosterUrl - When A Different Value Is Provided")
+    void shouldChangeCustomPosterUrlWhenADifferentValueIsProvidedOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemposter");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", true);
+        UserListItem item = persistContentItem(list, persistContent("550"), 1);
+
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, null, "https://example.com/new.png")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/new.png"));
+
+        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl())
+                .isEqualTo("https://example.com/new.png");
+    }
+
+    @Test
+    @DisplayName("[updateItem] Should Return BadRequest - When CustomPosterUrl Is Provided Against A ChildList Item")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsProvidedAgainstAChildListItemOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updateitemposterchild");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList parent = persistList(entity, "Parent", true);
+        UserList child = persistList(entity, "Child", true);
+        UserListItem item = persistChildListItem(parent, child, 1);
+
+        mockMvc.perform(updateItemRequest(user, parent.getId(), item.getId(), patchItemBody(null, null, "https://example.com/x.png")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl()).isNull();
     }
 }
