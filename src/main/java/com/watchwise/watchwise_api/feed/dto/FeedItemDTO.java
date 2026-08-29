@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 public record FeedItemDTO(
@@ -17,6 +18,7 @@ public record FeedItemDTO(
         String comment,
         Integer likesCount,
         Boolean likedByMe,
+        List<UserPreviewDTO> watchedWith,
         LocalDateTime createdAt
 ) {
 }

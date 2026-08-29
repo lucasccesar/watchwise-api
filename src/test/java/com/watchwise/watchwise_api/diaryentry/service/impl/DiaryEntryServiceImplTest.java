@@ -21,14 +21,18 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
@@ -110,6 +114,12 @@ class DiaryEntryServiceImplTest {
     @Mock
     private LikeService likeService;
 
+    @Mock
+    private WatchCompanionRepository watchCompanionRepository;
+
+    @Mock
+    private UserMapper userMapper;
+
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
@@ -118,6 +128,9 @@ class DiaryEntryServiceImplTest {
 
     @Captor
     private ArgumentCaptor<DiaryEntry> entryCaptor;
+
+    @Captor
+    private ArgumentCaptor<List<WatchCompanion>> watchCompanionsCaptor;
 
     @Captor
     private ArgumentCaptor<PageRequest> pageRequestCaptor;
@@ -159,6 +172,7 @@ class DiaryEntryServiceImplTest {
         fightClub = buildContent("550", ContentType.MOVIE);
 
         lenient().when(likeService.getLikedDiaryEntryIds(any(), any())).thenReturn(Set.of());
+        lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
     }
 
     // ---------- getDiaryEntries ----------
@@ -171,7 +185,7 @@ class DiaryEntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(entry)));
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(dto);
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(dto);
 
         Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, null);
 
@@ -640,7 +654,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
         when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(entry)));
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(dto);
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(dto);
 
         Page<DiaryEntryResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
 
@@ -683,7 +697,7 @@ class DiaryEntryServiceImplTest {
         DiaryEntry savedEntry = buildEntry(lucas, fightClub);
         DiaryEntryResponseDTO expectedDto = buildResponseDto(savedEntry);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(expectedDto);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(expectedDto);
         LocalDate watchedDate = LocalDate.of(2024, 5, 1);
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
@@ -710,6 +724,59 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntry] Should Throw BadRequestException - When WatchedWith Includes The Owner")
+    void shouldThrowBadRequestExceptionWhenWatchedWithIncludesTheOwner() {
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
+                null, null, null, null, null, null, List.of(lucasId));
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedWith cannot include yourself");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Throw BadRequestException - When WatchedWith Includes A User Not Followed")
+    void shouldThrowBadRequestExceptionWhenWatchedWithIncludesAUserNotFollowed() {
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
+                null, null, null, null, null, null, List.of(marinaId));
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedWith can only include users you follow");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Save A WatchCompanion - When A Followed Companion Is Provided")
+    void shouldSaveAWatchCompanionWhenAFollowedCompanionIsProvided() {
+        stubContentResolution(fightClub);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
+        DiaryEntry savedEntry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(eq(savedEntry), eq(false), any()))
+                .thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
+                null, null, null, null, null, null, List.of(marinaId, marinaId));
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(watchCompanionRepository).saveAll(watchCompanionsCaptor.capture());
+        List<WatchCompanion> saved = watchCompanionsCaptor.getValue();
+        assertThat(saved).hasSize(1);
+        assertThat(saved.get(0).getUser()).isEqualTo(marina);
+        assertThat(saved.get(0).getDiaryEntry()).isEqualTo(savedEntry);
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Set WatchNumber To 1 - When No Prior Entry Exists And IsRewatch Is Not Requested")
     void shouldSetWatchNumberToOneWhenNoPriorEntryExistsAndIsRewatchIsNotRequested() {
         stubContentResolution(fightClub);
@@ -718,7 +785,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, fightClub.getId())).thenReturn(0);
         DiaryEntry savedEntry = buildEntry(lucas, fightClub);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
@@ -739,7 +806,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, fightClub.getId())).thenReturn(0);
         DiaryEntry savedEntry = buildEntry(lucas, fightClub);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
@@ -760,7 +827,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, fightClub.getId())).thenReturn(2);
         DiaryEntry savedEntry = buildEntry(lucas, fightClub);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
@@ -784,7 +851,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, episode.getId())).thenReturn(0);
         DiaryEntry savedEntry = buildEntry(lucas, episode);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "900", 1, 1, null, null),
@@ -808,7 +875,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(0);
         DiaryEntry savedEntry = buildEntry(lucas, season);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null),
@@ -832,7 +899,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(0);
         DiaryEntry savedEntry = buildEntry(lucas, series);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
@@ -854,7 +921,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         DiaryEntry savedEntry = buildEntry(lucas, fightClub);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
@@ -873,7 +940,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
         DiaryEntry savedEntry = buildEntry(lucas, fightClub);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false)).thenReturn(buildResponseDto(savedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
         DroppedEntry droppedEntry = DroppedEntry.builder().id(UUID.randomUUID()).build();
         when(droppedEntryRepository.findByUserIdAndTypeAndContentId(lucasId, ContentType.MOVIE, fightClub.getId()))
                 .thenReturn(Optional.of(droppedEntry));
@@ -900,7 +967,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, episode.getId())).thenReturn(0);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
         when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(seriesContent));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
@@ -925,7 +992,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, episode.getId())).thenReturn(0);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "900", 1, 1, null, null),
@@ -949,7 +1016,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.getReferenceById(seriesContent.getId())).thenReturn(seriesContent);
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, seriesContent.getId())).thenReturn(0);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, seriesContent)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, seriesContent)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
@@ -1038,7 +1105,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(0);
         stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, true, null),
@@ -1077,7 +1144,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(1);
         stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, true, null),
@@ -1109,7 +1176,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(1);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, true, null),
@@ -1143,7 +1210,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(0);
         stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, nonFinaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, nonFinaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, null, null),
@@ -1167,7 +1234,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
                 .thenReturn(List.of(episodeWatchCount(1, 1L), episodeWatchCount(2, 1L), episodeWatchCount(3, 1L)));
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 5, true, null),
@@ -1190,7 +1257,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, episode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, null, null),
@@ -1222,7 +1289,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(0);
         stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true),
@@ -1259,7 +1326,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(1);
         stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true),
@@ -1291,7 +1358,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new ContentRefDTO(seriesId, "1399", ContentType.SERIES, null, null, null, null, null, null, null));
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, seriesId)).thenReturn(1);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 2, null, null, true),
@@ -1316,7 +1383,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.maxWatchNumberBySeasonInSeries(lucasId, "1399"))
                 .thenReturn(List.of(seasonWatchMax(1, 1), seasonWatchMax(2, 1), seasonWatchMax(3, 1)));
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 5, null, null, true),
@@ -1339,7 +1406,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, season)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, season)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 2, null, null, null),
@@ -1366,7 +1433,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
                 .thenReturn(Optional.of(degenerateFinale));
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, loggedEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, loggedEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(contentRef, null, null, null, null, null, null);
 
@@ -1391,7 +1458,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(specialsSeason));
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, specialsSeason)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, specialsSeason)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(contentRef, null, null, null, null, null, null);
 
@@ -1432,7 +1499,7 @@ class DiaryEntryServiceImplTest {
             }
             return saved;
         });
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, true, null),
@@ -1478,7 +1545,7 @@ class DiaryEntryServiceImplTest {
             }
             return saved;
         });
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true),
@@ -1526,7 +1593,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(0);
         stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, true, true),
@@ -1595,6 +1662,80 @@ class DiaryEntryServiceImplTest {
         assertThat(signal.completedSeason().getWatchNumber()).isEqualTo(1);
         assertThat(signal.completedSeason().getIgnore()).isFalse();
         assertThat(signal.completedSeries()).isNull();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Save The Shared Companion On The Completed Season - When All Its Episodes Were Watched With The Same Person")
+    void shouldSaveTheSharedCompanionOnTheCompletedSeasonWhenAllItsEpisodesWereWatchedWithTheSamePerson() throws Exception {
+        Content finaleEpisode = buildFinaleEpisode("1399", 1, 2);
+        Content otherEpisode = buildEpisode("1399", 1, 1);
+        Content season = buildSeason("1399", 1);
+        DiaryEntry firstEpisodeEntry = buildDiaryEntry(lucas, otherEpisode, 1);
+        DiaryEntry secondEpisodeEntry = buildDiaryEntry(lucas, finaleEpisode, 1);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L), episodeWatchCount(2, 1L)));
+        when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
+                .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
+        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(0);
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
+        stubNewTransactionPassthrough();
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryRepository.findEpisodeEntriesInSeasonByWatchNumber(lucasId, "1399", 1, 1))
+                .thenReturn(List.of(firstEpisodeEntry, secondEpisodeEntry));
+        when(watchCompanionRepository.findByDiaryEntryIdIn(List.of(firstEpisodeEntry.getId(), secondEpisodeEntry.getId())))
+                .thenReturn(List.of(
+                        WatchCompanion.builder().diaryEntry(firstEpisodeEntry).user(marina).createdAt(LocalDateTime.now()).build(),
+                        WatchCompanion.builder().diaryEntry(secondEpisodeEntry).user(marina).createdAt(LocalDateTime.now()).build()));
+
+        invokeTriggerCompletionCascade(lucasId, finaleEpisode, LocalDate.of(2024, 5, 1));
+
+        verify(watchCompanionRepository).saveAll(watchCompanionsCaptor.capture());
+        assertThat(watchCompanionsCaptor.getValue()).hasSize(1);
+        assertThat(watchCompanionsCaptor.getValue().get(0).getUser()).isEqualTo(marina);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Not Save Any Companion On The Completed Season - When Its Episodes Were Watched With Different People")
+    void shouldNotSaveAnyCompanionOnTheCompletedSeasonWhenItsEpisodesWereWatchedWithDifferentPeople() throws Exception {
+        Content finaleEpisode = buildFinaleEpisode("1399", 1, 2);
+        Content otherEpisode = buildEpisode("1399", 1, 1);
+        Content season = buildSeason("1399", 1);
+        User joao = User.builder().id(UUID.randomUUID()).username("joao").email("joao@email.com").password("hashed_password")
+                .isProfilePublic(true).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        DiaryEntry firstEpisodeEntry = buildDiaryEntry(lucas, otherEpisode, 1);
+        DiaryEntry secondEpisodeEntry = buildDiaryEntry(lucas, finaleEpisode, 1);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(finaleEpisode));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "1399", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L), episodeWatchCount(2, 1L)));
+        when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
+                .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
+        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(0);
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        stubNewTransactionPassthrough();
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryRepository.findEpisodeEntriesInSeasonByWatchNumber(lucasId, "1399", 1, 1))
+                .thenReturn(List.of(firstEpisodeEntry, secondEpisodeEntry));
+        when(watchCompanionRepository.findByDiaryEntryIdIn(List.of(firstEpisodeEntry.getId(), secondEpisodeEntry.getId())))
+                .thenReturn(List.of(
+                        WatchCompanion.builder().diaryEntry(firstEpisodeEntry).user(marina).createdAt(LocalDateTime.now()).build(),
+                        WatchCompanion.builder().diaryEntry(secondEpisodeEntry).user(joao).createdAt(LocalDateTime.now()).build()));
+
+        CompletionSignalResult signal = invokeTriggerCompletionCascade(lucasId, finaleEpisode, LocalDate.of(2024, 5, 1));
+
+        assertThat(signal.completedSeason()).isNotNull();
+        verify(watchCompanionRepository, never()).saveAll(any());
     }
 
     @Test
@@ -1691,7 +1832,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(0);
         stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean()))
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
                 .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
@@ -1735,7 +1876,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1))
                 .thenReturn(Optional.of(existingSeasonEntry));
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, true, null),
@@ -1910,7 +2051,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean()))
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
                 .thenAnswer(inv -> buildResponseDto(inv.getArgument(0)));
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
@@ -1968,7 +2109,7 @@ class DiaryEntryServiceImplTest {
                 .thenAnswer(inv -> inv.getArgument(0));
 
         // Mock mapper to return DTOs
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean()))
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
                 .thenAnswer(inv -> {
                     DiaryEntry entry = inv.getArgument(0);
                     return buildResponseDto(entry);
@@ -2001,7 +2142,7 @@ class DiaryEntryServiceImplTest {
                         LocalDateTime.now(), LocalDateTime.now()));
         when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
         when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(seriesContent));
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
@@ -2030,7 +2171,7 @@ class DiaryEntryServiceImplTest {
                         LocalDateTime.now(), LocalDateTime.now()));
         when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
         when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(seriesContent));
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
@@ -2082,7 +2223,7 @@ class DiaryEntryServiceImplTest {
                 .thenAnswer(inv -> inv.getArgument(0));
 
         // Mock mapper
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean()))
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
                 .thenAnswer(inv -> {
                     DiaryEntry entry = inv.getArgument(0);
                     return buildResponseDto(entry);
@@ -2150,7 +2291,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean()))
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
                 .thenAnswer(inv -> {
                     DiaryEntry entry = inv.getArgument(0);
                     Content entryContent = entry.getContent();
@@ -2228,7 +2369,7 @@ class DiaryEntryServiceImplTest {
 
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean()))
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
                 .thenAnswer(inv -> {
                     DiaryEntry entry = inv.getArgument(0);
                     Content entryContent = entry.getContent();
@@ -2290,7 +2431,7 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalUpdateDto());
 
@@ -2311,7 +2452,7 @@ class DiaryEntryServiceImplTest {
         entry.setCustomPosterUrl("https://example.com/original.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalUpdateDto());
 
@@ -2332,7 +2473,7 @@ class DiaryEntryServiceImplTest {
         entry.setAutoGenerated(true);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalUpdateDto());
 
@@ -2346,11 +2487,61 @@ class DiaryEntryServiceImplTest {
         entry.setIgnore(true);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean())).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalUpdateDto());
 
         assertThat(entry.getIgnore()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Leave Companions Untouched - When WatchedWith Is Not Provided")
+    void shouldLeaveCompanionsUntouchedWhenWatchedWithIsNotProvided() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(diaryEntryRepository.save(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(entry));
+
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), minimalUpdateDto());
+
+        verify(watchCompanionRepository, never()).deleteByDiaryEntryId(any());
+        verify(watchCompanionRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Replace Companions - When WatchedWith Is Provided")
+    void shouldReplaceCompanionsWhenWatchedWithIsProvided() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
+        when(diaryEntryRepository.save(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(entry));
+
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(),
+                new DiaryEntryUpdateDTO(null, null, null, null, null, List.of(marinaId)));
+
+        InOrder order = inOrder(watchCompanionRepository);
+        order.verify(watchCompanionRepository).deleteByDiaryEntryId(entry.getId());
+        order.verify(watchCompanionRepository).saveAll(watchCompanionsCaptor.capture());
+        assertThat(watchCompanionsCaptor.getValue()).hasSize(1);
+        assertThat(watchCompanionsCaptor.getValue().get(0).getUser()).isEqualTo(marina);
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Clear Companions - When WatchedWith Is An Empty List")
+    void shouldClearCompanionsWhenWatchedWithIsAnEmptyList() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(diaryEntryRepository.save(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(entry));
+
+        diaryEntryService.updateDiaryEntry(lucasId, entry.getId(),
+                new DiaryEntryUpdateDTO(null, null, null, null, null, List.of()));
+
+        verify(watchCompanionRepository).deleteByDiaryEntryId(entry.getId());
+        verify(watchCompanionRepository, never()).saveAll(any());
     }
 
     @Test
@@ -2360,7 +2551,7 @@ class DiaryEntryServiceImplTest {
         entry.setComment("Old comment");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 "New comment", null, null, null, null));
@@ -2376,7 +2567,7 @@ class DiaryEntryServiceImplTest {
         entry.setScore(5);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, 10, null, null, null));
@@ -2392,7 +2583,7 @@ class DiaryEntryServiceImplTest {
         entry.setWatchedDate(LocalDate.of(2023, 1, 1));
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
         LocalDate newDate = LocalDate.of(2024, 3, 15);
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
@@ -2409,7 +2600,7 @@ class DiaryEntryServiceImplTest {
         entry.setWatchedInTheater(false);
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, null, null, true, null));
@@ -2440,7 +2631,7 @@ class DiaryEntryServiceImplTest {
         entry.setCustomPosterUrl("https://example.com/old.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
-        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false)).thenReturn(buildResponseDto(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, null, null, null, "https://example.com/new.png"));

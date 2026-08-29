@@ -8,7 +8,9 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -71,6 +73,9 @@ class FeedControllerIntegrationTest {
 
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private WatchCompanionRepository watchCompanionRepository;
 
     @Autowired
     private DroppedEntryRepository droppedEntryRepository;
@@ -149,18 +154,26 @@ class FeedControllerIntegrationTest {
                 .build());
     }
 
-    private void persistDiaryEntry(User user, Content content, LocalDateTime createdAt) {
-        persistDiaryEntry(user, content, createdAt, false);
+    private DiaryEntry persistDiaryEntry(User user, Content content, LocalDateTime createdAt) {
+        return persistDiaryEntry(user, content, createdAt, false);
     }
 
-    private void persistDiaryEntry(User user, Content content, LocalDateTime createdAt, boolean ignore) {
-        diaryEntryRepository.save(DiaryEntry.builder()
+    private DiaryEntry persistDiaryEntry(User user, Content content, LocalDateTime createdAt, boolean ignore) {
+        return diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
                 .content(content)
                 .watchNumber(1)
                 .ignore(ignore)
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
+                .build());
+    }
+
+    private void persistWatchCompanion(DiaryEntry diaryEntry, User companion) {
+        watchCompanionRepository.save(WatchCompanion.builder()
+                .diaryEntry(diaryEntry)
+                .user(companion)
+                .createdAt(LocalDateTime.now())
                 .build());
     }
 
@@ -183,6 +196,26 @@ class FeedControllerIntegrationTest {
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
                 .build());
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Include WatchedWith - When The DiaryEntry Has A Companion")
+    void shouldIncludeWatchedWithWhenTheDiaryEntryHasACompanion() throws Exception {
+        RegisteredUser viewer = registerUser("feedwatchedwithviewer");
+        RegisteredUser followed = registerUser("feedwatchedwithfollowed");
+        RegisteredUser companion = registerUser("feedwatchedwithcompanion");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        User companionEntity = userRepository.findById(companion.id()).orElseThrow();
+        Content movie = persistContent("550", ContentType.MOVIE);
+        DiaryEntry entry = persistDiaryEntry(followedEntity, movie, LocalDateTime.now());
+        persistWatchCompanion(entry, companionEntity);
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].watchedWith.length()").value(1))
+                .andExpect(jsonPath("$.content[0].watchedWith[0].username").value("feedwatchedwithcompanion"));
     }
 
     @Test

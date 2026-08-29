@@ -129,6 +129,18 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     @Query("""
             SELECT de FROM DiaryEntry de
             WHERE de.user.id = :userId
+            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND de.content.seriesTmdbId = :seriesTmdbId
+            AND de.content.seasonNumber = :seasonNumber
+            AND de.watchNumber = :watchNumber
+            """)
+    List<DiaryEntry> findEpisodeEntriesInSeasonByWatchNumber(
+            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId,
+            @Param("seasonNumber") Integer seasonNumber, @Param("watchNumber") Integer watchNumber);
+
+    @Query("""
+            SELECT de FROM DiaryEntry de
+            WHERE de.user.id = :userId
             AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SEASON
             AND de.content.seriesTmdbId = :seriesTmdbId
             AND de.watchNumber = :watchNumber

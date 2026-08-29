@@ -839,6 +839,112 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.completedSeries").doesNotExist());
     }
 
+    // ---------- watchedWith ----------
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Return The Companion In WatchedWith - When The Companion Is Followed")
+    void shouldReturnTheCompanionInWatchedWithWhenTheCompanionIsFollowed() throws Exception {
+        RegisteredUser user = registerUser("watchedwithok");
+        RegisteredUser companion = registerUser("watchedwithcompanion");
+        persistFollow(user.id(), companion.id(), FollowStatus.ACCEPTED);
+
+        String body = """
+                {
+                    "content": { "tmdbId": "550", "type": "MOVIE" },
+                    "watchedWith": ["%s"]
+                }
+                """.formatted(companion.id());
+
+        mockMvc.perform(createRequest(user, body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.entry.watchedWith.length()").value(1))
+                .andExpect(jsonPath("$.entry.watchedWith[0].id").value(companion.id().toString()))
+                .andExpect(jsonPath("$.entry.watchedWith[0].username").value("watchedwithcompanion"));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Return BadRequest - When WatchedWith Includes A User Not Followed")
+    void shouldReturnBadRequestWhenWatchedWithIncludesAUserNotFollowed() throws Exception {
+        RegisteredUser user = registerUser("watchedwithnotfollowed");
+        RegisteredUser stranger = registerUser("watchedwithstranger");
+
+        String body = """
+                {
+                    "content": { "tmdbId": "550", "type": "MOVIE" },
+                    "watchedWith": ["%s"]
+                }
+                """.formatted(stranger.id());
+
+        mockMvc.perform(createRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("watchedWith can only include users you follow"));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Return BadRequest - When WatchedWith Includes The Owner")
+    void shouldReturnBadRequestWhenWatchedWithIncludesTheOwner() throws Exception {
+        RegisteredUser user = registerUser("watchedwithself");
+
+        String body = """
+                {
+                    "content": { "tmdbId": "550", "type": "MOVIE" },
+                    "watchedWith": ["%s"]
+                }
+                """.formatted(user.id());
+
+        mockMvc.perform(createRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("watchedWith cannot include yourself"));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Apply WatchedWith To Every Episode And The Completed Season")
+    void shouldApplyWatchedWithToEveryEpisodeAndTheCompletedSeason() throws Exception {
+        RegisteredUser user = registerUser("watchedwithbulk");
+        RegisteredUser companion = registerUser("watchedwithbulkcompanion");
+        persistFollow(user.id(), companion.id(), FollowStatus.ACCEPTED);
+
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "1500", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 2,
+                    "watchedWith": ["%s"]
+                }
+                """.formatted(companion.id());
+
+        MvcResult result = mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        List<String> watchedWithUsernames = JsonPath.read(result.getResponse().getContentAsString(),
+                "$[*].watchedWith[0].username");
+        assertThat(watchedWithUsernames).containsOnly("watchedwithbulkcompanion");
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Replace WatchedWith - When A New List Is Provided")
+    void shouldReplaceWatchedWithWhenANewListIsProvided() throws Exception {
+        RegisteredUser user = registerUser("watchedwithupdate");
+        RegisteredUser companion = registerUser("watchedwithupdatecompanion");
+        persistFollow(user.id(), companion.id(), FollowStatus.ACCEPTED);
+
+        MvcResult createResult = mockMvc.perform(createRequest(user, creationBody("550", null)))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String diaryEntryId = JsonPath.read(createResult.getResponse().getContentAsString(), "$.entry.id");
+
+        String updateBody = """
+                {
+                    "watchedWith": ["%s"]
+                }
+                """.formatted(companion.id());
+
+        mockMvc.perform(updateRequest(user, UUID.fromString(diaryEntryId), updateBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.watchedWith.length()").value(1))
+                .andExpect(jsonPath("$.watchedWith[0].id").value(companion.id().toString()));
+    }
+
     // ---------- PATCH /diary/{diaryEntryId} ----------
 
     @Test

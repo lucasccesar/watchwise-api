@@ -9,6 +9,8 @@ import jakarta.validation.constraints.Size;
 import org.hibernate.validator.constraints.URL;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.UUID;
 
 public record DiaryEntryCreationDTO(
         @NotNull @Valid ContentRefCreationDTO content,
@@ -17,6 +19,11 @@ public record DiaryEntryCreationDTO(
         LocalDate watchedDate,
         Boolean isRewatch,
         Boolean watchedInTheater,
-        @Size(max = 2048) @URL String customPosterUrl
+        @Size(max = 2048) @URL String customPosterUrl,
+        @Size(max = 20) List<UUID> watchedWith
 ) {
+    public DiaryEntryCreationDTO(ContentRefCreationDTO content, String comment, Integer score, LocalDate watchedDate,
+            Boolean isRewatch, Boolean watchedInTheater, String customPosterUrl) {
+        this(content, comment, score, watchedDate, isRewatch, watchedInTheater, customPosterUrl, null);
+    }
 }

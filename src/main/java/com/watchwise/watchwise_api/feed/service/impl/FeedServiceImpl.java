@@ -4,7 +4,9 @@ import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.feed.dto.FeedEventType;
@@ -15,6 +17,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -27,8 +30,10 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -42,6 +47,7 @@ public class FeedServiceImpl implements FeedService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final DroppedEntryRepository droppedEntryRepository;
     private final Top5EntryRepository top5EntryRepository;
+    private final WatchCompanionRepository watchCompanionRepository;
     private final LikeService likeService;
     private final ContentMapper contentMapper;
     private final UserMapper userMapper;
@@ -74,11 +80,16 @@ public class FeedServiceImpl implements FeedService {
 
         Set<UUID> likedDiaryEntryIds = likeService.getLikedDiaryEntryIds(
                 userId, diaryEntries.stream().map(DiaryEntry::getId).toList());
+        Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = watchCompanionRepository
+                .findByDiaryEntryIdIn(diaryEntries.stream().map(DiaryEntry::getId).toList()).stream()
+                .collect(Collectors.groupingBy(wc -> wc.getDiaryEntry().getId(),
+                        Collectors.mapping(wc -> userMapper.userToUserPreviewDto(wc.getUser()), Collectors.toList())));
 
         List<FeedCandidate> candidates = new ArrayList<>();
         for (DiaryEntry entry : diaryEntries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
-                    toDiaryFeedItem(entry, likedDiaryEntryIds.contains(entry.getId()))));
+                    toDiaryFeedItem(entry, likedDiaryEntryIds.contains(entry.getId()),
+                            watchedWithByEntryId.getOrDefault(entry.getId(), List.of()))));
         }
         for (DroppedEntry entry : droppedEntries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(), toDroppedFeedItem(entry)));
@@ -114,7 +125,7 @@ public class FeedServiceImpl implements FeedService {
         return list.size() > size ? list.subList(0, size) : list;
     }
 
-    private FeedItemDTO toDiaryFeedItem(DiaryEntry entry, boolean likedByMe) {
+    private FeedItemDTO toDiaryFeedItem(DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith) {
         return new FeedItemDTO(
                 FeedEventType.DIARY_ENTRY,
                 entry.getId(),
@@ -125,6 +136,7 @@ public class FeedServiceImpl implements FeedService {
                 entry.getComment(),
                 entry.getLikesCount(),
                 likedByMe,
+                watchedWith,
                 entry.getCreatedAt());
     }
 
@@ -139,6 +151,7 @@ public class FeedServiceImpl implements FeedService {
                 entry.getComment(),
                 null,
                 null,
+                null,
                 entry.getCreatedAt());
     }
 
@@ -149,6 +162,7 @@ public class FeedServiceImpl implements FeedService {
                 userMapper.userToUserPreviewDto(entry.getUser()),
                 null,
                 entry.getType(),
+                null,
                 null,
                 null,
                 null,

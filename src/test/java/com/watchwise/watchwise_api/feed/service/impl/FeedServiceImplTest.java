@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.feed.dto.FeedEventType;
@@ -60,6 +61,9 @@ class FeedServiceImplTest {
     private Top5EntryRepository top5EntryRepository;
 
     @Mock
+    private WatchCompanionRepository watchCompanionRepository;
+
+    @Mock
     private LikeService likeService;
 
     @Mock
@@ -89,6 +93,7 @@ class FeedServiceImplTest {
                     return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
                             null, null, content.getCreatedAt(), content.getUpdatedAt());
                 });
+        lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
     }
 
     @Test
