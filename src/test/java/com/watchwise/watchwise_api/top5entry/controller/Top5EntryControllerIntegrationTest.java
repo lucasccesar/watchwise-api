@@ -37,6 +37,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -145,6 +146,22 @@ class Top5EntryControllerIntegrationTest {
         return delete("/users/me/top5/" + type + "/" + top5EntryId)
                 .cookie(actor.accessToken(), actor.csrfToken())
                 .header("X-XSRF-TOKEN", actor.csrfToken().getValue());
+    }
+
+    private MockHttpServletRequestBuilder updateRequest(RegisteredUser actor, ContentType type, UUID top5EntryId, String body) {
+        return patch("/users/me/top5/" + type + "/" + top5EntryId)
+                .cookie(actor.accessToken(), actor.csrfToken())
+                .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    private String posterPatchBody(String customPosterUrl) {
+        return """
+                {
+                    "customPosterUrl": "%s"
+                }
+                """.formatted(customPosterUrl);
     }
 
     private MockHttpServletRequestBuilder getTop5Request(RegisteredUser viewer, UUID targetUserId, ContentType type) {
@@ -492,6 +509,86 @@ class Top5EntryControllerIntegrationTest {
 
         mockMvc.perform(delete("/users/me/top5/MOVIE/" + UUID.randomUUID())
                         .cookie(user.accessToken()))
+                .andExpect(status().isForbidden());
+    }
+
+    // ---------- PATCH /users/me/top5/{type}/{top5EntryId} ----------
+
+    @Test
+    @DisplayName("[updateEntry] Should Return Ok And Persist The New Poster - When Entry Exists")
+    void shouldReturnOkAndPersistTheNewPosterWhenEntryExists() throws Exception {
+        RegisteredUser user = registerUser("updatetop5ok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Top5Entry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
+
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(), posterPatchBody("https://example.com/new.png")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/new.png"));
+
+        assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl())
+                .isEqualTo("https://example.com/new.png");
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Return BadRequest - When CustomPosterUrl Is Not A Valid Url")
+    void shouldReturnBadRequestWhenCustomPosterUrlIsNotAValidUrl() throws Exception {
+        RegisteredUser user = registerUser("updatetop5invalidurl");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Top5Entry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
+
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(), posterPatchBody("not-a-url")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Return NotFound - When Entry Does Not Exist")
+    void shouldReturnNotFoundWhenEntryDoesNotExistOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatetop5notfound");
+
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, UUID.randomUUID(), posterPatchBody("https://example.com/x.png")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Return NotFound - When Entry Belongs To A Different User")
+    void shouldReturnNotFoundWhenEntryBelongsToADifferentUserOnUpdate() throws Exception {
+        RegisteredUser owner = registerUser("updatetop5owner");
+        RegisteredUser intruder = registerUser("updatetop5intruder");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        Top5Entry entry = persistEntry(ownerEntity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
+
+        mockMvc.perform(updateRequest(intruder, ContentType.MOVIE, entry.getId(), posterPatchBody("https://example.com/x.png")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
+
+        assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatetop5noauth");
+
+        mockMvc.perform(patch("/users/me/top5/MOVIE/" + UUID.randomUUID())
+                        .cookie(user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(posterPatchBody("https://example.com/x.png")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[updateEntry] Should Return Forbidden - When Csrf Token Is Missing")
+    void shouldReturnForbiddenWhenCsrfTokenIsMissingForUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatetop5nocsrf");
+
+        mockMvc.perform(patch("/users/me/top5/MOVIE/" + UUID.randomUUID())
+                        .cookie(user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(posterPatchBody("https://example.com/x.png")))
                 .andExpect(status().isForbidden());
     }
 }
