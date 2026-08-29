@@ -273,6 +273,32 @@ class DiaryEntryControllerTest {
         order.verify(diaryEntryService).createDiaryEntriesInBulk(currentUserId, dto);
     }
 
+    @Test
+    @DisplayName("[deleteAllDiaryEntriesForSeries] Should Return NoContent - When Called")
+    void shouldReturnNoContentWhenDeletingAllDiaryEntriesForSeries() {
+        ResponseEntity<Void> result = diaryEntryController.deleteAllDiaryEntriesForSeries("1399");
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    @DisplayName("[deleteAllDiaryEntriesForSeries] Should Resolve The Current User Id And Forward SeriesTmdbId - When Called")
+    void shouldResolveTheCurrentUserIdAndForwardSeriesTmdbIdWhenDeletingAllDiaryEntriesForSeries() {
+        diaryEntryController.deleteAllDiaryEntriesForSeries("1399");
+
+        verify(diaryEntryService).deleteAllDiaryEntriesForSeries(currentUserId, "1399");
+    }
+
+    @Test
+    @DisplayName("[deleteAllDiaryEntriesForSeries] Should Check Rate Limit Before Calling Service - When Called")
+    void shouldCheckRateLimitBeforeCallingServiceWhenDeletingAllDiaryEntriesForSeries() {
+        diaryEntryController.deleteAllDiaryEntriesForSeries("1399");
+
+        InOrder order = inOrder(requestThrottler, diaryEntryService);
+        order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
+        order.verify(diaryEntryService).deleteAllDiaryEntriesForSeries(currentUserId, "1399");
+    }
+
     private DiaryEntryCreationDTO minimalCreationDto() {
         return new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null, null, null),

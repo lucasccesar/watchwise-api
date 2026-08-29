@@ -116,6 +116,14 @@ public class DiaryEntryController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/diary/series/{seriesTmdbId}")
+    public ResponseEntity<Void> deleteAllDiaryEntriesForSeries(@PathVariable String seriesTmdbId) {
+        requestThrottler.checkAllowed(diaryBulkActionKey(), diaryBulkActionMaxRequests, Duration.ofMinutes(diaryBulkActionWindowMinutes));
+
+        diaryEntryService.deleteAllDiaryEntriesForSeries(getCurrentUserId(), seriesTmdbId);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/diary/{diaryEntryId}/deletion-impact")
     public ResponseEntity<DeletionImpactDTO> getDeletionImpact(
             @PathVariable UUID diaryEntryId,

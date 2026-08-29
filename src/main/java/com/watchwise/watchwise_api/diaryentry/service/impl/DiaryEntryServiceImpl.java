@@ -310,6 +310,24 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         deleteDiaryEntry(userId, diaryEntryId, overrideProtectedEntries, new ArrayList<>());
     }
 
+    @Override
+    @Transactional
+    public void deleteAllDiaryEntriesForSeries(UUID userId, String seriesTmdbId) {
+        List<DiaryEntry> allEntries = Stream.of(
+                        diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId),
+                        diaryEntryRepository.findAllSeasonEntriesInSeries(userId, seriesTmdbId),
+                        diaryEntryRepository.findAllSeriesEntriesInSeries(userId, seriesTmdbId))
+                .flatMap(List::stream)
+                .toList();
+
+        if (allEntries.isEmpty()) {
+            return;
+        }
+
+        diaryEntryRepository.deleteAll(allEntries);
+        diaryEntryRepository.flush();
+    }
+
     private void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
         DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
         Content content = entry.getContent();

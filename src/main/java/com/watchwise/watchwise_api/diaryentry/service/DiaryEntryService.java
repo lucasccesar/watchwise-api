@@ -33,4 +33,6 @@ public interface DiaryEntryService {
 
     DeletionImpactDTO computeDeletionImpact(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries);
 
+    void deleteAllDiaryEntriesForSeries(UUID userId, String seriesTmdbId);
+
 }
