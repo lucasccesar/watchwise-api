@@ -41,7 +41,7 @@ public class TmdbClient {
                 "person " + personTmdbId);
     }
 
-    @Cacheable(cacheNames = "tmdbMovieFullDetails", key = "#tmdbId + '|' + #language", unless = "#result.isEmpty()")
+    @Cacheable(cacheNames = "tmdbMovieFullDetails", key = "#tmdbId + '|' + #language", unless = "#result == null")
     public Optional<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
@@ -54,7 +54,7 @@ public class TmdbClient {
                 "movie full details " + tmdbId);
     }
 
-    @Cacheable(cacheNames = "tmdbTvFullDetails", key = "#tmdbId + '|' + #language", unless = "#result.isEmpty()")
+    @Cacheable(cacheNames = "tmdbTvFullDetails", key = "#tmdbId + '|' + #language", unless = "#result == null")
     public Optional<TmdbTvFullDetails> getTvFullDetails(String tmdbId, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
@@ -67,7 +67,7 @@ public class TmdbClient {
                 "tv full details " + tmdbId);
     }
 
-    @Cacheable(cacheNames = "tmdbSeasonFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #language", unless = "#result.isEmpty()")
+    @Cacheable(cacheNames = "tmdbSeasonFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #language", unless = "#result == null")
     public Optional<TmdbSeasonFullDetails> getSeasonFullDetails(String seriesTmdbId, Integer seasonNumber, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
@@ -80,7 +80,7 @@ public class TmdbClient {
                 "season full details " + seriesTmdbId + "/" + seasonNumber);
     }
 
-    @Cacheable(cacheNames = "tmdbEpisodeFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #episodeNumber + '|' + #language", unless = "#result.isEmpty()")
+    @Cacheable(cacheNames = "tmdbEpisodeFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #episodeNumber + '|' + #language", unless = "#result == null")
     public Optional<TmdbEpisodeFullDetails> getEpisodeFullDetails(
             String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
