@@ -33,8 +33,8 @@ class ContentChangeDetectorTest {
     }
 
     @Test
-    @DisplayName("[detectMovieChange] Should Return RELEASE - When Known Future Date Has Now Passed")
-    void shouldReturnReleaseWhenKnownFutureDateHasNowPassed() {
+    @DisplayName("[detectMovieChange] Should Return RELEASE - When Status Transitions From Post Production To Released")
+    void shouldReturnReleaseWhenStatusTransitionsFromPostProductionToReleased() {
         TrackedContentState previous = TrackedContentState.builder().lastKnownReleaseDate(LocalDate.of(2026, 8, 20)).lastKnownStatus("Post Production").build();
         TmdbMovieDetails fresh = new TmdbMovieDetails("603", "2026-08-20", "Released");
 
@@ -42,6 +42,17 @@ class ContentChangeDetectorTest {
 
         assertThat(result).isPresent();
         assertThat(result.get().type()).isEqualTo(NotificationType.RELEASE);
+    }
+
+    @Test
+    @DisplayName("[detectMovieChange] Should Return Empty - When Status Was Already Released And Stays Released")
+    void shouldReturnEmptyWhenStatusWasAlreadyReleasedAndStaysReleased() {
+        TrackedContentState previous = TrackedContentState.builder().lastKnownReleaseDate(LocalDate.of(2026, 1, 1)).lastKnownStatus("Released").build();
+        TmdbMovieDetails fresh = new TmdbMovieDetails("603", "2026-01-01", "Released");
+
+        Optional<ContentChangeEvent> result = detector.detectMovieChange(previous, fresh, today);
+
+        assertThat(result).isEmpty();
     }
 
     @Test
@@ -71,6 +82,16 @@ class ContentChangeDetectorTest {
     @DisplayName("[detectMovieChange] Should Return Empty - When First Check Has No Release Date Yet")
     void shouldReturnEmptyWhenFirstCheckHasNoReleaseDateYet() {
         TmdbMovieDetails fresh = new TmdbMovieDetails("603", "", "Planned");
+
+        Optional<ContentChangeEvent> result = detector.detectMovieChange(null, fresh, today);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[detectMovieChange] Should Return Empty - When First Observation Already Shows Cancelled")
+    void shouldReturnEmptyWhenFirstObservationAlreadyShowsCancelled() {
+        TmdbMovieDetails fresh = new TmdbMovieDetails("603", "", "Canceled");
 
         Optional<ContentChangeEvent> result = detector.detectMovieChange(null, fresh, today);
 
@@ -132,6 +153,16 @@ class ContentChangeDetectorTest {
 
         assertThat(result).extracting(ContentChangeEvent::type)
                 .containsExactlyInAnyOrder(NotificationType.RENEWED, NotificationType.NEW_EPISODE);
+    }
+
+    @Test
+    @DisplayName("[detectTvChange] Should Return Empty List - When First Observation Already Shows Cancelled")
+    void shouldReturnEmptyListWhenFirstObservationAlreadyShowsCancelled() {
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Canceled", null);
+
+        List<ContentChangeEvent> result = detector.detectTvChange(null, fresh, today);
+
+        assertThat(result).isEmpty();
     }
 
     @Test
