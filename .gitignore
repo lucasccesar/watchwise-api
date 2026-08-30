@@ -5,6 +5,7 @@ CLAUDE.md
 docs/
 .claude
 graphify-out/
+.superpowers/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
