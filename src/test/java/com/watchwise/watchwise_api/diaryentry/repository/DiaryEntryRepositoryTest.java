@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
@@ -54,6 +56,9 @@ class DiaryEntryRepositoryTest {
 
     @Autowired
     private ContentRepository contentRepository;
+
+    @Autowired
+    private DroppedEntryRepository droppedEntryRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -450,6 +455,22 @@ class DiaryEntryRepositoryTest {
         Content episode = contentRepository.save(buildEpisode("1399", 1, 3));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
+
+        Page<DiaryEntryRepository.SeriesInProgress> result =
+                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Exclude Series - When User Already Dropped It")
+    void shouldExcludeSeriesWhenUserAlreadyDroppedIt() {
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 3));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+        LocalDateTime now = LocalDateTime.now();
+        droppedEntryRepository.saveAndFlush(DroppedEntry.builder()
+                .user(lucas).content(series).type(ContentType.SERIES).createdAt(now).updatedAt(now).build());
 
         Page<DiaryEntryRepository.SeriesInProgress> result =
                 diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));

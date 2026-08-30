@@ -233,6 +233,13 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                 AND c2.type = 'SERIES'
                 AND c2.tmdb_id = sa.series_tmdb_id
             )
+            AND NOT EXISTS (
+                SELECT 1 FROM dropped_entries de
+                JOIN contents c3 ON c3.id = de.content_id
+                WHERE de.user_id = :userId
+                AND de.type = 'SERIES'
+                AND c3.tmdb_id = sa.series_tmdb_id
+            )
             ORDER BY sa.last_watched_date DESC
             """,
             countQuery = """
@@ -256,6 +263,13 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                 WHERE d2.user_id = :userId
                 AND c2.type = 'SERIES'
                 AND c2.tmdb_id = sa.series_tmdb_id
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM dropped_entries de
+                JOIN contents c3 ON c3.id = de.content_id
+                WHERE de.user_id = :userId
+                AND de.type = 'SERIES'
+                AND c3.tmdb_id = sa.series_tmdb_id
             )
             """,
             nativeQuery = true)
