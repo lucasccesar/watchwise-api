@@ -792,10 +792,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     // --- Content tracking job (daily TMDB change detection) ---
 
     @Query(value = """
-            SELECT DISTINCT sc.*
+            SELECT DISTINCT c.series_tmdb_id
             FROM contents c
             JOIN diary_entries d ON d.content_id = c.id
-            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
             WHERE c.type = 'EPISODE'
             AND NOT EXISTS (
                 SELECT 1 FROM diary_entries d2
@@ -805,7 +804,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                 AND c2.tmdb_id = c.series_tmdb_id
             )
             """, nativeQuery = true)
-    List<Content> findDistinctInProgressSeriesContent();
+    List<String> findDistinctInProgressSeriesTmdbIds();
 
     @Query("""
             SELECT DISTINCT d.user.id FROM DiaryEntry d
