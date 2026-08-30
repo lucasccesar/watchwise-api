@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.watchlist.repository;
 
+import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import org.springframework.data.domain.Page;
@@ -48,5 +49,13 @@ public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, 
     void settleParkedPositions(
             @Param("userId") UUID userId, @Param("type") ContentType type,
             @Param("offset") int offset, @Param("delta") int delta);
+
+    // --- Content tracking job (daily TMDB change detection) ---
+
+    @Query("SELECT DISTINCT w.content FROM WatchlistEntry w")
+    List<Content> findDistinctTrackedContent();
+
+    @Query("SELECT DISTINCT w.user.id FROM WatchlistEntry w WHERE w.content.id = :contentId")
+    List<UUID> findUserIdsByContentId(@Param("contentId") UUID contentId);
 
 }

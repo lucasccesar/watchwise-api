@@ -789,4 +789,29 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
         long getCount();
     }
 
+    // --- Content tracking job (daily TMDB change detection) ---
+
+    @Query(value = """
+            SELECT DISTINCT sc.*
+            FROM contents c
+            JOIN diary_entries d ON d.content_id = c.id
+            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            WHERE c.type = 'EPISODE'
+            AND NOT EXISTS (
+                SELECT 1 FROM diary_entries d2
+                JOIN contents c2 ON c2.id = d2.content_id
+                WHERE d2.user_id = d.user_id
+                AND c2.type = 'SERIES'
+                AND c2.tmdb_id = c.series_tmdb_id
+            )
+            """, nativeQuery = true)
+    List<Content> findDistinctInProgressSeriesContent();
+
+    @Query("""
+            SELECT DISTINCT d.user.id FROM DiaryEntry d
+            WHERE d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND d.content.seriesTmdbId = :seriesTmdbId
+            """)
+    List<UUID> findUserIdsWatchingSeries(@Param("seriesTmdbId") String seriesTmdbId);
+
 }
