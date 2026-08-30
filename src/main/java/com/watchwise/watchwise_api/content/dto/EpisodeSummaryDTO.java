@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.content.dto;
 import java.time.LocalDate;
 
 public record EpisodeSummaryDTO(
+        Integer seasonNumber,
         Integer episodeNumber,
         String name,
         LocalDate airDate,

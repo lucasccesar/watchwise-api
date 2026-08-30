@@ -15,6 +15,7 @@ public record ContentDetailsDTO(
         String backdropPath,
         LocalDate releaseDate,
         Integer runtimeMinutes,
+        Integer totalRuntimeMinutes,
         List<String> genres,
         List<String> countries,
         List<CastMemberDTO> cast,
@@ -22,5 +23,6 @@ public record ContentDetailsDTO(
         List<CreatorDTO> creators,
         List<WatchProviderDTO> watchProviders,
         List<SeasonSummaryDTO> seasons,
-        List<EpisodeSummaryDTO> episodes) {
+        List<EpisodeSummaryDTO> episodes,
+        List<EpisodeSummaryDTO> recentEpisodes) {
 }

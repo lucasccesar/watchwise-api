@@ -14,7 +14,9 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieAlternativeTitles;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProvider;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
@@ -23,11 +25,11 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -36,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,17 +58,24 @@ class ContentDetailsServiceImplTest {
     @Mock
     private TmdbClient tmdbClient;
 
-    @InjectMocks
     private ContentDetailsServiceImpl contentDetailsService;
+    private ExecutorService seasonFetchExecutor;
 
     private UUID requestingUserId;
     private User requestingUser;
 
     @BeforeEach
     void setUp() {
+        seasonFetchExecutor = Executors.newSingleThreadExecutor();
+        contentDetailsService = new ContentDetailsServiceImpl(contentRepository, userRepository, tmdbClient, seasonFetchExecutor);
         requestingUserId = UUID.randomUUID();
         requestingUser = User.builder().id(requestingUserId).preferredLanguage("en-US").preferredRegion("US").build();
         lenient().when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(requestingUser));
+    }
+
+    @AfterEach
+    void tearDown() {
+        seasonFetchExecutor.shutdownNow();
     }
 
     @Test
@@ -154,6 +165,96 @@ class ContentDetailsServiceImplTest {
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
         assertThat(result.watchProviders()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Sum Episode Runtimes Across All Seasons - When Content Is A Series")
+    void shouldSumEpisodeRuntimesAcrossAllSeasonsWhenContentIsASeries() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
+                        new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
+                        new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
+                null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                101, "Season 1", null, null, "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null),
+                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null)),
+                null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                102, "Season 2", null, null, "2009-03-08", 2, List.of(
+                        new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null),
+                        new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null)),
+                null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                103, "Season 3", null, null, "2010-01-01", 3, List.of(
+                        new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null)),
+                null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.totalRuntimeMinutes()).isEqualTo(58 + 48 + 47 + 45 + 50);
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Last 3 Already Aired Episodes Sorted By Date Desc - When Content Is A Series")
+    void shouldReturnLast3AlreadyAiredEpisodesSortedByDateDescWhenContentIsASeries() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
+                        new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
+                        new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
+                null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                101, "Season 1", null, null, "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null),
+                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null)),
+                null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                102, "Season 2", null, null, "2009-03-08", 2, List.of(
+                        new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null),
+                        new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null)),
+                null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                103, "Season 3", null, null, "2010-01-01", 3, List.of(
+                        new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null)),
+                null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.recentEpisodes()).extracting("seasonNumber", "episodeNumber").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(3, 1),
+                org.assertj.core.groups.Tuple.tuple(2, 1),
+                org.assertj.core.groups.Tuple.tuple(1, 2));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Null Total Runtime - When No Episode Has A Known Runtime")
+    void shouldReturnNullTotalRuntimeWhenNoEpisodeHasAKnownRuntime() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("2316").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("2316", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "2316", "The Office", "The Office", null, null, null, "2005-03-24", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2005-03-24", 1, null)),
+                null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails("2316", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                201, "Season 1", null, null, "2005-03-24", 1,
+                List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2005-03-24", null, null)),
+                null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.totalRuntimeMinutes()).isNull();
     }
 
     @Test

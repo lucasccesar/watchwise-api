@@ -40,19 +40,25 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 @Service
 @RequiredArgsConstructor
 public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     static final int MAX_BATCH_IDS = 100;
+    private static final int RECENT_EPISODES_LIMIT = 3;
 
     private final ContentRepository contentRepository;
     private final UserRepository userRepository;
     private final TmdbClient tmdbClient;
+    private final ExecutorService tmdbSeasonFetchExecutor;
 
     @Override
     public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId) {
@@ -103,6 +109,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 details.backdropPath(),
                 parseDate(details.releaseDate()),
                 details.runtime(),
+                null,
                 genreNames(details.genres()),
                 countryCodes(details.productionCountries()),
                 castFromCredits(details.credits()),
@@ -110,12 +117,14 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 watchProviders(details.watchProviders(), region),
                 null,
+                null,
                 null);
     }
 
     private ContentDetailsDTO buildSeriesDetails(Content content, String language, String region) {
         TmdbTvFullDetails details = tmdbClient.getTvFullDetails(content.getTmdbId(), language)
                 .orElseThrow(this::tmdbUnavailable);
+        List<TmdbSeasonFullDetails> allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), details.seasons(), language);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -126,6 +135,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 details.backdropPath(),
                 parseDate(details.firstAirDate()),
                 averageRuntime(details.episodeRunTime()),
+                totalRuntimeMinutes(allSeasons),
                 genreNames(details.genres()),
                 countryCodes(details.productionCountries()),
                 castFromAggregateCredits(details.aggregateCredits()),
@@ -133,7 +143,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 creators(details.createdBy()),
                 watchProviders(details.watchProviders(), region),
                 seasonSummaries(details.seasons()),
-                null);
+                null,
+                recentlyAiredEpisodes(allSeasons));
     }
 
     private ContentDetailsDTO buildSeasonDetails(Content content, String language, String region) {
@@ -152,6 +163,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 parseDate(season.airDate()),
                 null,
+                null,
                 genreNames(series.genres()),
                 countryCodes(series.productionCountries()),
                 castFromAggregateCredits(series.aggregateCredits()),
@@ -159,7 +171,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 watchProviders(season.watchProviders(), region),
                 null,
-                episodeSummaries(season.episodes()));
+                episodeSummaries(season.seasonNumber(), season.episodes()),
+                null);
     }
 
     private ContentDetailsDTO buildEpisodeDetails(Content content, String language, String region) {
@@ -178,12 +191,14 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 parseDate(episode.airDate()),
                 episode.runtime(),
+                null,
                 genreNames(series.genres()),
                 countryCodes(series.productionCountries()),
                 castFromAggregateCredits(series.aggregateCredits()),
                 guestStars(episode.guestStars()),
                 null,
                 List.of(),
+                null,
                 null,
                 null);
     }
@@ -284,14 +299,61 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .toList();
     }
 
-    private List<EpisodeSummaryDTO> episodeSummaries(List<TmdbEpisodeSummary> episodes) {
+    private List<EpisodeSummaryDTO> episodeSummaries(Integer seasonNumber, List<TmdbEpisodeSummary> episodes) {
         if (episodes == null) {
             return List.of();
         }
         return episodes.stream()
-                .map(episode -> new EpisodeSummaryDTO(
-                        episode.episodeNumber(), episode.name(),
-                        parseDate(episode.airDate()), episode.runtime(), episode.stillPath()))
+                .map(episode -> toEpisodeSummaryDto(seasonNumber, episode))
+                .toList();
+    }
+
+    private EpisodeSummaryDTO toEpisodeSummaryDto(Integer seasonNumber, TmdbEpisodeSummary episode) {
+        return new EpisodeSummaryDTO(
+                seasonNumber, episode.episodeNumber(), episode.name(),
+                parseDate(episode.airDate()), episode.runtime(), episode.stillPath());
+    }
+
+    private List<TmdbSeasonFullDetails> fetchAllSeasonsInParallel(
+            String seriesTmdbId, List<TmdbSeasonSummary> seasons, String language) {
+        if (seasons == null || seasons.isEmpty()) {
+            return List.of();
+        }
+        List<CompletableFuture<Optional<TmdbSeasonFullDetails>>> futures = seasons.stream()
+                .map(season -> CompletableFuture.supplyAsync(
+                        () -> tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(), language),
+                        tmdbSeasonFetchExecutor))
+                .toList();
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    private Integer totalRuntimeMinutes(List<TmdbSeasonFullDetails> seasons) {
+        List<Integer> runtimes = seasons.stream()
+                .filter(Objects::nonNull)
+                .map(TmdbSeasonFullDetails::episodes)
+                .filter(Objects::nonNull)
+                .flatMap(List::stream)
+                .map(TmdbEpisodeSummary::runtime)
+                .filter(Objects::nonNull)
+                .toList();
+        if (runtimes.isEmpty()) {
+            return null;
+        }
+        return runtimes.stream().mapToInt(Integer::intValue).sum();
+    }
+
+    private List<EpisodeSummaryDTO> recentlyAiredEpisodes(List<TmdbSeasonFullDetails> seasons) {
+        LocalDate today = LocalDate.now();
+        return seasons.stream()
+                .filter(season -> season.episodes() != null)
+                .flatMap(season -> season.episodes().stream()
+                        .map(episode -> toEpisodeSummaryDto(season.seasonNumber(), episode)))
+                .filter(episode -> episode.airDate() != null && !episode.airDate().isAfter(today))
+                .sorted(Comparator.comparing(EpisodeSummaryDTO::airDate).reversed())
+                .limit(RECENT_EPISODES_LIMIT)
                 .toList();
     }
 

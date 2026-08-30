@@ -126,8 +126,8 @@ class ContentControllerTest {
     void shouldReturnOkWithDetailsResolvedForTheCurrentUserWhenServiceResolvesThem() {
         UUID contentId = UUID.randomUUID();
         ContentDetailsDTO details = new ContentDetailsDTO(
-                contentId, ContentType.MOVIE, "The Matrix", null, null, null, null, null,
-                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                contentId, ContentType.MOVIE, "The Matrix", null, null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         when(contentDetailsService.getDetails(contentId, currentUserId)).thenReturn(details);
 
         ResponseEntity<ContentDetailsDTO> result = contentController.getDetails(contentId);
@@ -143,11 +143,11 @@ class ContentControllerTest {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
         ContentDetailsDTO firstDetails = new ContentDetailsDTO(
-                first, ContentType.MOVIE, "First", null, null, null, null, null,
-                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                first, ContentType.MOVIE, "First", null, null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         ContentDetailsDTO secondDetails = new ContentDetailsDTO(
-                second, ContentType.MOVIE, "Second", null, null, null, null, null,
-                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+                second, ContentType.MOVIE, "Second", null, null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         when(contentDetailsService.getDetailsBatch(List.of(first, second), currentUserId))
                 .thenReturn(List.of(firstDetails, secondDetails));
 
