@@ -123,18 +123,39 @@ class NotificationControllerIntegrationTest {
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
     }
 
+    private Notification buildFollowedPersonNotification(UUID ownerId) {
+        User owner = userRepository.findById(ownerId).orElseThrow();
+        return Notification.builder()
+                .user(owner).type(NotificationType.FOLLOWED_PERSON_NEW_CREDIT).message("New title from someone you follow")
+                .content(movie).personTmdbId("6193").isRead(false)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+    }
+
     @Test
     @DisplayName("[getNotifications] Should Return Only The Caller's Notifications - When Authenticated")
     void shouldReturnOnlyTheCallersNotificationsWhenAuthenticated() throws Exception {
         RegisteredUser lucas = registerUser("notifok");
         RegisteredUser marina = registerUser("notifother");
-        notificationRepository.saveAndFlush(buildNotification(lucas.id()));
+        Notification releaseNotification = buildNotification(lucas.id());
+        releaseNotification.setCreatedAt(LocalDateTime.now().minusMinutes(1));
+        notificationRepository.saveAndFlush(releaseNotification);
+        notificationRepository.saveAndFlush(buildFollowedPersonNotification(lucas.id()));
         notificationRepository.saveAndFlush(buildNotification(marina.id()));
 
         mockMvc.perform(get("/notifications").cookie(lucas.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content.length()").value(1))
-                .andExpect(jsonPath("$.totalElements").value(1));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[0].type").value("FOLLOWED_PERSON_NEW_CREDIT"))
+                .andExpect(jsonPath("$.content[0].message").value("New title from someone you follow"))
+                .andExpect(jsonPath("$.content[0].isRead").value(false))
+                .andExpect(jsonPath("$.content[0].content.tmdbId").value("603"))
+                .andExpect(jsonPath("$.content[0].personTmdbId").value("6193"))
+                .andExpect(jsonPath("$.content[1].type").value("RELEASE"))
+                .andExpect(jsonPath("$.content[1].message").value("The Matrix is out now"))
+                .andExpect(jsonPath("$.content[1].isRead").value(false))
+                .andExpect(jsonPath("$.content[1].content.tmdbId").value("603"))
+                .andExpect(jsonPath("$.content[1].personTmdbId").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

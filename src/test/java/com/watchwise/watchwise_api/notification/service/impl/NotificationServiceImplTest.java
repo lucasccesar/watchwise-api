@@ -6,16 +6,19 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.notification.dto.NotificationResponseDTO;
 import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.mapper.NotificationMapper;
+import com.watchwise.watchwise_api.notification.mapper.NotificationMapperImpl;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mapstruct.factory.Mappers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
@@ -25,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -49,7 +53,7 @@ class NotificationServiceImplTest {
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @Spy
-    private NotificationMapper notificationMapper = new NotificationMapperImplStub();
+    private NotificationMapper notificationMapper = buildRealNotificationMapper();
 
     @InjectMocks
     private NotificationServiceImpl notificationService;
@@ -243,5 +247,11 @@ class NotificationServiceImplTest {
 
     private void stubEmptyPage() {
         when(notificationRepository.findByUserIdOrderByCreatedAtDesc(any(), any(PageRequest.class))).thenReturn(Page.empty());
+    }
+
+    private static NotificationMapper buildRealNotificationMapper() {
+        NotificationMapperImpl mapper = new NotificationMapperImpl();
+        ReflectionTestUtils.setField(mapper, "contentMapper", Mappers.getMapper(ContentMapper.class));
+        return mapper;
     }
 }
