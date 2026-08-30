@@ -157,6 +157,14 @@ public class UserServiceImpl implements UserService {
             user.setBanner(patchUserDTO.banner());
         }
 
+        if (patchUserDTO.preferredLanguage() != null && !patchUserDTO.preferredLanguage().equals(user.getPreferredLanguage())) {
+            user.setPreferredLanguage(patchUserDTO.preferredLanguage());
+        }
+
+        if (patchUserDTO.preferredRegion() != null && !patchUserDTO.preferredRegion().equals(user.getPreferredRegion())) {
+            user.setPreferredRegion(patchUserDTO.preferredRegion());
+        }
+
         if (patchUserDTO.isProfilePublic() != null && !patchUserDTO.isProfilePublic().equals(user.getIsProfilePublic())) {
             boolean becamePublic = Boolean.TRUE.equals(patchUserDTO.isProfilePublic()) && !Boolean.TRUE.equals(user.getIsProfilePublic());
             user.setIsProfilePublic(patchUserDTO.isProfilePublic());

@@ -20,6 +20,8 @@ public interface UserMapper {
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "sessionsInvalidatedAt", ignore = true)
+    @Mapping(target = "preferredLanguage", ignore = true)
+    @Mapping(target = "preferredRegion", ignore = true)
     User postUserDtoToUser(PostUserDTO postUserDTO);
 
     UserResponseDTO userToUserResponseDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,

@@ -96,4 +96,83 @@ class TmdbClientTest {
         assertThat(result.get().cast()).extracting(TmdbCredit::id).containsExactly("603");
         assertThat(result.get().crew()).extracting(TmdbCredit::id).containsExactly("1396");
     }
+
+    @Test
+    @DisplayName("[getMovieFullDetails] Should Request Credits Watch Providers And Alternative Titles Appended - When Called")
+    void shouldRequestCreditsWatchProvidersAndAlternativeTitlesAppendedWhenCalled() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": "603", "title": "The Matrix", "release_date": "1999-03-31", "runtime": 136}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().title()).isEqualTo("The Matrix");
+        assertThat(result.get().runtime()).isEqualTo(136);
+    }
+
+    @Test
+    @DisplayName("[getMovieFullDetails] Should Return Empty - When TMDB Fails Twice In A Row")
+    void shouldReturnEmptyWhenMovieFullDetailsFailsTwiceInARow() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                .andRespond(withServerError());
+
+        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getTvFullDetails] Should Request Aggregate Credits Watch Providers And Alternative Titles Appended - When Called")
+    void shouldRequestAggregateCreditsWatchProvidersAndAlternativeTitlesAppendedWhenCalled() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles&language=pt-BR"))
+                .andRespond(withSuccess("""
+                        {"id": "1396", "name": "Breaking Bad", "first_air_date": "2008-01-20"}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "pt-BR");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().name()).isEqualTo("Breaking Bad");
+    }
+
+    @Test
+    @DisplayName("[getSeasonFullDetails] Should Request Watch Providers Appended - When Called")
+    void shouldRequestWatchProvidersAppendedWhenSeasonFullDetailsCalled() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=watch/providers&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": 3572, "name": "Season 1", "season_number": 1, "episodes": []}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbSeasonFullDetails> result = tmdbClient.getSeasonFullDetails("1396", 1, "en-US");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().name()).isEqualTo("Season 1");
+        assertThat(result.get().episodes()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getEpisodeFullDetails] Should Parse Guest Stars - When Called Without Append")
+    void shouldParseGuestStarsWhenEpisodeFullDetailsCalledWithoutAppend() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396/season/1/episode/1?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": 62085, "name": "Pilot", "episode_number": 1, "season_number": 1,
+                         "guest_stars": [{"id": 17419, "name": "John Doe", "character": "Neighbor"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbEpisodeFullDetails> result = tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().name()).isEqualTo("Pilot");
+        assertThat(result.get().guestStars()).extracting(TmdbGuestStar::name).containsExactly("John Doe");
+    }
 }

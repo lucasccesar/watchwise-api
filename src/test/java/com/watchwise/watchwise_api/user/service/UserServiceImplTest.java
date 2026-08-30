@@ -874,6 +874,62 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateUser] Should Update PreferredLanguage - When A Different Value Is Provided")
+    void shouldUpdatePreferredLanguageWhenDifferentValueProvided() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, "pt-BR", null);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.updateUser(savedUser, patchUserDTO);
+
+        verify(userRepository).saveAndFlush(userCaptor.capture());
+        assertThat(userCaptor.getValue().getPreferredLanguage()).isEqualTo("pt-BR");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Not Change PreferredLanguage - When The Same Value Is Provided")
+    void shouldNotChangePreferredLanguageWhenSameValueProvided() {
+        savedUser.setPreferredLanguage("en-US");
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, "en-US", null);
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+
+        userService.updateUser(savedUser, patchUserDTO);
+
+        assertThat(savedUser.getPreferredLanguage()).isEqualTo("en-US");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Update PreferredRegion - When A Different Value Is Provided")
+    void shouldUpdatePreferredRegionWhenDifferentValueProvided() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, null, "BR");
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+
+        userService.updateUser(savedUser, patchUserDTO);
+
+        verify(userRepository).saveAndFlush(userCaptor.capture());
+        assertThat(userCaptor.getValue().getPreferredRegion()).isEqualTo("BR");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Not Change PreferredRegion - When The Same Value Is Provided")
+    void shouldNotChangePreferredRegionWhenSameValueProvided() {
+        savedUser.setPreferredRegion("US");
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, null, "US");
+        when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+
+        userService.updateUser(savedUser, patchUserDTO);
+
+        assertThat(savedUser.getPreferredRegion()).isEqualTo("US");
+    }
+
+    @Test
     @DisplayName("[updateUser] Should Update IsProfilePublic - When A Different Value Is Provided")
     void shouldUpdateIsProfilePublicWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, false, null);

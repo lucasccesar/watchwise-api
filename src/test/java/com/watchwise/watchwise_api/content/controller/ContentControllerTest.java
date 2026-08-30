@@ -1,10 +1,12 @@
 package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.service.ContentDetailsService;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import org.junit.jupiter.api.AfterEach;
@@ -38,15 +40,21 @@ class ContentControllerTest {
     private ContentStatsService contentStatsService;
 
     @Mock
+    private ContentDetailsService contentDetailsService;
+
+    @Mock
     private RequestThrottler requestThrottler;
 
     @InjectMocks
     private ContentController contentController;
 
+    private UUID currentUserId;
+
     @BeforeEach
     void setUp() {
+        currentUserId = UUID.randomUUID();
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(UUID.randomUUID(), null, List.of())
+                new UsernamePasswordAuthenticationToken(currentUserId, null, List.of())
         );
     }
 
@@ -111,6 +119,42 @@ class ContentControllerTest {
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(stats);
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Ok With Details Resolved For The Current User - When Service Resolves Them")
+    void shouldReturnOkWithDetailsResolvedForTheCurrentUserWhenServiceResolvesThem() {
+        UUID contentId = UUID.randomUUID();
+        ContentDetailsDTO details = new ContentDetailsDTO(
+                contentId, ContentType.MOVIE, "The Matrix", null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        when(contentDetailsService.getDetails(contentId, currentUserId)).thenReturn(details);
+
+        ResponseEntity<ContentDetailsDTO> result = contentController.getDetails(contentId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(details);
+        verify(contentDetailsService).getDetails(contentId, currentUserId);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Return Ok With The List From The Service Resolved For The Current User - When Called With Multiple Ids")
+    void shouldReturnOkWithTheListFromTheServiceResolvedForTheCurrentUserWhenCalledWithMultipleIds() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        ContentDetailsDTO firstDetails = new ContentDetailsDTO(
+                first, ContentType.MOVIE, "First", null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        ContentDetailsDTO secondDetails = new ContentDetailsDTO(
+                second, ContentType.MOVIE, "Second", null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        when(contentDetailsService.getDetailsBatch(List.of(first, second), currentUserId))
+                .thenReturn(List.of(firstDetails, secondDetails));
+
+        ResponseEntity<List<ContentDetailsDTO>> result = contentController.getDetailsBatch(List.of(first, second));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).containsExactly(firstDetails, secondDetails);
     }
 
 }

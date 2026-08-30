@@ -107,6 +107,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 ));
     }
 
+    @ExceptionHandler(TmdbUnavailableException.class)
+    ResponseEntity<ApiError> handleTmdbUnavailable(
+            TmdbUnavailableException ex,
+            HttpServletRequest request
+    ){
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(new ApiError(
+                        LocalDateTime.now(),
+                        HttpStatus.BAD_GATEWAY.value(),
+                        "Bad Gateway",
+                        ex.getMessage(),
+                        request.getRequestURI()
+                ));
+    }
+
     @ExceptionHandler(TooManyRequestsException.class)
     ResponseEntity<ApiError> handleTooManyRequests(
             TooManyRequestsException ex,

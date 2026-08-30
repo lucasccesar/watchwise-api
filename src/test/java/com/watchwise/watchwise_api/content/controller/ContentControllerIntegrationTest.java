@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -18,6 +20,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -25,9 +28,13 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -63,6 +70,9 @@ class ContentControllerIntegrationTest {
 
     @Autowired
     private RequestThrottler requestThrottler;
+
+    @MockitoBean
+    private TmdbClient tmdbClient;
 
     private Cookie accessTokenCookie;
     private Cookie csrfCookie;
@@ -403,6 +413,87 @@ class ContentControllerIntegrationTest {
         mockMvc.perform(get("/contents/stats").cookie(accessTokenCookie).param("ids", ids))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Cannot request stats for more than 100 contents at once"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Movie Details Resolved Via TmdbClient - When Content Exists")
+    void shouldReturnMovieDetailsResolvedViaTmdbClientWhenContentExists() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
+                "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
+                List.of(), List.of(), null, null, null)));
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contentId").value(content.getId().toString()))
+                .andExpect(jsonPath("$.type").value("MOVIE"))
+                .andExpect(jsonPath("$.title").value("The Matrix"))
+                .andExpect(jsonPath("$.releaseDate").value("1999-03-31"))
+                .andExpect(jsonPath("$.runtimeMinutes").value(136));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return NotFound - When Content Does Not Exist")
+    void shouldReturnNotFoundWhenContentDoesNotExistForDetails() throws Exception {
+        mockMvc.perform(get("/contents/" + UUID.randomUUID() + "/details").cookie(accessTokenCookie))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return BadGateway - When TMDB Is Unavailable")
+    void shouldReturnBadGatewayWhenTmdbIsUnavailableForDetails() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForDetails() throws Exception {
+        mockMvc.perform(get("/contents/" + UUID.randomUUID() + "/details"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Return One Entry Per Requested Id, Preserving Order - When Called")
+    void shouldReturnOneEntryPerRequestedIdPreservingOrderWhenDetailsBatchCalled() throws Exception {
+        Content first = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content second = contentRepository.save(Content.builder()
+                .tmdbId("604").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null)));
+        when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null)));
+
+        mockMvc.perform(get("/contents/details")
+                        .cookie(accessTokenCookie)
+                        .param("ids", first.getId().toString(), second.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].title").value("First"))
+                .andExpect(jsonPath("$[1].title").value("Second"));
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Return BadRequest - When Ids Exceed The Batch Limit")
+    void shouldReturnBadRequestWhenIdsExceedTheBatchLimitForDetails() throws Exception {
+        String[] ids = java.util.stream.Stream.generate(() -> UUID.randomUUID().toString())
+                .limit(101)
+                .toArray(String[]::new);
+
+        mockMvc.perform(get("/contents/details").cookie(accessTokenCookie).param("ids", ids))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Cannot request details for more than 100 contents at once"));
     }
 
     private MockHttpServletRequestBuilder referenceRequest(String body) {

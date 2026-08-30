@@ -1,9 +1,11 @@
 package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
+import com.watchwise.watchwise_api.content.service.ContentDetailsService;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import jakarta.validation.Valid;
@@ -30,6 +32,7 @@ public class ContentController {
 
     private final ContentService contentService;
     private final ContentStatsService contentStatsService;
+    private final ContentDetailsService contentDetailsService;
     private final RequestThrottler requestThrottler;
 
     @Value("${app.rate-limit.content-reference.max-requests}")
@@ -53,6 +56,16 @@ public class ContentController {
     @GetMapping("/stats")
     public ResponseEntity<List<ContentStatsResponseDTO>> getStatsBatch(@RequestParam List<UUID> ids) {
         return ResponseEntity.ok(contentStatsService.getStatsBatch(ids));
+    }
+
+    @GetMapping("/{contentId}/details")
+    public ResponseEntity<ContentDetailsDTO> getDetails(@PathVariable UUID contentId) {
+        return ResponseEntity.ok(contentDetailsService.getDetails(contentId, getCurrentUserId()));
+    }
+
+    @GetMapping("/details")
+    public ResponseEntity<List<ContentDetailsDTO>> getDetailsBatch(@RequestParam List<UUID> ids) {
+        return ResponseEntity.ok(contentDetailsService.getDetailsBatch(ids, getCurrentUserId()));
     }
 
     private String contentReferenceKey() {

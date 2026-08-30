@@ -65,4 +65,14 @@ public class User {
     @Column(name = "sessions_invalidated_at")
     @Setter
     private LocalDateTime sessionsInvalidatedAt;
+
+    @Column(name = "preferred_language", nullable = false, length = 10)
+    @Setter
+    @Builder.Default
+    private String preferredLanguage = "en-US";
+
+    @Column(name = "preferred_region", nullable = false, length = 2)
+    @Setter
+    @Builder.Default
+    private String preferredRegion = "US";
 }

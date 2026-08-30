@@ -20,11 +20,13 @@ public record UserResponseDTO(
         List<GenreCountDTO> genreCounts,
         String banner,
         long followersCount,
-        long followingCount
+        long followingCount,
+        String preferredLanguage,
+        String preferredRegion
 ) {
     public UserResponseDTO(UUID id, String username, String email, String description, String profilePicture,
             Boolean isProfilePublic, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this(id, username, email, description, profilePicture, isProfilePublic, createdAt, updatedAt,
-                0L, 0L, List.of(), null, 0L, 0L);
+                0L, 0L, List.of(), null, 0L, 0L, null, null);
     }
 }
