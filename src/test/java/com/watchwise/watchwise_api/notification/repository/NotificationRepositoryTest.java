@@ -110,6 +110,18 @@ class NotificationRepositoryTest {
         assertThat(notificationRepository.findById(notification.getId())).isEmpty();
     }
 
+    @Test
+    @DisplayName("[deleteAll] Should Cascade Delete - When The Content Is Deleted")
+    void shouldCascadeDeleteWhenTheContentIsDeleted() {
+        Notification notification = notificationRepository.saveAndFlush(buildNotification(LocalDateTime.now()));
+        entityManager.clear();
+
+        contentRepository.delete(contentRepository.findById(movie.getId()).orElseThrow());
+        contentRepository.flush();
+
+        assertThat(notificationRepository.findById(notification.getId())).isEmpty();
+    }
+
     private Notification buildNotification(LocalDateTime createdAt) {
         return Notification.builder()
                 .user(lucas)
