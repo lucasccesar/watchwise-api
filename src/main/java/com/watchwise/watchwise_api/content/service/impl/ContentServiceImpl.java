@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -35,8 +36,7 @@ public class ContentServiceImpl implements ContentService {
 
         Optional<Content> existing = findExisting(normalized);
         if (existing.isPresent()) {
-            assertNoMetadataMismatch(existing.get(), normalized);
-            return contentMapper.contentToContentRefDto(existing.get());
+            return contentMapper.contentToContentRefDto(reconcileExisting(existing.get(), normalized));
         }
 
         try {
@@ -123,11 +123,44 @@ public class ContentServiceImpl implements ContentService {
                 });
     }
 
+    private Content reconcileExisting(Content existing, ContentRefCreationDTO normalized) {
+        assertNoMetadataMismatch(existing, normalized);
+
+        boolean backfillSeasonFinale = existing.getIsSeasonFinale() == null && Boolean.TRUE.equals(normalized.isSeasonFinale());
+        boolean backfillSeriesFinale = existing.getIsSeriesFinale() == null && Boolean.TRUE.equals(normalized.isSeriesFinale());
+        if (!backfillSeasonFinale && !backfillSeriesFinale) {
+            return existing;
+        }
+
+        UUID existingId = existing.getId();
+        try {
+            return newTransactionExecutor.runInNewTransaction(() -> {
+                Content fresh = contentRepository.findById(existingId).orElseThrow();
+                if (backfillSeasonFinale) {
+                    clearPreviousSeasonFinale(normalized.seriesTmdbId(), normalized.seasonNumber(), normalized.episodeNumber());
+                    fresh.setIsSeasonFinale(true);
+                }
+                if (backfillSeriesFinale) {
+                    if (fresh.getType() == ContentType.SEASON) {
+                        clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
+                    }
+                    fresh.setIsSeriesFinale(true);
+                }
+                fresh.setUpdatedAt(LocalDateTime.now());
+                return contentRepository.saveAndFlush(fresh);
+            });
+        } catch (DataIntegrityViolationException e) {
+            return existing;
+        }
+    }
+
     private void assertNoMetadataMismatch(Content existing, ContentRefCreationDTO normalized) {
-        if (normalized.isSeasonFinale() != null && !normalized.isSeasonFinale().equals(existing.getIsSeasonFinale())) {
+        if (normalized.isSeasonFinale() != null && existing.getIsSeasonFinale() != null
+                && !normalized.isSeasonFinale().equals(existing.getIsSeasonFinale())) {
             throw new ConflictException("This content is already registered with a different isSeasonFinale value");
         }
-        if (normalized.isSeriesFinale() != null && !normalized.isSeriesFinale().equals(existing.getIsSeriesFinale())) {
+        if (normalized.isSeriesFinale() != null && existing.getIsSeriesFinale() != null
+                && !normalized.isSeriesFinale().equals(existing.getIsSeriesFinale())) {
             throw new ConflictException("This content is already registered with a different isSeriesFinale value");
         }
         if (normalized.runtimeMinutes() != null && !normalized.runtimeMinutes().equals(existing.getRuntimeMinutes())) {
@@ -147,8 +180,7 @@ public class ContentServiceImpl implements ContentService {
     private Content resolveConcurrentCreation(ContentRefCreationDTO dto, DataIntegrityViolationException e) {
         Optional<Content> existing = findExisting(dto);
         if (existing.isPresent()) {
-            assertNoMetadataMismatch(existing.get(), dto);
-            return existing.get();
+            return reconcileExisting(existing.get(), dto);
         }
 
         String constraintName = extractConstraintName(e);

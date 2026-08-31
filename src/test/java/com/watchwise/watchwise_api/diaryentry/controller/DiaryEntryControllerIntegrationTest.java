@@ -1453,6 +1453,36 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Bulk-Log The Whole Series And Backfill IsSeriesFinale - When The Finale Season Content Already Existed Without It")
+    void shouldBulkLogTheWholeSeriesAndBackfillIsSeriesFinaleWhenTheFinaleSeasonContentAlreadyExistedWithoutIt() throws Exception {
+        RegisteredUser user = registerUser("bulkpreexistingseason");
+        LocalDateTime now = LocalDateTime.now();
+        Content finaleSeason = contentRepository.save(Content.builder()
+                .type(ContentType.SEASON)
+                .seriesTmdbId("904")
+                .seasonNumber(2)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+
+        String bulkBody = """
+                {
+                    "content": { "type": "SERIES", "tmdbId": "904" },
+                    "watchedDate": "2025-03-12",
+                    "finaleSeasonNumber": 2,
+                    "seasonFinaleEpisodeNumbers": { "1": 2, "2": 2 }
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, bulkBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(7));
+
+        Content reloadedFinaleSeason = contentRepository.findById(finaleSeason.getId()).orElseThrow();
+        assertThat(reloadedFinaleSeason.getIsSeriesFinale()).isTrue();
+    }
+
+    @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Return TooManyRequests - When The Bulk Rate Limit Is Exceeded")
     void shouldReturnTooManyRequestsWhenTheBulkRateLimitIsExceeded() throws Exception {
         RegisteredUser user = registerUser("bulkratelimit");

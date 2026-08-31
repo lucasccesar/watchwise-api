@@ -722,6 +722,74 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Backfill IsSeriesFinale On The Existing Season - When It Was Never Set Before")
+    void shouldBackfillIsSeriesFinaleOnTheExistingSeasonWhenItWasNeverSetBefore() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 5, null, null, true);
+        Content existing = Content.builder().id(existingId).seriesTmdbId("200").seasonNumber(5).type(ContentType.SEASON).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, null, ContentType.SEASON, "200", 5, null, null, true, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 5, null, ContentType.SEASON))
+                .thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("200", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getIsSeriesFinale()).isTrue();
+        verify(contentRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Backfill IsSeasonFinale On The Existing Episode - When It Was Never Set Before")
+    void shouldBackfillIsSeasonFinaleOnTheExistingEpisodeWhenItWasNeverSetBefore() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 7, true, null);
+        Content existing = Content.builder().id(existingId).seriesTmdbId("200").seasonNumber(1).episodeNumber(7).type(ContentType.EPISODE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, null, ContentType.EPISODE, "200", 1, 7, true, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 7, ContentType.EPISODE))
+                .thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("200", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getIsSeasonFinale()).isTrue();
+        verify(contentRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Fall Back To The Existing Value - When Backfilling IsSeriesFinale Loses A Concurrent Race")
+    void shouldFallBackToTheExistingValueWhenBackfillingIsSeriesFinaleLosesAConcurrentRace() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "200", 5, null, null, true);
+        Content existing = Content.builder().id(existingId).seriesTmdbId("200").seasonNumber(5).type(ContentType.SEASON).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, null, ContentType.SEASON, "200", 5, null, null, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 5, null, ContentType.SEASON))
+                .thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("200", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.saveAndFlush(existing))
+                .thenThrow(buildDataIntegrityViolationException("uq_contents_series_finale"));
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Concurrent Creation Recovery Finds A Different IsSeasonFinale Value")
     void shouldThrowConflictExceptionWhenConcurrentCreationRecoveryFindsADifferentIsSeasonFinaleValue() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 3, true, null);
