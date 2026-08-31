@@ -16,6 +16,8 @@ public record ContentDetailsDTO(
         LocalDate releaseDate,
         Integer runtimeMinutes,
         Integer totalRuntimeMinutes,
+        Integer numberOfSeasons,
+        Integer numberOfEpisodes,
         List<String> genres,
         List<String> countries,
         List<CastMemberDTO> cast,

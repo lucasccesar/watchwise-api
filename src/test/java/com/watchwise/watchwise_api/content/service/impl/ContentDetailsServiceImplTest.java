@@ -172,8 +172,8 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDetails] Should Sum And Average Episode Runtimes Across All Seasons - When Content Is A Series")
-    void shouldSumAndAverageEpisodeRuntimesAcrossAllSeasonsWhenContentIsASeries() {
+    @DisplayName("[getDetails] Should Sum And Average Episode Runtimes And Return Number Of Seasons And Episodes - When Content Is A Series")
+    void shouldSumAndAverageEpisodeRuntimesAndReturnNumberOfSeasonsAndEpisodesWhenContentIsASeries() {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
@@ -183,7 +183,7 @@ class ContentDetailsServiceImplTest {
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
                         new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
                         new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
-                null, null, null, null)));
+                null, null, null, null, 3, 5)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null),
@@ -203,6 +203,8 @@ class ContentDetailsServiceImplTest {
 
         assertThat(result.totalRuntimeMinutes()).isEqualTo(58 + 48 + 47 + 45 + 50);
         assertThat(result.runtimeMinutes()).isEqualTo(Math.round((58 + 48 + 47 + 45 + 50) / 5.0));
+        assertThat(result.numberOfSeasons()).isEqualTo(3);
+        assertThat(result.numberOfEpisodes()).isEqualTo(5);
     }
 
     @Test
@@ -217,7 +219,7 @@ class ContentDetailsServiceImplTest {
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
                         new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
                         new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
-                null, null, null, null)));
+                null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null),
@@ -252,7 +254,7 @@ class ContentDetailsServiceImplTest {
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(0, "Specials", null, "2099-01-01", 1, null),
                         new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)),
-                null, null, null, null)));
+                null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null)),
@@ -277,7 +279,7 @@ class ContentDetailsServiceImplTest {
                 "2316", "The Office", "The Office", null, null, null, "2005-03-24", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2005-03-24", 1, null)),
-                null, null, null, null)));
+                null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("2316", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 201, "Season 1", null, null, "2005-03-24", 1,
                 List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2005-03-24", null, null)),
@@ -303,7 +305,7 @@ class ContentDetailsServiceImplTest {
                 List.of(), List.of(), null, List.of(), null,
                 new TmdbAggregateCredits(List.of(new TmdbAggregateCastMember(
                         17419, "Bryan Cranston", "/cranston.jpg", List.of(new TmdbAggregateRole("Walter White"))))),
-                null, null)));
+                null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -325,7 +327,7 @@ class ContentDetailsServiceImplTest {
                 List.of(new TmdbGuestStar(17420, "John Doe", "Neighbor", "/doe.jpg")))));
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
-                List.of(), List.of(), null, List.of(), null, null, null, null)));
+                List.of(), List.of(), null, List.of(), null, null, null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 

@@ -22,5 +22,7 @@ public record TmdbTvFullDetails(
         @JsonProperty("next_episode_to_air") TmdbNextEpisode nextEpisodeToAir,
         @JsonProperty("aggregate_credits") TmdbAggregateCredits aggregateCredits,
         @JsonProperty("watch/providers") TmdbWatchProviders watchProviders,
-        @JsonProperty("alternative_titles") TmdbTvAlternativeTitles alternativeTitles) {
+        @JsonProperty("alternative_titles") TmdbTvAlternativeTitles alternativeTitles,
+        @JsonProperty("number_of_seasons") Integer numberOfSeasons,
+        @JsonProperty("number_of_episodes") Integer numberOfEpisodes) {
 }
