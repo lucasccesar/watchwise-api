@@ -144,10 +144,10 @@ class TmdbClientTest {
     }
 
     @Test
-    @DisplayName("[getSeasonFullDetails] Should Request Watch Providers Appended - When Called")
-    void shouldRequestWatchProvidersAppendedWhenSeasonFullDetailsCalled() {
+    @DisplayName("[getSeasonFullDetails] Should Request Aggregate Credits And Watch Providers Appended - When Called")
+    void shouldRequestAggregateCreditsAndWatchProvidersAppendedWhenSeasonFullDetailsCalled() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=watch/providers&language=en-US"))
+                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=aggregate_credits,watch/providers&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": 3572, "name": "Season 1", "season_number": 1, "episodes": []}
                         """, MediaType.APPLICATION_JSON));

@@ -143,7 +143,7 @@ class TmdbClientCachingTest {
     @DisplayName("[getSeasonFullDetails] Should Not Throw And Should Cache - When TMDB Responds Successfully")
     void shouldNotThrowAndShouldCacheWhenSeasonFullDetailsRespondsSuccessfully() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=watch/providers&language=en-US"))
+                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=aggregate_credits,watch/providers&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": 3572, "name": "Season 1", "season_number": 1, "episodes": []}
                         """, MediaType.APPLICATION_JSON));
@@ -160,10 +160,10 @@ class TmdbClientCachingTest {
     @DisplayName("[getSeasonFullDetails] Should Not Throw And Should Not Cache - When TMDB Fails Twice In A Row")
     void shouldNotThrowAndShouldNotCacheWhenSeasonFullDetailsFailsTwiceInARow() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=watch/providers&language=en-US"))
+                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=aggregate_credits,watch/providers&language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=watch/providers&language=en-US"))
+                        "https://api.themoviedb.org/3/tv/1396/season/1?append_to_response=aggregate_credits,watch/providers&language=en-US"))
                 .andRespond(withServerError());
 
         Optional<TmdbSeasonFullDetails> result = tmdbClient.getSeasonFullDetails("1396", 1, "en-US");

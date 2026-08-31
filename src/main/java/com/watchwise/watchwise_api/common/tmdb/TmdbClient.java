@@ -72,7 +72,7 @@ public class TmdbClient {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/tv/{seriesId}/season/{seasonNumber}")
-                                .queryParam("append_to_response", "watch/providers")
+                                .queryParam("append_to_response", "aggregate_credits,watch/providers")
                                 .queryParam("language", language)
                                 .build(seriesTmdbId, seasonNumber))
                         .retrieve()

@@ -10,5 +10,6 @@ public record TmdbAggregateCastMember(
         Integer id,
         String name,
         @JsonProperty("profile_path") String profilePath,
-        List<TmdbAggregateRole> roles) {
+        List<TmdbAggregateRole> roles,
+        @JsonProperty("total_episode_count") Integer totalEpisodeCount) {
 }

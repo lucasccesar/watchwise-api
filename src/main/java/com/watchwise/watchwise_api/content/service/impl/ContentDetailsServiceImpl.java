@@ -6,7 +6,6 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAlternativeTitleEntry;
-import com.watchwise.watchwise_api.common.tmdb.TmdbCastMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCreator;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
@@ -176,7 +175,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 genreNames(series.genres()),
                 countryCodes(series.productionCountries()),
-                castFromAggregateCredits(series.aggregateCredits()),
+                castFromAggregateCredits(season.aggregateCredits()),
                 null,
                 null,
                 watchProviders(season.watchProviders(), region),
@@ -262,7 +261,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return List.of();
         }
         return credits.cast().stream()
-                .map(member -> new CastMemberDTO(member.name(), member.character(), member.profilePath()))
+                .map(member -> new CastMemberDTO(member.id(), member.name(), member.character(), member.profilePath(), null))
                 .toList();
     }
 
@@ -271,15 +270,15 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return List.of();
         }
         return credits.cast().stream()
-                .map(this::toAggregateCastMemberDto)
+                .map(member -> toAggregateCastMemberDto(member, member.totalEpisodeCount()))
                 .toList();
     }
 
-    private CastMemberDTO toAggregateCastMemberDto(TmdbAggregateCastMember member) {
+    private CastMemberDTO toAggregateCastMemberDto(TmdbAggregateCastMember member, Integer episodeCount) {
         String character = member.roles() == null || member.roles().isEmpty()
                 ? null
                 : member.roles().get(0).character();
-        return new CastMemberDTO(member.name(), character, member.profilePath());
+        return new CastMemberDTO(member.id(), member.name(), character, member.profilePath(), episodeCount);
     }
 
     private List<CastMemberDTO> guestStars(List<TmdbGuestStar> guestStars) {
@@ -287,7 +286,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return List.of();
         }
         return guestStars.stream()
-                .map(guest -> new CastMemberDTO(guest.name(), guest.character(), guest.profilePath()))
+                .map(guest -> new CastMemberDTO(guest.id(), guest.name(), guest.character(), guest.profilePath(), null))
                 .toList();
     }
 

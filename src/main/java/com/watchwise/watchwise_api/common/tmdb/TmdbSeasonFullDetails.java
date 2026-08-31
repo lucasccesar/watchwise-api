@@ -14,5 +14,6 @@ public record TmdbSeasonFullDetails(
         @JsonProperty("air_date") String airDate,
         @JsonProperty("season_number") Integer seasonNumber,
         List<TmdbEpisodeSummary> episodes,
+        @JsonProperty("aggregate_credits") TmdbAggregateCredits aggregateCredits,
         @JsonProperty("watch/providers") TmdbWatchProviders watchProviders) {
 }
