@@ -540,9 +540,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private DiaryEntry bulkLogEpisode(UUID userId, String seriesTmdbId, Integer seasonNumber, int episodeNumber,
             boolean isSeasonFinale, Boolean isSeriesFinale, LocalDate watchedDate, List<DiaryEntry> created,
             ContentType requestedType, List<UUID> companionIds) {
+        Boolean seasonFinaleFlag = isSeasonFinale ? Boolean.TRUE : null;
+        Boolean seriesFinaleFlag = isSeasonFinale && Boolean.TRUE.equals(isSeriesFinale) ? Boolean.TRUE : null;
         ContentRefDTO episodeRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
                 null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber,
-                isSeasonFinale, isSeasonFinale ? isSeriesFinale : null));
+                seasonFinaleFlag, seriesFinaleFlag));
 
         User user = userRepository.getReferenceById(userId);
         Content episodeContent = contentRepository.getReferenceById(episodeRef.id());

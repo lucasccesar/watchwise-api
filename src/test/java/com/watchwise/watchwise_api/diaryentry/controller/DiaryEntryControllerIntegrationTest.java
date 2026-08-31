@@ -1433,6 +1433,26 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Bulk-Log The Whole Season - When One Episode Was Already Logged Individually Without A Finale Flag")
+    void shouldBulkLogTheWholeSeasonWhenOneEpisodeWasAlreadyLoggedIndividuallyWithoutAFinaleFlag() throws Exception {
+        RegisteredUser user = registerUser("bulkpreexistingepisode");
+        mockMvc.perform(createRequest(user, episodeBody("902", 1, 1, null, null)))
+                .andExpect(status().isCreated());
+
+        String bulkBody = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "902", "seasonNumber": 1 },
+                    "watchedDate": "2025-03-12",
+                    "finaleEpisodeNumber": 3
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, bulkBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(4));
+    }
+
+    @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Return TooManyRequests - When The Bulk Rate Limit Is Exceeded")
     void shouldReturnTooManyRequestsWhenTheBulkRateLimitIsExceeded() throws Exception {
         RegisteredUser user = registerUser("bulkratelimit");
