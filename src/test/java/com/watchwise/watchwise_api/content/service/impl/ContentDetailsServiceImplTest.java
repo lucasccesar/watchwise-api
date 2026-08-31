@@ -168,8 +168,8 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDetails] Should Sum Episode Runtimes Across All Seasons - When Content Is A Series")
-    void shouldSumEpisodeRuntimesAcrossAllSeasonsWhenContentIsASeries() {
+    @DisplayName("[getDetails] Should Sum And Average Episode Runtimes Across All Seasons - When Content Is A Series")
+    void shouldSumAndAverageEpisodeRuntimesAcrossAllSeasonsWhenContentIsASeries() {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
@@ -198,6 +198,7 @@ class ContentDetailsServiceImplTest {
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
         assertThat(result.totalRuntimeMinutes()).isEqualTo(58 + 48 + 47 + 45 + 50);
+        assertThat(result.runtimeMinutes()).isEqualTo(Math.round((58 + 48 + 47 + 45 + 50) / 5.0));
     }
 
     @Test
@@ -237,8 +238,8 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDetails] Should Return Null Total Runtime - When No Episode Has A Known Runtime")
-    void shouldReturnNullTotalRuntimeWhenNoEpisodeHasAKnownRuntime() {
+    @DisplayName("[getDetails] Should Return Null Total And Average Runtime - When No Episode Has A Known Runtime")
+    void shouldReturnNullTotalAndAverageRuntimeWhenNoEpisodeHasAKnownRuntime() {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("2316").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
@@ -255,6 +256,7 @@ class ContentDetailsServiceImplTest {
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
         assertThat(result.totalRuntimeMinutes()).isNull();
+        assertThat(result.runtimeMinutes()).isNull();
     }
 
     @Test

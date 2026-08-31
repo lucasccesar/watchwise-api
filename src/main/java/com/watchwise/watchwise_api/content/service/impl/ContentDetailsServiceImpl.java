@@ -125,6 +125,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         TmdbTvFullDetails details = tmdbClient.getTvFullDetails(content.getTmdbId(), language)
                 .orElseThrow(this::tmdbUnavailable);
         List<TmdbSeasonFullDetails> allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), details.seasons(), language);
+        List<Integer> episodeRuntimes = episodeRuntimes(allSeasons);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -134,8 +135,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 details.posterPath(),
                 details.backdropPath(),
                 parseDate(details.firstAirDate()),
-                averageRuntime(details.episodeRunTime()),
-                totalRuntimeMinutes(allSeasons),
+                averageRuntime(episodeRuntimes),
+                totalRuntimeMinutes(episodeRuntimes),
                 genreNames(details.genres()),
                 countryCodes(details.productionCountries()),
                 castFromAggregateCredits(details.aggregateCredits()),
@@ -330,8 +331,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .toList();
     }
 
-    private Integer totalRuntimeMinutes(List<TmdbSeasonFullDetails> seasons) {
-        List<Integer> runtimes = seasons.stream()
+    private List<Integer> episodeRuntimes(List<TmdbSeasonFullDetails> seasons) {
+        return seasons.stream()
                 .filter(Objects::nonNull)
                 .map(TmdbSeasonFullDetails::episodes)
                 .filter(Objects::nonNull)
@@ -339,10 +340,13 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .map(TmdbEpisodeSummary::runtime)
                 .filter(Objects::nonNull)
                 .toList();
-        if (runtimes.isEmpty()) {
+    }
+
+    private Integer totalRuntimeMinutes(List<Integer> episodeRuntimes) {
+        if (episodeRuntimes.isEmpty()) {
             return null;
         }
-        return runtimes.stream().mapToInt(Integer::intValue).sum();
+        return episodeRuntimes.stream().mapToInt(Integer::intValue).sum();
     }
 
     private List<EpisodeSummaryDTO> recentlyAiredEpisodes(List<TmdbSeasonFullDetails> seasons) {
