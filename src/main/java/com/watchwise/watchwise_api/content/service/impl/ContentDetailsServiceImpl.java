@@ -40,6 +40,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -160,6 +162,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .orElseThrow(this::tmdbUnavailable);
         TmdbTvFullDetails series = tmdbClient.getTvFullDetails(content.getSeriesTmdbId(), language)
                 .orElseThrow(this::tmdbUnavailable);
+        List<Integer> episodeRuntimes = runtimesOf(season.episodes());
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -169,15 +172,15 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 season.posterPath(),
                 null,
                 parseDate(season.airDate()),
+                averageRuntime(episodeRuntimes),
+                totalRuntimeMinutes(episodeRuntimes),
                 null,
-                null,
-                null,
-                null,
+                numberOfEpisodes(season.episodes()),
                 genreNames(series.genres()),
                 countryCodes(series.productionCountries()),
                 castFromAggregateCredits(season.aggregateCredits()),
-                null,
-                null,
+                seasonGuestStars(season.episodes()),
+                creators(series.createdBy()),
                 watchProviders(season.watchProviders(), region),
                 null,
                 episodeSummaries(season.seasonNumber(), season.episodes()),
@@ -290,6 +293,27 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .toList();
     }
 
+    private List<CastMemberDTO> seasonGuestStars(List<TmdbEpisodeSummary> episodes) {
+        if (episodes == null) {
+            return List.of();
+        }
+        Map<Integer, TmdbGuestStar> firstAppearanceById = new LinkedHashMap<>();
+        Map<Integer, Integer> episodeCountById = new HashMap<>();
+        for (TmdbEpisodeSummary episode : episodes) {
+            if (episode.guestStars() == null) {
+                continue;
+            }
+            for (TmdbGuestStar guest : episode.guestStars()) {
+                firstAppearanceById.putIfAbsent(guest.id(), guest);
+                episodeCountById.merge(guest.id(), 1, Integer::sum);
+            }
+        }
+        return firstAppearanceById.values().stream()
+                .map(guest -> new CastMemberDTO(
+                        guest.id(), guest.name(), guest.character(), guest.profilePath(), episodeCountById.get(guest.id())))
+                .toList();
+    }
+
     private List<CreatorDTO> creators(List<TmdbCreator> creators) {
         if (creators == null) {
             return List.of();
@@ -361,12 +385,22 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private List<Integer> episodeRuntimes(List<TmdbSeasonFullDetails> seasons) {
         return seasons.stream()
                 .filter(Objects::nonNull)
-                .map(TmdbSeasonFullDetails::episodes)
-                .filter(Objects::nonNull)
-                .flatMap(List::stream)
+                .flatMap(season -> runtimesOf(season.episodes()).stream())
+                .toList();
+    }
+
+    private List<Integer> runtimesOf(List<TmdbEpisodeSummary> episodes) {
+        if (episodes == null) {
+            return List.of();
+        }
+        return episodes.stream()
                 .map(TmdbEpisodeSummary::runtime)
                 .filter(Objects::nonNull)
                 .toList();
+    }
+
+    private Integer numberOfEpisodes(List<TmdbEpisodeSummary> episodes) {
+        return episodes == null ? null : episodes.size();
     }
 
     private Integer totalRuntimeMinutes(List<Integer> episodeRuntimes) {

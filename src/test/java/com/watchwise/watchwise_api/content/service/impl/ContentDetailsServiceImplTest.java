@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateRole;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAlternativeTitleEntry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCreator;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieAlternativeTitles;
@@ -186,17 +187,17 @@ class ContentDetailsServiceImplTest {
                 null, null, null, null, 3, 5)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
-                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null),
-                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null)),
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
+                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
                 null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 102, "Season 2", null, null, "2009-03-08", 2, List.of(
-                        new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null),
-                        new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null)),
+                        new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null, null),
+                        new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null, null)),
                 null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 103, "Season 3", null, null, "2010-01-01", 3, List.of(
-                        new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null)),
+                        new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null, null)),
                 null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
@@ -246,17 +247,17 @@ class ContentDetailsServiceImplTest {
                 null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
-                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null),
-                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null)),
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
+                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
                 null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 102, "Season 2", null, null, "2009-03-08", 2, List.of(
-                        new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null),
-                        new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null)),
+                        new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null, null),
+                        new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null, null)),
                 null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 103, "Season 3", null, null, "2010-01-01", 3, List.of(
-                        new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null)),
+                        new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null, null)),
                 null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
@@ -281,7 +282,7 @@ class ContentDetailsServiceImplTest {
                 null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
-                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null)),
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null)),
                 null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
@@ -306,7 +307,7 @@ class ContentDetailsServiceImplTest {
                 null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("2316", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 201, "Season 1", null, null, "2005-03-24", 1,
-                List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2005-03-24", null, null)),
+                List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2005-03-24", null, null, null)),
                 null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
@@ -324,8 +325,8 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
-                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null),
-                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null)),
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
+                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
                 new TmdbAggregateCredits(List.of(new TmdbAggregateCastMember(
                         17419, "Bryan Cranston", "/cranston.jpg",
                         List.of(new TmdbAggregateRole("Walter White")), 2))),
@@ -344,6 +345,59 @@ class ContentDetailsServiceImplTest {
         assertThat(result.title()).isEqualTo("Season 1");
         assertThat(result.cast()).extracting("id", "name", "character", "episodeCount")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(17419, "Bryan Cranston", "Walter White", 2));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return RuntimeMinutes, TotalRuntimeMinutes, NumberOfEpisodes And Creators - When Content Is A Season")
+    void shouldReturnRuntimeMinutesTotalRuntimeMinutesNumberOfEpisodesAndCreatorsWhenContentIsASeason() {
+        UUID contentId = UUID.randomUUID();
+        Content season = Content.builder().id(contentId).type(ContentType.SEASON)
+                .seriesTmdbId("1396").seasonNumber(1).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
+                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
+                null, null)));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), List.of(new TmdbCreator(9181, "Vince Gilligan", "/gilligan.jpg")),
+                List.of(), null, null, null, null, null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.numberOfEpisodes()).isEqualTo(2);
+        assertThat(result.totalRuntimeMinutes()).isEqualTo(106);
+        assertThat(result.runtimeMinutes()).isEqualTo(53);
+        assertThat(result.creators()).extracting("name", "profilePath")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("Vince Gilligan", "/gilligan.jpg"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Aggregate Guest Stars Across Episodes With Per-Season Episode Count - When Content Is A Season")
+    void shouldAggregateGuestStarsAcrossEpisodesWithPerSeasonEpisodeCountWhenContentIsASeason() {
+        UUID contentId = UUID.randomUUID();
+        Content season = Content.builder().id(contentId).type(ContentType.SEASON)
+                .seriesTmdbId("1396").seasonNumber(1).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null,
+                                List.of(new TmdbGuestStar(500, "Guest One", "Neighbor", "/guest1.jpg"))),
+                        new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null,
+                                List.of(new TmdbGuestStar(500, "Guest One", "Neighbor", "/guest1.jpg"),
+                                        new TmdbGuestStar(501, "Guest Two", "Cop", "/guest2.jpg")))),
+                null, null)));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null, List.of(), null, null, null, null, null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.guestStars()).extracting("id", "name", "character", "episodeCount")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(500, "Guest One", "Neighbor", 2),
+                        org.assertj.core.groups.Tuple.tuple(501, "Guest Two", "Cop", 1));
     }
 
     @Test
