@@ -43,7 +43,11 @@ import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -235,6 +239,32 @@ class ContentDetailsServiceImplTest {
                 org.assertj.core.groups.Tuple.tuple(3, 1),
                 org.assertj.core.groups.Tuple.tuple(2, 1),
                 org.assertj.core.groups.Tuple.tuple(1, 2));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Exclude Specials Season Zero From Recent Episodes And Runtime - When Content Is A Series")
+    void shouldExcludeSpecialsSeasonZeroFromRecentEpisodesAndRuntimeWhenContentIsASeries() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(0, "Specials", null, "2099-01-01", 1, null),
+                        new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)),
+                null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                101, "Season 1", null, null, "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null)),
+                null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.recentEpisodes()).extracting("seasonNumber", "episodeNumber")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, 1));
+        assertThat(result.totalRuntimeMinutes()).isEqualTo(58);
+        assertThat(result.runtimeMinutes()).isEqualTo(58);
+        verify(tmdbClient, never()).getSeasonFullDetails(eq("1396"), eq(0), any());
     }
 
     @Test

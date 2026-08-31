@@ -321,6 +321,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return List.of();
         }
         List<CompletableFuture<Optional<TmdbSeasonFullDetails>>> futures = seasons.stream()
+                .filter(season -> !Integer.valueOf(0).equals(season.seasonNumber()))
                 .map(season -> CompletableFuture.supplyAsync(
                         () -> tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(), language),
                         tmdbSeasonFetchExecutor))
