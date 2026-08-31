@@ -172,8 +172,8 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDetails] Should Sum And Average Episode Runtimes And Return Number Of Seasons And Episodes - When Content Is A Series")
-    void shouldSumAndAverageEpisodeRuntimesAndReturnNumberOfSeasonsAndEpisodesWhenContentIsASeries() {
+    @DisplayName("[getDetails] Should Return Runtime Totals, Number Of Seasons/Episodes And Aired Episode Count Per Season - When Content Is A Series")
+    void shouldReturnRuntimeTotalsNumberOfSeasonsEpisodesAndAiredEpisodeCountPerSeasonWhenContentIsASeries() {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
@@ -205,6 +205,30 @@ class ContentDetailsServiceImplTest {
         assertThat(result.runtimeMinutes()).isEqualTo(Math.round((58 + 48 + 47 + 45 + 50) / 5.0));
         assertThat(result.numberOfSeasons()).isEqualTo(3);
         assertThat(result.numberOfEpisodes()).isEqualTo(5);
+        assertThat(result.seasons()).extracting("seasonNumber", "episodeCount", "airedEpisodeCount")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(1, 2, 2),
+                        org.assertj.core.groups.Tuple.tuple(2, 2, 1),
+                        org.assertj.core.groups.Tuple.tuple(3, 1, 1));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Null Aired Episode Count - When That Season's Full Details Failed To Fetch")
+    void shouldReturnNullAiredEpisodeCountWhenThatSeasonsFullDetailsFailedToFetch() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 7, null)),
+                null, null, null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.empty());
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.seasons()).extracting("seasonNumber", "episodeCount", "airedEpisodeCount")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, 7, null));
     }
 
     @Test

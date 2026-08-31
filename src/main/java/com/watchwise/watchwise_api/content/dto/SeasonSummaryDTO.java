@@ -7,5 +7,6 @@ public record SeasonSummaryDTO(
         String name,
         String posterPath,
         LocalDate airDate,
-        Integer episodeCount) {
+        Integer episodeCount,
+        Integer airedEpisodeCount) {
 }

@@ -42,11 +42,14 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -147,7 +150,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 creators(details.createdBy()),
                 watchProviders(details.watchProviders(), region),
-                seasonSummaries(details.seasons()),
+                seasonSummaries(details.seasons(), allSeasons),
                 null,
                 recentlyAiredEpisodes(allSeasons));
     }
@@ -297,15 +300,31 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .toList();
     }
 
-    private List<SeasonSummaryDTO> seasonSummaries(List<TmdbSeasonSummary> seasons) {
+    private List<SeasonSummaryDTO> seasonSummaries(List<TmdbSeasonSummary> seasons, List<TmdbSeasonFullDetails> allSeasons) {
         if (seasons == null) {
             return List.of();
         }
+        Map<Integer, TmdbSeasonFullDetails> fullDetailsBySeasonNumber = allSeasons.stream()
+                .filter(season -> season.seasonNumber() != null)
+                .collect(Collectors.toMap(TmdbSeasonFullDetails::seasonNumber, Function.identity(), (a, b) -> a));
+        LocalDate today = LocalDate.now();
         return seasons.stream()
                 .map(season -> new SeasonSummaryDTO(
                         season.seasonNumber(), season.name(), season.posterPath(),
-                        parseDate(season.airDate()), season.episodeCount()))
+                        parseDate(season.airDate()), season.episodeCount(),
+                        airedEpisodeCount(fullDetailsBySeasonNumber.get(season.seasonNumber()), today)))
                 .toList();
+    }
+
+    private Integer airedEpisodeCount(TmdbSeasonFullDetails season, LocalDate today) {
+        if (season == null || season.episodes() == null) {
+            return null;
+        }
+        return (int) season.episodes().stream()
+                .map(TmdbEpisodeSummary::airDate)
+                .map(this::parseDate)
+                .filter(airDate -> airDate != null && !airDate.isAfter(today))
+                .count();
     }
 
     private List<EpisodeSummaryDTO> episodeSummaries(Integer seasonNumber, List<TmdbEpisodeSummary> episodes) {
