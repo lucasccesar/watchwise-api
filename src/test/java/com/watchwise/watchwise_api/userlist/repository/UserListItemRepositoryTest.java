@@ -30,6 +30,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -501,18 +502,21 @@ class UserListItemRepositoryTest {
     @Test
     @DisplayName("[findDistinctContentTypesByUserListIdIn] Should Group Types By Their Own List - When Multiple Lists Are Requested")
     void shouldGroupTypesByTheirOwnListWhenMultipleListsAreRequestedForDistinctTypes() {
+        Content episode = contentRepository.save(buildEpisodeContent("1396", 1, 1));
         UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
         userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
-        userListItemRepository.saveAndFlush(buildContentItem(horror, pulpFiction, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(horror, episode, 1));
         entityManager.clear();
 
         List<UserListItemRepository.UserListContentType> result = userListItemRepository
                 .findDistinctContentTypesByUserListIdIn(List.of(scifi.getId(), horror.getId()));
 
-        assertThat(result).extracting(UserListItemRepository.UserListContentType::getUserListId)
-                .containsExactlyInAnyOrder(scifi.getId(), horror.getId());
-        assertThat(result).extracting(UserListItemRepository.UserListContentType::getType)
-                .containsOnly(ContentType.MOVIE);
+        assertThat(result).extracting(
+                UserListItemRepository.UserListContentType::getUserListId,
+                UserListItemRepository.UserListContentType::getType)
+                .containsExactlyInAnyOrder(
+                        tuple(scifi.getId(), ContentType.MOVIE),
+                        tuple(horror.getId(), ContentType.EPISODE));
     }
 
     private UserListItem buildContentItem(UserList userList, Content content, Integer position) {
