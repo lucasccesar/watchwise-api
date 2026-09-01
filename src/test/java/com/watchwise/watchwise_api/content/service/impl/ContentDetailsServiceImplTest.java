@@ -5,20 +5,26 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewJob;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateRole;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAlternativeTitleEntry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCreator;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieAlternativeTitles;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProvider;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbVideo;
+import com.watchwise.watchwise_api.common.tmdb.TmdbVideos;
 import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -34,6 +40,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -425,6 +432,100 @@ class ContentDetailsServiceImplTest {
         assertThat(result.title()).isEqualTo("Pilot");
         assertThat(result.guestStars()).extracting("name").containsExactly("John Doe");
         assertThat(result.watchProviders()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Budget Revenue Production Companies Crew And Videos - When Content Is A Movie")
+    void shouldReturnBudgetRevenueProductionCompaniesCrewAndVideosWhenContentIsAMovie() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
+                new com.watchwise.watchwise_api.common.tmdb.TmdbCredits(List.of(), List.of(
+                        new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
+                        new TmdbCrewMember(11, "Best Boy Grip", "Best Boy Grip", null))),
+                null, null,
+                63000000L, 463500000L,
+                List.of(new TmdbProductionCompany(79, "Village Roadshow Pictures", "/village.png", "US")),
+                new TmdbVideos(List.of(new TmdbVideo("vKQi3bBA1y8", "Trailer", "YouTube", "Trailer", true, "en",
+                        "1999-03-01T00:00:00.000Z"))))));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.budget()).isEqualTo(63000000L);
+        assertThat(result.revenue()).isEqualTo(463500000L);
+        assertThat(result.productionCompanies()).extracting("id", "name", "logoPath", "originCountry")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(79, "Village Roadshow Pictures", "/village.png", "US"));
+        assertThat(result.crew()).extracting("id", "name", "profilePath", "jobs")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(10, "Lana Wachowski", "/lana.jpg", List.of("Director")));
+        assertThat(result.videos()).extracting("key", "name", "site", "type", "official", "language", "publishedAt")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        "vKQi3bBA1y8", "Trailer", "YouTube", "Trailer", true, "en", Instant.parse("1999-03-01T00:00:00.000Z")));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Null Budget And Revenue - When TMDB Reports Them As Zero")
+    void shouldReturnNullBudgetAndRevenueWhenTmdbReportsThemAsZero() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(), null, null, null,
+                0L, 0L, null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.budget()).isNull();
+        assertThat(result.revenue()).isNull();
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Group Multiple Matching Jobs For The Same Crew Member - When Content Is A Movie")
+    void shouldGroupMultipleMatchingJobsForTheSameCrewMemberWhenContentIsAMovie() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
+                new com.watchwise.watchwise_api.common.tmdb.TmdbCredits(List.of(), List.of(
+                        new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
+                        new TmdbCrewMember(10, "Lana Wachowski", "Screenplay", "/lana.jpg"))),
+                null, null, null, null, null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.crew()).extracting("id", "jobs")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(10, List.of("Director", "Screenplay")));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Production Companies Aggregate Crew And Videos But Null Budget And Revenue - When Content Is A Series")
+    void shouldReturnProductionCompaniesAggregateCrewAndVideosButNullBudgetAndRevenueWhenContentIsASeries() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null, List.of(), null,
+                new TmdbAggregateCredits(List.of(), List.of(
+                        new TmdbAggregateCrewMember(66633, "Vince Gilligan", "/vince.jpg",
+                                List.of(new TmdbAggregateCrewJob("Director"), new TmdbAggregateCrewJob("Executive Producer"))),
+                        new TmdbAggregateCrewMember(99999, "Random Grip", null, List.of(new TmdbAggregateCrewJob("Grip"))))),
+                null, null, null, null,
+                List.of(new TmdbProductionCompany(11073, "Sony Pictures Television", "/sony.png", "US")),
+                new TmdbVideos(List.of(new TmdbVideo("abc123", "Official Trailer", "YouTube", "Trailer", true, "en",
+                        "2008-01-01T00:00:00.000Z"))))));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.budget()).isNull();
+        assertThat(result.revenue()).isNull();
+        assertThat(result.productionCompanies()).extracting("id", "name")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(11073, "Sony Pictures Television"));
+        assertThat(result.crew()).extracting("id", "jobs")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(66633, List.of("Director", "Executive Producer")));
+        assertThat(result.videos()).extracting("key", "name").containsExactly(org.assertj.core.groups.Tuple.tuple("abc123", "Official Trailer"));
     }
 
     @Test
