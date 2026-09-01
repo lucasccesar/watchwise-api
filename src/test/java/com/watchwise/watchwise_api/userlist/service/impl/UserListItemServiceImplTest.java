@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
@@ -424,6 +425,79 @@ class UserListItemServiceImplTest {
     @DisplayName("[getWatchedPercentagesByListIds] Should Return Empty Map - When No List Ids Are Given")
     void shouldReturnEmptyMapWhenNoListIdsAreGivenForWatchedPercentages() {
         Map<UUID, Double> result = userListItemService.getWatchedPercentagesByListIds(List.of(), lucasId);
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userListItemRepository);
+    }
+
+    // ---------- getItemScope / getItemScopeByListIds ----------
+
+    @Test
+    @DisplayName("[getItemScope] Should Return Null - When List Has No Items")
+    void shouldReturnNullWhenListHasNoItemsForItemScope() {
+        when(userListItemRepository.countNestedListsByUserListIdIn(List.of(listId))).thenReturn(List.of());
+        when(userListItemRepository.findDistinctContentTypesByUserListIdIn(List.of(listId))).thenReturn(List.of());
+
+        UserListItemScope result = userListItemService.getItemScope(listId);
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    @DisplayName("[getItemScope] Should Return MovieOrSeries - When List Only Has Movies And Series")
+    void shouldReturnMovieOrSeriesWhenListOnlyHasMoviesAndSeries() {
+        when(userListItemRepository.countNestedListsByUserListIdIn(List.of(listId))).thenReturn(List.of());
+        when(userListItemRepository.findDistinctContentTypesByUserListIdIn(List.of(listId))).thenReturn(List.of(
+                buildUserListContentType(listId, ContentType.MOVIE), buildUserListContentType(listId, ContentType.SERIES)));
+
+        UserListItemScope result = userListItemService.getItemScope(listId);
+
+        assertThat(result).isEqualTo(UserListItemScope.MOVIE_OR_SERIES);
+    }
+
+    @Test
+    @DisplayName("[getItemScope] Should Return List - When List Only Has Nested Lists")
+    void shouldReturnListWhenListOnlyHasNestedLists() {
+        when(userListItemRepository.countNestedListsByUserListIdIn(List.of(listId)))
+                .thenReturn(List.of(buildUserListCount(listId, 1L)));
+        when(userListItemRepository.findDistinctContentTypesByUserListIdIn(List.of(listId))).thenReturn(List.of());
+
+        UserListItemScope result = userListItemService.getItemScope(listId);
+
+        assertThat(result).isEqualTo(UserListItemScope.LIST);
+    }
+
+    @Test
+    @DisplayName("[getItemScope] Should Return Mixed - When List Has Items From More Than One Content Type Group")
+    void shouldReturnMixedWhenListHasItemsFromMoreThanOneContentTypeGroup() {
+        when(userListItemRepository.countNestedListsByUserListIdIn(List.of(listId))).thenReturn(List.of());
+        when(userListItemRepository.findDistinctContentTypesByUserListIdIn(List.of(listId))).thenReturn(List.of(
+                buildUserListContentType(listId, ContentType.MOVIE), buildUserListContentType(listId, ContentType.EPISODE)));
+
+        UserListItemScope result = userListItemService.getItemScope(listId);
+
+        assertThat(result).isEqualTo(UserListItemScope.MIXED);
+    }
+
+    @Test
+    @DisplayName("[getItemScopeByListIds] Should Resolve Each List's Scope Independently - When Multiple Lists Are Requested")
+    void shouldResolveEachListsScopeIndependentlyWhenMultipleListsAreRequested() {
+        UUID nestedListId = UUID.randomUUID();
+        when(userListItemRepository.countNestedListsByUserListIdIn(List.of(listId, nestedListId)))
+                .thenReturn(List.of(buildUserListCount(nestedListId, 1L)));
+        when(userListItemRepository.findDistinctContentTypesByUserListIdIn(List.of(listId, nestedListId)))
+                .thenReturn(List.of(buildUserListContentType(listId, ContentType.EPISODE)));
+
+        Map<UUID, UserListItemScope> result = userListItemService.getItemScopeByListIds(List.of(listId, nestedListId));
+
+        assertThat(result.get(listId)).isEqualTo(UserListItemScope.EPISODE);
+        assertThat(result.get(nestedListId)).isEqualTo(UserListItemScope.LIST);
+    }
+
+    @Test
+    @DisplayName("[getItemScopeByListIds] Should Return Empty Map - When No List Ids Are Given")
+    void shouldReturnEmptyMapWhenNoListIdsAreGivenForItemScope() {
+        Map<UUID, UserListItemScope> result = userListItemService.getItemScopeByListIds(List.of());
 
         assertThat(result).isEmpty();
         verifyNoInteractions(userListItemRepository);
@@ -1558,6 +1632,20 @@ class UserListItemServiceImplTest {
             @Override
             public long getCount() {
                 return count;
+            }
+        };
+    }
+
+    private UserListItemRepository.UserListContentType buildUserListContentType(UUID userListId, ContentType type) {
+        return new UserListItemRepository.UserListContentType() {
+            @Override
+            public UUID getUserListId() {
+                return userListId;
+            }
+
+            @Override
+            public ContentType getType() {
+                return type;
             }
         };
     }

@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 
 import java.util.Collection;
 import java.util.List;
@@ -34,6 +35,10 @@ public interface UserListItemService {
     long getTotalRuntimeMinutes(UUID listId);
 
     Map<UUID, Long> getTotalRuntimeMinutesByListIds(Collection<UUID> listIds);
+
+    UserListItemScope getItemScope(UUID listId);
+
+    Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds);
 
     UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO);
 

@@ -32,9 +32,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -186,6 +188,38 @@ public class UserListItemServiceImpl implements UserListItemService {
                 .collect(Collectors.toMap(
                         UserListItemRepository.UserListSum::getUserListId,
                         UserListItemRepository.UserListSum::getTotal));
+    }
+
+    @Override
+    public UserListItemScope getItemScope(UUID listId) {
+        return getItemScopeByListIds(List.of(listId)).get(listId);
+    }
+
+    @Override
+    public Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds) {
+        if (listIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Set<UUID> nestedListLockedIds = userListItemRepository.countNestedListsByUserListIdIn(listIds).stream()
+                .map(UserListItemRepository.UserListCount::getUserListId)
+                .collect(Collectors.toSet());
+
+        Map<UUID, Set<ContentType>> contentTypesByListId = new LinkedHashMap<>();
+        for (UserListItemRepository.UserListContentType row : userListItemRepository.findDistinctContentTypesByUserListIdIn(listIds)) {
+            contentTypesByListId.computeIfAbsent(row.getUserListId(), id -> new HashSet<>()).add(row.getType());
+        }
+
+        Map<UUID, UserListItemScope> scopeByListId = new LinkedHashMap<>();
+        for (UUID listId : listIds) {
+            boolean hasNestedLists = nestedListLockedIds.contains(listId);
+            Set<ContentType> types = contentTypesByListId.getOrDefault(listId, Set.of());
+            UserListItemScope scope = UserListItemScope.resolve(types, hasNestedLists);
+            if (scope != null) {
+                scopeByListId.put(listId, scope);
+            }
+        }
+        return scopeByListId;
     }
 
     @Override
