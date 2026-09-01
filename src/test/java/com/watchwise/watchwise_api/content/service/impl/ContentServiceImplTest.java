@@ -980,6 +980,26 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Backfill RuntimeMinutes On The Existing Content - When It Was Never Set Before")
+    void shouldBackfillRuntimeMinutesOnTheExistingContentWhenItWasNeverSetBefore() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null, 139, null);
+        Content existing = Content.builder().id(existingId).tmdbId("100").type(ContentType.MOVIE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "100", ContentType.MOVIE, null, null, null, null, null, null, null, 139, null);
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getRuntimeMinutes()).isEqualTo(139);
+        verify(contentRepository).saveAndFlush(existing);
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Accept Genres - When Type Is Series")
     void shouldAcceptGenresWhenTypeIsSeries() {
         List<String> genres = List.of("Drama", "Thriller");
@@ -1035,6 +1055,27 @@ class ContentServiceImplTest {
                 .hasMessage("This content is already registered with a different genres value");
 
         verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Backfill Genres On The Existing Content - When It Was Never Set Before")
+    void shouldBackfillGenresOnTheExistingContentWhenItWasNeverSetBefore() {
+        UUID existingId = UUID.randomUUID();
+        List<String> genres = List.of("Drama", "Thriller");
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, genres);
+        Content existing = Content.builder().id(existingId).tmdbId("300").type(ContentType.SERIES).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "300", ContentType.SERIES, null, null, null, null, null, null, null, null, genres);
+
+        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getGenres()).isEqualTo(genres);
+        verify(contentRepository).saveAndFlush(existing);
     }
 
     @Test
@@ -1101,6 +1142,26 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Backfill ReleaseYear On The Existing Content - When It Was Never Set Before")
+    void shouldBackfillReleaseYearOnTheExistingContentWhenItWasNeverSetBefore() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("301", ContentType.MOVIE, null, null, null, null, null, null, null, 1999, null);
+        Content existing = Content.builder().id(existingId).tmdbId("301").type(ContentType.MOVIE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "301", ContentType.MOVIE, null, null, null, null, null, null, null, null, null, 1999, null);
+
+        when(contentRepository.findByTmdbIdAndType("301", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getReleaseYear()).isEqualTo(1999);
+        verify(contentRepository).saveAndFlush(existing);
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different Countries Value")
     void shouldThrowConflictExceptionWhenExistingContentHasADifferentCountriesValue() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO("302", ContentType.SERIES, null, null, null, null, null, null, null, null, List.of("US"));
@@ -1113,6 +1174,26 @@ class ContentServiceImplTest {
                 .hasMessage("This content is already registered with a different countries value");
 
         verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Backfill Countries On The Existing Content - When It Was Never Set Before")
+    void shouldBackfillCountriesOnTheExistingContentWhenItWasNeverSetBefore() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("302", ContentType.SERIES, null, null, null, null, null, null, null, null, List.of("US"));
+        Content existing = Content.builder().id(existingId).tmdbId("302").type(ContentType.SERIES).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "302", ContentType.SERIES, null, null, null, null, null, null, null, null, null, null, List.of("US"));
+
+        when(contentRepository.findByTmdbIdAndType("302", ContentType.SERIES)).thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getCountries()).isEqualTo(List.of("US"));
+        verify(contentRepository).saveAndFlush(existing);
     }
 
     @Test

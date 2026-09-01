@@ -128,7 +128,14 @@ public class ContentServiceImpl implements ContentService {
 
         boolean backfillSeasonFinale = existing.getIsSeasonFinale() == null && Boolean.TRUE.equals(normalized.isSeasonFinale());
         boolean backfillSeriesFinale = existing.getIsSeriesFinale() == null && Boolean.TRUE.equals(normalized.isSeriesFinale());
-        if (!backfillSeasonFinale && !backfillSeriesFinale) {
+        boolean backfillRuntimeMinutes = existing.getRuntimeMinutes() == null && normalized.runtimeMinutes() != null;
+        boolean backfillGenres = (existing.getGenres() == null || existing.getGenres().isEmpty())
+                && normalized.genres() != null && !normalized.genres().isEmpty();
+        boolean backfillReleaseYear = existing.getReleaseYear() == null && normalized.releaseYear() != null;
+        boolean backfillCountries = (existing.getCountries() == null || existing.getCountries().isEmpty())
+                && normalized.countries() != null && !normalized.countries().isEmpty();
+        if (!backfillSeasonFinale && !backfillSeriesFinale && !backfillRuntimeMinutes
+                && !backfillGenres && !backfillReleaseYear && !backfillCountries) {
             return existing;
         }
 
@@ -145,6 +152,18 @@ public class ContentServiceImpl implements ContentService {
                         clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
                     }
                     fresh.setIsSeriesFinale(true);
+                }
+                if (backfillRuntimeMinutes) {
+                    fresh.setRuntimeMinutes(normalized.runtimeMinutes());
+                }
+                if (backfillGenres) {
+                    fresh.setGenres(normalized.genres());
+                }
+                if (backfillReleaseYear) {
+                    fresh.setReleaseYear(normalized.releaseYear());
+                }
+                if (backfillCountries) {
+                    fresh.setCountries(normalized.countries());
                 }
                 fresh.setUpdatedAt(LocalDateTime.now());
                 return contentRepository.saveAndFlush(fresh);
@@ -163,16 +182,22 @@ public class ContentServiceImpl implements ContentService {
                 && !normalized.isSeriesFinale().equals(existing.getIsSeriesFinale())) {
             throw new ConflictException("This content is already registered with a different isSeriesFinale value");
         }
-        if (normalized.runtimeMinutes() != null && !normalized.runtimeMinutes().equals(existing.getRuntimeMinutes())) {
+        if (normalized.runtimeMinutes() != null && existing.getRuntimeMinutes() != null
+                && !normalized.runtimeMinutes().equals(existing.getRuntimeMinutes())) {
             throw new ConflictException("This content is already registered with a different runtimeMinutes value");
         }
-        if (normalized.genres() != null && !normalized.genres().isEmpty() && !normalized.genres().equals(existing.getGenres())) {
+        if (normalized.genres() != null && !normalized.genres().isEmpty()
+                && existing.getGenres() != null && !existing.getGenres().isEmpty()
+                && !normalized.genres().equals(existing.getGenres())) {
             throw new ConflictException("This content is already registered with a different genres value");
         }
-        if (normalized.releaseYear() != null && !normalized.releaseYear().equals(existing.getReleaseYear())) {
+        if (normalized.releaseYear() != null && existing.getReleaseYear() != null
+                && !normalized.releaseYear().equals(existing.getReleaseYear())) {
             throw new ConflictException("This content is already registered with a different releaseYear value");
         }
-        if (normalized.countries() != null && !normalized.countries().isEmpty() && !normalized.countries().equals(existing.getCountries())) {
+        if (normalized.countries() != null && !normalized.countries().isEmpty()
+                && existing.getCountries() != null && !existing.getCountries().isEmpty()
+                && !normalized.countries().equals(existing.getCountries())) {
             throw new ConflictException("This content is already registered with a different countries value");
         }
     }
