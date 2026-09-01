@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateRole;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAlternativeTitleEntry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCreator;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
@@ -506,7 +507,7 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
-                new com.watchwise.watchwise_api.common.tmdb.TmdbCredits(List.of(), List.of(
+                new TmdbCredits(List.of(), List.of(
                         new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
                         new TmdbCrewMember(11, "Best Boy Grip", "Best Boy Grip", null))),
                 null, null,
@@ -552,7 +553,7 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
-                new com.watchwise.watchwise_api.common.tmdb.TmdbCredits(List.of(), List.of(
+                new TmdbCredits(List.of(), List.of(
                         new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
                         new TmdbCrewMember(10, "Lana Wachowski", "Screenplay", "/lana.jpg"))),
                 null, null, null, null, null, null)));
@@ -571,7 +572,7 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
-                new com.watchwise.watchwise_api.common.tmdb.TmdbCredits(List.of(), List.of(
+                new TmdbCredits(List.of(), List.of(
                         new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
                         new TmdbCrewMember(20, "Unknown Role", null, "/unknown.jpg"))),
                 null, null, null, null, null, null)));
