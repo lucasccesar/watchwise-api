@@ -363,7 +363,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         }
         Map<Integer, CrewAccumulator> accumulators = new LinkedHashMap<>();
         for (TmdbCrewMember member : credits.crew()) {
-            if (!ALLOWED_CREW_JOBS.contains(member.job())) {
+            if (member.job() == null || !ALLOWED_CREW_JOBS.contains(member.job())) {
                 continue;
             }
             accumulators.computeIfAbsent(member.id(), id -> new CrewAccumulator(id, member.name(), member.profilePath()))
@@ -382,7 +382,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         for (TmdbAggregateCrewMember member : credits.crew()) {
             List<String> matchingJobs = member.jobs() == null
                     ? List.of()
-                    : member.jobs().stream().map(TmdbAggregateCrewJob::job).filter(ALLOWED_CREW_JOBS::contains).toList();
+                    : member.jobs().stream().map(TmdbAggregateCrewJob::job)
+                            .filter(Objects::nonNull).filter(ALLOWED_CREW_JOBS::contains).toList();
             if (!matchingJobs.isEmpty()) {
                 result.add(new CrewMemberDTO(member.id(), member.name(), member.profilePath(), matchingJobs));
             }

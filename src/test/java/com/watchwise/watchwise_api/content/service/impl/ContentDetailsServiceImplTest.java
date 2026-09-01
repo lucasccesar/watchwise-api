@@ -500,6 +500,25 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDetails] Should Silently Exclude Crew Member With Null Job - When Content Is A Movie")
+    void shouldSilentlyExcludeCrewMemberWithNullJobWhenContentIsAMovie() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
+                new com.watchwise.watchwise_api.common.tmdb.TmdbCredits(List.of(), List.of(
+                        new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
+                        new TmdbCrewMember(20, "Unknown Role", null, "/unknown.jpg"))),
+                null, null, null, null, null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.crew()).extracting("id", "jobs")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(10, List.of("Director")));
+    }
+
+    @Test
     @DisplayName("[getDetails] Should Return Production Companies Aggregate Crew And Videos But Null Budget And Revenue - When Content Is A Series")
     void shouldReturnProductionCompaniesAggregateCrewAndVideosButNullBudgetAndRevenueWhenContentIsASeries() {
         UUID contentId = UUID.randomUUID();
@@ -526,6 +545,26 @@ class ContentDetailsServiceImplTest {
         assertThat(result.crew()).extracting("id", "jobs")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(66633, List.of("Director", "Executive Producer")));
         assertThat(result.videos()).extracting("key", "name").containsExactly(org.assertj.core.groups.Tuple.tuple("abc123", "Official Trailer"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Filter Out Null Job And Keep Only Matching Jobs For Aggregate Crew Member - When Content Is A Series")
+    void shouldFilterOutNullJobAndKeepOnlyMatchingJobsForAggregateCrewMemberWhenContentIsASeries() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null, List.of(), null,
+                new TmdbAggregateCredits(List.of(), List.of(
+                        new TmdbAggregateCrewMember(66633, "Vince Gilligan", "/vince.jpg",
+                                List.of(new TmdbAggregateCrewJob(null), new TmdbAggregateCrewJob("Director"))))),
+                null, null, null, null, null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.crew()).extracting("id", "jobs")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(66633, List.of("Director")));
     }
 
     @Test
