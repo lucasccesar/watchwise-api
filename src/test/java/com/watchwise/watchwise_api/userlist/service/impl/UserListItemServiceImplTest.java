@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -448,6 +449,74 @@ class UserListItemServiceImplTest {
         assertThat(itemCaptor.getValue().getPosition()).isEqualTo(1);
         assertThat(itemCaptor.getValue().getContent()).isEqualTo(fightClub);
         assertThat(itemCaptor.getValue().getChildList()).isNull();
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Throw BadRequestException - When Inserting An Episode Into A List That Already Has A Movie")
+    void shouldThrowBadRequestExceptionWhenInsertingAnEpisodeIntoAListThatAlreadyHasAMovie() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of(ContentType.MOVIE));
+
+        assertThatThrownBy(() -> userListItemService.addItem(
+                lucasId, listId, new UserListItemCreationDTO(episodeRefCreation("1396", 1, 1), null, null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("different content type group");
+
+        verifyNoInteractions(contentService);
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Insert A Series - When List Already Has A Movie")
+    void shouldInsertASeriesWhenListAlreadyHasAMovie() {
+        Content theWire = buildContent("1438", ContentType.SERIES);
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of(ContentType.MOVIE));
+        stubContentResolution(theWire, ContentType.SERIES);
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(1L);
+        when(contentRepository.getReferenceById(theWire.getId())).thenReturn(theWire);
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userListItemService.addItem(lucasId, listId,
+                new UserListItemCreationDTO(new ContentRefCreationDTO("1438", ContentType.SERIES, null, null, null, null, null), null, null, null));
+
+        verify(userListItemRepository).save(itemCaptor.capture());
+        assertThat(itemCaptor.getValue().getContent()).isEqualTo(theWire);
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Allow Any Type - When List Has No Content Items Yet")
+    void shouldAllowAnyTypeWhenListHasNoContentItemsYet() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of());
+        stubContentResolution(fightClub, ContentType.MOVIE);
+        when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        userListItemService.addItem(lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, null, null));
+
+        verify(userListItemRepository).save(itemCaptor.capture());
+        assertThat(itemCaptor.getValue().getContent()).isEqualTo(fightClub);
+    }
+
+    @Test
+    @DisplayName("[addItems] Should Throw BadRequestException - When A Later Item In The Same Payload Violates The Group Established By An Earlier Item")
+    void shouldThrowBadRequestExceptionWhenALaterItemInTheSamePayloadViolatesTheGroupEstablishedByAnEarlierItem() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
+        when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of());
+        stubContentResolution(fightClub, ContentType.MOVIE);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+
+        assertThatThrownBy(() -> userListItemService.addItems(lucasId, listId,
+                new UserListItemBulkCreationDTO(List.of(contentRefCreation("550"), episodeRefCreation("1396", 1, 1)))))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("different content type group");
+
+        verify(contentService, never()).getOrCreateReference(episodeRefCreation("1396", 1, 1));
     }
 
     @Test
@@ -1392,6 +1461,10 @@ class UserListItemServiceImplTest {
 
     private ContentRefCreationDTO contentRefCreation(String tmdbId) {
         return new ContentRefCreationDTO(tmdbId, ContentType.MOVIE, null, null, null, null, null);
+    }
+
+    private ContentRefCreationDTO episodeRefCreation(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        return new ContentRefCreationDTO(null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber, null, null);
     }
 
     private UserListItemResponseDTO buildResponseDto() {

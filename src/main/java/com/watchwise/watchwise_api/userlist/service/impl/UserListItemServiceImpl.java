@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -14,6 +15,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
@@ -49,6 +51,18 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final UserListItemMapper userListItemMapper;
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
+
+    private UserListItemScope resolveExistingContentScope(UUID listId) {
+        return UserListItemScope.resolve(userListItemRepository.findDistinctContentTypesByUserListId(listId), false);
+    }
+
+    private void assertContentTypeGroupMatches(UserListItemScope lockedScope, ContentType candidateType) {
+        UserListItemScope candidateScope = UserListItemScope.forContentType(candidateType);
+        if (lockedScope != null && lockedScope != candidateScope) {
+            throw new BadRequestException(
+                    "This list already contains items of a different content type group and cannot also contain " + candidateType);
+        }
+    }
 
     @Override
     public List<UserListItemResponseDTO> getItems(UUID viewerId, UUID listId) {
@@ -189,6 +203,7 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         if (userListItemCreationDTO.content() != null) {
             assertListIsNotLockedAsListOfLists(listId);
+            assertContentTypeGroupMatches(resolveExistingContentScope(listId), userListItemCreationDTO.content().type());
             ContentRefDTO contentRef = contentService.getOrCreateReference(userListItemCreationDTO.content());
             builder.content(contentRepository.getReferenceById(contentRef.id()));
             builder.customPosterUrl(userListItemCreationDTO.customPosterUrl());
@@ -212,12 +227,17 @@ public class UserListItemServiceImpl implements UserListItemService {
     public List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
         UserList userList = findOwnedList(userId, listId);
         assertListIsNotLockedAsListOfLists(listId);
+        UserListItemScope lockedScope = resolveExistingContentScope(listId);
 
         int position = (int) userListItemRepository.countByUserListId(listId) + 1;
         LocalDateTime now = LocalDateTime.now();
 
         List<UserListItem> newItems = new ArrayList<>();
         for (ContentRefCreationDTO content : userListItemBulkCreationDTO.items()) {
+            assertContentTypeGroupMatches(lockedScope, content.type());
+            if (lockedScope == null) {
+                lockedScope = UserListItemScope.forContentType(content.type());
+            }
             ContentRefDTO contentRef = contentService.getOrCreateReference(content);
             newItems.add(UserListItem.builder()
                     .userList(userList)
