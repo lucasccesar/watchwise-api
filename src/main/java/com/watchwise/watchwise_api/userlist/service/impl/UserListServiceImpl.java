@@ -123,7 +123,8 @@ public class UserListServiceImpl implements UserListService {
         Map<UUID, Long> itemsCountByListId = userListItemService.getItemsCountByListIds(listIds);
         Map<UUID, Long> totalRuntimeMinutesByListId = userListItemService.getTotalRuntimeMinutesByListIds(listIds);
         Map<UUID, Long> commentsCountByListId = commentsCountByListIds(listIds);
-        Map<UUID, UserListItemScope> itemScopeByListId = userListItemService.getItemScopeByListIds(listIds);
+        Map<UUID, UserListItemScope> itemScopeByListId =
+                userListItemService.getItemScopeByListIds(listIds, nestedListsCountByListId);
 
         return lists.map(list -> userListMapper.userListToResponseDto(
                 list,
@@ -156,7 +157,9 @@ public class UserListServiceImpl implements UserListService {
         long itemsCount = userListItemService.getItemsCount(userList.getId());
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(userList.getId());
         long commentsCount = commentRepository.countByListId(userList.getId());
-        UserListItemScope itemScope = userListItemService.getItemScope(userList.getId());
+        UserListItemScope itemScope = userListItemService
+                .getItemScopeByListIds(List.of(userList.getId()), Map.of(userList.getId(), nestedListsCount))
+                .get(userList.getId());
         return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage, likedByMe,
                 itemsCount, commentsCount, totalRuntimeMinutes, itemScope);
     }
@@ -196,7 +199,7 @@ public class UserListServiceImpl implements UserListService {
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
         long commentsCount = commentRepository.countByListId(listId);
-        UserListItemScope itemScope = resolveItemScopeFromLoadedItems(allItems);
+        UserListItemScope itemScope = userListItemService.getItemScope(listId);
 
         return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe,
                 allItems.size(), commentsCount, totalRuntimeMinutes, itemScope);

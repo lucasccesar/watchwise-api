@@ -506,7 +506,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Insert At Position One - When List Is Empty")
     void shouldInsertAtPositionOneWhenListIsEmpty() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -528,7 +528,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When Inserting An Episode Into A List That Already Has A Movie")
     void shouldThrowBadRequestExceptionWhenInsertingAnEpisodeIntoAListThatAlreadyHasAMovie() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of(ContentType.MOVIE));
 
@@ -544,7 +544,7 @@ class UserListItemServiceImplTest {
     @DisplayName("[addItem] Should Insert A Series - When List Already Has A Movie")
     void shouldInsertASeriesWhenListAlreadyHasAMovie() {
         Content theWire = buildContent("1438", ContentType.SERIES);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of(ContentType.MOVIE));
         stubContentResolution(theWire, ContentType.SERIES);
@@ -562,7 +562,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Allow Any Type - When List Has No Content Items Yet")
     void shouldAllowAnyTypeWhenListHasNoContentItemsYet() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of());
         stubContentResolution(fightClub, ContentType.MOVIE);
@@ -579,7 +579,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItems] Should Throw BadRequestException - When A Later Item In The Same Payload Violates The Group Established By An Earlier Item")
     void shouldThrowBadRequestExceptionWhenALaterItemInTheSamePayloadViolatesTheGroupEstablishedByAnEarlierItem() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userListItemRepository.findDistinctContentTypesByUserListId(listId)).thenReturn(Set.of());
         stubContentResolution(fightClub, ContentType.MOVIE);
@@ -596,7 +596,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Persist CustomPosterUrl - When Content Item Provides One")
     void shouldPersistCustomPosterUrlWhenContentItemProvidesOne() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -613,7 +613,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When CustomPosterUrl Is Provided With ChildListId")
     void shouldThrowBadRequestExceptionWhenCustomPosterUrlIsProvidedWithChildListId() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
 
         assertThatThrownBy(() -> userListItemService.addItem(lucasId, listId,
                 new UserListItemCreationDTO(null, UUID.randomUUID(), null, null, "https://example.com/poster.png")))
@@ -626,7 +626,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Insert At Next Free Position - When List Already Has Items And No Position Given")
     void shouldInsertAtNextFreePositionWhenListAlreadyHasItemsAndNoPositionGiven() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(2L);
@@ -644,7 +644,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Shift Existing Items Forward - When An Explicit Position Is Given")
     void shouldShiftExistingItemsForwardWhenAnExplicitPositionIsGiven() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(2L);
@@ -664,7 +664,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When Position Is Greater Than The Next Free Position")
     void shouldThrowBadRequestExceptionWhenPositionIsGreaterThanTheNextFreePosition() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -681,7 +681,7 @@ class UserListItemServiceImplTest {
     void shouldInsertANestedListItemWhenChildListIdIsProvidedAndListIsOwnedByTheCaller() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, lucas, "List of lists' target", UserListVisibility.PUBLIC);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(false);
@@ -701,7 +701,7 @@ class UserListItemServiceImplTest {
     void shouldInsertANestedListItemWhenChildListIdReferencesAnotherUsersPublicList() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, marina, "Marina's public list", UserListVisibility.PUBLIC);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(false);
@@ -719,7 +719,7 @@ class UserListItemServiceImplTest {
     void shouldThrowForbiddenExceptionWhenChildListIdReferencesAnotherUsersPrivateList() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, marina, "Marina's private list", UserListVisibility.PRIVATE);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
 
@@ -736,7 +736,7 @@ class UserListItemServiceImplTest {
     void shouldInsertANestedListItemWhenChildListIdReferencesAFollowersOnlyListAndCallerFollowsItsOwner() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, marina, "Marina's followers-only list", UserListVisibility.FOLLOWERS);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED)).thenReturn(true);
@@ -755,7 +755,7 @@ class UserListItemServiceImplTest {
     void shouldThrowForbiddenExceptionWhenChildListIdReferencesAFollowersOnlyListAndCallerDoesNotFollowItsOwner() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, marina, "Marina's followers-only list", UserListVisibility.FOLLOWERS);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED)).thenReturn(false);
@@ -772,7 +772,7 @@ class UserListItemServiceImplTest {
     @DisplayName("[addItem] Should Throw NotFoundException - When ChildListId Does Not Exist")
     void shouldThrowNotFoundExceptionWhenChildListIdDoesNotExist() {
         UUID childListId = UUID.randomUUID();
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.empty());
 
@@ -785,6 +785,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When ChildListId Is The Item's Own List")
     void shouldThrowBadRequestExceptionWhenChildListIdIsTheItemsOwnList() {
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
 
@@ -799,7 +800,7 @@ class UserListItemServiceImplTest {
     void shouldThrowBadRequestExceptionWhenChildListIdAlreadyContainsNestedLists() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, lucas, "Already a list of lists", UserListVisibility.PUBLIC);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(true);
@@ -815,7 +816,7 @@ class UserListItemServiceImplTest {
     void shouldThrowBadRequestExceptionWhenParentListIsAlreadyNestedInsideAnotherList() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, lucas, "Would-be grandchild list", UserListVisibility.PUBLIC);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByChildListId(listId)).thenReturn(true);
@@ -832,7 +833,7 @@ class UserListItemServiceImplTest {
     @DisplayName("[addItem] Should Throw BadRequestException - When List Already Contains Content Items And ChildListId Is Given")
     void shouldThrowBadRequestExceptionWhenListAlreadyContainsContentItemsAndChildListIdIsGiven() {
         UUID childListId = UUID.randomUUID();
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(true);
 
         assertThatThrownBy(() -> userListItemService.addItem(
@@ -846,7 +847,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When List Already Contains Nested Lists And Content Is Given")
     void shouldThrowBadRequestExceptionWhenListAlreadyContainsNestedListsAndContentIsGiven() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(true);
 
         assertThatThrownBy(() -> userListItemService.addItem(
@@ -860,7 +861,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When Both Content And ChildListId Are Provided")
     void shouldThrowBadRequestExceptionWhenBothContentAndChildListIdAreProvided() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
 
         assertThatThrownBy(() -> userListItemService.addItem(
                 lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), UUID.randomUUID(), null, null)))
@@ -873,7 +874,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw BadRequestException - When Neither Content Nor ChildListId Is Provided")
     void shouldThrowBadRequestExceptionWhenNeitherContentNorChildListIdIsProvided() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
 
         assertThatThrownBy(() -> userListItemService.addItem(
                 lucasId, listId, new UserListItemCreationDTO(null, null, null, null)))
@@ -884,7 +885,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExist() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.empty());
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userListItemService.addItem(
                 lucasId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, null, null)))
@@ -897,7 +898,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw NotFoundException - When List Belongs To A Different User")
     void shouldThrowNotFoundExceptionWhenListBelongsToADifferentUser() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
 
         assertThatThrownBy(() -> userListItemService.addItem(
                 marinaId, listId, new UserListItemCreationDTO(contentRefCreation("550"), null, null, null)))
@@ -908,7 +909,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw ConflictException With Specific Message - When Content Is Already In The List")
     void shouldThrowConflictExceptionWithSpecificMessageWhenContentIsAlreadyInTheList() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -927,7 +928,7 @@ class UserListItemServiceImplTest {
     void shouldThrowConflictExceptionWithSpecificMessageWhenListIsAlreadyNestedInTheList() {
         UUID childListId = UUID.randomUUID();
         UserList childList = buildUserList(childListId, lucas, "Nested", UserListVisibility.PUBLIC);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndContentIdIsNotNull(listId)).thenReturn(false);
         when(userListRepository.findById(childListId)).thenReturn(Optional.of(childList));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(childListId)).thenReturn(false);
@@ -944,7 +945,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw ConflictException With Specific Message - When Position Was Just Taken By A Concurrent Insert")
     void shouldThrowConflictExceptionWithSpecificMessageWhenPositionWasJustTakenByAConcurrentInsert() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -961,7 +962,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw ConflictException With Generic Message - When Constraint Name Is Unknown")
     void shouldThrowConflictExceptionWithGenericMessageWhenConstraintNameIsUnknown() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -978,7 +979,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Log The Original Exception - When Constraint Name Is Unknown")
     void shouldLogTheOriginalExceptionWhenConstraintNameIsUnknown() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -1010,7 +1011,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw ConflictException With Generic Message - When Cause Is Not ConstraintViolationException")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNotConstraintViolationException() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -1028,7 +1029,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItem] Should Throw ConflictException With Generic Message - When Cause Is Null")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNull() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -1047,7 +1048,7 @@ class UserListItemServiceImplTest {
     void shouldInsertAllItemsInTheOrderSentWhenAllItemsAreValid() {
         Content contentA = buildContent("550", ContentType.MOVIE);
         Content contentB = buildContent("551", ContentType.MOVIE);
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(contentService.getOrCreateReference(contentRefCreation("550"))).thenReturn(buildContentRefDto(contentA));
         when(contentService.getOrCreateReference(contentRefCreation("551"))).thenReturn(buildContentRefDto(contentB));
@@ -1077,7 +1078,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItems] Should Throw ConflictException - When Two Items In The Same Call Resolve To The Same Content")
     void shouldThrowConflictExceptionWhenTwoItemsInTheSameCallResolveToTheSameContent() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         stubContentResolution(fightClub, ContentType.MOVIE);
         when(userListItemRepository.countByUserListId(listId)).thenReturn(0L);
@@ -1096,7 +1097,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItems] Should Throw BadRequestException - When List Already Contains Nested Lists")
     void shouldThrowBadRequestExceptionWhenListAlreadyContainsNestedListsOnAddItems() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(true);
 
         assertThatThrownBy(() -> userListItemService.addItems(lucasId, listId,
@@ -1110,7 +1111,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItems] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExistOnAddItems() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.empty());
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userListItemService.addItems(lucasId, listId,
                 new UserListItemBulkCreationDTO(List.of(contentRefCreation("550")))))
@@ -1123,7 +1124,7 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[addItems] Should Throw NotFoundException - When List Belongs To A Different User")
     void shouldThrowNotFoundExceptionWhenListBelongsToADifferentUserOnAddItems() {
-        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
 
         assertThatThrownBy(() -> userListItemService.addItems(marinaId, listId,
                 new UserListItemBulkCreationDTO(List.of(contentRefCreation("550")))))

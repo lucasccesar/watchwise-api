@@ -40,6 +40,8 @@ public interface UserListItemService {
 
     Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds);
 
+    Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds, Map<UUID, Long> nestedListsCountByListId);
+
     UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO);
 
     List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);

@@ -201,9 +201,14 @@ public class UserListItemServiceImpl implements UserListItemService {
             return Map.of();
         }
 
-        Set<UUID> nestedListLockedIds = userListItemRepository.countNestedListsByUserListIdIn(listIds).stream()
-                .map(UserListItemRepository.UserListCount::getUserListId)
-                .collect(Collectors.toSet());
+        return getItemScopeByListIds(listIds, countNestedListsByListIds(listIds));
+    }
+
+    @Override
+    public Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds, Map<UUID, Long> nestedListsCountByListId) {
+        if (listIds.isEmpty()) {
+            return Map.of();
+        }
 
         Map<UUID, Set<ContentType>> contentTypesByListId = new LinkedHashMap<>();
         for (UserListItemRepository.UserListContentType row : userListItemRepository.findDistinctContentTypesByUserListIdIn(listIds)) {
@@ -212,7 +217,7 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         Map<UUID, UserListItemScope> scopeByListId = new LinkedHashMap<>();
         for (UUID listId : listIds) {
-            boolean hasNestedLists = nestedListLockedIds.contains(listId);
+            boolean hasNestedLists = nestedListsCountByListId.getOrDefault(listId, 0L) > 0;
             Set<ContentType> types = contentTypesByListId.getOrDefault(listId, Set.of());
             UserListItemScope scope = UserListItemScope.resolve(types, hasNestedLists);
             if (scope != null) {
@@ -225,7 +230,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO) {
-        UserList userList = findOwnedList(userId, listId);
+        UserList userList = findOwnedListForUpdate(userId, listId);
         validateExactlyOneTarget(userListItemCreationDTO);
 
         LocalDateTime now = LocalDateTime.now();
@@ -259,7 +264,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
-        UserList userList = findOwnedList(userId, listId);
+        UserList userList = findOwnedListForUpdate(userId, listId);
         assertListIsNotLockedAsListOfLists(listId);
         UserListItemScope lockedScope = resolveExistingContentScope(listId);
 
@@ -482,6 +487,17 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     private UserList findOwnedList(UUID userId, UUID listId) {
         UserList userList = userListRepository.findById(listId)
+                .orElseThrow(() -> new NotFoundException("List not found"));
+
+        if (!userList.getUser().getId().equals(userId)) {
+            throw new NotFoundException("List not found");
+        }
+
+        return userList;
+    }
+
+    private UserList findOwnedListForUpdate(UUID userId, UUID listId) {
+        UserList userList = userListRepository.findByIdForUpdate(listId)
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
         if (!userList.getUser().getId().equals(userId)) {

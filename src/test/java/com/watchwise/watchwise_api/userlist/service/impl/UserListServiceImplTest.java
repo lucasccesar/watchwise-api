@@ -613,6 +613,7 @@ class UserListServiceImplTest {
         UserListDetailedResponseDTO dto = buildDetailedResponseDto(list, items);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItems(lucasId, list.getId())).thenReturn(items);
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
         when(userListMapper.userListToDetailedResponseDto(list, items, 0.0, false, 1L, 0L, 0L, UserListItemScope.MOVIE_OR_SERIES)).thenReturn(dto);
 
         UserListDetailedResponseDTO result = userListService.getUserListById(lucasId, list.getId(), null, null, null, null);
@@ -778,6 +779,7 @@ class UserListServiceImplTest {
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItems(marinaId, list.getId())).thenReturn(items);
         when(userListItemService.getWatchedPercentage(list.getId(), marinaId)).thenReturn(50.0);
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
         when(userListMapper.userListToDetailedResponseDto(list, items, 50.0, false, 1L, 0L, 0L, UserListItemScope.MOVIE_OR_SERIES)).thenReturn(buildDetailedResponseDto(list, items));
 
         userListService.getUserListById(marinaId, list.getId(), null, null, null, null);
@@ -859,6 +861,7 @@ class UserListServiceImplTest {
         UserListItemResponseDTO movieItem = buildItemResponseDto(buildContentRef("550", ContentType.MOVIE));
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(movieItem));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(),
                 eq(UserListItemScope.MOVIE_OR_SERIES))).thenReturn(buildDetailedResponseDto(list, List.of(movieItem)));
 
@@ -1088,7 +1091,8 @@ class UserListServiceImplTest {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
         when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
         when(userListRepository.saveAndFlush(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userListItemService.getItemScope(existing.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+        when(userListItemService.getItemScopeByListIds(List.of(existing.getId()), Map.of(existing.getId(), 0L)))
+                .thenReturn(Map.of(existing.getId(), UserListItemScope.MOVIE_OR_SERIES));
         when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(),
                 eq(UserListItemScope.MOVIE_OR_SERIES))).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 

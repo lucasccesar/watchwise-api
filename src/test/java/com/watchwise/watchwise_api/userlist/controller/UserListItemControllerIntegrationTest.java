@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -32,7 +33,14 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -508,6 +516,47 @@ class UserListItemControllerIntegrationTest {
 
         mockMvc.perform(addItemRequest(user, list.getId(), episodeBody))
                 .andExpect(status().isBadRequest());
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Only Let One Content Type Group Win - When Two Different Groups Race On The Same Empty List")
+    void shouldOnlyLetOneContentTypeGroupWinWhenTwoDifferentGroupsRaceOnTheSameEmptyList() throws Exception {
+        RegisteredUser user = registerUser("grouprace");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Race list", true);
+
+        String movieBody = contentItemBody("550", null, null);
+        String episodeBody = """
+                {
+                    "content": { "type": "EPISODE", "seriesTmdbId": "1396", "seasonNumber": 1, "episodeNumber": 1 }
+                }
+                """;
+
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        Callable<Integer> callMovie = () -> {
+            barrier.await();
+            return mockMvc.perform(addItemRequest(user, list.getId(), movieBody)).andReturn().getResponse().getStatus();
+        };
+        Callable<Integer> callEpisode = () -> {
+            barrier.await();
+            return mockMvc.perform(addItemRequest(user, list.getId(), episodeBody)).andReturn().getResponse().getStatus();
+        };
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Integer> futureMovie = executor.submit(callMovie);
+            Future<Integer> futureEpisode = executor.submit(callEpisode);
+
+            int statusMovie = futureMovie.get(10, TimeUnit.SECONDS);
+            int statusEpisode = futureEpisode.get(10, TimeUnit.SECONDS);
+
+            assertThat(List.of(statusMovie, statusEpisode))
+                    .containsExactlyInAnyOrder(HttpStatus.CREATED.value(), HttpStatus.BAD_REQUEST.value());
+        } finally {
+            executor.shutdownNow();
+        }
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(1);
     }
