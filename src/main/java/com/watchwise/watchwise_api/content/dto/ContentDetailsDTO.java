@@ -26,5 +26,10 @@ public record ContentDetailsDTO(
         List<WatchProviderDTO> watchProviders,
         List<SeasonSummaryDTO> seasons,
         List<EpisodeSummaryDTO> episodes,
-        List<EpisodeSummaryDTO> recentEpisodes) {
+        List<EpisodeSummaryDTO> recentEpisodes,
+        Long budget,
+        Long revenue,
+        List<ProductionCompanyDTO> productionCompanies,
+        List<CrewMemberDTO> crew,
+        List<VideoDTO> videos) {
 }

@@ -5,27 +5,36 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewJob;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAlternativeTitleEntry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCreator;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProvider;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbVideo;
+import com.watchwise.watchwise_api.common.tmdb.TmdbVideos;
 import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
 import com.watchwise.watchwise_api.content.dto.CastMemberDTO;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.CreatorDTO;
+import com.watchwise.watchwise_api.content.dto.CrewMemberDTO;
 import com.watchwise.watchwise_api.content.dto.EpisodeSummaryDTO;
+import com.watchwise.watchwise_api.content.dto.ProductionCompanyDTO;
 import com.watchwise.watchwise_api.content.dto.SeasonSummaryDTO;
+import com.watchwise.watchwise_api.content.dto.VideoDTO;
 import com.watchwise.watchwise_api.content.dto.WatchProviderDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -36,6 +45,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -46,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -58,6 +69,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     static final int MAX_BATCH_IDS = 100;
     private static final int RECENT_EPISODES_LIMIT = 3;
+    private static final Set<String> ALLOWED_CREW_JOBS = Set.of(
+            "Director", "Screenplay", "Executive Producer", "Production Manager",
+            "First Assistant Director", "Director of Photography", "Supervising Art Director");
 
     private final ContentRepository contentRepository;
     private final UserRepository userRepository;
@@ -124,7 +138,12 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 watchProviders(details.watchProviders(), region),
                 null,
                 null,
-                null);
+                null,
+                nullIfZero(details.budget()),
+                nullIfZero(details.revenue()),
+                productionCompanies(details.productionCompanies()),
+                crewFromCredits(details.credits()),
+                videos(details.videos()));
     }
 
     private ContentDetailsDTO buildSeriesDetails(Content content, String language, String region) {
@@ -153,7 +172,12 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 watchProviders(details.watchProviders(), region),
                 seasonSummaries(details.seasons(), allSeasons),
                 null,
-                recentlyAiredEpisodes(allSeasons));
+                recentlyAiredEpisodes(allSeasons),
+                null,
+                null,
+                productionCompanies(details.productionCompanies()),
+                crewFromAggregateCredits(details.aggregateCredits()),
+                videos(details.videos()));
     }
 
     private ContentDetailsDTO buildSeasonDetails(Content content, String language, String region) {
@@ -184,6 +208,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 watchProviders(season.watchProviders(), region),
                 null,
                 episodeSummaries(season.seasonNumber(), season.episodes()),
+                null,
+                null,
+                null,
+                null,
+                null,
                 null);
     }
 
@@ -212,6 +241,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 guestStars(episode.guestStars()),
                 null,
                 List.of(),
+                null,
+                null,
+                null,
+                null,
+                null,
                 null,
                 null,
                 null);
@@ -321,6 +355,74 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         return creators.stream()
                 .map(creator -> new CreatorDTO(creator.name(), creator.profilePath()))
                 .toList();
+    }
+
+    private List<CrewMemberDTO> crewFromCredits(TmdbCredits credits) {
+        if (credits == null || credits.crew() == null) {
+            return List.of();
+        }
+        Map<Integer, CrewAccumulator> accumulators = new LinkedHashMap<>();
+        for (TmdbCrewMember member : credits.crew()) {
+            if (!ALLOWED_CREW_JOBS.contains(member.job())) {
+                continue;
+            }
+            accumulators.computeIfAbsent(member.id(), id -> new CrewAccumulator(id, member.name(), member.profilePath()))
+                    .jobs.add(member.job());
+        }
+        return accumulators.values().stream()
+                .map(accumulator -> new CrewMemberDTO(accumulator.id, accumulator.name, accumulator.profilePath, accumulator.jobs))
+                .toList();
+    }
+
+    private List<CrewMemberDTO> crewFromAggregateCredits(TmdbAggregateCredits credits) {
+        if (credits == null || credits.crew() == null) {
+            return List.of();
+        }
+        List<CrewMemberDTO> result = new ArrayList<>();
+        for (TmdbAggregateCrewMember member : credits.crew()) {
+            List<String> matchingJobs = member.jobs() == null
+                    ? List.of()
+                    : member.jobs().stream().map(TmdbAggregateCrewJob::job).filter(ALLOWED_CREW_JOBS::contains).toList();
+            if (!matchingJobs.isEmpty()) {
+                result.add(new CrewMemberDTO(member.id(), member.name(), member.profilePath(), matchingJobs));
+            }
+        }
+        return result;
+    }
+
+    private List<ProductionCompanyDTO> productionCompanies(List<TmdbProductionCompany> companies) {
+        if (companies == null) {
+            return List.of();
+        }
+        return companies.stream()
+                .map(company -> new ProductionCompanyDTO(company.id(), company.name(), company.logoPath(), company.originCountry()))
+                .toList();
+    }
+
+    private List<VideoDTO> videos(TmdbVideos videos) {
+        if (videos == null || videos.results() == null) {
+            return List.of();
+        }
+        return videos.results().stream()
+                .map(video -> new VideoDTO(
+                        video.key(), video.name(), video.site(), video.type(), video.official(),
+                        video.isoCode639_1(), parseInstant(video.publishedAt())))
+                .toList();
+    }
+
+    private Instant parseInstant(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    private Long nullIfZero(Long value) {
+        return value == null || value == 0L ? null : value;
     }
 
     private List<SeasonSummaryDTO> seasonSummaries(List<TmdbSeasonSummary> seasons, List<TmdbSeasonFullDetails> allSeasons) {
@@ -466,5 +568,18 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     private TmdbUnavailableException tmdbUnavailable() {
         return new TmdbUnavailableException("TMDB is currently unavailable");
+    }
+
+    private static final class CrewAccumulator {
+        private final Integer id;
+        private final String name;
+        private final String profilePath;
+        private final List<String> jobs = new ArrayList<>();
+
+        private CrewAccumulator(Integer id, String name, String profilePath) {
+            this.id = id;
+            this.name = name;
+            this.profilePath = profilePath;
+        }
     }
 }
