@@ -211,9 +211,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 null,
                 null,
-                null,
-                null,
-                null);
+                productionCompanies(series.productionCompanies()),
+                crewFromAggregateCredits(series.aggregateCredits()),
+                videos(series.videos()));
     }
 
     private ContentDetailsDTO buildEpisodeDetails(Content content, String language, String region) {
@@ -246,9 +246,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 null,
                 null,
-                null,
-                null,
-                null);
+                productionCompanies(series.productionCompanies()),
+                crewFromAggregateCredits(series.aggregateCredits()),
+                videos(series.videos()));
     }
 
     private String resolveMovieTitle(TmdbMovieFullDetails details, String region) {

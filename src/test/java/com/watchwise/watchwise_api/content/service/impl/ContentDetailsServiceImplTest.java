@@ -435,6 +435,70 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDetails] Should Inherit Production Companies Crew And Videos From Series - When Content Is A Season")
+    void shouldInheritProductionCompaniesCrewAndVideosFromSeriesWhenContentIsASeason() {
+        UUID contentId = UUID.randomUUID();
+        Content season = Content.builder().id(contentId).type(ContentType.SEASON)
+                .seriesTmdbId("1396").seasonNumber(1).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null)),
+                null, null)));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null, List.of(), null,
+                new TmdbAggregateCredits(List.of(), List.of(
+                        new TmdbAggregateCrewMember(66633, "Vince Gilligan", "/vince.jpg",
+                                List.of(new TmdbAggregateCrewJob("Director"))))),
+                null, null, null, null,
+                List.of(new TmdbProductionCompany(11073, "Sony Pictures Television", "/sony.png", "US")),
+                new TmdbVideos(List.of(new TmdbVideo("abc123", "Official Trailer", "YouTube", "Trailer", true, "en",
+                        "2008-01-01T00:00:00.000Z"))))));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.budget()).isNull();
+        assertThat(result.revenue()).isNull();
+        assertThat(result.productionCompanies()).extracting("id", "name")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(11073, "Sony Pictures Television"));
+        assertThat(result.crew()).extracting("id", "jobs")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(66633, List.of("Director")));
+        assertThat(result.videos()).extracting("key").containsExactly("abc123");
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Inherit Production Companies Crew And Videos From Series - When Content Is An Episode")
+    void shouldInheritProductionCompaniesCrewAndVideosFromSeriesWhenContentIsAnEpisode() {
+        UUID contentId = UUID.randomUUID();
+        Content episode = Content.builder().id(contentId).type(ContentType.EPISODE)
+                .seriesTmdbId("1396").seasonNumber(1).episodeNumber(1).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(episode));
+        when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US")).thenReturn(Optional.of(new TmdbEpisodeFullDetails(
+                62085, "Pilot", "First episode", "2008-01-20", 1, 1, 58, "/still.jpg", List.of())));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null, List.of(), null,
+                new TmdbAggregateCredits(List.of(), List.of(
+                        new TmdbAggregateCrewMember(66633, "Vince Gilligan", "/vince.jpg",
+                                List.of(new TmdbAggregateCrewJob("Director"))))),
+                null, null, null, null,
+                List.of(new TmdbProductionCompany(11073, "Sony Pictures Television", "/sony.png", "US")),
+                new TmdbVideos(List.of(new TmdbVideo("abc123", "Official Trailer", "YouTube", "Trailer", true, "en",
+                        "2008-01-01T00:00:00.000Z"))))));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.budget()).isNull();
+        assertThat(result.revenue()).isNull();
+        assertThat(result.productionCompanies()).extracting("id", "name")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(11073, "Sony Pictures Television"));
+        assertThat(result.crew()).extracting("id", "jobs")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(66633, List.of("Director")));
+        assertThat(result.videos()).extracting("key").containsExactly("abc123");
+    }
+
+    @Test
     @DisplayName("[getDetails] Should Return Budget Revenue Production Companies Crew And Videos - When Content Is A Movie")
     void shouldReturnBudgetRevenueProductionCompaniesCrewAndVideosWhenContentIsAMovie() {
         UUID contentId = UUID.randomUUID();
