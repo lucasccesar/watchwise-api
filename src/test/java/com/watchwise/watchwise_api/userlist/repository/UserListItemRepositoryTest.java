@@ -26,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -465,6 +466,55 @@ class UserListItemRepositoryTest {
         assertThat(userListItemRepository.findById(saved.getId())).isEmpty();
     }
 
+    @Test
+    @DisplayName("[findDistinctContentTypesByUserListId] Should Return Every Distinct Type Present - When List Has Items Of More Than One Type")
+    void shouldReturnEveryDistinctTypePresentWhenListHasItemsOfMoreThanOneType() {
+        Content episode = contentRepository.save(buildEpisodeContent("1396", 1, 1));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(scifi, episode, 2));
+        entityManager.clear();
+
+        Set<ContentType> result = userListItemRepository.findDistinctContentTypesByUserListId(scifi.getId());
+
+        assertThat(result).containsExactlyInAnyOrder(ContentType.MOVIE, ContentType.EPISODE);
+    }
+
+    @Test
+    @DisplayName("[findDistinctContentTypesByUserListId] Should Return Empty Set - When List Has No Content Items")
+    void shouldReturnEmptySetWhenListHasNoContentItemsForDistinctTypes() {
+        Set<ContentType> result = userListItemRepository.findDistinctContentTypesByUserListId(scifi.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findDistinctContentTypesByUserListId] Should Ignore ChildList Items - When List Is A List Of Lists")
+    void shouldIgnoreChildListItemsWhenListIsAListOfLists() {
+        userListItemRepository.saveAndFlush(buildChildListItem(scifi, nestedList, 1));
+        entityManager.clear();
+
+        Set<ContentType> result = userListItemRepository.findDistinctContentTypesByUserListId(scifi.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findDistinctContentTypesByUserListIdIn] Should Group Types By Their Own List - When Multiple Lists Are Requested")
+    void shouldGroupTypesByTheirOwnListWhenMultipleListsAreRequestedForDistinctTypes() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(horror, pulpFiction, 1));
+        entityManager.clear();
+
+        List<UserListItemRepository.UserListContentType> result = userListItemRepository
+                .findDistinctContentTypesByUserListIdIn(List.of(scifi.getId(), horror.getId()));
+
+        assertThat(result).extracting(UserListItemRepository.UserListContentType::getUserListId)
+                .containsExactlyInAnyOrder(scifi.getId(), horror.getId());
+        assertThat(result).extracting(UserListItemRepository.UserListContentType::getType)
+                .containsOnly(ContentType.MOVIE);
+    }
+
     private UserListItem buildContentItem(UserList userList, Content content, Integer position) {
         LocalDateTime now = LocalDateTime.now();
         return UserListItem.builder()
@@ -514,6 +564,18 @@ class UserListItemRepositoryTest {
         return Content.builder()
                 .tmdbId(tmdbId)
                 .type(type)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildEpisodeContent(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .type(ContentType.EPISODE)
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

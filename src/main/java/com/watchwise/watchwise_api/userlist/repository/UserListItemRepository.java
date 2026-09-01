@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.userlist.repository;
 
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -8,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public interface UserListItemRepository extends JpaRepository<UserListItem, UUID> {
@@ -71,6 +73,20 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     List<UserListCount> countNestedListsByUserListIdIn(@Param("userListIds") Collection<UUID> userListIds);
 
     @Query("""
+            SELECT DISTINCT uli.content.type FROM UserListItem uli
+            WHERE uli.userList.id = :userListId
+            AND uli.content.id IS NOT NULL
+            """)
+    Set<ContentType> findDistinctContentTypesByUserListId(@Param("userListId") UUID userListId);
+
+    @Query("""
+            SELECT DISTINCT uli.userList.id AS userListId, uli.content.type AS type FROM UserListItem uli
+            WHERE uli.userList.id IN :userListIds
+            AND uli.content.id IS NOT NULL
+            """)
+    List<UserListContentType> findDistinctContentTypesByUserListIdIn(@Param("userListIds") Collection<UUID> userListIds);
+
+    @Query("""
             SELECT uli.userList.id AS userListId, COUNT(uli) AS count FROM UserListItem uli
             WHERE uli.userList.id IN :userListIds
             AND uli.content.id IS NOT NULL
@@ -115,6 +131,11 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     interface UserListSum {
         UUID getUserListId();
         long getTotal();
+    }
+
+    interface UserListContentType {
+        UUID getUserListId();
+        ContentType getType();
     }
 
 }
