@@ -493,6 +493,26 @@ class UserListItemControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[addItem] Should Return 400 And Leave The List Unchanged - When Content Type Group Conflicts With An Existing Item")
+    void shouldReturn400AndLeaveTheListUnchangedWhenContentTypeGroupConflictsWithAnExistingItem() throws Exception {
+        RegisteredUser user = registerUser("groupmismatch");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Movies only", true);
+        persistContentItem(list, persistContent("550"), 1);
+
+        String episodeBody = """
+                {
+                    "content": { "type": "EPISODE", "seriesTmdbId": "1396", "seasonNumber": 1, "episodeNumber": 1 }
+                }
+                """;
+
+        mockMvc.perform(addItemRequest(user, list.getId(), episodeBody))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(1);
+    }
+
+    @Test
     @DisplayName("[addItem] Should Return Forbidden - When ChildListId References Another User's Private List")
     void shouldReturnForbiddenWhenChildListIdReferencesAnotherUsersPrivateList() throws Exception {
         RegisteredUser owner = registerUser("additemprivateowner");

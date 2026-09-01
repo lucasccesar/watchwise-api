@@ -804,6 +804,31 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getUserListById] Should Report The Locked Content Type Group As ItemScope - When List Has A Movie Item")
+    void shouldReportTheLockedContentTypeGroupAsItemScopeWhenListHasAMovieItem() throws Exception {
+        RegisteredUser user = registerUser("itemscopeowner");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "My list", UserListVisibility.PUBLIC);
+        persistContentItem(list, "550", 1);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.itemScope").value("MOVIE_OR_SERIES"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Report Null ItemScope - When List Has No Items Yet")
+    void shouldReportNullItemScopeWhenListHasNoItemsYet() throws Exception {
+        RegisteredUser user = registerUser("itemscopeempty");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Empty list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.itemScope").doesNotExist());
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetById() throws Exception {
         mockMvc.perform(get("/lists/" + UUID.randomUUID()))
@@ -945,6 +970,28 @@ class UserListControllerIntegrationTest {
 
         User entity = userRepository.findById(user.id()).orElseThrow();
         assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return 400 And Create No List - When Submitted Items Span More Than One Content Type Group")
+    void shouldReturn400AndCreateNoListWhenSubmittedItemsSpanMoreThanOneContentTypeGroup() throws Exception {
+        RegisteredUser user = registerUser("bulkgroupmismatch");
+
+        String body = """
+                {
+                    "name": "Mixed bulk list",
+                    "items": [
+                        { "tmdbId": "550", "type": "MOVIE" },
+                        { "type": "EPISODE", "seriesTmdbId": "1396", "seasonNumber": 1, "episodeNumber": 1 }
+                    ]
+                }
+                """;
+
+        mockMvc.perform(createBulkRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        assertThat(userListRepository.findByUserId(user.id(), org.springframework.data.domain.Pageable.unpaged()).getContent())
+                .isEmpty();
     }
 
     @Test
