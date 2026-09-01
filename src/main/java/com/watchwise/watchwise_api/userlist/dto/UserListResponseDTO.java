@@ -22,6 +22,7 @@ public record UserListResponseDTO(
         long itemsCount,
         long commentsCount,
         long totalRuntimeMinutes,
-        Integer rank
+        Integer rank,
+        UserListItemScope itemScope
 ) {
 }

@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -122,6 +123,7 @@ public class UserListServiceImpl implements UserListService {
         Map<UUID, Long> itemsCountByListId = userListItemService.getItemsCountByListIds(listIds);
         Map<UUID, Long> totalRuntimeMinutesByListId = userListItemService.getTotalRuntimeMinutesByListIds(listIds);
         Map<UUID, Long> commentsCountByListId = commentsCountByListIds(listIds);
+        Map<UUID, UserListItemScope> itemScopeByListId = userListItemService.getItemScopeByListIds(listIds);
 
         return lists.map(list -> userListMapper.userListToResponseDto(
                 list,
@@ -131,7 +133,8 @@ public class UserListServiceImpl implements UserListService {
                 likedListIds.contains(list.getId()),
                 itemsCountByListId.getOrDefault(list.getId(), 0L),
                 commentsCountByListId.getOrDefault(list.getId(), 0L),
-                totalRuntimeMinutesByListId.getOrDefault(list.getId(), 0L)));
+                totalRuntimeMinutesByListId.getOrDefault(list.getId(), 0L),
+                itemScopeByListId.get(list.getId())));
     }
 
     private Map<UUID, Long> commentsCountByListIds(Collection<UUID> listIds) {
@@ -154,7 +157,7 @@ public class UserListServiceImpl implements UserListService {
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(userList.getId());
         long commentsCount = commentRepository.countByListId(userList.getId());
         return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage, likedByMe,
-                itemsCount, commentsCount, totalRuntimeMinutes);
+                itemsCount, commentsCount, totalRuntimeMinutes, null);
     }
 
     private void assertCanViewLists(User target, boolean isOwner, boolean viewerFollowsTarget) {
@@ -192,9 +195,19 @@ public class UserListServiceImpl implements UserListService {
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
         long commentsCount = commentRepository.countByListId(listId);
+        UserListItemScope itemScope = resolveItemScopeFromLoadedItems(allItems);
 
         return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe,
-                allItems.size(), commentsCount, totalRuntimeMinutes);
+                allItems.size(), commentsCount, totalRuntimeMinutes, itemScope);
+    }
+
+    private UserListItemScope resolveItemScopeFromLoadedItems(List<UserListItemResponseDTO> items) {
+        boolean hasNestedLists = items.stream().anyMatch(item -> item.childList() != null);
+        Set<ContentType> types = items.stream()
+                .filter(item -> item.content() != null)
+                .map(item -> item.content().type())
+                .collect(Collectors.toSet());
+        return UserListItemScope.resolve(types, hasNestedLists);
     }
 
     private List<UserListItemResponseDTO> filterAndSortItems(List<UserListItemResponseDTO> items, ContentType type,
@@ -331,7 +344,7 @@ public class UserListServiceImpl implements UserListService {
                 .updatedAt(now)
                 .build();
 
-        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0, false, 0L, 0L, 0L);
+        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0, false, 0L, 0L, 0L, null);
     }
 
     @Override
@@ -359,9 +372,10 @@ public class UserListServiceImpl implements UserListService {
                 .filter(item -> item.content() != null && item.content().runtimeMinutes() != null)
                 .mapToLong(item -> item.content().runtimeMinutes())
                 .sum();
+        UserListItemScope itemScope = resolveItemScopeFromLoadedItems(items);
 
         return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage, false,
-                items.size(), 0L, totalRuntimeMinutes);
+                items.size(), 0L, totalRuntimeMinutes, itemScope);
     }
 
     @Override

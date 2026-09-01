@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.userlist.mapper;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import org.mapstruct.Mapper;
@@ -15,10 +16,10 @@ public interface UserListMapper {
 
     UserListResponseDTO userListToResponseDto(
             UserList userList, List<ContentRefDTO> previewItems, long nestedListsCount, double watchedPercentage, boolean likedByMe,
-            long itemsCount, long commentsCount, long totalRuntimeMinutes);
+            long itemsCount, long commentsCount, long totalRuntimeMinutes, UserListItemScope itemScope);
 
     UserListDetailedResponseDTO userListToDetailedResponseDto(
             UserList userList, List<UserListItemResponseDTO> items, double watchedPercentage, boolean likedByMe,
-            long itemsCount, long commentsCount, long totalRuntimeMinutes);
+            long itemsCount, long commentsCount, long totalRuntimeMinutes, UserListItemScope itemScope);
 
 }

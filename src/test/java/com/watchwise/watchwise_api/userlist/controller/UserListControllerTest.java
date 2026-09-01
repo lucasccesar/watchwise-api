@@ -230,7 +230,7 @@ class UserListControllerTest {
 
     private UserListResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
-        return new UserListResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(), 0L, 0, false, 0L, 0L, 0L, 1);
+        return new UserListResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(), 0L, 0, false, 0L, 0L, 0L, 1, null);
     }
 
     private UserListDetailedResponseDTO buildDetailedResponseDto() {
@@ -239,7 +239,7 @@ class UserListControllerTest {
                 UUID.randomUUID(),
                 new ContentRefDTO(UUID.randomUUID(), "100", ContentType.MOVIE, null, null, null, null, null, now, now),
                 null, 1, null, now, now);
-        return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(item), 0, false, 1L, 0L, 0L, 1);
+        return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(item), 0, false, 1L, 0L, 0L, 1, null);
     }
 
     private ContentRefCreationDTO buildContentRef() {
