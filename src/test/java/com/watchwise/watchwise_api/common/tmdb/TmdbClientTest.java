@@ -101,7 +101,7 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Request Credits Watch Providers And Alternative Titles Appended - When Called")
     void shouldRequestCreditsWatchProvidersAndAlternativeTitlesAppendedWhenCalled() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "603", "title": "The Matrix", "release_date": "1999-03-31", "runtime": 136}
                         """, MediaType.APPLICATION_JSON));
@@ -117,10 +117,10 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Return Empty - When TMDB Fails Twice In A Row")
     void shouldReturnEmptyWhenMovieFullDetailsFailsTwiceInARow() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
 
         Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
@@ -132,7 +132,7 @@ class TmdbClientTest {
     @DisplayName("[getTvFullDetails] Should Request Aggregate Credits Watch Providers And Alternative Titles Appended - When Called")
     void shouldRequestAggregateCreditsWatchProvidersAndAlternativeTitlesAppendedWhenCalled() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles&language=pt-BR"))
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles,videos&language=pt-BR"))
                 .andRespond(withSuccess("""
                         {"id": "1396", "name": "Breaking Bad", "first_air_date": "2008-01-20"}
                         """, MediaType.APPLICATION_JSON));
@@ -174,5 +174,93 @@ class TmdbClientTest {
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("Pilot");
         assertThat(result.get().guestStars()).extracting(TmdbGuestStar::name).containsExactly("John Doe");
+    }
+
+    @Test
+    @DisplayName("[getMovieFullDetails] Should Request Videos Appended - When Called")
+    void shouldRequestVideosAppendedWhenMovieFullDetailsCalled() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": "603", "title": "The Matrix"}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+
+        assertThat(result).isPresent();
+    }
+
+    @Test
+    @DisplayName("[getMovieFullDetails] Should Parse Budget Revenue Production Companies Crew And Videos - When TMDB Responds")
+    void shouldParseBudgetRevenueProductionCompaniesCrewAndVideosWhenMovieFullDetailsResponds() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": "603", "title": "The Matrix", "budget": 63000000, "revenue": 463500000,
+                         "production_companies": [{"id": 79, "name": "Village Roadshow Pictures", "logo_path": "/village.png", "origin_country": "US"}],
+                         "credits": {"cast": [], "crew": [
+                            {"id": 10, "name": "Lana Wachowski", "job": "Director", "profile_path": "/lana.jpg"},
+                            {"id": 11, "name": "Best Boy Grip", "job": "Best Boy Grip", "profile_path": null}]},
+                         "videos": {"results": [
+                            {"key": "vKQi3bBA1y8", "name": "Trailer", "site": "YouTube", "type": "Trailer",
+                             "official": true, "iso_639_1": "en", "published_at": "1999-03-01T00:00:00.000Z"}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().budget()).isEqualTo(63000000L);
+        assertThat(result.get().revenue()).isEqualTo(463500000L);
+        assertThat(result.get().productionCompanies()).extracting("id", "name", "logoPath", "originCountry")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(79, "Village Roadshow Pictures", "/village.png", "US"));
+        assertThat(result.get().credits().crew()).extracting("id", "name", "job")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(10, "Lana Wachowski", "Director"),
+                        org.assertj.core.groups.Tuple.tuple(11, "Best Boy Grip", "Best Boy Grip"));
+        assertThat(result.get().videos().results()).extracting("key", "name", "site", "type", "official", "isoCode639_1")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("vKQi3bBA1y8", "Trailer", "YouTube", "Trailer", true, "en"));
+        assertThat(result.get().videos().results().get(0).publishedAt()).isEqualTo("1999-03-01T00:00:00.000Z");
+    }
+
+    @Test
+    @DisplayName("[getTvFullDetails] Should Request Videos Appended - When Called")
+    void shouldRequestVideosAppendedWhenTvFullDetailsCalled() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles,videos&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": "1396", "name": "Breaking Bad"}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "en-US");
+
+        assertThat(result).isPresent();
+    }
+
+    @Test
+    @DisplayName("[getTvFullDetails] Should Parse Production Companies And Aggregate Crew Jobs - When TMDB Responds")
+    void shouldParseProductionCompaniesAndAggregateCrewJobsWhenTvFullDetailsResponds() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles,videos&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": "1396", "name": "Breaking Bad",
+                         "production_companies": [{"id": 11073, "name": "Sony Pictures Television", "logo_path": "/sony.png", "origin_country": "US"}],
+                         "aggregate_credits": {"cast": [], "crew": [
+                            {"id": 66633, "name": "Vince Gilligan", "profile_path": "/vince.jpg",
+                             "jobs": [{"job": "Director"}, {"job": "Executive Producer"}]},
+                            {"id": 99999, "name": "Random Grip", "profile_path": null,
+                             "jobs": [{"job": "Grip"}]}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "en-US");
+
+        assertThat(result).isPresent();
+        assertThat(result.get().productionCompanies()).extracting("id", "name")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(11073, "Sony Pictures Television"));
+        assertThat(result.get().aggregateCredits().crew()).extracting("id", "name")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(66633, "Vince Gilligan"),
+                        org.assertj.core.groups.Tuple.tuple(99999, "Random Grip"));
+        assertThat(result.get().aggregateCredits().crew().get(0).jobs()).extracting("job")
+                .containsExactly("Director", "Executive Producer");
     }
 }

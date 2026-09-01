@@ -79,7 +79,7 @@ class TmdbClientCachingTest {
     @DisplayName("[getMovieFullDetails] Should Not Throw And Should Cache - When TMDB Responds Successfully")
     void shouldNotThrowAndShouldCacheWhenMovieFullDetailsRespondsSuccessfully() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "603", "title": "The Matrix"}
                         """, MediaType.APPLICATION_JSON));
@@ -96,10 +96,10 @@ class TmdbClientCachingTest {
     @DisplayName("[getMovieFullDetails] Should Not Throw And Should Not Cache - When TMDB Fails Twice In A Row")
     void shouldNotThrowAndShouldNotCacheWhenMovieFullDetailsFailsTwiceInARow() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
 
         Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
@@ -111,7 +111,7 @@ class TmdbClientCachingTest {
     @DisplayName("[getTvFullDetails] Should Not Throw And Should Cache - When TMDB Responds Successfully")
     void shouldNotThrowAndShouldCacheWhenTvFullDetailsRespondsSuccessfully() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "1396", "name": "Breaking Bad"}
                         """, MediaType.APPLICATION_JSON));
@@ -128,10 +128,10 @@ class TmdbClientCachingTest {
     @DisplayName("[getTvFullDetails] Should Not Throw And Should Not Cache - When TMDB Fails Twice In A Row")
     void shouldNotThrowAndShouldNotCacheWhenTvFullDetailsFailsTwiceInARow() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles&language=en-US"))
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
 
         Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "en-US");

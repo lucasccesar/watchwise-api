@@ -424,7 +424,8 @@ class ContentControllerIntegrationTest {
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
                 "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
-                List.of(), List.of(), null, null, null)));
+                List.of(), List.of(), null, null, null,
+                null, null, null, null)));
 
         mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
                 .andExpect(status().isOk())
@@ -472,9 +473,9 @@ class ContentControllerIntegrationTest {
                 .tmdbId("604").type(ContentType.MOVIE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
-                "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null)));
+                "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null, null, null, null, null)));
         when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
-                "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null)));
+                "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null, null, null, null, null)));
 
         mockMvc.perform(get("/contents/details")
                         .cookie(accessTokenCookie)

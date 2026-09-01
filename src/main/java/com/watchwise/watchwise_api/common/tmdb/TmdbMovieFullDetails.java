@@ -19,5 +19,9 @@ public record TmdbMovieFullDetails(
         @JsonProperty("production_countries") List<TmdbProductionCountry> productionCountries,
         TmdbCredits credits,
         @JsonProperty("watch/providers") TmdbWatchProviders watchProviders,
-        @JsonProperty("alternative_titles") TmdbMovieAlternativeTitles alternativeTitles) {
+        @JsonProperty("alternative_titles") TmdbMovieAlternativeTitles alternativeTitles,
+        Long budget,
+        Long revenue,
+        @JsonProperty("production_companies") List<TmdbProductionCompany> productionCompanies,
+        TmdbVideos videos) {
 }

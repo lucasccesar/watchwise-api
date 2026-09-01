@@ -92,7 +92,8 @@ class ContentDetailsServiceImplTest {
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
                 "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
-                List.of(), List.of(), null, null, null)));
+                List.of(), List.of(), null, null, null,
+                null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -114,7 +115,8 @@ class ContentDetailsServiceImplTest {
                 List.of(), List.of(), null, null,
                 new TmdbMovieAlternativeTitles(List.of(
                         new TmdbAlternativeTitleEntry("FR", "Titre Francais"),
-                        new TmdbAlternativeTitleEntry("US", "US Release Title"))))));
+                        new TmdbAlternativeTitleEntry("US", "US Release Title"))),
+                null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -130,7 +132,8 @@ class ContentDetailsServiceImplTest {
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", null, "Original Title", null, null, null, null, null,
                 List.of(), List.of(), null, null,
-                new TmdbMovieAlternativeTitles(List.of(new TmdbAlternativeTitleEntry("FR", "Titre Francais"))))));
+                new TmdbMovieAlternativeTitles(List.of(new TmdbAlternativeTitleEntry("FR", "Titre Francais"))),
+                null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -148,7 +151,8 @@ class ContentDetailsServiceImplTest {
                 "BR", new TmdbRegionProviders(List.of(new TmdbProvider("Globoplay", "/globoplay.png")), null, null)));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null,
-                List.of(), List.of(), null, watchProviders, null)));
+                List.of(), List.of(), null, watchProviders, null,
+                null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -165,7 +169,8 @@ class ContentDetailsServiceImplTest {
                 "BR", new TmdbRegionProviders(List.of(new TmdbProvider("Globoplay", "/globoplay.png")), null, null)));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null,
-                List.of(), List.of(), null, watchProviders, null)));
+                List.of(), List.of(), null, watchProviders, null,
+                null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -184,7 +189,7 @@ class ContentDetailsServiceImplTest {
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
                         new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
                         new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
-                null, null, null, null, 3, 5)));
+                null, null, null, null, 3, 5, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
@@ -223,7 +228,7 @@ class ContentDetailsServiceImplTest {
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 7, null)),
-                null, null, null, null, null, null)));
+                null, null, null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.empty());
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
@@ -244,7 +249,7 @@ class ContentDetailsServiceImplTest {
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
                         new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
                         new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
-                null, null, null, null, null, null)));
+                null, null, null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
@@ -279,7 +284,7 @@ class ContentDetailsServiceImplTest {
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(0, "Specials", null, "2099-01-01", 1, null),
                         new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)),
-                null, null, null, null, null, null)));
+                null, null, null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null)),
@@ -304,7 +309,7 @@ class ContentDetailsServiceImplTest {
                 "2316", "The Office", "The Office", null, null, null, "2005-03-24", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2005-03-24", 1, null)),
-                null, null, null, null, null, null)));
+                null, null, null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("2316", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
                 201, "Season 1", null, null, "2005-03-24", 1,
                 List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2005-03-24", null, null, null)),
@@ -329,15 +334,15 @@ class ContentDetailsServiceImplTest {
                         new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
                 new TmdbAggregateCredits(List.of(new TmdbAggregateCastMember(
                         17419, "Bryan Cranston", "/cranston.jpg",
-                        List.of(new TmdbAggregateRole("Walter White")), 2))),
+                        List.of(new TmdbAggregateRole("Walter White")), 2)), null),
                 null)));
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null,
                 new TmdbAggregateCredits(List.of(new TmdbAggregateCastMember(
                         17419, "Bryan Cranston", "/cranston.jpg",
-                        List.of(new TmdbAggregateRole("Walter White")), 62))),
-                null, null, null, null)));
+                        List.of(new TmdbAggregateRole("Walter White")), 62)), null),
+                null, null, null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -362,7 +367,7 @@ class ContentDetailsServiceImplTest {
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), List.of(new TmdbCreator(9181, "Vince Gilligan", "/gilligan.jpg")),
-                List.of(), null, null, null, null, null, null)));
+                List.of(), null, null, null, null, null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -390,7 +395,7 @@ class ContentDetailsServiceImplTest {
                 null, null)));
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
-                List.of(), List.of(), null, List.of(), null, null, null, null, null, null)));
+                List.of(), List.of(), null, List.of(), null, null, null, null, null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -412,7 +417,7 @@ class ContentDetailsServiceImplTest {
                 List.of(new TmdbGuestStar(17420, "John Doe", "Neighbor", "/doe.jpg")))));
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
-                List.of(), List.of(), null, List.of(), null, null, null, null, null, null)));
+                List.of(), List.of(), null, List.of(), null, null, null, null, null, null, null, null)));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -467,9 +472,11 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(first)).thenReturn(Optional.of(firstContent));
         when(contentRepository.findById(second)).thenReturn(Optional.of(secondContent));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
-                "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null)));
+                "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null,
+                null, null, null, null)));
         when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
-                "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null)));
+                "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null,
+                null, null, null, null)));
 
         List<ContentDetailsDTO> result = contentDetailsService.getDetailsBatch(List.of(first, second), requestingUserId);
 

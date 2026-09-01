@@ -24,5 +24,7 @@ public record TmdbTvFullDetails(
         @JsonProperty("watch/providers") TmdbWatchProviders watchProviders,
         @JsonProperty("alternative_titles") TmdbTvAlternativeTitles alternativeTitles,
         @JsonProperty("number_of_seasons") Integer numberOfSeasons,
-        @JsonProperty("number_of_episodes") Integer numberOfEpisodes) {
+        @JsonProperty("number_of_episodes") Integer numberOfEpisodes,
+        @JsonProperty("production_companies") List<TmdbProductionCompany> productionCompanies,
+        TmdbVideos videos) {
 }

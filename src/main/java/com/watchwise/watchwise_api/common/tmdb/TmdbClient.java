@@ -46,7 +46,7 @@ public class TmdbClient {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/movie/{id}")
-                                .queryParam("append_to_response", "credits,watch/providers,alternative_titles")
+                                .queryParam("append_to_response", "credits,watch/providers,alternative_titles,videos")
                                 .queryParam("language", language)
                                 .build(tmdbId))
                         .retrieve()
@@ -59,7 +59,7 @@ public class TmdbClient {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/tv/{id}")
-                                .queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles")
+                                .queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos")
                                 .queryParam("language", language)
                                 .build(tmdbId))
                         .retrieve()
