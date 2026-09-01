@@ -281,11 +281,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (content.type() == ContentType.SEASON) {
             seriesTmdbId = content.seriesTmdbId();
             bulkLogSeason(userId, content.seriesTmdbId(), content.seasonNumber(), content.isSeriesFinale(),
-                    dto.finaleEpisodeNumber(), dto.watchedDate(), created, ContentType.SEASON, companionIds);
+                    dto.finaleEpisodeNumber(), dto.watchedDate(), created, ContentType.SEASON, companionIds,
+                    dto.episodeRuntimeMinutes());
         } else {
             seriesTmdbId = content.tmdbId();
             bulkLogSeries(userId, content.tmdbId(), dto.finaleSeasonNumber(), dto.seasonFinaleEpisodeNumbers(),
-                    dto.watchedDate(), created, companionIds);
+                    dto.watchedDate(), created, companionIds, dto.seasonEpisodeRuntimeMinutes());
         }
         removeSeriesFromWatchlistAndDropped(userId, seriesTmdbId);
 
@@ -510,15 +511,17 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private void bulkLogSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, Boolean isSeriesFinale,
             Integer explicitFinaleEpisodeNumber, LocalDate watchedDate, List<DiaryEntry> created, ContentType requestedType,
-            List<UUID> companionIds) {
+            List<UUID> companionIds, Map<Integer, Integer> episodeRuntimeMinutes) {
         int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, explicitFinaleEpisodeNumber);
         if (finaleEpisodeNumber > MAX_BULK_EPISODES) {
             throw new BadRequestException("Season has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
         }
 
         for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
+            Integer runtimeMinutes = episodeRuntimeMinutes == null ? null : episodeRuntimeMinutes.get(episodeNumber);
             created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
-                    episodeNumber == finaleEpisodeNumber, isSeriesFinale, watchedDate, created, requestedType, companionIds));
+                    episodeNumber == finaleEpisodeNumber, isSeriesFinale, watchedDate, created, requestedType, companionIds,
+                    runtimeMinutes));
         }
     }
 
@@ -539,12 +542,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private DiaryEntry bulkLogEpisode(UUID userId, String seriesTmdbId, Integer seasonNumber, int episodeNumber,
             boolean isSeasonFinale, Boolean isSeriesFinale, LocalDate watchedDate, List<DiaryEntry> created,
-            ContentType requestedType, List<UUID> companionIds) {
+            ContentType requestedType, List<UUID> companionIds, Integer runtimeMinutes) {
         Boolean seasonFinaleFlag = isSeasonFinale ? Boolean.TRUE : null;
         Boolean seriesFinaleFlag = isSeasonFinale && Boolean.TRUE.equals(isSeriesFinale) ? Boolean.TRUE : null;
         ContentRefDTO episodeRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
                 null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber,
-                seasonFinaleFlag, seriesFinaleFlag));
+                seasonFinaleFlag, seriesFinaleFlag, runtimeMinutes, null));
 
         User user = userRepository.getReferenceById(userId);
         Content episodeContent = contentRepository.getReferenceById(episodeRef.id());
@@ -571,7 +574,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber,
             Map<Integer, Integer> seasonFinaleEpisodeNumbers, LocalDate watchedDate, List<DiaryEntry> created,
-            List<UUID> companionIds) {
+            List<UUID> companionIds, Map<Integer, Map<Integer, Integer>> seasonEpisodeRuntimeMinutes) {
         int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber);
 
         int totalEpisodes = 0;
@@ -587,10 +590,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             boolean isSeriesFinaleSeason = seasonNumber == finaleSeasonNumber;
             int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber,
                     explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber));
+            Map<Integer, Integer> episodeRuntimeMinutes = seasonEpisodeRuntimeMinutes == null
+                    ? null : seasonEpisodeRuntimeMinutes.get(seasonNumber);
             for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
+                Integer runtimeMinutes = episodeRuntimeMinutes == null ? null : episodeRuntimeMinutes.get(episodeNumber);
                 created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
                         episodeNumber == finaleEpisodeNumber, isSeriesFinaleSeason, watchedDate, created,
-                        ContentType.SERIES, companionIds));
+                        ContentType.SERIES, companionIds, runtimeMinutes));
             }
         }
     }
