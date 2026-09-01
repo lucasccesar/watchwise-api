@@ -156,8 +156,9 @@ public class UserListServiceImpl implements UserListService {
         long itemsCount = userListItemService.getItemsCount(userList.getId());
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(userList.getId());
         long commentsCount = commentRepository.countByListId(userList.getId());
+        UserListItemScope itemScope = userListItemService.getItemScope(userList.getId());
         return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage, likedByMe,
-                itemsCount, commentsCount, totalRuntimeMinutes, null);
+                itemsCount, commentsCount, totalRuntimeMinutes, itemScope);
     }
 
     private void assertCanViewLists(User target, boolean isOwner, boolean viewerFollowsTarget) {

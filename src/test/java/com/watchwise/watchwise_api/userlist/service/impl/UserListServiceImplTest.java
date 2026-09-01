@@ -1083,6 +1083,22 @@ class UserListServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateUserList] Should Query And Pass The Real ItemScope To The Mapper - When List Has Content Items")
+    void shouldQueryAndPassTheRealItemScopeToTheMapperOnUpdate() {
+        UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
+        when(userListRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(userListRepository.saveAndFlush(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userListItemService.getItemScope(existing.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(),
+                eq(UserListItemScope.MOVIE_OR_SERIES))).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        userListService.updateUserList(lucasId, existing.getId(), new UserListPatchDTO(null, null, null));
+
+        verify(userListMapper).userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(),
+                eq(UserListItemScope.MOVIE_OR_SERIES));
+    }
+
+    @Test
     @DisplayName("[updateUserList] Should Not Change Any Field - When All Patch Fields Are Null")
     void shouldNotChangeAnyFieldWhenAllPatchFieldsAreNullOnUpdate() {
         UserList existing = buildList(lucas, "Old name", "Old description", UserListVisibility.PUBLIC);
