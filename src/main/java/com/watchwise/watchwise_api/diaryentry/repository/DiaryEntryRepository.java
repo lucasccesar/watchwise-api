@@ -178,13 +178,17 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
 
     @Query(value = """
             SELECT genre AS genre,
-                   COUNT(DISTINCT CASE WHEN c.type = 'MOVIE' THEN c.id::text ELSE c.series_tmdb_id END) AS count
+                   COUNT(DISTINCT CASE
+                             WHEN c.type = 'MOVIE' THEN c.id::text
+                             WHEN c.type = 'SERIES' THEN c.tmdb_id
+                             ELSE c.series_tmdb_id
+                         END) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'MOVIE' THEN c.genres ELSE sc.genres END) AS genre
+            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
             WHERE d.user_id = :userId
-            AND c.type IN ('MOVIE', 'EPISODE')
+            AND c.type IN ('MOVIE', 'EPISODE', 'SERIES')
             GROUP BY genre
             ORDER BY count DESC
             """, nativeQuery = true)
@@ -312,13 +316,14 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     List<GenreCount> countDistinctTitlesByGenreAndUserIdForMovies(@Param("userId") UUID userId);
 
     @Query(value = """
-            SELECT genre AS genre, COUNT(DISTINCT c.series_tmdb_id) AS count
+            SELECT genre AS genre,
+                   COUNT(DISTINCT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
-            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(sc.genres) AS genre
+            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
             WHERE d.user_id = :userId
-            AND c.type = 'EPISODE'
+            AND c.type IN ('EPISODE', 'SERIES')
             GROUP BY genre
             ORDER BY count DESC
             """, nativeQuery = true)
@@ -541,10 +546,10 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             SELECT genre AS genre, COUNT(d.id) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
-            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(sc.genres) AS genre
+            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
             WHERE d.user_id = :userId
-            AND c.type = 'EPISODE'
+            AND c.type IN ('EPISODE', 'SERIES')
             AND d.watched_date BETWEEN :start AND :end
             GROUP BY genre
             ORDER BY count DESC
@@ -568,10 +573,10 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             SELECT genre AS genre, COUNT(d.id) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
-            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(sc.genres) AS genre
+            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
             WHERE d.user_id = :userId
-            AND c.type = 'EPISODE'
+            AND c.type IN ('EPISODE', 'SERIES')
             GROUP BY genre
             ORDER BY count DESC
             """, nativeQuery = true)
