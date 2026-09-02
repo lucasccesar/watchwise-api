@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -120,6 +121,9 @@ class DiaryEntryControllerIntegrationTest {
         RequestThrottlerTestSupport.reset(requestThrottler);
         when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
                 .thenReturn(Optional.of(new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(), null, null)));
+        when(tmdbClient.getTvFullDetails(any(), any())).thenReturn(Optional.of(new TmdbTvFullDetails(
+                null, null, null, null, null, null, null, null, null, null, null, List.of(),
+                null, null, null, null, null, null, null, null)));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {

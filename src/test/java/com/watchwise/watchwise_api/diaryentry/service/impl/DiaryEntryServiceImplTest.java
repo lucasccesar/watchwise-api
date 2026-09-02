@@ -9,6 +9,8 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -184,10 +186,17 @@ class DiaryEntryServiceImplTest {
         lenient().when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
                 .thenReturn(Optional.of(emptySeasonDetails()));
+        lenient().when(tmdbClient.getTvFullDetails(any(), any()))
+                .thenReturn(Optional.of(emptySeriesDetails()));
     }
 
     private TmdbSeasonFullDetails emptySeasonDetails() {
         return new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(), null, null);
+    }
+
+    private TmdbTvFullDetails emptySeriesDetails() {
+        return new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
+                List.of(), null, null, null, null, null, null, null, null);
     }
 
     private TmdbSeasonFullDetails seasonDetailsWithRuntimes(Map<Integer, Integer> runtimeByEpisode) {
@@ -2277,8 +2286,6 @@ class DiaryEntryServiceImplTest {
     @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Throw TmdbUnavailableException - When TMDB Fails To Return A Season's Episode Runtimes")
     void shouldThrowTmdbUnavailableExceptionWhenTmdbFailsToReturnASeasonsEpisodeRuntimes() {
-        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
-                .thenReturn(Optional.empty());
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(Optional.empty());
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
@@ -2288,6 +2295,100 @@ class DiaryEntryServiceImplTest {
                 .isInstanceOf(TmdbUnavailableException.class);
 
         verify(contentService, never()).getOrCreateReference(any());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Derive FinaleEpisodeNumber From TMDB Aired Episodes - When Omitted And No Existing Finale Content")
+    void shouldDeriveFinaleEpisodeNumberFromTmdbAiredEpisodesWhenOmittedAndNoExistingFinaleContent() {
+        Content e1 = buildEpisode("900", 1, 1);
+        Content e2 = buildEpisode("900", 1, 2);
+        Content e3 = buildEpisode("900", 1, 3);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(Optional.of(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
+                        new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null),
+                        new TmdbEpisodeSummary(2, null, null, "2020-01-08", 45, null, null),
+                        new TmdbEpisodeSummary(3, null, null, "2020-01-15", 45, null, null),
+                        new TmdbEpisodeSummary(4, null, null, "2099-01-01", 45, null, null)),
+                        null, null)));
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO refDto = inv.getArgument(0);
+                    Content content = switch (refDto.episodeNumber()) {
+                        case 1 -> e1;
+                        case 2 -> e2;
+                        default -> e3;
+                    };
+                    return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
+                            null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(inv -> {
+                    UUID id = inv.getArgument(0);
+                    if (id.equals(e1.getId())) return e1;
+                    if (id.equals(e2.getId())) return e2;
+                    return e3;
+                });
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), null, null, null);
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(3);
+        verify(contentService, times(3)).getOrCreateReference(any(ContentRefCreationDTO.class));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Derive FinaleSeasonNumber From TMDB Aired Seasons - When Omitted And No Existing Finale Content")
+    void shouldDeriveFinaleSeasonNumberFromTmdbAiredSeasonsWhenOmittedAndNoExistingFinaleContent() {
+        Content e1 = buildEpisode("900", 1, 1);
+        Content e2 = buildEpisode("900", 2, 1);
+
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(eq("900"), any(), eq(ContentType.EPISODE)))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+                new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null, List.of(
+                        new TmdbSeasonSummary(1, null, null, "2020-01-01", 1, null),
+                        new TmdbSeasonSummary(2, null, null, "2021-01-01", 1, null),
+                        new TmdbSeasonSummary(3, null, null, "2099-01-01", 1, null)),
+                        null, null, null, null, null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails(eq("900"), any(), eq(lucas.getPreferredLanguage()))).thenReturn(Optional.of(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
+                        new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null)),
+                        null, null)));
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO refDto = inv.getArgument(0);
+                    Content content = refDto.seasonNumber() == 1 ? e1 : e2;
+                    return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
+                            null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(inv -> {
+                    UUID id = inv.getArgument(0);
+                    return id.equals(e1.getId()) ? e1 : e2;
+                });
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, null, null);
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(2);
+        verify(tmdbClient, never()).getSeasonFullDetails(eq("900"), eq(3), any());
     }
 
     @Test

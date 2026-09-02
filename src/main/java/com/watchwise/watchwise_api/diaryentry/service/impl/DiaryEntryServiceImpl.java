@@ -9,6 +9,8 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -53,6 +55,7 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -519,12 +522,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private void bulkLogSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, Boolean isSeriesFinale,
             Integer explicitFinaleEpisodeNumber, LocalDate watchedDate, List<DiaryEntry> created, ContentType requestedType,
             List<UUID> companionIds, String language) {
-        int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, explicitFinaleEpisodeNumber);
+        TmdbSeasonFullDetails seasonDetails = fetchSeasonDetails(seriesTmdbId, seasonNumber, language);
+        int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, explicitFinaleEpisodeNumber, seasonDetails);
         if (finaleEpisodeNumber > MAX_BULK_EPISODES) {
             throw new BadRequestException("Season has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
         }
 
-        Map<Integer, Integer> episodeRuntimeMinutes = fetchEpisodeRuntimeMinutes(seriesTmdbId, seasonNumber, language);
+        Map<Integer, Integer> episodeRuntimeMinutes = episodeRuntimeMinutes(seasonDetails);
         for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
             created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
                     episodeNumber == finaleEpisodeNumber, isSeriesFinale, watchedDate, created, requestedType, companionIds,
@@ -532,9 +536,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
     }
 
-    private Map<Integer, Integer> fetchEpisodeRuntimeMinutes(String seriesTmdbId, Integer seasonNumber, String language) {
-        TmdbSeasonFullDetails season = tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language)
-                .orElseThrow(this::tmdbUnavailable);
+    private TmdbSeasonFullDetails fetchSeasonDetails(String seriesTmdbId, Integer seasonNumber, String language) {
+        return tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language).orElseThrow(this::tmdbUnavailable);
+    }
+
+    private Map<Integer, Integer> episodeRuntimeMinutes(TmdbSeasonFullDetails season) {
         if (season.episodes() == null) {
             return Map.of();
         }
@@ -543,23 +549,51 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .collect(Collectors.toMap(TmdbEpisodeSummary::episodeNumber, TmdbEpisodeSummary::runtime, (a, b) -> a));
     }
 
+    private int airedEpisodeCount(TmdbSeasonFullDetails season) {
+        if (season.episodes() == null) {
+            return 0;
+        }
+        LocalDate today = LocalDate.now();
+        return (int) season.episodes().stream()
+                .map(TmdbEpisodeSummary::airDate)
+                .map(this::parseTmdbDate)
+                .filter(airDate -> airDate != null && !airDate.isAfter(today))
+                .count();
+    }
+
+    private LocalDate parseTmdbDate(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value);
+        } catch (DateTimeException e) {
+            return null;
+        }
+    }
+
     private TmdbUnavailableException tmdbUnavailable() {
         return new TmdbUnavailableException("TMDB is currently unavailable");
     }
 
-    private int resolveSeasonFinaleEpisodeNumber(String seriesTmdbId, Integer seasonNumber, Integer explicitFinaleEpisodeNumber) {
+    private int resolveSeasonFinaleEpisodeNumber(String seriesTmdbId, Integer seasonNumber, Integer explicitFinaleEpisodeNumber,
+            TmdbSeasonFullDetails seasonDetails) {
         Optional<Content> existingFinale = contentRepository
                 .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
         if (existingFinale.isPresent()) {
             return existingFinale.get().getEpisodeNumber();
         }
-        if (explicitFinaleEpisodeNumber == null) {
+        if (explicitFinaleEpisodeNumber != null) {
+            if (explicitFinaleEpisodeNumber < 1) {
+                throw new BadRequestException("finaleEpisodeNumber for season " + seasonNumber + " must be greater than or equal to 1");
+            }
+            return explicitFinaleEpisodeNumber;
+        }
+        int airedEpisodeCount = airedEpisodeCount(seasonDetails);
+        if (airedEpisodeCount < 1) {
             throw new BadRequestException("finaleEpisodeNumber is required when season " + seasonNumber + " has no known finale episode yet");
         }
-        if (explicitFinaleEpisodeNumber < 1) {
-            throw new BadRequestException("finaleEpisodeNumber for season " + seasonNumber + " must be greater than or equal to 1");
-        }
-        return explicitFinaleEpisodeNumber;
+        return airedEpisodeCount;
     }
 
     private DiaryEntry bulkLogEpisode(UUID userId, String seriesTmdbId, Integer seasonNumber, int episodeNumber,
@@ -597,12 +631,15 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber,
             Map<Integer, Integer> seasonFinaleEpisodeNumbers, LocalDate watchedDate, List<DiaryEntry> created,
             List<UUID> companionIds, String language) {
-        int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber);
+        int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber, language);
 
+        Map<Integer, TmdbSeasonFullDetails> seasonDetailsByNumber = new LinkedHashMap<>();
         int totalEpisodes = 0;
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
+            TmdbSeasonFullDetails seasonDetails = fetchSeasonDetails(seriesTmdbId, seasonNumber, language);
+            seasonDetailsByNumber.put(seasonNumber, seasonDetails);
             totalEpisodes += resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber,
-                    explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber));
+                    explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber), seasonDetails);
         }
         if (totalEpisodes > MAX_BULK_EPISODES) {
             throw new BadRequestException("Series has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
@@ -610,9 +647,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
             boolean isSeriesFinaleSeason = seasonNumber == finaleSeasonNumber;
+            TmdbSeasonFullDetails seasonDetails = seasonDetailsByNumber.get(seasonNumber);
             int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber,
-                    explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber));
-            Map<Integer, Integer> episodeRuntimeMinutes = fetchEpisodeRuntimeMinutes(seriesTmdbId, seasonNumber, language);
+                    explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber), seasonDetails);
+            Map<Integer, Integer> episodeRuntimeMinutes = episodeRuntimeMinutes(seasonDetails);
             for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
                 created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
                         episodeNumber == finaleEpisodeNumber, isSeriesFinaleSeason, watchedDate, created,
@@ -625,15 +663,36 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return seasonFinaleEpisodeNumbers == null ? null : seasonFinaleEpisodeNumbers.get(seasonNumber);
     }
 
-    private int resolveSeriesFinaleSeasonNumber(String seriesTmdbId, Integer explicitFinaleSeasonNumber) {
+    private int resolveSeriesFinaleSeasonNumber(String seriesTmdbId, Integer explicitFinaleSeasonNumber, String language) {
         Optional<Content> existingFinale = contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON);
         if (existingFinale.isPresent()) {
             return existingFinale.get().getSeasonNumber();
         }
-        if (explicitFinaleSeasonNumber == null) {
+        if (explicitFinaleSeasonNumber != null) {
+            return explicitFinaleSeasonNumber;
+        }
+        TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).orElseThrow(this::tmdbUnavailable);
+        int latestAiredSeasonNumber = latestAiredSeasonNumber(series.seasons());
+        if (latestAiredSeasonNumber < 1) {
             throw new BadRequestException("finaleSeasonNumber is required when the series has no known finale season yet");
         }
-        return explicitFinaleSeasonNumber;
+        return latestAiredSeasonNumber;
+    }
+
+    private int latestAiredSeasonNumber(List<TmdbSeasonSummary> seasons) {
+        if (seasons == null) {
+            return 0;
+        }
+        LocalDate today = LocalDate.now();
+        return seasons.stream()
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
+                .filter(season -> {
+                    LocalDate airDate = parseTmdbDate(season.airDate());
+                    return airDate != null && !airDate.isAfter(today);
+                })
+                .map(TmdbSeasonSummary::seasonNumber)
+                .max(Integer::compareTo)
+                .orElse(0);
     }
 
     private DiaryEntry findOwnedEntry(UUID userId, UUID diaryEntryId) {
