@@ -520,7 +520,10 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .flatMap(season -> season.episodes().stream()
                         .map(episode -> toEpisodeSummaryDto(season.seasonNumber(), episode)))
                 .filter(episode -> episode.airDate() != null && !episode.airDate().isAfter(today))
-                .sorted(Comparator.comparing(EpisodeSummaryDTO::airDate).reversed())
+                .sorted(Comparator.comparing(EpisodeSummaryDTO::airDate)
+                        .thenComparing(EpisodeSummaryDTO::seasonNumber)
+                        .thenComparing(EpisodeSummaryDTO::episodeNumber)
+                        .reversed())
                 .limit(RECENT_EPISODES_LIMIT)
                 .toList();
     }

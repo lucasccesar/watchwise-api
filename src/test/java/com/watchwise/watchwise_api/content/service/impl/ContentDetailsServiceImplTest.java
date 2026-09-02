@@ -282,6 +282,34 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDetails] Should Break Ties By Season And Episode Number Descending - When All Episodes Of A Season Air On The Same Date")
+    void shouldBreakTiesBySeasonAndEpisodeNumberDescendingWhenAllEpisodesOfASeasonAirOnTheSameDate() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 5, null)),
+                null, null, null, null, null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                101, "Season 1", null, null, "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Episode 1", null, "2008-01-20", 45, null, null),
+                        new TmdbEpisodeSummary(2, "Episode 2", null, "2008-01-20", 45, null, null),
+                        new TmdbEpisodeSummary(3, "Episode 3", null, "2008-01-20", 45, null, null),
+                        new TmdbEpisodeSummary(4, "Episode 4", null, "2008-01-20", 45, null, null),
+                        new TmdbEpisodeSummary(5, "Episode 5", null, "2008-01-20", 45, null, null)),
+                null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.recentEpisodes()).extracting("seasonNumber", "episodeNumber").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(1, 5),
+                org.assertj.core.groups.Tuple.tuple(1, 4),
+                org.assertj.core.groups.Tuple.tuple(1, 3));
+    }
+
+    @Test
     @DisplayName("[getDetails] Should Exclude Specials Season Zero From Recent Episodes And Runtime - When Content Is A Series")
     void shouldExcludeSpecialsSeasonZeroFromRecentEpisodesAndRuntimeWhenContentIsASeries() {
         UUID contentId = UUID.randomUUID();
