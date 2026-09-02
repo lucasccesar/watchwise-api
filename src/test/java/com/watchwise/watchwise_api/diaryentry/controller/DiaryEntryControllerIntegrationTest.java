@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -30,6 +32,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -40,6 +43,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
@@ -49,6 +53,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -99,6 +105,9 @@ class DiaryEntryControllerIntegrationTest {
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @MockitoBean
+    private TmdbClient tmdbClient;
+
     @BeforeEach
     void setUp() {
         diaryEntryRepository.deleteAll();
@@ -109,6 +118,8 @@ class DiaryEntryControllerIntegrationTest {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
+        when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
+                .thenReturn(Optional.of(new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(), null, null)));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
@@ -1653,6 +1664,25 @@ class DiaryEntryControllerIntegrationTest {
         mockMvc.perform(bulkRequest(user, body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Bulk logging only supports content of type SEASON or SERIES"));
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadGateway And Not Persist - When TMDB Is Unavailable While Fetching A Season's Episode Runtimes")
+    void shouldReturnBadGatewayAndNotPersistWhenTmdbIsUnavailableOnBulk() throws Exception {
+        RegisteredUser user = registerUser("bulktmdbdown");
+        when(tmdbClient.getSeasonFullDetails("917", 1, "en-US")).thenReturn(Optional.empty());
+
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "917", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 2
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadGateway());
 
         assertThat(diaryEntryRepository.findAll()).isEmpty();
     }

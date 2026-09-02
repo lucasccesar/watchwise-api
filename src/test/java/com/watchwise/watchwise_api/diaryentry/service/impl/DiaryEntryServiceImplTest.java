@@ -4,7 +4,11 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -121,6 +125,9 @@ class DiaryEntryServiceImplTest {
     @Mock
     private UserMapper userMapper;
 
+    @Mock
+    private TmdbClient tmdbClient;
+
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
@@ -174,6 +181,20 @@ class DiaryEntryServiceImplTest {
 
         lenient().when(likeService.getLikedDiaryEntryIds(any(), any())).thenReturn(Set.of());
         lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
+        lenient().when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
+                .thenReturn(Optional.of(emptySeasonDetails()));
+    }
+
+    private TmdbSeasonFullDetails emptySeasonDetails() {
+        return new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(), null, null);
+    }
+
+    private TmdbSeasonFullDetails seasonDetailsWithRuntimes(Map<Integer, Integer> runtimeByEpisode) {
+        List<TmdbEpisodeSummary> episodes = runtimeByEpisode.entrySet().stream()
+                .map(entry -> new TmdbEpisodeSummary(entry.getKey(), null, null, null, entry.getValue(), null, null))
+                .toList();
+        return new TmdbSeasonFullDetails(null, null, null, null, null, null, episodes, null, null);
     }
 
     // ---------- getDiaryEntries ----------
@@ -2185,8 +2206,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Pass Each Episode's RuntimeMinutes To The Content Reference - When Bulk-Logging A Season With EpisodeRuntimeMinutes")
-    void shouldPassEachEpisodesRuntimeMinutesToTheContentReferenceWhenBulkLoggingASeasonWithEpisodeRuntimeMinutes() {
+    @DisplayName("[createDiaryEntriesInBulk] Should Fetch Each Episode's RuntimeMinutes From TMDB And Pass To The Content Reference - When Bulk-Logging A Season")
+    void shouldFetchEachEpisodesRuntimeMinutesFromTmdbAndPassToTheContentReferenceWhenBulkLoggingASeason() {
         Content e1 = buildEpisode("900", 1, 1);
         Content e2 = buildFinaleEpisode("900", 1, 2);
 
@@ -2194,6 +2215,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47, 2, 55))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
                 .thenAnswer(inv -> {
                     ContentRefCreationDTO refDto = inv.getArgument(0);
@@ -2211,8 +2234,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
-                seasonRef, LocalDate.now(), 2, null, null, null, Map.of(1, 47, 2, 55), null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 2, null, null);
 
         diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
@@ -2223,8 +2245,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Pass Each Episode's RuntimeMinutes To The Content Reference - When Bulk-Logging A Series With SeasonEpisodeRuntimeMinutes")
-    void shouldPassEachEpisodesRuntimeMinutesToTheContentReferenceWhenBulkLoggingASeriesWithSeasonEpisodeRuntimeMinutes() {
+    @DisplayName("[createDiaryEntriesInBulk] Should Fetch Each Season's Episode RuntimeMinutes From TMDB Once Per Season - When Bulk-Logging A Series")
+    void shouldFetchEachSeasonsEpisodeRuntimeMinutesFromTmdbOncePerSeasonWhenBulkLoggingASeries() {
         Content e1 = buildFinaleEpisode("900", 1, 1);
 
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
@@ -2233,6 +2255,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
@@ -2241,13 +2265,29 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
-                seriesRef, LocalDate.now(), null, 1, Map.of(1, 1), null, null, Map.of(1, Map.of(1, 47)));
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 1, Map.of(1, 1));
 
         diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
         assertThat(contentRefCreationCaptor.getValue().runtimeMinutes()).isEqualTo(47);
+        verify(tmdbClient, times(1)).getSeasonFullDetails("900", 1, lucas.getPreferredLanguage());
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw TmdbUnavailableException - When TMDB Fails To Return A Season's Episode Runtimes")
+    void shouldThrowTmdbUnavailableExceptionWhenTmdbFailsToReturnASeasonsEpisodeRuntimes() {
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(Optional.empty());
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 2, null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(TmdbUnavailableException.class);
+
+        verify(contentService, never()).getOrCreateReference(any());
     }
 
     @Test
