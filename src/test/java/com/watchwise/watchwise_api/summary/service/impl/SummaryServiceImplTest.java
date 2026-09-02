@@ -565,7 +565,7 @@ class SummaryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         User marina = buildUser(marinaId, true);
         when(watchCompanionRepository.countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
-                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any()))
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), eq(PageRequest.of(0, 3))))
                 .thenReturn(List.of(companionWatchCount(marinaId, 5L)));
         when(userRepository.findAllById(List.of(marinaId))).thenReturn(List.of(marina));
         when(userMapper.userToUserPreviewDto(marina)).thenReturn(new UserPreviewDTO(marinaId, "marina", null, true));
@@ -583,7 +583,7 @@ class SummaryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         User marina = buildUser(marinaId, true);
         when(watchCompanionRepository.countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
-                eq(lucasId), eq(ContentType.EPISODE), eq(LocalDate.of(2026, 1, 1)), eq(LocalDate.of(2026, 12, 31)), any()))
+                eq(lucasId), eq(ContentType.EPISODE), eq(LocalDate.of(2026, 1, 1)), eq(LocalDate.of(2026, 12, 31)), eq(PageRequest.of(0, 3))))
                 .thenReturn(List.of(companionWatchCount(marinaId, 12L)));
         when(userRepository.findAllById(List.of(marinaId))).thenReturn(List.of(marina));
         when(userMapper.userToUserPreviewDto(marina)).thenReturn(new UserPreviewDTO(marinaId, "marina", null, true));
@@ -684,7 +684,7 @@ class SummaryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         User marina = buildUser(marinaId, true);
         when(watchCompanionRepository.countGroupedByCompanionUserIdAndContentTypeIn(
-                eq(lucasId), eq(Set.of(ContentType.MOVIE, ContentType.EPISODE)), any()))
+                eq(lucasId), eq(Set.of(ContentType.MOVIE, ContentType.EPISODE)), eq(PageRequest.of(0, 3))))
                 .thenReturn(List.of(companionWatchCount(marinaId, 37L)));
         when(userRepository.findAllById(List.of(marinaId))).thenReturn(List.of(marina));
         when(userMapper.userToUserPreviewDto(marina)).thenReturn(new UserPreviewDTO(marinaId, "marina", null, true));
