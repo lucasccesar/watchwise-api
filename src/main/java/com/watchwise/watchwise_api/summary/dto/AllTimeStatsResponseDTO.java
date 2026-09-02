@@ -9,6 +9,7 @@ public record AllTimeStatsResponseDTO(
         long totalMoviesWatched,
         long totalEpisodesWatched,
         long totalMinutesWatched,
+        long totalTheaterVisits,
         double averageMinutesPerMonth,
         double averageMinutesPerWeek,
         double averageMinutesPerDay,

@@ -17,6 +17,7 @@ public record UserResponseDTO(
         LocalDateTime updatedAt,
         long totalMinutesWatched,
         long minutesWatchedLast30Days,
+        long totalTheaterVisits,
         List<GenreCountDTO> genreCounts,
         String banner,
         long followersCount,
@@ -27,6 +28,6 @@ public record UserResponseDTO(
     public UserResponseDTO(UUID id, String username, String email, String description, String profilePicture,
             Boolean isProfilePublic, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this(id, username, email, description, profilePicture, isProfilePublic, createdAt, updatedAt,
-                0L, 0L, List.of(), null, 0L, 0L, null, null);
+                0L, 0L, 0L, List.of(), null, 0L, 0L, null, null);
     }
 }

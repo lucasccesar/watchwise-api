@@ -167,6 +167,13 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     long sumRuntimeMinutesByUserId(@Param("userId") UUID userId);
 
     @Query("""
+            SELECT COUNT(d) FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.watchedInTheater = true
+            """)
+    long countByUserIdAndWatchedInTheaterTrue(@Param("userId") UUID userId);
+
+    @Query("""
             SELECT COALESCE(SUM(d.content.runtimeMinutes), 0) FROM DiaryEntry d
             WHERE d.user.id = :userId
             AND d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,

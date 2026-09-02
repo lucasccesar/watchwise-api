@@ -227,7 +227,7 @@ public class UserServiceImpl implements UserService {
 
         ProfileStats stats = computeProfileStats(id);
         return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.genreCounts(), stats.followersCount(), stats.followingCount());
+                stats.totalTheaterVisits(), stats.genreCounts(), stats.followersCount(), stats.followingCount());
     }
 
     @Override
@@ -301,7 +301,7 @@ public class UserServiceImpl implements UserService {
 
     private UserResponseDTO toUserResponseDto(User user, ProfileStats stats) {
         return userMapper.userToUserResponseDto(user, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.genreCounts(), stats.followersCount(), stats.followingCount());
+                stats.totalTheaterVisits(), stats.genreCounts(), stats.followersCount(), stats.followingCount());
     }
 
     private ProfileStats computeProfileStats(UUID userId) {
@@ -311,12 +311,14 @@ public class UserServiceImpl implements UserService {
         long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
         long minutesWatchedLast30Days = diaryEntryRepository
                 .sumRuntimeMinutesByUserIdAndWatchedDateBetween(userId, windowStart, windowEnd);
+        long totalTheaterVisits = diaryEntryRepository.countByUserIdAndWatchedInTheaterTrue(userId);
         List<GenreCountDTO> genreCounts = toGenreCountDtos(
                 diaryEntryRepository.countDistinctTitlesByGenreAndUserId(userId));
         long followersCount = followerRepository.countByFollowedIdAndStatus(userId, FollowStatus.ACCEPTED);
         long followingCount = followerRepository.countByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
 
-        return new ProfileStats(totalMinutesWatched, minutesWatchedLast30Days, genreCounts, followersCount, followingCount);
+        return new ProfileStats(totalMinutesWatched, minutesWatchedLast30Days, totalTheaterVisits, genreCounts,
+                followersCount, followingCount);
     }
 
     private List<GenreCountDTO> toGenreCountDtos(List<DiaryEntryRepository.GenreCount> rows) {
@@ -325,8 +327,8 @@ public class UserServiceImpl implements UserService {
                 .toList();
     }
 
-    private record ProfileStats(long totalMinutesWatched, long minutesWatchedLast30Days, List<GenreCountDTO> genreCounts,
-            long followersCount, long followingCount) {
-        static final ProfileStats EMPTY = new ProfileStats(0L, 0L, List.of(), 0L, 0L);
+    private record ProfileStats(long totalMinutesWatched, long minutesWatchedLast30Days, long totalTheaterVisits,
+            List<GenreCountDTO> genreCounts, long followersCount, long followingCount) {
+        static final ProfileStats EMPTY = new ProfileStats(0L, 0L, 0L, List.of(), 0L, 0L);
     }
 }

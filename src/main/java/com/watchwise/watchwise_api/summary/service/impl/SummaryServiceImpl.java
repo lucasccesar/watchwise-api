@@ -313,6 +313,7 @@ public class SummaryServiceImpl implements SummaryService {
         long totalMoviesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.MOVIE);
         long totalEpisodesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.EPISODE);
         long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
+        long totalTheaterVisits = diaryEntryRepository.countByUserIdAndWatchedInTheaterTrue(userId);
 
         LocalDate firstWatched = diaryEntryRepository.findMinWatchedDateByUserId(userId).orElse(LocalDate.now());
         long daysSinceFirstWatched = Math.max(1, ChronoUnit.DAYS.between(firstWatched, LocalDate.now()) + 1);
@@ -351,7 +352,7 @@ public class SummaryServiceImpl implements SummaryService {
         List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(ContentType.MOVIE, ContentType.SERIES));
         List<DiaryEntryResponseDTO> bottomRated = promoteTop5First(bottomRatedRaw, userId, List.of(ContentType.MOVIE, ContentType.SERIES));
 
-        return new AllTimeStatsResponseDTO(totalMoviesWatched, totalEpisodesWatched, totalMinutesWatched,
+        return new AllTimeStatsResponseDTO(totalMoviesWatched, totalEpisodesWatched, totalMinutesWatched, totalTheaterVisits,
                 averageMinutesPerMonth, averageMinutesPerWeek, averageMinutesPerDay,
                 watchCountByYearMovies, watchCountByYearEpisodes, watchCountByDecade, watchCountByCountry,
                 mostLoggedContent, genreCountsMovies, genreCountsEpisodes, topRated, bottomRated);

@@ -143,6 +143,7 @@ class UserServiceImplTest {
                 savedUser.getCreatedAt(),
                 0L,
                 0L,
+                0L,
                 List.of(),
                 null,
                 0L,
@@ -159,13 +160,13 @@ class UserServiceImplTest {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.saveNewUser(postUserDTO);
 
         assertThat(result).isEqualTo(userResponseDTO);
         verify(userRepository).save(any(User.class));
-        verify(userMapper).userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L);
+        verify(userMapper).userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L);
     }
 
     @Test
@@ -174,7 +175,7 @@ class UserServiceImplTest {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -194,7 +195,7 @@ class UserServiceImplTest {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -215,7 +216,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Username already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -229,7 +230,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Email already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -243,7 +244,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Username or email already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -259,7 +260,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Username or email already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -274,7 +275,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Username or email already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -301,13 +302,13 @@ class UserServiceImplTest {
     void shouldReturnPublicUserDtoWhenIdExistsAndProfileIsPublic() {
         UUID id = savedUser.getId();
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
-        when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(publicUserDTO);
+        when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(publicUserDTO);
 
         PublicUserProfileDTO result = userService.getUserById(id);
 
         assertThat(result).isEqualTo(publicUserDTO);
         verify(userRepository).findById(id);
-        verify(userMapper).userToPublicUserProfileDto(savedUser, 0L, 0L, List.of(), 0L, 0L);
+        verify(userMapper).userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L);
     }
 
     @Test
@@ -320,7 +321,7 @@ class UserServiceImplTest {
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("User not found");
 
-        verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -334,7 +335,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
-        verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -342,13 +343,13 @@ class UserServiceImplTest {
     void shouldReturnUserResponseDtoWhenIdExists() {
         UUID id = savedUser.getId();
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.getCurrentUser(id);
 
         assertThat(result).isEqualTo(userResponseDTO);
         verify(userRepository).findById(id);
-        verify(userMapper).userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L);
+        verify(userMapper).userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L);
     }
 
     @Test
@@ -357,7 +358,7 @@ class UserServiceImplTest {
         UUID id = savedUser.getId();
         savedUser.setIsProfilePublic(false);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.getCurrentUser(id);
 
@@ -376,7 +377,7 @@ class UserServiceImplTest {
         when(diaryEntryRepository.sumRuntimeMinutesByUserId(id)).thenReturn(4200L);
         when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndWatchedDateBetween(eq(id), any(), any())).thenReturn(300L);
         when(diaryEntryRepository.countDistinctTitlesByGenreAndUserId(id)).thenReturn(List.of(actionGenre));
-        when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), any(), anyLong(), anyLong())).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong())).thenReturn(userResponseDTO);
 
         ArgumentCaptor<Long> totalCaptor = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> last30Captor = ArgumentCaptor.forClass(Long.class);
@@ -384,7 +385,7 @@ class UserServiceImplTest {
 
         userService.getCurrentUser(id);
 
-        verify(userMapper).userToUserResponseDto(eq(savedUser), totalCaptor.capture(), last30Captor.capture(), genreCaptor.capture(), anyLong(), anyLong());
+        verify(userMapper).userToUserResponseDto(eq(savedUser), totalCaptor.capture(), last30Captor.capture(), anyLong(), genreCaptor.capture(), anyLong(), anyLong());
         assertThat(totalCaptor.getValue()).isEqualTo(4200L);
         assertThat(last30Captor.getValue()).isEqualTo(300L);
         assertThat(genreCaptor.getValue()).containsExactly(new GenreCountDTO("Action", 5L));
@@ -397,14 +398,14 @@ class UserServiceImplTest {
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(followerRepository.countByFollowedIdAndStatus(id, FollowStatus.ACCEPTED)).thenReturn(42L);
         when(followerRepository.countByFollowerIdAndStatus(id, FollowStatus.ACCEPTED)).thenReturn(17L);
-        when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), any(), anyLong(), anyLong())).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong())).thenReturn(userResponseDTO);
 
         ArgumentCaptor<Long> followersCaptor = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Long> followingCaptor = ArgumentCaptor.forClass(Long.class);
 
         userService.getCurrentUser(id);
 
-        verify(userMapper).userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), any(), followersCaptor.capture(), followingCaptor.capture());
+        verify(userMapper).userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), anyLong(), any(), followersCaptor.capture(), followingCaptor.capture());
         assertThat(followersCaptor.getValue()).isEqualTo(42L);
         assertThat(followingCaptor.getValue()).isEqualTo(17L);
     }
@@ -415,7 +416,7 @@ class UserServiceImplTest {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);
         when(passwordEncoder.encode(postUserDTO.password())).thenReturn("hashedPassword");
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.saveNewUser(postUserDTO);
 
@@ -432,7 +433,7 @@ class UserServiceImplTest {
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("User not found");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -647,7 +648,7 @@ class UserServiceImplTest {
     void shouldNotChangeAnyFieldWhenAllPatchFieldsAreNull() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -670,7 +671,7 @@ class UserServiceImplTest {
     void shouldUpdateUsernameTrimmedWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO("  NewUsername  ", null, null, null, null, null, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -685,7 +686,7 @@ class UserServiceImplTest {
     void shouldNotChangeUsernameWhenSameValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO("  " + savedUser.getUsername() + "  ", null, null, null, null, null, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -713,7 +714,7 @@ class UserServiceImplTest {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  NEW.EMAIL@EMAIL.COM  ", null, null, null, null, "Password123");
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -728,7 +729,7 @@ class UserServiceImplTest {
     void shouldNotChangeEmailWhenSameValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "  " + savedUser.getEmail().toUpperCase() + "  ", null, null, null, null, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -744,7 +745,7 @@ class UserServiceImplTest {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, "SamePassword123", null, null, null, null);
         when(passwordEncoder.matches("SamePassword123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -763,7 +764,7 @@ class UserServiceImplTest {
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(passwordEncoder.encode("NewPassword123")).thenReturn("newHashedPassword");
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -782,7 +783,7 @@ class UserServiceImplTest {
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(passwordEncoder.encode("NewPassword123")).thenReturn("newHashedPassword");
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -796,7 +797,7 @@ class UserServiceImplTest {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, "new.email@email.com", null, null, null, null, "Password123");
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -808,7 +809,7 @@ class UserServiceImplTest {
     void shouldNotRevokeAnyRefreshTokenWhenNeitherPasswordNorEmailChanges() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New bio", null, null, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -820,7 +821,7 @@ class UserServiceImplTest {
     void shouldUpdateDescriptionWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, "New description", null, null, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -835,7 +836,7 @@ class UserServiceImplTest {
     void shouldUpdateProfilePictureWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, "https://new-picture.com/pic.png", null, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -850,7 +851,7 @@ class UserServiceImplTest {
     void shouldUpdateBannerWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, "https://new-banner.com/banner.png");
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -866,7 +867,7 @@ class UserServiceImplTest {
         savedUser.setBanner("https://picture.com/banner.png");
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, "https://picture.com/banner.png");
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -878,7 +879,7 @@ class UserServiceImplTest {
     void shouldUpdatePreferredLanguageWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, "pt-BR", null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -894,7 +895,7 @@ class UserServiceImplTest {
         savedUser.setPreferredLanguage("en-US");
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, "en-US", null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -906,7 +907,7 @@ class UserServiceImplTest {
     void shouldUpdatePreferredRegionWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, null, "BR");
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -922,7 +923,7 @@ class UserServiceImplTest {
         savedUser.setPreferredRegion("US");
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, null, "US");
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -934,7 +935,7 @@ class UserServiceImplTest {
     void shouldUpdateIsProfilePublicWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, false, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
 
@@ -952,7 +953,7 @@ class UserServiceImplTest {
         savedUser.setIsProfilePublic(false);
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, true, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -965,7 +966,7 @@ class UserServiceImplTest {
         savedUser.setIsProfilePublic(true);
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, true, null);
         when(userRepository.saveAndFlush(any(User.class))).thenReturn(savedUser);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.updateUser(savedUser, patchUserDTO);
 
@@ -983,7 +984,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Username already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -998,7 +999,7 @@ class UserServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Email already in use");
 
-        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), any(), anyLong(), anyLong());
+        verify(userMapper, never()).userToUserResponseDto(any(), anyLong(), anyLong(), anyLong(), any(), anyLong(), anyLong());
     }
 
     @Test
@@ -1135,7 +1136,7 @@ class UserServiceImplTest {
         when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
         when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.login(loginUserDTO);
 
@@ -1148,7 +1149,7 @@ class UserServiceImplTest {
         LoginUserDTO loginUserDTO = new LoginUserDTO(savedUser.getUsername(), "Password123");
         when(userRepository.findByUsernameIgnoreCase(savedUser.getUsername())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.login(loginUserDTO);
 
@@ -1163,7 +1164,7 @@ class UserServiceImplTest {
         when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
         when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.login(loginUserDTO);
 
@@ -1179,7 +1180,7 @@ class UserServiceImplTest {
         when(userRepository.findByUsernameIgnoreCase(savedUser.getEmail())).thenReturn(Optional.empty());
         when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
         when(passwordEncoder.matches("Password123", savedUser.getPassword())).thenReturn(true);
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.login(loginUserDTO);
 
@@ -1235,7 +1236,7 @@ class UserServiceImplTest {
     @DisplayName("[findByEmail] Should Return UserResponseDTO - When Email Exists")
     void shouldReturnUserResponseDtoWhenEmailExists() {
         when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         Optional<UserResponseDTO> result = userService.findByEmail(savedUser.getEmail());
 
@@ -1257,7 +1258,7 @@ class UserServiceImplTest {
     @DisplayName("[findByEmail] Should Trim Email Before Lookup - When Email Has Surrounding Whitespace")
     void shouldTrimEmailBeforeLookupWhenEmailHasSurroundingWhitespace() {
         when(userRepository.findByEmailIgnoreCase(savedUser.getEmail())).thenReturn(Optional.of(savedUser));
-        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
+        when(userMapper.userToUserResponseDto(savedUser, 0L, 0L, 0L, List.of(), 0L, 0L)).thenReturn(userResponseDTO);
 
         userService.findByEmail("  " + savedUser.getEmail() + "  ");
 

@@ -325,6 +325,7 @@ class UserControllerTest {
                 LocalDateTime.now(),
                 0L,
                 0L,
+                0L,
                 List.of(),
                 null,
                 0L,
