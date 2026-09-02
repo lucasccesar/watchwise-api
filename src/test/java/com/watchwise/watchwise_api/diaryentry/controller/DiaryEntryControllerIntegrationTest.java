@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -648,6 +649,24 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When WatchedDate Is In The Future")
+    void shouldReturnBadRequestAndNotPersistWhenWatchedDateIsInTheFuture() throws Exception {
+        RegisteredUser user = registerUser("creatediarywatcheddatefuture");
+        String body = """
+                {
+                    "content": { "tmdbId": "550", "type": "MOVIE" },
+                    "watchedDate": "2099-01-01"
+                }
+                """;
+
+        mockMvc.perform(createRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("watchedDate cannot be in the future"));
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Set WatchNumber To 2 And Persist - When User Already Logged This Content")
     void shouldSetWatchNumberToTwoAndPersistWhenUserAlreadyLoggedThisContent() throws Exception {
         RegisteredUser user = registerUser("creatediaryrewatch");
@@ -1025,6 +1044,21 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isBadRequest());
 
         assertThat(diaryEntryRepository.findById(entry.getId()).orElseThrow().getWatchedInTheater()).isNull();
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Return BadRequest And Not Persist - When WatchedDate Is In The Future")
+    void shouldReturnBadRequestAndNotPersistWhenWatchedDateIsInTheFutureOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatediarywatcheddatefuture");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        DiaryEntry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE));
+        LocalDate originalWatchedDate = entry.getWatchedDate();
+
+        mockMvc.perform(updateRequest(user, entry.getId(), updateBody("watchedDate", "2099-01-01")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("watchedDate cannot be in the future"));
+
+        assertThat(diaryEntryRepository.findById(entry.getId()).orElseThrow().getWatchedDate()).isEqualTo(originalWatchedDate);
     }
 
     @Test
@@ -1668,6 +1702,50 @@ class DiaryEntryControllerIntegrationTest {
         mockMvc.perform(bulkRequest(user, body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Bulk logging only supports content of type SEASON or SERIES"));
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When WatchedDate Is In The Future")
+    void shouldReturnBadRequestAndNotPersistWhenWatchedDateIsInTheFutureOnBulk() throws Exception {
+        RegisteredUser user = registerUser("bulkwatcheddatefuture");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "918", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 2,
+                    "watchedDate": "2099-01-01"
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("watchedDate cannot be in the future"));
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When WatchedDate Predates The Finale Episode's Release Date")
+    void shouldReturnBadRequestAndNotPersistWhenWatchedDatePredatesTheFinaleEpisodesReleaseDateOnBulk() throws Exception {
+        RegisteredUser user = registerUser("bulkwatcheddatebeforerelease");
+        when(tmdbClient.getSeasonFullDetails("919", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+                null, null, null, null, null, null, List.of(
+                        new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null),
+                        new TmdbEpisodeSummary(2, null, null, "2020-01-08", 45, null, null)),
+                null, null)));
+
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "919", "seasonNumber": 1 },
+                    "finaleEpisodeNumber": 2,
+                    "watchedDate": "2019-12-31"
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("watchedDate cannot predate the content's release date (2020-01-08)"));
 
         assertThat(diaryEntryRepository.findAll()).isEmpty();
     }

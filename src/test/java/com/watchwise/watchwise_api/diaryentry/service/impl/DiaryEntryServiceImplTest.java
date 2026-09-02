@@ -1117,6 +1117,20 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntry] Should Throw BadRequestException - When WatchedDate Is In The Future")
+    void shouldThrowBadRequestExceptionWhenWatchedDateIsInTheFutureOnCreate() {
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO("550", ContentType.MOVIE, null, null, null, null, null),
+                null, null, LocalDate.now().plusDays(1), null, null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedDate cannot be in the future");
+
+        verifyNoInteractions(contentService);
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Auto-Create Season Entry With WatchNumber 1 - When The First Complete Pass Finishes")
     void shouldAutoCreateSeasonEntryWithWatchNumberOneWhenTheFirstCompletePassFinishes() {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 2);
@@ -1979,6 +1993,40 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When WatchedDate Is In The Future")
+    void shouldThrowBadRequestExceptionWhenWatchedDateIsInTheFutureOnBulk() {
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now().plusDays(1), 2, null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedDate cannot be in the future");
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When WatchedDate Predates The Finale Episode's Release Date")
+    void shouldThrowBadRequestExceptionWhenWatchedDatePredatesTheFinaleEpisodesReleaseDateOnSeasonBulk() {
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(Optional.of(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
+                        new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null),
+                        new TmdbEpisodeSummary(2, null, null, "2020-01-08", 45, null, null)),
+                        null, null)));
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.of(2019, 12, 31), 2, null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedDate cannot predate the content's release date (2020-01-08)");
+
+        verify(contentService, never()).getOrCreateReference(any());
+    }
+
+    @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When The Season Exceeds The Bulk Episode Limit")
     void shouldThrowBadRequestExceptionWhenTheSeasonExceedsTheBulkEpisodeLimit() {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
@@ -2828,6 +2876,20 @@ class DiaryEntryServiceImplTest {
                 null, null, null, true, null)))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("watchedInTheater can only be set for content of type MOVIE");
+
+        verify(diaryEntryRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Throw BadRequestException - When WatchedDate Is In The Future")
+    void shouldThrowBadRequestExceptionWhenWatchedDateIsInTheFutureOnUpdate() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+
+        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
+                null, null, LocalDate.now().plusDays(1), null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("watchedDate cannot be in the future");
 
         verify(diaryEntryRepository, never()).save(any());
     }

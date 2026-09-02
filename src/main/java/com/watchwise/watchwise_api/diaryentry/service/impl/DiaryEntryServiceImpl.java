@@ -172,6 +172,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     @Override
     @Transactional
     public DiaryEntryCreationResultDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO) {
+        assertWatchedDateNotInFuture(diaryEntryCreationDTO.watchedDate());
         List<UUID> companionIds = validateCompanions(userId, diaryEntryCreationDTO.watchedWith());
         ContentRefDTO contentRef = contentService.getOrCreateReference(diaryEntryCreationDTO.content());
 
@@ -282,6 +283,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (content.type() != ContentType.SEASON && content.type() != ContentType.SERIES) {
             throw new BadRequestException("Bulk logging only supports content of type SEASON or SERIES");
         }
+        assertWatchedDateNotInFuture(dto.watchedDate());
         List<UUID> companionIds = validateCompanions(userId, dto.watchedWith());
         String language = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"))
@@ -321,6 +323,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             entry.setScore(diaryEntryUpdateDTO.score());
         }
         if (diaryEntryUpdateDTO.watchedDate() != null) {
+            assertWatchedDateNotInFuture(diaryEntryUpdateDTO.watchedDate());
             entry.setWatchedDate(diaryEntryUpdateDTO.watchedDate());
         }
         if (diaryEntryUpdateDTO.watchedInTheater() != null) {
@@ -350,6 +353,18 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private void assertWatchedInTheaterAllowed(ContentType contentType, Boolean watchedInTheater) {
         if (watchedInTheater != null && contentType != ContentType.MOVIE) {
             throw new BadRequestException("watchedInTheater can only be set for content of type MOVIE");
+        }
+    }
+
+    private void assertWatchedDateNotInFuture(LocalDate watchedDate) {
+        if (watchedDate != null && watchedDate.isAfter(LocalDate.now())) {
+            throw new BadRequestException("watchedDate cannot be in the future");
+        }
+    }
+
+    private void assertWatchedDateNotBeforeRelease(LocalDate watchedDate, LocalDate releaseDate) {
+        if (watchedDate != null && releaseDate != null && watchedDate.isBefore(releaseDate)) {
+            throw new BadRequestException("watchedDate cannot predate the content's release date (" + releaseDate + ")");
         }
     }
 
@@ -527,6 +542,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (finaleEpisodeNumber > MAX_BULK_EPISODES) {
             throw new BadRequestException("Season has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
         }
+        assertWatchedDateNotBeforeRelease(watchedDate, episodeAirDate(seasonDetails, finaleEpisodeNumber));
 
         Map<Integer, Integer> episodeRuntimeMinutes = episodeRuntimeMinutes(seasonDetails);
         for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
@@ -547,6 +563,19 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return season.episodes().stream()
                 .filter(episode -> episode.episodeNumber() != null && episode.runtime() != null)
                 .collect(Collectors.toMap(TmdbEpisodeSummary::episodeNumber, TmdbEpisodeSummary::runtime, (a, b) -> a));
+    }
+
+    private LocalDate episodeAirDate(TmdbSeasonFullDetails season, int episodeNumber) {
+        if (season.episodes() == null) {
+            return null;
+        }
+        return season.episodes().stream()
+                .filter(episode -> Objects.equals(episodeNumber, episode.episodeNumber()))
+                .map(TmdbEpisodeSummary::airDate)
+                .map(this::parseTmdbDate)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
     }
 
     private int airedEpisodeCount(TmdbSeasonFullDetails season) {
@@ -650,6 +679,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             TmdbSeasonFullDetails seasonDetails = seasonDetailsByNumber.get(seasonNumber);
             int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber,
                     explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber), seasonDetails);
+            if (isSeriesFinaleSeason) {
+                assertWatchedDateNotBeforeRelease(watchedDate, episodeAirDate(seasonDetails, finaleEpisodeNumber));
+            }
             Map<Integer, Integer> episodeRuntimeMinutes = episodeRuntimeMinutes(seasonDetails);
             for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
                 created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
