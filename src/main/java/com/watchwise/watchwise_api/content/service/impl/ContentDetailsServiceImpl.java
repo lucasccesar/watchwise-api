@@ -72,6 +72,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private static final Set<String> ALLOWED_CREW_JOBS = Set.of(
             "Director", "Screenplay", "Executive Producer", "Production Manager",
             "First Assistant Director", "Director of Photography", "Supervising Art Director");
+    private static final String YOUTUBE_SITE = "YouTube";
+    private static final String YOUTUBE_WATCH_URL_PREFIX = "https://www.youtube.com/watch?v=";
 
     private final ContentRepository contentRepository;
     private final UserRepository userRepository;
@@ -405,9 +407,10 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return List.of();
         }
         return videos.results().stream()
+                .filter(video -> YOUTUBE_SITE.equalsIgnoreCase(video.site()))
                 .map(video -> new VideoDTO(
                         video.key(), video.name(), video.site(), video.type(), video.official(),
-                        video.isoCode639_1(), parseInstant(video.publishedAt())))
+                        video.isoCode639_1(), parseInstant(video.publishedAt()), YOUTUBE_WATCH_URL_PREFIX + video.key()))
                 .toList();
     }
 

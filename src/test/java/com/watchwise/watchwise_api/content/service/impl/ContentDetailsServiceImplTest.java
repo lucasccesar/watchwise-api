@@ -552,9 +552,30 @@ class ContentDetailsServiceImplTest {
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(79, "Village Roadshow Pictures", "/village.png", "US"));
         assertThat(result.crew()).extracting("id", "name", "profilePath", "jobs")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(10, "Lana Wachowski", "/lana.jpg", List.of("Director")));
-        assertThat(result.videos()).extracting("key", "name", "site", "type", "official", "language", "publishedAt")
+        assertThat(result.videos()).extracting("key", "name", "site", "type", "official", "language", "publishedAt", "url")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(
-                        "vKQi3bBA1y8", "Trailer", "YouTube", "Trailer", true, "en", Instant.parse("1999-03-01T00:00:00.000Z")));
+                        "vKQi3bBA1y8", "Trailer", "YouTube", "Trailer", true, "en", Instant.parse("1999-03-01T00:00:00.000Z"),
+                        "https://www.youtube.com/watch?v=vKQi3bBA1y8"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Exclude Non YouTube Videos - When Content Is A Movie")
+    void shouldExcludeNonYoutubeVideosWhenContentIsAMovie() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(), null,
+                null, null, null, null, null,
+                new TmdbVideos(List.of(
+                        new TmdbVideo("vimeo123", "Behind The Scenes", "Vimeo", "Featurette", true, "en",
+                                "1999-03-01T00:00:00.000Z"),
+                        new TmdbVideo("vKQi3bBA1y8", "Trailer", "YouTube", "Trailer", true, "en",
+                                "1999-03-01T00:00:00.000Z"))))));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.videos()).extracting("key").containsExactly("vKQi3bBA1y8");
     }
 
     @Test
