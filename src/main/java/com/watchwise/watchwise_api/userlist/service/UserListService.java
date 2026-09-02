@@ -13,7 +13,7 @@ import java.util.UUID;
 public interface UserListService {
 
     Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize,
-            String sortBy, String sortDirection);
+            String sortBy, String sortDirection, UUID contentId);
 
     Page<UserListResponseDTO> getLikedLists(UUID userId, Integer pageNumber, Integer pageSize);
 

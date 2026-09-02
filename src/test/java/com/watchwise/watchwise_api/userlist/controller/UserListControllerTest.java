@@ -66,9 +66,9 @@ class UserListControllerTest {
         UUID targetUserId = UUID.randomUUID();
         UserListResponseDTO dto = buildResponseDto();
         Page<UserListResponseDTO> page = new PageImpl<>(List.of(dto));
-        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10, null, null)).thenReturn(page);
+        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10, null, null, null)).thenReturn(page);
 
-        ResponseEntity<PageResponseDTO<UserListResponseDTO>> result = userListController.getUserLists(targetUserId, 1, 10, null, null);
+        ResponseEntity<PageResponseDTO<UserListResponseDTO>> result = userListController.getUserLists(targetUserId, 1, 10, null, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody().content()).containsExactly(dto);
@@ -78,11 +78,23 @@ class UserListControllerTest {
     @DisplayName("[getUserLists] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingUserLists() {
         UUID targetUserId = UUID.randomUUID();
-        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10, null, null)).thenReturn(Page.empty());
+        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10, null, null, null)).thenReturn(Page.empty());
 
-        userListController.getUserLists(targetUserId, 1, 10, null, null);
+        userListController.getUserLists(targetUserId, 1, 10, null, null, null);
 
-        verify(userListService).getUserLists(currentUserId, targetUserId, 1, 10, null, null);
+        verify(userListService).getUserLists(currentUserId, targetUserId, 1, 10, null, null, null);
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Pass ContentId Through To The Service - When Given")
+    void shouldPassContentIdThroughToTheServiceWhenGiven() {
+        UUID targetUserId = UUID.randomUUID();
+        UUID contentId = UUID.randomUUID();
+        when(userListService.getUserLists(currentUserId, targetUserId, 1, 10, null, null, contentId)).thenReturn(Page.empty());
+
+        userListController.getUserLists(targetUserId, 1, 10, null, null, contentId);
+
+        verify(userListService).getUserLists(currentUserId, targetUserId, 1, 10, null, null, contentId);
     }
 
     @Test
@@ -230,7 +242,7 @@ class UserListControllerTest {
 
     private UserListResponseDTO buildResponseDto() {
         LocalDateTime now = LocalDateTime.now();
-        return new UserListResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(), 0L, 0, false, 0L, 0L, 0L, 1, null);
+        return new UserListResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(), 0L, 0, false, 0L, 0L, 0L, 1, null, null);
     }
 
     private UserListDetailedResponseDTO buildDetailedResponseDto() {

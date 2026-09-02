@@ -71,7 +71,7 @@ public class UserListServiceImpl implements UserListService {
 
     @Override
     public Page<UserListResponseDTO> getUserLists(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize,
-            String sortBy, String sortDirection) {
+            String sortBy, String sortDirection, UUID contentId) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
@@ -103,7 +103,7 @@ public class UserListServiceImpl implements UserListService {
                     : userListRepository.findByUserIdAndVisibilityIn(userId, visibilities, pageRequest);
         }
 
-        return mapToResponseDtoPage(lists, viewerId);
+        return mapToResponseDtoPage(lists, viewerId, contentId);
     }
 
     @Override
@@ -111,10 +111,10 @@ public class UserListServiceImpl implements UserListService {
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         Page<UserList> lists = likeRepository.findLikedListsByUserId(userId, pageRequest);
 
-        return mapToResponseDtoPage(lists, userId);
+        return mapToResponseDtoPage(lists, userId, null);
     }
 
-    private Page<UserListResponseDTO> mapToResponseDtoPage(Page<UserList> lists, UUID viewerId) {
+    private Page<UserListResponseDTO> mapToResponseDtoPage(Page<UserList> lists, UUID viewerId, UUID contentId) {
         List<UUID> listIds = lists.getContent().stream().map(UserList::getId).toList();
         Map<UUID, List<ContentRefDTO>> previewsByListId = userListItemService.getPreviewItemsByListIds(listIds);
         Map<UUID, Long> nestedListsCountByListId = userListItemService.countNestedListsByListIds(listIds);
@@ -125,6 +125,9 @@ public class UserListServiceImpl implements UserListService {
         Map<UUID, Long> commentsCountByListId = commentsCountByListIds(listIds);
         Map<UUID, UserListItemScope> itemScopeByListId =
                 userListItemService.getItemScopeByListIds(listIds, nestedListsCountByListId);
+        Set<UUID> listIdsContainingContent = contentId != null
+                ? userListItemService.getListIdsContainingContent(listIds, contentId)
+                : null;
 
         return lists.map(list -> userListMapper.userListToResponseDto(
                 list,
@@ -135,7 +138,8 @@ public class UserListServiceImpl implements UserListService {
                 itemsCountByListId.getOrDefault(list.getId(), 0L),
                 commentsCountByListId.getOrDefault(list.getId(), 0L),
                 totalRuntimeMinutesByListId.getOrDefault(list.getId(), 0L),
-                itemScopeByListId.get(list.getId())));
+                itemScopeByListId.get(list.getId()),
+                listIdsContainingContent == null ? null : listIdsContainingContent.contains(list.getId())));
     }
 
     private Map<UUID, Long> commentsCountByListIds(Collection<UUID> listIds) {
@@ -161,7 +165,7 @@ public class UserListServiceImpl implements UserListService {
                 .getItemScopeByListIds(List.of(userList.getId()), Map.of(userList.getId(), nestedListsCount))
                 .get(userList.getId());
         return userListMapper.userListToResponseDto(userList, previewItems, nestedListsCount, watchedPercentage, likedByMe,
-                itemsCount, commentsCount, totalRuntimeMinutes, itemScope);
+                itemsCount, commentsCount, totalRuntimeMinutes, itemScope, null);
     }
 
     private void assertCanViewLists(User target, boolean isOwner, boolean viewerFollowsTarget) {
@@ -348,7 +352,7 @@ public class UserListServiceImpl implements UserListService {
                 .updatedAt(now)
                 .build();
 
-        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0, false, 0L, 0L, 0L, null);
+        return userListMapper.userListToResponseDto(userListRepository.save(userList), List.of(), 0L, 0.0, false, 0L, 0L, 0L, null, null);
     }
 
     @Override

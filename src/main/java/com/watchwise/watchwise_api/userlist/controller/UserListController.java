@@ -30,9 +30,11 @@ public class UserListController {
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) String sortBy,
-            @RequestParam(required = false) String sortDirection
+            @RequestParam(required = false) String sortDirection,
+            @RequestParam(required = false) UUID contentId
     ) {
-        Page<UserListResponseDTO> lists = userListService.getUserLists(getCurrentUserId(), userId, page, size, sortBy, sortDirection);
+        Page<UserListResponseDTO> lists =
+                userListService.getUserLists(getCurrentUserId(), userId, page, size, sortBy, sortDirection, contentId);
         return ResponseEntity.ok(PageResponseDTO.of(lists));
     }
 

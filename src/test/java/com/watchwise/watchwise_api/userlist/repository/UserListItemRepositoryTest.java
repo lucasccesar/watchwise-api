@@ -27,6 +27,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -383,6 +384,20 @@ class UserListItemRepositoryTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getUserListId()).isEqualTo(scifi.getId());
         assertThat(result.get(0).getCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[findUserListIdsContainingContent] Should Return Only Lists That Have The Content - When Several Lists Are Requested")
+    void shouldReturnOnlyListsThatHaveTheContentWhenSeveralListsAreRequested() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(horror, pulpFiction, 1));
+        entityManager.clear();
+
+        Set<UUID> result = userListItemRepository.findUserListIdsContainingContent(
+                List.of(scifi.getId(), horror.getId()), fightClub.getId());
+
+        assertThat(result).containsExactly(scifi.getId());
     }
 
     @Test

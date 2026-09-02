@@ -123,6 +123,14 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
             """)
     List<UserListSum> sumRuntimeMinutesByUserListIdIn(@Param("userListIds") Collection<UUID> userListIds);
 
+    @Query("""
+            SELECT DISTINCT uli.userList.id FROM UserListItem uli
+            WHERE uli.userList.id IN :userListIds
+            AND uli.content.id = :contentId
+            """)
+    Set<UUID> findUserListIdsContainingContent(
+            @Param("userListIds") Collection<UUID> userListIds, @Param("contentId") UUID contentId);
+
     interface UserListCount {
         UUID getUserListId();
         long getCount();

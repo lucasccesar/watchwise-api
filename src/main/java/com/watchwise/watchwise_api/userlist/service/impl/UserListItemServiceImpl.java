@@ -228,6 +228,15 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     @Override
+    public Set<UUID> getListIdsContainingContent(Collection<UUID> listIds, UUID contentId) {
+        if (listIds.isEmpty()) {
+            return Set.of();
+        }
+
+        return userListItemRepository.findUserListIdsContainingContent(listIds, contentId);
+    }
+
+    @Override
     @Transactional
     public UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO) {
         UserList userList = findOwnedListForUpdate(userId, listId);

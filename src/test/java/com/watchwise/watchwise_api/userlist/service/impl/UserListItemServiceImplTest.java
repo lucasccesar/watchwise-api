@@ -258,6 +258,30 @@ class UserListItemServiceImplTest {
         verifyNoInteractions(userListItemRepository);
     }
 
+    // ---------- getListIdsContainingContent ----------
+
+    @Test
+    @DisplayName("[getListIdsContainingContent] Should Return The Repository Result - When List Ids Are Given")
+    void shouldReturnTheRepositoryResultWhenListIdsAreGivenForContainingContent() {
+        UUID otherListId = UUID.randomUUID();
+        UUID contentId = fightClub.getId();
+        when(userListItemRepository.findUserListIdsContainingContent(List.of(listId, otherListId), contentId))
+                .thenReturn(Set.of(listId));
+
+        Set<UUID> result = userListItemService.getListIdsContainingContent(List.of(listId, otherListId), contentId);
+
+        assertThat(result).containsExactly(listId);
+    }
+
+    @Test
+    @DisplayName("[getListIdsContainingContent] Should Return Empty Set - When No List Ids Are Given")
+    void shouldReturnEmptySetWhenNoListIdsAreGivenForContainingContent() {
+        Set<UUID> result = userListItemService.getListIdsContainingContent(List.of(), fightClub.getId());
+
+        assertThat(result).isEmpty();
+        verifyNoInteractions(userListItemRepository);
+    }
+
     // ---------- countNestedLists / countNestedListsByListIds ----------
 
     @Test

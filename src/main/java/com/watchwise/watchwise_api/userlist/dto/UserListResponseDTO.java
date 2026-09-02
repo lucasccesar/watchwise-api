@@ -23,6 +23,7 @@ public record UserListResponseDTO(
         long commentsCount,
         long totalRuntimeMinutes,
         Integer rank,
-        UserListItemScope itemScope
+        UserListItemScope itemScope,
+        Boolean containsContent
 ) {
 }

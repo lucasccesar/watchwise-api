@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public interface UserListItemService {
@@ -41,6 +42,8 @@ public interface UserListItemService {
     Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds);
 
     Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds, Map<UUID, Long> nestedListsCountByListId);
+
+    Set<UUID> getListIdsContainingContent(Collection<UUID> listIds, UUID contentId);
 
     UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO);
 
