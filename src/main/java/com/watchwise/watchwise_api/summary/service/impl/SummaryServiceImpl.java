@@ -362,10 +362,12 @@ public class SummaryServiceImpl implements SummaryService {
         List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(ContentType.MOVIE, ContentType.SERIES));
         List<DiaryEntryResponseDTO> bottomRated = promoteTop5First(bottomRatedRaw, userId, List.of(ContentType.MOVIE, ContentType.SERIES));
 
+        List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanionsAllTime(userId);
+
         return new AllTimeStatsResponseDTO(totalMoviesWatched, totalEpisodesWatched, totalMinutesWatched, totalTheaterVisits,
                 averageMinutesPerMonth, averageMinutesPerWeek, averageMinutesPerDay,
                 watchCountByYearMovies, watchCountByYearEpisodes, watchCountByDecade, watchCountByCountry,
-                mostLoggedContent, genreCountsMovies, genreCountsEpisodes, topRated, bottomRated);
+                mostLoggedContent, genreCountsMovies, genreCountsEpisodes, topRated, bottomRated, topWatchCompanions);
     }
 
     @Override
@@ -438,6 +440,13 @@ public class SummaryServiceImpl implements SummaryService {
         List<WatchCompanionRepository.CompanionWatchCount> rows = watchCompanionRepository
                 .countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
                         userId, contentType, start, end, PageRequest.of(0, TOP_COMPANIONS_LIMIT));
+        return toWatchCompanionCountDtos(rows);
+    }
+
+    private List<WatchCompanionCountDTO> computeTopWatchCompanionsAllTime(UUID userId) {
+        List<WatchCompanionRepository.CompanionWatchCount> rows = watchCompanionRepository
+                .countGroupedByCompanionUserIdAndContentTypeIn(
+                        userId, Set.of(ContentType.MOVIE, ContentType.EPISODE), PageRequest.of(0, TOP_COMPANIONS_LIMIT));
         return toWatchCompanionCountDtos(rows);
     }
 

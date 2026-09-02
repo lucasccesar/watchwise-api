@@ -37,6 +37,18 @@ public interface WatchCompanionRepository extends JpaRepository<WatchCompanion, 
             @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
             @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
 
+    @Query("""
+            SELECT wc.user.id AS companionUserId, COUNT(wc) AS count
+            FROM WatchCompanion wc
+            WHERE wc.diaryEntry.user.id = :userId
+            AND wc.diaryEntry.content.type IN :contentTypes
+            GROUP BY wc.user.id
+            ORDER BY COUNT(wc) DESC
+            """)
+    List<CompanionWatchCount> countGroupedByCompanionUserIdAndContentTypeIn(
+            @Param("userId") UUID userId, @Param("contentTypes") Collection<ContentType> contentTypes,
+            Pageable pageable);
+
     interface CompanionWatchCount {
         UUID getCompanionUserId();
         Long getCount();

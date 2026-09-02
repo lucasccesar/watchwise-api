@@ -21,5 +21,6 @@ public record AllTimeStatsResponseDTO(
         List<GenreCountDTO> genreCountsMovies,
         List<GenreCountDTO> genreCountsEpisodes,
         List<DiaryEntryResponseDTO> topRated,
-        List<DiaryEntryResponseDTO> bottomRated) {
+        List<DiaryEntryResponseDTO> bottomRated,
+        List<WatchCompanionCountDTO> topWatchCompanions) {
 }

@@ -195,6 +195,6 @@ class SummaryControllerTest {
     }
 
     private AllTimeStatsResponseDTO buildAllTimeStatsResponseDto() {
-        return new AllTimeStatsResponseDTO(0L, 0L, 0L, 0L, 0.0, 0.0, 0.0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        return new AllTimeStatsResponseDTO(0L, 0L, 0L, 0L, 0.0, 0.0, 0.0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 }

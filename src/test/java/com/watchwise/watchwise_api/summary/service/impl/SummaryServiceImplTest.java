@@ -53,6 +53,7 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -675,6 +676,34 @@ class SummaryServiceImplTest {
         assertThat(result.totalMoviesWatched()).isEqualTo(42L);
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
         assertThat(result.totalMinutesWatched()).isEqualTo(9000L);
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Return Top Watch Companions Combining Movies And Episodes - When Companions Are Tagged")
+    void shouldReturnTopWatchCompanionsForAllTimeStats() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        User marina = buildUser(marinaId, true);
+        when(watchCompanionRepository.countGroupedByCompanionUserIdAndContentTypeIn(
+                eq(lucasId), eq(Set.of(ContentType.MOVIE, ContentType.EPISODE)), any()))
+                .thenReturn(List.of(companionWatchCount(marinaId, 37L)));
+        when(userRepository.findAllById(List.of(marinaId))).thenReturn(List.of(marina));
+        when(userMapper.userToUserPreviewDto(marina)).thenReturn(new UserPreviewDTO(marinaId, "marina", null, true));
+
+        AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
+
+        assertThat(result.topWatchCompanions()).hasSize(1);
+        assertThat(result.topWatchCompanions().getFirst().companion().id()).isEqualTo(marinaId);
+        assertThat(result.topWatchCompanions().getFirst().watchCount()).isEqualTo(37L);
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Return Empty Top Watch Companions - When User Has No Companions Tagged")
+    void shouldReturnEmptyTopWatchCompanionsWhenNoneTaggedForAllTimeStats() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
+
+        assertThat(result.topWatchCompanions()).isEmpty();
     }
 
     @Test
