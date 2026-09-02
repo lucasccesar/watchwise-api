@@ -2243,7 +2243,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
@@ -2290,8 +2290,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Fetch Each Episode's RuntimeMinutes From TMDB And Pass To The Content Reference - When Bulk-Logging A Season")
-    void shouldFetchEachEpisodesRuntimeMinutesFromTmdbAndPassToTheContentReferenceWhenBulkLoggingASeason() {
+    @DisplayName("[createDiaryEntriesInBulk] Should Apply Client-Supplied EpisodeRuntimeMinutes To The Content Reference - When Bulk-Logging A Season")
+    void shouldApplyClientSuppliedEpisodeRuntimeMinutesWhenBulkLoggingASeason() {
         Content e1 = buildEpisode("900", 1, 1);
         Content e2 = buildFinaleEpisode("900", 1, 2);
 
@@ -2300,8 +2300,8 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47, 2, 55))));
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 999, 2, 999))));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
                 .thenAnswer(inv -> {
                     ContentRefCreationDTO refDto = inv.getArgument(0);
                     Content content = refDto.episodeNumber() == 1 ? e1 : e2;
@@ -2318,14 +2318,43 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 2, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seasonRef, LocalDate.now(), 2, null, null, null, Map.of(1, 47, 2, 55));
 
         diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        verify(contentService, times(2)).getOrCreateReference(contentRefCreationCaptor.capture(), eq(true));
+        verify(contentService, times(2)).getOrCreateReference(contentRefCreationCaptor.capture(), eq(false));
         Map<Integer, Integer> runtimeByEpisode = contentRefCreationCaptor.getAllValues().stream()
                 .collect(Collectors.toMap(ContentRefCreationDTO::episodeNumber, ContentRefCreationDTO::runtimeMinutes));
         assertThat(runtimeByEpisode).containsEntry(1, 47).containsEntry(2, 55);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Omit RuntimeMinutes For An Episode Missing From episodeRuntimeMinutes - When Bulk-Logging A Season")
+    void shouldOmitRuntimeMinutesForAnEpisodeMissingFromEpisodeRuntimeMinutesWhenBulkLoggingASeason() {
+        Content e1 = buildFinaleEpisode("900", 1, 1);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of())));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
+                .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seasonRef, LocalDate.now(), 1, null, null, null, null);
+
+        diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), eq(false));
+        assertThat(contentRefCreationCaptor.getValue().runtimeMinutes()).isNull();
     }
 
     @Test
@@ -2390,7 +2419,7 @@ class DiaryEntryServiceImplTest {
                         null, null)));
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
                 .thenAnswer(inv -> {
                     ContentRefCreationDTO refDto = inv.getArgument(0);
                     Content content = switch (refDto.episodeNumber()) {
@@ -2417,7 +2446,7 @@ class DiaryEntryServiceImplTest {
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
         assertThat(result).hasSize(3);
-        verify(contentService, times(3)).getOrCreateReference(any(ContentRefCreationDTO.class), eq(true));
+        verify(contentService, times(3)).getOrCreateReference(any(ContentRefCreationDTO.class), eq(false));
     }
 
     @Test
@@ -2481,7 +2510,7 @@ class DiaryEntryServiceImplTest {
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
 
         // Mock contentService for each episode
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
                 .thenAnswer(inv -> {
                     ContentRefCreationDTO dto = inv.getArgument(0);
                     Content content;
@@ -2560,7 +2589,7 @@ class DiaryEntryServiceImplTest {
                     episode.getIsSeriesFinale(), null, null);
         };
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class))).thenAnswer(contentResolutionAnswer);
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true))).thenAnswer(contentResolutionAnswer);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false))).thenAnswer(contentResolutionAnswer);
 
         when(contentRepository.getReferenceById(any(UUID.class)))
                 .thenAnswer(inv -> {
