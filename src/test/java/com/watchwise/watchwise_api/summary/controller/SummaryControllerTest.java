@@ -187,11 +187,11 @@ class SummaryControllerTest {
     }
 
     private MonthInReviewResponseDTO buildMonthInReviewResponseDto() {
-        return new MonthInReviewResponseDTO(List.of(), List.of(), List.of(), List.of(), 0L, 0L, null, null, List.of(), List.of(), List.of(), List.of(), List.of());
+        return new MonthInReviewResponseDTO(List.of(), List.of(), List.of(), List.of(), 0L, 0L, null, null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     private YearInReviewResponseDTO buildYearInReviewResponseDto() {
-        return new YearInReviewResponseDTO(List.of(), 0L, 0L, 0.0, 0.0, 0.0, List.of(), List.of(), null, null, List.of(), List.of(), List.of(), List.of());
+        return new YearInReviewResponseDTO(List.of(), 0L, 0L, 0.0, 0.0, 0.0, List.of(), List.of(), null, null, List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     private AllTimeStatsResponseDTO buildAllTimeStatsResponseDto() {

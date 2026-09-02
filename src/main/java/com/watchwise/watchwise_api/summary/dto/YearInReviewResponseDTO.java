@@ -20,5 +20,6 @@ public record YearInReviewResponseDTO(
         List<LongestWatchedItemDTO> longestWatched,
         List<GenreCountDTO> genreCounts,
         List<DiaryEntryResponseDTO> topRated,
-        List<DiaryEntryResponseDTO> bottomRated) {
+        List<DiaryEntryResponseDTO> bottomRated,
+        List<WatchCompanionCountDTO> topWatchCompanions) {
 }

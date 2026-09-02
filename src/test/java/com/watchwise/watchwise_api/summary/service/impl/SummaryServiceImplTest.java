@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -28,10 +29,13 @@ import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -91,6 +95,12 @@ class SummaryServiceImplTest {
 
     @Mock
     private Top5EntryRepository top5EntryRepository;
+
+    @Mock
+    private WatchCompanionRepository watchCompanionRepository;
+
+    @Mock
+    private UserMapper userMapper;
 
     @InjectMocks
     private SummaryServiceImpl summaryService;
@@ -549,6 +559,42 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getMonthInReview] Should Return Top Watch Companions Scoped By Type And Month")
+    void shouldReturnTopWatchCompanionsForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        User marina = buildUser(marinaId, true);
+        when(watchCompanionRepository.countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any()))
+                .thenReturn(List.of(companionWatchCount(marinaId, 5L)));
+        when(userRepository.findAllById(List.of(marinaId))).thenReturn(List.of(marina));
+        when(userMapper.userToUserPreviewDto(marina)).thenReturn(new UserPreviewDTO(marinaId, "marina", null, true));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.topWatchCompanions()).hasSize(1);
+        assertThat(result.topWatchCompanions().getFirst().companion().id()).isEqualTo(marinaId);
+        assertThat(result.topWatchCompanions().getFirst().watchCount()).isEqualTo(5L);
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Return Top Watch Companions Scoped By Type And Year")
+    void shouldReturnTopWatchCompanionsForYearInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        User marina = buildUser(marinaId, true);
+        when(watchCompanionRepository.countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.EPISODE), eq(LocalDate.of(2026, 1, 1)), eq(LocalDate.of(2026, 12, 31)), any()))
+                .thenReturn(List.of(companionWatchCount(marinaId, 12L)));
+        when(userRepository.findAllById(List.of(marinaId))).thenReturn(List.of(marina));
+        when(userMapper.userToUserPreviewDto(marina)).thenReturn(new UserPreviewDTO(marinaId, "marina", null, true));
+
+        YearInReviewResponseDTO result = summaryService.getYearInReview(lucasId, lucasId, ContentType.SERIES, 2026);
+
+        assertThat(result.topWatchCompanions()).hasSize(1);
+        assertThat(result.topWatchCompanions().getFirst().companion().id()).isEqualTo(marinaId);
+        assertThat(result.topWatchCompanions().getFirst().watchCount()).isEqualTo(12L);
+    }
+
+    @Test
     @DisplayName("[getYearInReview] Should Throw NotFoundException - When User Does Not Exist")
     void shouldThrowNotFoundExceptionWhenUserDoesNotExistForYearInReview() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
@@ -733,6 +779,20 @@ class SummaryServiceImplTest {
             @Override
             public Integer getScore() {
                 return score;
+            }
+
+            @Override
+            public Long getCount() {
+                return count;
+            }
+        };
+    }
+
+    private WatchCompanionRepository.CompanionWatchCount companionWatchCount(UUID companionUserId, long count) {
+        return new WatchCompanionRepository.CompanionWatchCount() {
+            @Override
+            public UUID getCompanionUserId() {
+                return companionUserId;
             }
 
             @Override

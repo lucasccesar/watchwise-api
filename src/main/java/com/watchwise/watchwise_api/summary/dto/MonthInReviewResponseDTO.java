@@ -20,5 +20,6 @@ public record MonthInReviewResponseDTO(
         List<DayOfWeekCountDTO> watchCountByDayOfWeek,
         List<GenreCountDTO> genreCounts,
         List<SeriesWatchTimeDTO> topSeriesByWatchTime,
-        List<ContentRefDTO> topLongestMovies) {
+        List<ContentRefDTO> topLongestMovies,
+        List<WatchCompanionCountDTO> topWatchCompanions) {
 }

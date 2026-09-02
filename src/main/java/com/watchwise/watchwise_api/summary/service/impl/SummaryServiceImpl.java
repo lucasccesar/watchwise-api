@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -36,12 +37,14 @@ import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.SeriesWatchTimeDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
 import com.watchwise.watchwise_api.summary.dto.YearCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.service.SummaryService;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
@@ -75,6 +78,7 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int ALL_TIME_TOP_LIMIT = 10;
     private static final int TOP_SERIES_LIMIT = 3;
     private static final int TOP_LONGEST_MOVIES_LIMIT = 3;
+    private static final int TOP_COMPANIONS_LIMIT = 3;
     private static final int YEAR_LONGEST_LIMIT = 10;
     private static final double AVERAGE_DAYS_PER_MONTH = 30.44;
     private static final Set<ContentType> ALLOWED_SUMMARY_TYPES = Set.of(ContentType.MOVIE, ContentType.SERIES);
@@ -88,6 +92,8 @@ public class SummaryServiceImpl implements SummaryService {
     private final ContentMapper contentMapper;
     private final DiaryEntryMapper diaryEntryMapper;
     private final Top5EntryRepository top5EntryRepository;
+    private final WatchCompanionRepository watchCompanionRepository;
+    private final UserMapper userMapper;
 
     @Override
     public SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type) {
@@ -236,9 +242,11 @@ public class SummaryServiceImpl implements SummaryService {
                         .stream().map(contentMapper::contentToContentRefDto).toList()
                 : List.of();
 
+        List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanions(userId, watchedContentType, start, end);
+
         return new MonthInReviewResponseDTO(recentWatched, topRated, bottomRated, ratingsDistribution, watchCount,
                 minutesWatched, firstWatchedDate, lastWatchedDate, minutesPerDay, watchCountByDayOfWeek, genreCounts,
-                topSeriesByWatchTime, topLongestMovies);
+                topSeriesByWatchTime, topLongestMovies, topWatchCompanions);
     }
 
     @Override
@@ -299,9 +307,11 @@ public class SummaryServiceImpl implements SummaryService {
                 : diaryEntryRepository.countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, start, end))
                 .stream().map(row -> new GenreCountDTO(row.getGenre(), row.getCount())).toList();
 
+        List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanions(userId, watchedContentType, start, end);
+
         return new YearInReviewResponseDTO(ratingsDistribution, watchCount, minutesWatched, averageMinutesPerMonth,
                 averageMinutesPerWeek, averageMinutesPerDay, watchCountByMonth, watchCountByDayOfWeek,
-                firstWatchedDate, lastWatchedDate, longestWatched, genreCounts, topRated, bottomRated);
+                firstWatchedDate, lastWatchedDate, longestWatched, genreCounts, topRated, bottomRated, topWatchCompanions);
     }
 
     @Override
@@ -421,6 +431,26 @@ public class SummaryServiceImpl implements SummaryService {
                         userId, start, end, PageRequest.of(0, YEAR_LONGEST_LIMIT))
                 .stream()
                 .map(row -> new LongestWatchedItemDTO(ContentType.SERIES, null, row.getSeriesTmdbId(), row.getTotalMinutes()))
+                .toList();
+    }
+
+    private List<WatchCompanionCountDTO> computeTopWatchCompanions(UUID userId, ContentType contentType, LocalDate start, LocalDate end) {
+        List<WatchCompanionRepository.CompanionWatchCount> rows = watchCompanionRepository
+                .countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
+                        userId, contentType, start, end, PageRequest.of(0, TOP_COMPANIONS_LIMIT));
+        return toWatchCompanionCountDtos(rows);
+    }
+
+    private List<WatchCompanionCountDTO> toWatchCompanionCountDtos(List<WatchCompanionRepository.CompanionWatchCount> rows) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, User> usersById = userRepository
+                .findAllById(rows.stream().map(WatchCompanionRepository.CompanionWatchCount::getCompanionUserId).toList())
+                .stream().collect(Collectors.toMap(User::getId, u -> u));
+        return rows.stream()
+                .map(row -> new WatchCompanionCountDTO(
+                        userMapper.userToUserPreviewDto(usersById.get(row.getCompanionUserId())), row.getCount()))
                 .toList();
     }
 
