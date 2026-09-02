@@ -7,4 +7,6 @@ public interface ContentService {
 
     ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO);
 
+    ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO, boolean trustedRuntimeMinutes);
+
 }

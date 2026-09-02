@@ -283,6 +283,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (content.type() != ContentType.SEASON && content.type() != ContentType.SERIES) {
             throw new BadRequestException("Bulk logging only supports content of type SEASON or SERIES");
         }
+        if (content.genres() != null || content.releaseYear() != null || content.countries() != null) {
+            throw new BadRequestException("genres, releaseYear and countries must not be provided when bulk logging");
+        }
         assertWatchedDateNotInFuture(dto.watchedDate());
         List<UUID> companionIds = validateCompanions(userId, dto.watchedWith());
         String language = userRepository.findById(userId)
@@ -632,7 +635,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         Boolean seriesFinaleFlag = isSeasonFinale && Boolean.TRUE.equals(isSeriesFinale) ? Boolean.TRUE : null;
         ContentRefDTO episodeRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
                 null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber,
-                seasonFinaleFlag, seriesFinaleFlag, runtimeMinutes, null));
+                seasonFinaleFlag, seriesFinaleFlag, runtimeMinutes, null), true);
 
         User user = userRepository.getReferenceById(userId);
         Content episodeContent = contentRepository.getReferenceById(episodeRef.id());

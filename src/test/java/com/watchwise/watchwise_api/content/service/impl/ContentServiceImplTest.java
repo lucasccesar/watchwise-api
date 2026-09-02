@@ -1000,6 +1000,45 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Overwrite RuntimeMinutes On The Existing Content - When TrustedRuntimeMinutes Is True And Values Differ")
+    void shouldOverwriteRuntimeMinutesOnTheExistingContentWhenTrustedRuntimeMinutesIsTrueAndValuesDiffer() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 1, null, null, 25, null);
+        Content existing = Content.builder().id(existingId).type(ContentType.EPISODE).seriesTmdbId("200")
+                .seasonNumber(1).episodeNumber(1).runtimeMinutes(20).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, null, ContentType.EPISODE, "200", 1, 1, null, null, null, null, 25, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(existing));
+        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
+        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto, true);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getRuntimeMinutes()).isEqualTo(25);
+        verify(contentRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When TrustedRuntimeMinutes Is False And Existing Content Has A Different RuntimeMinutes Value")
+    void shouldThrowConflictExceptionWhenTrustedRuntimeMinutesIsFalseAndExistingContentHasADifferentRuntimeMinutesValue() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 1, null, null, 25, null);
+        Content existing = Content.builder().id(UUID.randomUUID()).type(ContentType.EPISODE).seriesTmdbId("200")
+                .seasonNumber(1).episodeNumber(1).runtimeMinutes(20).build();
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto, false))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This content is already registered with a different runtimeMinutes value");
+
+        verify(contentMapper, never()).contentToContentRefDto(any());
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Accept Genres - When Type Is Series")
     void shouldAcceptGenresWhenTypeIsSeries() {
         List<String> genres = List.of("Drama", "Thriller");
