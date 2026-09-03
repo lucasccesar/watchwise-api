@@ -183,24 +183,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     long sumRuntimeMinutesByUserIdAndWatchedDateBetween(
             @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
 
-    @Query(value = """
-            SELECT genre AS genre,
-                   COUNT(DISTINCT CASE
-                             WHEN c.type = 'MOVIE' THEN c.id::text
-                             WHEN c.type = 'SERIES' THEN c.tmdb_id
-                             ELSE c.series_tmdb_id
-                         END) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
-            WHERE d.user_id = :userId
-            AND c.type IN ('MOVIE', 'EPISODE', 'SERIES')
-            GROUP BY genre
-            ORDER BY count DESC
-            """, nativeQuery = true)
-    List<GenreCount> countDistinctTitlesByGenreAndUserId(@Param("userId") UUID userId);
-
     interface GenreCount {
         String getGenre();
         Long getCount();

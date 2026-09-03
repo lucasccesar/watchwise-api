@@ -171,9 +171,10 @@ class UserMapperTest {
                 .updatedAt(updatedAt)
                 .build();
 
-        List<GenreCountDTO> genres = List.of(new GenreCountDTO("Action", 5L));
+        List<GenreCountDTO> genresMovies = List.of(new GenreCountDTO("Action", 5L));
+        List<GenreCountDTO> genresEpisodes = List.of(new GenreCountDTO("Drama", 2L));
 
-        UserResponseDTO result = userMapper.userToUserResponseDto(user, 500L, 90L, 8L, genres, 12L, 7L);
+        UserResponseDTO result = userMapper.userToUserResponseDto(user, 500L, 90L, 8L, genresMovies, genresEpisodes, 12L, 7L);
 
         assertThat(result.id()).isEqualTo(id);
         assertThat(result.username()).isEqualTo("JohnDoe");
@@ -187,7 +188,8 @@ class UserMapperTest {
         assertThat(result.totalMinutesWatched()).isEqualTo(500L);
         assertThat(result.minutesWatchedLast30Days()).isEqualTo(90L);
         assertThat(result.totalTheaterVisits()).isEqualTo(8L);
-        assertThat(result.genreCounts()).isEqualTo(genres);
+        assertThat(result.genreCountsMovies()).isEqualTo(genresMovies);
+        assertThat(result.genreCountsEpisodes()).isEqualTo(genresEpisodes);
         assertThat(result.followersCount()).isEqualTo(12L);
         assertThat(result.followingCount()).isEqualTo(7L);
     }
@@ -197,7 +199,8 @@ class UserMapperTest {
     void shouldMapAllFieldsWhenMappingUserToPublicUserProfileDto() {
         UUID id = UUID.randomUUID();
         LocalDateTime createdAt = LocalDateTime.now().minusDays(1);
-        List<GenreCountDTO> genres = List.of(new GenreCountDTO("Drama", 3L));
+        List<GenreCountDTO> genresMovies = List.of(new GenreCountDTO("Drama", 3L));
+        List<GenreCountDTO> genresEpisodes = List.of(new GenreCountDTO("Comedy", 1L));
 
         User user = User.builder()
                 .id(id)
@@ -209,7 +212,7 @@ class UserMapperTest {
                 .createdAt(createdAt)
                 .build();
 
-        PublicUserProfileDTO result = userMapper.userToPublicUserProfileDto(user, 300L, 45L, 6L, genres, 20L, 15L);
+        PublicUserProfileDTO result = userMapper.userToPublicUserProfileDto(user, 300L, 45L, 6L, genresMovies, genresEpisodes, 20L, 15L);
 
         assertThat(result.id()).isEqualTo(id);
         assertThat(result.username()).isEqualTo("JaneDoe");
@@ -221,7 +224,8 @@ class UserMapperTest {
         assertThat(result.totalMinutesWatched()).isEqualTo(300L);
         assertThat(result.minutesWatchedLast30Days()).isEqualTo(45L);
         assertThat(result.totalTheaterVisits()).isEqualTo(6L);
-        assertThat(result.genreCounts()).isEqualTo(genres);
+        assertThat(result.genreCountsMovies()).isEqualTo(genresMovies);
+        assertThat(result.genreCountsEpisodes()).isEqualTo(genresEpisodes);
         assertThat(result.followersCount()).isEqualTo(20L);
         assertThat(result.followingCount()).isEqualTo(15L);
     }

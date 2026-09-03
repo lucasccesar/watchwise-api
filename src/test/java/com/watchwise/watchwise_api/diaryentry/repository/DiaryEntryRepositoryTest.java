@@ -368,98 +368,6 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Group By Genre - When Movie Has Genres Of Its Own")
-    void shouldGroupByGenreWhenMovieHasGenresOfItsOwn() {
-        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama", "Thriller")));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
-
-        assertThat(result).extracting(DiaryEntryRepository.GenreCount::getGenre).containsExactlyInAnyOrder("Drama", "Thriller");
-        assertThat(result).allSatisfy(row -> assertThat(row.getCount()).isEqualTo(1L));
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Resolve Genres From The Series Content - When Entry Is An Episode")
-    void shouldResolveGenresFromTheSeriesContentWhenEntryIsAnEpisode() {
-        contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
-        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
-
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getGenre()).isEqualTo("Drama");
-        assertThat(result.get(0).getCount()).isEqualTo(1L);
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Count Each Series Once - When User Watched Multiple Episodes Of The Same Series")
-    void shouldCountEachSeriesOnceWhenUserWatchedMultipleEpisodesOfTheSameSeries() {
-        contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
-        Content episode1 = contentRepository.save(buildEpisode("1399", 1, 1, 55));
-        Content episode2 = contentRepository.save(buildEpisode("1399", 1, 2, 55));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode1));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode2));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
-
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getCount()).isEqualTo(1L);
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Count Each Movie Once - When User Rewatched It")
-    void shouldCountEachMovieOnceWhenUserRewatchedIt() {
-        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama")));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie, 2));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
-
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getCount()).isEqualTo(1L);
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Omit Content - When Genres And Series Are Both Missing")
-    void shouldOmitContentWhenGenresAndSeriesAreBothMissing() {
-        Content episodeWithoutSeriesContent = contentRepository.save(buildEpisode("9999", 1, 1, 40));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episodeWithoutSeriesContent));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
-
-        assertThat(result).isEmpty();
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Count Series Once - When Logged Directly As SERIES Type Without Any Episode Entries")
-    void shouldCountSeriesOnceWhenLoggedDirectlyAsSeriesTypeWithoutAnyEpisodeEntries() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
-
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getGenre()).isEqualTo("Drama");
-        assertThat(result.get(0).getCount()).isEqualTo(1L);
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserId] Should Not Double Count - When The Same Series Has Both A Direct SERIES Entry And Episode Entries")
-    void shouldNotDoubleCountWhenTheSameSeriesHasBothADirectSeriesEntryAndEpisodeEntries() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
-        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserId(lucas.getId());
-
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getCount()).isEqualTo(1L);
-    }
-
-    @Test
     @DisplayName("[findSeriesInProgressByUserId] Should Return Series - When User Has Watched Episodes But Not Completed It")
     void shouldReturnSeriesWhenUserHasWatchedEpisodesButNotCompletedIt() {
         Content episode = contentRepository.save(buildEpisode("1399", 1, 3));
@@ -596,6 +504,42 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForMovies] Should Group By Genre - When Movie Has Multiple Genres")
+    void shouldGroupByGenreWhenMovieHasMultipleGenres() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama", "Thriller")));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(lucas.getId());
+
+        assertThat(result).extracting(DiaryEntryRepository.GenreCount::getGenre).containsExactlyInAnyOrder("Drama", "Thriller");
+        assertThat(result).allSatisfy(row -> assertThat(row.getCount()).isEqualTo(1L));
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForMovies] Should Count Each Movie Once - When User Rewatched It")
+    void shouldCountEachMovieOnceWhenUserRewatchedIt() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, List.of("Drama")));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movie, 2));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(lucas.getId());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForMovies] Should Omit Content - When Movie Has No Genres")
+    void shouldOmitContentWhenMovieHasNoGenres() {
+        Content movieWithoutGenres = contentRepository.save(buildContent("9001", ContentType.MOVIE));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, movieWithoutGenres));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(lucas.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Count Each Series Once Resolving Genres From The Series Content")
     void shouldCountEachSeriesOnceResolvingGenresFromTheSeriesContentForSummary() {
         contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
@@ -622,6 +566,31 @@ class DiaryEntryRepositoryTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getGenre()).isEqualTo("Drama");
         assertThat(result.get(0).getCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Not Double Count - When The Same Series Has Both A Direct SERIES Entry And Episode Entries")
+    void shouldNotDoubleCountWhenTheSameSeriesHasBothADirectSeriesEntryAndEpisodeEntries() {
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(lucas.getId());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Omit Content - When Genres And Series Are Both Missing")
+    void shouldOmitContentWhenGenresAndSeriesAreBothMissing() {
+        Content episodeWithoutSeriesContent = contentRepository.save(buildEpisode("9999", 1, 1, 40));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episodeWithoutSeriesContent));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(lucas.getId());
+
+        assertThat(result).isEmpty();
     }
 
     @Test

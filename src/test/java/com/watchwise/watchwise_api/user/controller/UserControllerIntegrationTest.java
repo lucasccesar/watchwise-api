@@ -125,8 +125,9 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalMinutesWatched").value(139))
                 .andExpect(jsonPath("$.minutesWatchedLast30Days").value(139))
-                .andExpect(jsonPath("$.genreCounts[0].genre").value("Drama"))
-                .andExpect(jsonPath("$.genreCounts[0].count").value(1));
+                .andExpect(jsonPath("$.genreCountsMovies[0].genre").value("Drama"))
+                .andExpect(jsonPath("$.genreCountsMovies[0].count").value(1))
+                .andExpect(jsonPath("$.genreCountsEpisodes").isEmpty());
     }
 
     @Test
@@ -699,7 +700,8 @@ class UserControllerIntegrationTest {
                 .andExpect(jsonPath("$.isProfilePublic").value(true))
                 .andExpect(jsonPath("$.email").doesNotExist())
                 .andExpect(jsonPath("$.totalMinutesWatched").value(0))
-                .andExpect(jsonPath("$.genreCounts").isEmpty());
+                .andExpect(jsonPath("$.genreCountsMovies").isEmpty())
+                .andExpect(jsonPath("$.genreCountsEpisodes").isEmpty());
     }
 
     @Test
@@ -727,8 +729,9 @@ class UserControllerIntegrationTest {
         mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalMinutesWatched").value(55))
-                .andExpect(jsonPath("$.genreCounts[*].genre", org.hamcrest.Matchers.containsInAnyOrder("Drama", "Action")))
-                .andExpect(jsonPath("$.genreCounts[*].count", org.hamcrest.Matchers.containsInAnyOrder(1, 1)));
+                .andExpect(jsonPath("$.genreCountsMovies").isEmpty())
+                .andExpect(jsonPath("$.genreCountsEpisodes[*].genre", org.hamcrest.Matchers.containsInAnyOrder("Drama", "Action")))
+                .andExpect(jsonPath("$.genreCountsEpisodes[*].count", org.hamcrest.Matchers.containsInAnyOrder(1, 1)));
     }
 
     @Test

@@ -25,14 +25,16 @@ public interface UserMapper {
     User postUserDtoToUser(PostUserDTO postUserDTO);
 
     UserResponseDTO userToUserResponseDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            long totalTheaterVisits, List<GenreCountDTO> genreCounts, long followersCount, long followingCount);
+            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsEpisodes,
+            long followersCount, long followingCount);
 
     UserPreviewDTO userToUserPreviewDto(User user);
 
     PublicUserDTO userToPublicUserDto(User user);
 
     PublicUserProfileDTO userToPublicUserProfileDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            long totalTheaterVisits, List<GenreCountDTO> genreCounts, long followersCount, long followingCount);
+            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsEpisodes,
+            long followersCount, long followingCount);
 
     @AfterMapping
     default void applyDefaults(@MappingTarget User.UserBuilder builder, PostUserDTO dto) {

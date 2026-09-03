@@ -16,7 +16,8 @@ public record PublicUserProfileDTO(
         long totalMinutesWatched,
         long minutesWatchedLast30Days,
         long totalTheaterVisits,
-        List<GenreCountDTO> genreCounts,
+        List<GenreCountDTO> genreCountsMovies,
+        List<GenreCountDTO> genreCountsEpisodes,
         String banner,
         long followersCount,
         long followingCount

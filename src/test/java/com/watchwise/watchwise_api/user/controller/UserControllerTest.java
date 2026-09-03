@@ -327,6 +327,7 @@ class UserControllerTest {
                 0L,
                 0L,
                 List.of(),
+                List.of(),
                 null,
                 0L,
                 0L
