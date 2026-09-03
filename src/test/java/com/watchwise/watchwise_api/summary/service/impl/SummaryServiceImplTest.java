@@ -704,6 +704,22 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getAllTimeStats] Should Use The Distinct Series Genre Query")
+    void shouldUseTheDistinctSeriesGenreQueryInAllTimeStats() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(lucasId))
+                .thenReturn(List.of(genreCount("Action", 9L)));
+        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(lucasId))
+                .thenReturn(List.of(genreCount("Sci-Fi", 6L)));
+
+        AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
+
+        assertThat(result.genreCountsSeries()).containsExactly(new GenreCountDTO("Sci-Fi", 6L));
+        assertThat(result.genreCountsMovies()).containsExactly(new GenreCountDTO("Action", 9L));
+        verify(diaryEntryRepository).countDistinctTitlesByGenreAndUserIdForSeries(lucasId);
+    }
+
+    @Test
     @DisplayName("[getAllTimeStats] Should Return Top Watch Companions Combining Movies And Episodes - When Companions Are Tagged")
     void shouldReturnTopWatchCompanionsForAllTimeStats() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));

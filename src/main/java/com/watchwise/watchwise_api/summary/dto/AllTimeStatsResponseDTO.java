@@ -19,7 +19,7 @@ public record AllTimeStatsResponseDTO(
         List<CountryCountDTO> watchCountByCountry,
         List<ContentWatchCountDTO> mostLoggedContent,
         List<GenreCountDTO> genreCountsMovies,
-        List<GenreCountDTO> genreCountsEpisodes,
+        List<GenreCountDTO> genreCountsSeries,
         List<DiaryEntryResponseDTO> topRated,
         List<DiaryEntryResponseDTO> bottomRated,
         List<WatchCompanionCountDTO> topWatchCompanions) {
