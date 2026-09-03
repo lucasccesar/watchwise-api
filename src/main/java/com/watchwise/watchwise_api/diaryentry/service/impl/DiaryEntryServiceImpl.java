@@ -624,17 +624,24 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (existingFinale.isPresent()) {
             return existingFinale.get().getEpisodeNumber();
         }
-        if (explicitFinaleEpisodeNumber != null) {
-            if (explicitFinaleEpisodeNumber < 1) {
-                throw new BadRequestException("finaleEpisodeNumber for season " + seasonNumber + " must be greater than or equal to 1");
-            }
-            return explicitFinaleEpisodeNumber;
-        }
+
         int airedEpisodeCount = airedEpisodeCount(seasonDetails);
-        if (airedEpisodeCount < 1) {
+        if (airedEpisodeCount >= 1) {
+            return airedEpisodeCount;
+        }
+
+        if (explicitFinaleEpisodeNumber == null) {
             throw new BadRequestException("finaleEpisodeNumber is required when season " + seasonNumber + " has no known finale episode yet");
         }
-        return airedEpisodeCount;
+        if (explicitFinaleEpisodeNumber < 1) {
+            throw new BadRequestException("finaleEpisodeNumber for season " + seasonNumber + " must be greater than or equal to 1");
+        }
+        int realSeasonEpisodeCount = realSeasonEpisodeCount(seasonDetails);
+        if (realSeasonEpisodeCount > 0 && explicitFinaleEpisodeNumber > realSeasonEpisodeCount) {
+            throw new BadRequestException("finaleEpisodeNumber for season " + seasonNumber + " exceeds the " + realSeasonEpisodeCount
+                    + " episodes known by TMDB for this season");
+        }
+        return explicitFinaleEpisodeNumber;
     }
 
     private DiaryEntry bulkLogEpisode(UUID userId, String seriesTmdbId, Integer seasonNumber, int episodeNumber,
@@ -771,15 +778,26 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (existingFinale.isPresent()) {
             return existingFinale.get().getSeasonNumber();
         }
-        if (explicitFinaleSeasonNumber != null) {
-            return explicitFinaleSeasonNumber;
+
+        Optional<TmdbTvFullDetails> series = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional();
+        if (series.isPresent()) {
+            int latestAiredSeasonNumber = latestAiredSeasonNumber(series.get().seasons());
+            if (latestAiredSeasonNumber >= 1) {
+                return latestAiredSeasonNumber;
+            }
         }
-        TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional().orElseThrow(this::tmdbUnavailable);
-        int latestAiredSeasonNumber = latestAiredSeasonNumber(series.seasons());
-        if (latestAiredSeasonNumber < 1) {
+
+        if (explicitFinaleSeasonNumber == null) {
+            if (series.isEmpty()) {
+                throw tmdbUnavailable();
+            }
             throw new BadRequestException("finaleSeasonNumber is required when the series has no known finale season yet");
         }
-        return latestAiredSeasonNumber;
+        int realSeasonCount = series.map(TmdbTvFullDetails::seasons).map(this::realSeasonCount).orElse(0);
+        if (realSeasonCount > 0 && explicitFinaleSeasonNumber > realSeasonCount) {
+            throw new BadRequestException("finaleSeasonNumber exceeds the " + realSeasonCount + " seasons known by TMDB for this series");
+        }
+        return explicitFinaleSeasonNumber;
     }
 
     private int latestAiredSeasonNumber(List<TmdbSeasonSummary> seasons) {
@@ -796,6 +814,15 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .map(TmdbSeasonSummary::seasonNumber)
                 .max(Integer::compareTo)
                 .orElse(0);
+    }
+
+    private int realSeasonCount(List<TmdbSeasonSummary> seasons) {
+        if (seasons == null) {
+            return 0;
+        }
+        return (int) seasons.stream()
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
+                .count();
     }
 
     private DiaryEntry findOwnedEntry(UUID userId, UUID diaryEntryId) {
