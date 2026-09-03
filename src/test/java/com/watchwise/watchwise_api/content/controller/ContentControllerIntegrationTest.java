@@ -5,7 +5,9 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -34,6 +36,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -92,6 +96,13 @@ class ContentControllerIntegrationTest {
         csrfCookie = registerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
         assertThat(accessTokenCookie).isNotNull();
         assertThat(csrfCookie).isNotNull();
+
+        lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+        lenient().when(tmdbClient.getTvFullDetails(any(), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
     }
 
     @Test
@@ -145,6 +156,30 @@ class ContentControllerIntegrationTest {
         assertThat(contentRepository
                 .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1399", 1, 3, ContentType.EPISODE))
                 .isPresent();
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Return NotFound And Not Persist - When TmdbId Does Not Exist On TMDB")
+    void shouldReturnNotFoundAndNotPersistWhenTmdbIdDoesNotExistOnTmdb() throws Exception {
+        when(tmdbClient.getMovieFullDetails("999999999", "en-US")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        mockMvc.perform(referenceRequest("{ \"tmdbId\": \"999999999\", \"type\": \"MOVIE\" }"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("No movie found on TMDB for the given id"));
+
+        assertThat(contentRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Return BadGateway And Not Persist - When TMDB Is Unavailable While Verifying Existence")
+    void shouldReturnBadGatewayAndNotPersistWhenTmdbIsUnavailableWhileVerifyingExistence() throws Exception {
+        when(tmdbClient.getMovieFullDetails("550", "en-US")).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(referenceRequest("{ \"tmdbId\": \"550\", \"type\": \"MOVIE\" }"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
+
+        assertThat(contentRepository.findAll()).isEmpty();
     }
 
     @Test
@@ -421,7 +456,7 @@ class ContentControllerIntegrationTest {
         Content content = contentRepository.save(Content.builder()
                 .tmdbId("603").type(ContentType.MOVIE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
                 "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
                 List.of(), List.of(), null, null, null,
@@ -449,7 +484,7 @@ class ContentControllerIntegrationTest {
         Content content = contentRepository.save(Content.builder()
                 .tmdbId("603").type(ContentType.MOVIE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.empty());
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
                 .andExpect(status().isBadGateway())
@@ -472,9 +507,9 @@ class ContentControllerIntegrationTest {
         Content second = contentRepository.save(Content.builder()
                 .tmdbId("604").type(ContentType.MOVIE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null, null, null, null, null)));
-        when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null, null, null, null, null)));
 
         mockMvc.perform(get("/contents/details")

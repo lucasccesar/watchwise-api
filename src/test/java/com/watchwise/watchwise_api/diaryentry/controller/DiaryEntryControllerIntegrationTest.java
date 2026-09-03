@@ -6,7 +6,10 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -56,6 +59,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -121,10 +125,14 @@ class DiaryEntryControllerIntegrationTest {
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
         when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
-                .thenReturn(Optional.of(new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(), null, null)));
-        when(tmdbClient.getTvFullDetails(any(), any())).thenReturn(Optional.of(new TmdbTvFullDetails(
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(), null, null)));
+        when(tmdbClient.getTvFullDetails(any(), any())).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 null, null, null, null, null, null, null, null, null, null, null, List.of(),
                 null, null, null, null, null, null, null, null)));
+        lenient().when(tmdbClient.getMovieFullDetails(any(), any())).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+        lenient().when(tmdbClient.getEpisodeFullDetails(any(), any(), any(), any())).thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
+                null, null, null, null, null, null, null, null, null)));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
@@ -1729,7 +1737,7 @@ class DiaryEntryControllerIntegrationTest {
     @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When WatchedDate Predates The Finale Episode's Release Date")
     void shouldReturnBadRequestAndNotPersistWhenWatchedDatePredatesTheFinaleEpisodesReleaseDateOnBulk() throws Exception {
         RegisteredUser user = registerUser("bulkwatcheddatebeforerelease");
-        when(tmdbClient.getSeasonFullDetails("919", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("919", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 null, null, null, null, null, null, List.of(
                         new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null),
                         new TmdbEpisodeSummary(2, null, null, "2020-01-08", 45, null, null)),
@@ -1754,7 +1762,7 @@ class DiaryEntryControllerIntegrationTest {
     @DisplayName("[createDiaryEntriesInBulk] Should Return BadGateway And Not Persist - When TMDB Is Unavailable While Fetching A Season's Episode Runtimes")
     void shouldReturnBadGatewayAndNotPersistWhenTmdbIsUnavailableOnBulk() throws Exception {
         RegisteredUser user = registerUser("bulktmdbdown");
-        when(tmdbClient.getSeasonFullDetails("917", 1, "en-US")).thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("917", 1, "en-US")).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         String body = """
                 {

@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -22,7 +23,7 @@ public class TmdbClient {
                         .uri("/movie/{id}", tmdbId)
                         .retrieve()
                         .body(TmdbMovieDetails.class),
-                "movie " + tmdbId);
+                "movie " + tmdbId).toOptional();
     }
 
     public Optional<TmdbTvDetails> getTvDetails(String tmdbId) {
@@ -30,7 +31,7 @@ public class TmdbClient {
                         .uri("/tv/{id}", tmdbId)
                         .retrieve()
                         .body(TmdbTvDetails.class),
-                "tv " + tmdbId);
+                "tv " + tmdbId).toOptional();
     }
 
     public Optional<TmdbPersonCredits> getPersonCombinedCredits(String personTmdbId) {
@@ -38,11 +39,11 @@ public class TmdbClient {
                         .uri("/person/{id}/combined_credits", personTmdbId)
                         .retrieve()
                         .body(TmdbPersonCredits.class),
-                "person " + personTmdbId);
+                "person " + personTmdbId).toOptional();
     }
 
-    @Cacheable(cacheNames = "tmdbMovieFullDetails", key = "#tmdbId + '|' + #language", unless = "#result == null")
-    public Optional<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {
+    @Cacheable(cacheNames = "tmdbMovieFullDetails", key = "#tmdbId + '|' + #language", unless = "#result.isUnavailable()")
+    public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/movie/{id}")
@@ -54,8 +55,8 @@ public class TmdbClient {
                 "movie full details " + tmdbId);
     }
 
-    @Cacheable(cacheNames = "tmdbTvFullDetails", key = "#tmdbId + '|' + #language", unless = "#result == null")
-    public Optional<TmdbTvFullDetails> getTvFullDetails(String tmdbId, String language) {
+    @Cacheable(cacheNames = "tmdbTvFullDetails", key = "#tmdbId + '|' + #language", unless = "#result.isUnavailable()")
+    public TmdbLookupResult<TmdbTvFullDetails> getTvFullDetails(String tmdbId, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/tv/{id}")
@@ -67,8 +68,8 @@ public class TmdbClient {
                 "tv full details " + tmdbId);
     }
 
-    @Cacheable(cacheNames = "tmdbSeasonFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #language", unless = "#result == null")
-    public Optional<TmdbSeasonFullDetails> getSeasonFullDetails(String seriesTmdbId, Integer seasonNumber, String language) {
+    @Cacheable(cacheNames = "tmdbSeasonFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #language", unless = "#result.isUnavailable()")
+    public TmdbLookupResult<TmdbSeasonFullDetails> getSeasonFullDetails(String seriesTmdbId, Integer seasonNumber, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/tv/{seriesId}/season/{seasonNumber}")
@@ -80,8 +81,8 @@ public class TmdbClient {
                 "season full details " + seriesTmdbId + "/" + seasonNumber);
     }
 
-    @Cacheable(cacheNames = "tmdbEpisodeFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #episodeNumber + '|' + #language", unless = "#result == null")
-    public Optional<TmdbEpisodeFullDetails> getEpisodeFullDetails(
+    @Cacheable(cacheNames = "tmdbEpisodeFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #episodeNumber + '|' + #language", unless = "#result.isUnavailable()")
+    public TmdbLookupResult<TmdbEpisodeFullDetails> getEpisodeFullDetails(
             String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, String language) {
         return callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
@@ -93,17 +94,26 @@ public class TmdbClient {
                 "episode full details " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber);
     }
 
-    private <T> Optional<T> callWithRetry(Supplier<T> call, String description) {
+    private <T> TmdbLookupResult<T> callWithRetry(Supplier<T> call, String description) {
         try {
-            return Optional.ofNullable(call.get());
+            return attempt(call);
+        } catch (HttpClientErrorException.NotFound notFound) {
+            return new TmdbLookupResult.NotFound<>();
         } catch (RestClientException firstFailure) {
             log.warn("TMDB call failed for {}, retrying once: {}", description, firstFailure.getMessage());
             try {
-                return Optional.ofNullable(call.get());
+                return attempt(call);
+            } catch (HttpClientErrorException.NotFound notFound) {
+                return new TmdbLookupResult.NotFound<>();
             } catch (RestClientException secondFailure) {
                 log.warn("TMDB call failed for {} after retry, skipping this cycle: {}", description, secondFailure.getMessage());
-                return Optional.empty();
+                return new TmdbLookupResult.Unavailable<>();
             }
         }
+    }
+
+    private <T> TmdbLookupResult<T> attempt(Supplier<T> call) {
+        T result = call.get();
+        return result == null ? new TmdbLookupResult.NotFound<>() : new TmdbLookupResult.Found<>(result);
     }
 }

@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieAlternativeTitles;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
@@ -97,7 +98,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
                 "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
                 List.of(), List.of(), null, null, null,
@@ -118,7 +119,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "", "Original Title", null, null, null, null, null,
                 List.of(), List.of(), null, null,
                 new TmdbMovieAlternativeTitles(List.of(
@@ -137,7 +138,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", null, "Original Title", null, null, null, null, null,
                 List.of(), List.of(), null, null,
                 new TmdbMovieAlternativeTitles(List.of(new TmdbAlternativeTitleEntry("FR", "Titre Francais"))),
@@ -157,7 +158,7 @@ class ContentDetailsServiceImplTest {
         TmdbWatchProviders watchProviders = new TmdbWatchProviders(Map.of(
                 "US", new TmdbRegionProviders(List.of(new TmdbProvider("Netflix", "/netflix.png")), null, null),
                 "BR", new TmdbRegionProviders(List.of(new TmdbProvider("Globoplay", "/globoplay.png")), null, null)));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null,
                 List.of(), List.of(), null, watchProviders, null,
                 null, null, null, null)));
@@ -175,7 +176,7 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
         TmdbWatchProviders watchProviders = new TmdbWatchProviders(Map.of(
                 "BR", new TmdbRegionProviders(List.of(new TmdbProvider("Globoplay", "/globoplay.png")), null, null)));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null,
                 List.of(), List.of(), null, watchProviders, null,
                 null, null, null, null)));
@@ -191,24 +192,24 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
                         new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
                         new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
                 null, null, null, null, 3, 5, null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
                         new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
                 null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 102, "Season 2", null, null, "2009-03-08", 2, List.of(
                         new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null, null),
                         new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null, null)),
                 null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 103, "Season 3", null, null, "2010-01-01", 3, List.of(
                         new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null, null)),
                 null, null)));
@@ -232,12 +233,12 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 7, null)),
                 null, null, null, null, null, null, null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -251,24 +252,24 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
                         new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
                         new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
                 null, null, null, null, null, null, null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
                         new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
                 null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 102, "Season 2", null, null, "2009-03-08", 2, List.of(
                         new TmdbEpisodeSummary(1, "Seven Thirty-Seven", null, "2009-03-08", 47, null, null),
                         new TmdbEpisodeSummary(2, "Future Episode", null, "2099-01-01", 45, null, null)),
                 null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 3, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 103, "Season 3", null, null, "2010-01-01", 3, List.of(
                         new TmdbEpisodeSummary(1, "No Mas", null, "2010-01-01", 50, null, null)),
                 null, null)));
@@ -287,12 +288,12 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 5, null)),
                 null, null, null, null, null, null, null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Episode 1", null, "2008-01-20", 45, null, null),
                         new TmdbEpisodeSummary(2, "Episode 2", null, "2008-01-20", 45, null, null),
@@ -315,13 +316,13 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(0, "Specials", null, "2099-01-01", 1, null),
                         new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)),
                 null, null, null, null, null, null, null, null)));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null)),
                 null, null)));
@@ -341,12 +342,12 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("2316").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("2316", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("2316", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "2316", "The Office", "The Office", null, null, null, "2005-03-24", null,
                 List.of(), List.of(), null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2005-03-24", 1, null)),
                 null, null, null, null, null, null, null, null)));
-        when(tmdbClient.getSeasonFullDetails("2316", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("2316", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 201, "Season 1", null, null, "2005-03-24", 1,
                 List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2005-03-24", null, null, null)),
                 null, null)));
@@ -364,7 +365,7 @@ class ContentDetailsServiceImplTest {
         Content season = Content.builder().id(contentId).type(ContentType.SEASON)
                 .seriesTmdbId("1396").seasonNumber(1).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
                         new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
@@ -372,7 +373,7 @@ class ContentDetailsServiceImplTest {
                         17419, "Bryan Cranston", "/cranston.jpg",
                         List.of(new TmdbAggregateRole("Walter White")), 2)), null),
                 null)));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null,
                 new TmdbAggregateCredits(List.of(new TmdbAggregateCastMember(
@@ -395,12 +396,12 @@ class ContentDetailsServiceImplTest {
         Content season = Content.builder().id(contentId).type(ContentType.SEASON)
                 .seriesTmdbId("1396").seasonNumber(1).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
                         new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48, null, null)),
                 null, null)));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), List.of(new TmdbCreator(9181, "Vince Gilligan", "/gilligan.jpg")),
                 List.of(), null, null, null, null, null, null, null, null)));
@@ -421,7 +422,7 @@ class ContentDetailsServiceImplTest {
         Content season = Content.builder().id(contentId).type(ContentType.SEASON)
                 .seriesTmdbId("1396").seasonNumber(1).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null,
                                 List.of(new TmdbGuestStar(500, "Guest One", "Neighbor", "/guest1.jpg"))),
@@ -429,7 +430,7 @@ class ContentDetailsServiceImplTest {
                                 List.of(new TmdbGuestStar(500, "Guest One", "Neighbor", "/guest1.jpg"),
                                         new TmdbGuestStar(501, "Guest Two", "Cop", "/guest2.jpg")))),
                 null, null)));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null, null, null, null, null, null, null, null)));
 
@@ -448,10 +449,10 @@ class ContentDetailsServiceImplTest {
         Content episode = Content.builder().id(contentId).type(ContentType.EPISODE)
                 .seriesTmdbId("1396").seasonNumber(1).episodeNumber(1).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(episode));
-        when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US")).thenReturn(Optional.of(new TmdbEpisodeFullDetails(
+        when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                 62085, "Pilot", "First episode", "2008-01-20", 1, 1, 58, "/still.jpg",
                 List.of(new TmdbGuestStar(17420, "John Doe", "Neighbor", "/doe.jpg")))));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null, null, null, null, null, null, null, null)));
 
@@ -470,11 +471,11 @@ class ContentDetailsServiceImplTest {
         Content season = Content.builder().id(contentId).type(ContentType.SEASON)
                 .seriesTmdbId("1396").seasonNumber(1).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(season));
-        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(Optional.of(new TmdbSeasonFullDetails(
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 3572, "Season 1", "First season", "/season1.jpg", "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null)),
                 null, null)));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null,
                 new TmdbAggregateCredits(List.of(), List.of(
@@ -503,9 +504,9 @@ class ContentDetailsServiceImplTest {
         Content episode = Content.builder().id(contentId).type(ContentType.EPISODE)
                 .seriesTmdbId("1396").seasonNumber(1).episodeNumber(1).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(episode));
-        when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US")).thenReturn(Optional.of(new TmdbEpisodeFullDetails(
+        when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                 62085, "Pilot", "First episode", "2008-01-20", 1, 1, 58, "/still.jpg", List.of())));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null,
                 new TmdbAggregateCredits(List.of(), List.of(
@@ -533,7 +534,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
                 new TmdbCredits(List.of(), List.of(
                         new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
@@ -564,7 +565,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(), null,
                 null, null, null, null, null,
                 new TmdbVideos(List.of(
@@ -584,7 +585,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(), null, null, null,
                 0L, 0L, null, null)));
 
@@ -600,7 +601,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
                 new TmdbCredits(List.of(), List.of(
                         new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
@@ -619,7 +620,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "The Matrix", "The Matrix", null, null, null, null, null, List.of(), List.of(),
                 new TmdbCredits(List.of(), List.of(
                         new TmdbCrewMember(10, "Lana Wachowski", "Director", "/lana.jpg"),
@@ -638,7 +639,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null,
                 new TmdbAggregateCredits(List.of(), List.of(
@@ -667,7 +668,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
-        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(Optional.of(new TmdbTvFullDetails(
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null,
                 new TmdbAggregateCredits(List.of(), List.of(
@@ -710,7 +711,7 @@ class ContentDetailsServiceImplTest {
         UUID contentId = UUID.randomUUID();
         Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.empty());
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         assertThatThrownBy(() -> contentDetailsService.getDetails(contentId, requestingUserId))
                 .isInstanceOf(TmdbUnavailableException.class);
@@ -725,10 +726,10 @@ class ContentDetailsServiceImplTest {
         Content secondContent = Content.builder().id(second).type(ContentType.MOVIE).tmdbId("604").build();
         when(contentRepository.findById(first)).thenReturn(Optional.of(firstContent));
         when(contentRepository.findById(second)).thenReturn(Optional.of(secondContent));
-        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null,
                 null, null, null, null)));
-        when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(Optional.of(new TmdbMovieFullDetails(
+        when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null,
                 null, null, null, null)));
 

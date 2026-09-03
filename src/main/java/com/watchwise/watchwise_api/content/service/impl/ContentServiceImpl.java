@@ -2,6 +2,10 @@ package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -25,9 +29,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ContentServiceImpl implements ContentService {
 
+    private static final String EXISTENCE_CHECK_LANGUAGE = "en-US";
+
     private final ContentMapper contentMapper;
     private final ContentRepository contentRepository;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final TmdbClient tmdbClient;
 
     @Override
     public ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO) {
@@ -43,6 +50,8 @@ public class ContentServiceImpl implements ContentService {
         if (existing.isPresent()) {
             return contentMapper.contentToContentRefDto(reconcileExisting(existing.get(), normalized, trustedRuntimeMinutes));
         }
+
+        assertExistsOnTmdb(normalized);
 
         try {
             Content saved = newTransactionExecutor.runInNewTransaction(() -> {
@@ -231,6 +240,21 @@ public class ContentServiceImpl implements ContentService {
             return cve.getConstraintName();
         }
         return null;
+    }
+
+    private void assertExistsOnTmdb(ContentRefCreationDTO dto) {
+        TmdbLookupResult<?> result = switch (dto.type()) {
+            case MOVIE -> tmdbClient.getMovieFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE);
+            case SERIES -> tmdbClient.getTvFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE);
+            case SEASON, EPISODE -> tmdbClient.getTvFullDetails(dto.seriesTmdbId(), EXISTENCE_CHECK_LANGUAGE);
+        };
+        if (result.isNotFound()) {
+            String subject = dto.type() == ContentType.SEASON || dto.type() == ContentType.EPISODE ? "series" : dto.type().name().toLowerCase();
+            throw new NotFoundException("No " + subject + " found on TMDB for the given id");
+        }
+        if (result.isUnavailable()) {
+            throw new TmdbUnavailableException("TMDB is currently unavailable");
+        }
     }
 
     private Optional<Content> findExisting(ContentRefCreationDTO dto) {

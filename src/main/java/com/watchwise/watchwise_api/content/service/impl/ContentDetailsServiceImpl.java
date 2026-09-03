@@ -118,7 +118,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     private ContentDetailsDTO buildMovieDetails(Content content, String language, String region) {
         TmdbMovieFullDetails details = tmdbClient.getMovieFullDetails(content.getTmdbId(), language)
-                .orElseThrow(this::tmdbUnavailable);
+                .toOptional().orElseThrow(this::tmdbUnavailable);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -150,7 +150,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     private ContentDetailsDTO buildSeriesDetails(Content content, String language, String region) {
         TmdbTvFullDetails details = tmdbClient.getTvFullDetails(content.getTmdbId(), language)
-                .orElseThrow(this::tmdbUnavailable);
+                .toOptional().orElseThrow(this::tmdbUnavailable);
         List<TmdbSeasonFullDetails> allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), details.seasons(), language);
         List<Integer> episodeRuntimes = episodeRuntimes(allSeasons);
 
@@ -185,9 +185,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private ContentDetailsDTO buildSeasonDetails(Content content, String language, String region) {
         TmdbSeasonFullDetails season = tmdbClient
                 .getSeasonFullDetails(content.getSeriesTmdbId(), content.getSeasonNumber(), language)
-                .orElseThrow(this::tmdbUnavailable);
+                .toOptional().orElseThrow(this::tmdbUnavailable);
         TmdbTvFullDetails series = tmdbClient.getTvFullDetails(content.getSeriesTmdbId(), language)
-                .orElseThrow(this::tmdbUnavailable);
+                .toOptional().orElseThrow(this::tmdbUnavailable);
         List<Integer> episodeRuntimes = runtimesOf(season.episodes());
 
         return new ContentDetailsDTO(
@@ -221,9 +221,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private ContentDetailsDTO buildEpisodeDetails(Content content, String language, String region) {
         TmdbEpisodeFullDetails episode = tmdbClient.getEpisodeFullDetails(
                         content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), language)
-                .orElseThrow(this::tmdbUnavailable);
+                .toOptional().orElseThrow(this::tmdbUnavailable);
         TmdbTvFullDetails series = tmdbClient.getTvFullDetails(content.getSeriesTmdbId(), language)
-                .orElseThrow(this::tmdbUnavailable);
+                .toOptional().orElseThrow(this::tmdbUnavailable);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -479,7 +479,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         List<CompletableFuture<Optional<TmdbSeasonFullDetails>>> futures = seasons.stream()
                 .filter(season -> !Integer.valueOf(0).equals(season.seasonNumber()))
                 .map(season -> CompletableFuture.supplyAsync(
-                        () -> tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(), language),
+                        () -> tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(), language).toOptional(),
                         tmdbSeasonFetchExecutor))
                 .toList();
         return futures.stream()

@@ -561,7 +561,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private TmdbSeasonFullDetails fetchSeasonDetails(String seriesTmdbId, Integer seasonNumber, String language) {
-        return tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language).orElseThrow(this::tmdbUnavailable);
+        return tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language).toOptional().orElseThrow(this::tmdbUnavailable);
     }
 
     private Map<Integer, Integer> episodeRuntimeMinutesFromTmdb(TmdbSeasonFullDetails season) {
@@ -685,7 +685,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                     explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber), seasonDetails);
         }
         if (totalEpisodes > MAX_BULK_EPISODES) {
-            TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).orElseThrow(this::tmdbUnavailable);
+            TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional().orElseThrow(this::tmdbUnavailable);
             Integer realEpisodeCount = series.numberOfEpisodes();
             if (realEpisodeCount == null || totalEpisodes > realEpisodeCount) {
                 throw new BadRequestException("Series has more than " + MAX_BULK_EPISODES
@@ -716,7 +716,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             return;
         }
 
-        Optional<TmdbTvFullDetails> seriesDetails = tmdbClient.getTvFullDetails(seriesTmdbId, language);
+        Optional<TmdbTvFullDetails> seriesDetails = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional();
         if (seriesDetails.isEmpty()) {
             return;
         }
@@ -774,7 +774,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (explicitFinaleSeasonNumber != null) {
             return explicitFinaleSeasonNumber;
         }
-        TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).orElseThrow(this::tmdbUnavailable);
+        TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional().orElseThrow(this::tmdbUnavailable);
         int latestAiredSeasonNumber = latestAiredSeasonNumber(series.seasons());
         if (latestAiredSeasonNumber < 1) {
             throw new BadRequestException("finaleSeasonNumber is required when the series has no known finale season yet");

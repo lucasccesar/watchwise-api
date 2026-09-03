@@ -2,6 +2,12 @@ package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -49,6 +55,9 @@ class ContentServiceImplTest {
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
 
+    @Mock
+    private TmdbClient tmdbClient;
+
     @InjectMocks
     private ContentServiceImpl contentService;
 
@@ -56,6 +65,12 @@ class ContentServiceImplTest {
     void setUp() {
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+        lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+        lenient().when(tmdbClient.getTvFullDetails(any(), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
     }
 
     @Test
@@ -310,6 +325,94 @@ class ContentServiceImplTest {
 
         assertThat(result).isEqualTo(responseDto);
         verify(contentRepository).saveAndFlush(mapped);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw NotFoundException - When Movie TmdbId Does Not Exist On TMDB")
+    void shouldThrowNotFoundExceptionWhenMovieTmdbIdDoesNotExistOnTmdb() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("999999999", ContentType.MOVIE, null, null, null, null, null);
+        when(contentRepository.findByTmdbIdAndType("999999999", ContentType.MOVIE)).thenReturn(Optional.empty());
+        when(tmdbClient.getMovieFullDetails("999999999", "en-US")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No movie found on TMDB for the given id");
+
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw TmdbUnavailableException - When TMDB Is Unavailable While Verifying Existence")
+    void shouldThrowTmdbUnavailableExceptionWhenTmdbIsUnavailableWhileVerifyingExistence() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
+        when(tmdbClient.getMovieFullDetails("100", "en-US")).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(TmdbUnavailableException.class)
+                .hasMessage("TMDB is currently unavailable");
+
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw NotFoundException - When Series TmdbId Does Not Exist On TMDB")
+    void shouldThrowNotFoundExceptionWhenSeriesTmdbIdDoesNotExistOnTmdb() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("999999999", ContentType.SERIES, null, null, null, null, null);
+        when(contentRepository.findByTmdbIdAndType("999999999", ContentType.SERIES)).thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("999999999", "en-US")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No series found on TMDB for the given id");
+
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw NotFoundException - When Season's SeriesTmdbId Does Not Exist On TMDB")
+    void shouldThrowNotFoundExceptionWhenSeasonsSeriesTmdbIdDoesNotExistOnTmdb() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.SEASON, "999999999", 1, null, null, null);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("999999999", 1, null, ContentType.SEASON))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("999999999", "en-US")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No series found on TMDB for the given id");
+
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw NotFoundException - When Episode's SeriesTmdbId Does Not Exist On TMDB")
+    void shouldThrowNotFoundExceptionWhenEpisodesSeriesTmdbIdDoesNotExistOnTmdb() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "999999999", 1, 1, null, null);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("999999999", 1, 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("999999999", "en-US")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No series found on TMDB for the given id");
+
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Not Verify Existence On TMDB - When Reference Already Exists")
+    void shouldNotVerifyExistenceOnTmdbWhenReferenceAlreadyExists() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existing.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null);
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
@@ -188,9 +189,9 @@ class DiaryEntryServiceImplTest {
         lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
         lenient().when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
-                .thenReturn(Optional.of(emptySeasonDetails()));
+                .thenReturn(new TmdbLookupResult.Found<>(emptySeasonDetails()));
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
-                .thenReturn(Optional.of(emptySeriesDetails()));
+                .thenReturn(new TmdbLookupResult.Found<>(emptySeriesDetails()));
     }
 
     private TmdbSeasonFullDetails emptySeasonDetails() {
@@ -2016,7 +2017,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(series));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
-        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(null, null, null, null, null, null, "2008-01-20", null,
                         List.of(new TmdbGenre(80, "Crime"), new TmdbGenre(18, "Drama")),
                         List.of(new TmdbProductionCountry("US", "United States")),
@@ -2024,7 +2025,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithRuntimes(Map.of(1, 47))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
@@ -2063,7 +2064,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithRuntimes(Map.of(1, 47))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
@@ -2089,11 +2090,11 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
-        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Unavailable<>());
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithRuntimes(Map.of(1, 47))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
@@ -2120,7 +2121,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(series));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
-        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(null, null, null, null, null, null, "2008-01-20", null,
                         List.of(new TmdbGenre(80, "Crime")), null,
                         null, List.of(), null, null, null, null, null, null, null, null)));
@@ -2129,7 +2130,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithRuntimes(Map.of(1, 47))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
@@ -2178,7 +2179,7 @@ class DiaryEntryServiceImplTest {
     void shouldThrowBadRequestExceptionWhenWatchedDatePredatesTheFinaleEpisodesReleaseDateOnSeasonBulk() {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
-        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(Optional.of(
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
                         new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null),
                         new TmdbEpisodeSummary(2, null, null, "2020-01-08", 45, null, null)),
@@ -2222,7 +2223,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(new TmdbSeasonFullDetails(null, null, null, null, null, null, episodes, null, null)));
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(null, null, null, null, null, null, episodes, null, null)));
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
@@ -2264,7 +2265,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntriesInBulk] Should Allow The Series To Exceed The Bulk Episode Limit - When TMDB Confirms The Real Episode Count")
     void shouldAllowTheSeriesToExceedTheBulkEpisodeLimitWhenTmdbConfirmsTheRealEpisodeCount() {
         int totalEpisodes = DiaryEntryServiceImpl.MAX_BULK_EPISODES + 1;
-        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
                         List.of(), null, null, null, null, null, totalEpisodes, null, null)));
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
@@ -2524,7 +2525,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 999, 2, 999))));
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithRuntimes(Map.of(1, 999, 2, 999))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
                 .thenAnswer(inv -> {
                     ContentRefCreationDTO refDto = inv.getArgument(0);
@@ -2563,7 +2564,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of())));
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithRuntimes(Map.of())));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
@@ -2593,7 +2594,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
-                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithRuntimes(Map.of(1, 47))));
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
                 .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
@@ -2614,7 +2615,7 @@ class DiaryEntryServiceImplTest {
     @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Throw TmdbUnavailableException - When TMDB Fails To Return A Season's Episode Runtimes")
     void shouldThrowTmdbUnavailableExceptionWhenTmdbFailsToReturnASeasonsEpisodeRuntimes() {
-        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 2, null, null);
@@ -2634,7 +2635,7 @@ class DiaryEntryServiceImplTest {
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
-        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(Optional.of(
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
                         new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null),
                         new TmdbEpisodeSummary(2, null, null, "2020-01-08", 45, null, null),
@@ -2683,13 +2684,13 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(eq("900"), any(), eq(ContentType.EPISODE)))
                 .thenReturn(Optional.empty());
-        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null, List.of(
                         new TmdbSeasonSummary(1, null, null, "2020-01-01", 1, null),
                         new TmdbSeasonSummary(2, null, null, "2021-01-01", 1, null),
                         new TmdbSeasonSummary(3, null, null, "2099-01-01", 1, null)),
                         null, null, null, null, null, null, null, null)));
-        when(tmdbClient.getSeasonFullDetails(eq("900"), any(), eq(lucas.getPreferredLanguage()))).thenReturn(Optional.of(
+        when(tmdbClient.getSeasonFullDetails(eq("900"), any(), eq(lucas.getPreferredLanguage()))).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
                         new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null)),
                         null, null)));

@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.common.tmdb;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -12,6 +13,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class TmdbClientTest {
@@ -106,7 +108,7 @@ class TmdbClientTest {
                         {"id": "603", "title": "The Matrix", "release_date": "1999-03-31", "runtime": 136}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US").toOptional();
 
         assertThat(result).isPresent();
         assertThat(result.get().title()).isEqualTo("The Matrix");
@@ -114,8 +116,8 @@ class TmdbClientTest {
     }
 
     @Test
-    @DisplayName("[getMovieFullDetails] Should Return Empty - When TMDB Fails Twice In A Row")
-    void shouldReturnEmptyWhenMovieFullDetailsFailsTwiceInARow() {
+    @DisplayName("[getMovieFullDetails] Should Return Unavailable - When TMDB Fails Twice In A Row")
+    void shouldReturnUnavailableWhenMovieFullDetailsFailsTwiceInARow() {
         mockServer.expect(requestTo(
                         "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
@@ -123,9 +125,25 @@ class TmdbClientTest {
                         "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
                 .andRespond(withServerError());
 
-        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+        TmdbLookupResult<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
 
-        assertThat(result).isEmpty();
+        assertThat(result.isUnavailable()).isTrue();
+        assertThat(result.toOptional()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getMovieFullDetails] Should Return NotFound Without Retrying - When TMDB Responds With 404")
+    void shouldReturnNotFoundWithoutRetryingWhenMovieFullDetailsRespondsWith404() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/999999999?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"status_message\": \"The resource you requested could not be found.\"}"));
+
+        TmdbLookupResult<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("999999999", "en-US");
+
+        assertThat(result.isNotFound()).isTrue();
+        assertThat(result.toOptional()).isEmpty();
+        mockServer.verify();
     }
 
     @Test
@@ -137,7 +155,7 @@ class TmdbClientTest {
                         {"id": "1396", "name": "Breaking Bad", "first_air_date": "2008-01-20"}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "pt-BR");
+        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "pt-BR").toOptional();
 
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("Breaking Bad");
@@ -152,7 +170,7 @@ class TmdbClientTest {
                         {"id": 3572, "name": "Season 1", "season_number": 1, "episodes": []}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbSeasonFullDetails> result = tmdbClient.getSeasonFullDetails("1396", 1, "en-US");
+        Optional<TmdbSeasonFullDetails> result = tmdbClient.getSeasonFullDetails("1396", 1, "en-US").toOptional();
 
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("Season 1");
@@ -169,7 +187,7 @@ class TmdbClientTest {
                          "guest_stars": [{"id": 17419, "name": "John Doe", "character": "Neighbor"}]}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbEpisodeFullDetails> result = tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US");
+        Optional<TmdbEpisodeFullDetails> result = tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US").toOptional();
 
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("Pilot");
@@ -185,7 +203,7 @@ class TmdbClientTest {
                         {"id": "603", "title": "The Matrix"}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US").toOptional();
 
         assertThat(result).isPresent();
     }
@@ -206,7 +224,7 @@ class TmdbClientTest {
                              "official": true, "iso_639_1": "en", "published_at": "1999-03-01T00:00:00.000Z"}]}}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
+        Optional<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US").toOptional();
 
         assertThat(result).isPresent();
         assertThat(result.get().budget()).isEqualTo(63000000L);
@@ -231,7 +249,7 @@ class TmdbClientTest {
                         {"id": "1396", "name": "Breaking Bad"}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "en-US");
+        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "en-US").toOptional();
 
         assertThat(result).isPresent();
     }
@@ -251,7 +269,7 @@ class TmdbClientTest {
                              "jobs": [{"job": "Grip"}]}]}}
                         """, MediaType.APPLICATION_JSON));
 
-        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "en-US");
+        Optional<TmdbTvFullDetails> result = tmdbClient.getTvFullDetails("1396", "en-US").toOptional();
 
         assertThat(result).isPresent();
         assertThat(result.get().productionCompanies()).extracting("id", "name")
