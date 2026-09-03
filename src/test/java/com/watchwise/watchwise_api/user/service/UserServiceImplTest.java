@@ -377,7 +377,7 @@ class UserServiceImplTest {
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(diaryEntryRepository.sumRuntimeMinutesByUserId(id)).thenReturn(4200L);
         when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndWatchedDateBetween(eq(id), any(), any())).thenReturn(300L);
-        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(id)).thenReturn(List.of(actionGenre));
+        when(diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(id)).thenReturn(List.of(actionGenre));
         when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong())).thenReturn(userResponseDTO);
 
         ArgumentCaptor<Long> totalCaptor = ArgumentCaptor.forClass(Long.class);

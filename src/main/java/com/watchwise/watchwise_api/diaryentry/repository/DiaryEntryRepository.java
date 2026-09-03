@@ -293,18 +293,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("start") LocalDate start, @Param("end") LocalDate end);
 
     @Query(value = """
-            SELECT genre AS genre, COUNT(DISTINCT c.id) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            CROSS JOIN LATERAL unnest(c.genres) AS genre
-            WHERE d.user_id = :userId
-            AND c.type = 'MOVIE'
-            GROUP BY genre
-            ORDER BY count DESC
-            """, nativeQuery = true)
-    List<GenreCount> countDistinctTitlesByGenreAndUserIdForMovies(@Param("userId") UUID userId);
-
-    @Query(value = """
             SELECT genre AS genre,
                    COUNT(DISTINCT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END) AS count
             FROM diary_entries d
@@ -535,21 +523,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             SELECT genre AS genre, COUNT(d.id) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
-            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
-            WHERE d.user_id = :userId
-            AND c.type IN ('EPISODE', 'SERIES')
-            AND d.watched_date BETWEEN :start AND :end
-            GROUP BY genre
-            ORDER BY count DESC
-            """, nativeQuery = true)
-    List<GenreCount> countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(
-            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
-
-    @Query(value = """
-            SELECT genre AS genre, COUNT(d.id) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
             CROSS JOIN LATERAL unnest(c.genres) AS genre
             WHERE d.user_id = :userId
             AND c.type = 'MOVIE'
@@ -559,17 +532,20 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     List<GenreCount> countEntriesByGenreAndUserIdForMovies(@Param("userId") UUID userId);
 
     @Query(value = """
-            SELECT genre AS genre, COUNT(d.id) AS count
+            SELECT genre AS genre,
+                   COUNT(DISTINCT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
             CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
             WHERE d.user_id = :userId
             AND c.type IN ('EPISODE', 'SERIES')
+            AND d.watched_date BETWEEN :start AND :end
             GROUP BY genre
             ORDER BY count DESC
             """, nativeQuery = true)
-    List<GenreCount> countEntriesByGenreAndUserIdForSeries(@Param("userId") UUID userId);
+    List<GenreCount> countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
 
     @Query("""
             SELECT d FROM DiaryEntry d JOIN FETCH d.content

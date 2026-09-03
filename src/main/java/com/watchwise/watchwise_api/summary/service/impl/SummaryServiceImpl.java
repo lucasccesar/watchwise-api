@@ -151,7 +151,7 @@ public class SummaryServiceImpl implements SummaryService {
                 .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
                 .toList();
         List<GenreCountDTO> genreCountsEpisodesLast30Days = diaryEntryRepository
-                .countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, windowStart, windowEnd).stream()
+                .countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, windowStart, windowEnd).stream()
                 .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
                 .toList();
 
@@ -227,7 +227,7 @@ public class SummaryServiceImpl implements SummaryService {
 
         List<GenreCountDTO> genreCounts = (type == ContentType.MOVIE
                 ? diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(userId, start, end)
-                : diaryEntryRepository.countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, start, end))
+                : diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, start, end))
                 .stream().map(row -> new GenreCountDTO(row.getGenre(), row.getCount())).toList();
 
         List<SeriesWatchTimeDTO> topSeriesByWatchTime = type == ContentType.SERIES
@@ -304,7 +304,7 @@ public class SummaryServiceImpl implements SummaryService {
 
         List<GenreCountDTO> genreCounts = (type == ContentType.MOVIE
                 ? diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(userId, start, end)
-                : diaryEntryRepository.countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, start, end))
+                : diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, start, end))
                 .stream().map(row -> new GenreCountDTO(row.getGenre(), row.getCount())).toList();
 
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanions(userId, watchedContentType, start, end);
@@ -354,7 +354,7 @@ public class SummaryServiceImpl implements SummaryService {
 
         List<GenreCountDTO> genreCountsMovies = diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(userId)
                 .stream().map(row -> new GenreCountDTO(row.getGenre(), row.getCount())).toList();
-        List<GenreCountDTO> genreCountsEpisodes = diaryEntryRepository.countEntriesByGenreAndUserIdForSeries(userId)
+        List<GenreCountDTO> genreCountsEpisodes = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(userId)
                 .stream().map(row -> new GenreCountDTO(row.getGenre(), row.getCount())).toList();
 
         List<DiaryEntry> topRatedRaw = diaryEntryRepository.findTopRatedByUserId(userId, PageRequest.of(0, ALL_TIME_TOP_LIMIT));
@@ -488,7 +488,7 @@ public class SummaryServiceImpl implements SummaryService {
 
     private List<GenreCountDTO> computeGenreCounts(UUID userId, ContentType type) {
         List<DiaryEntryRepository.GenreCount> rows = type == ContentType.MOVIE
-                ? diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(userId)
+                ? diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(userId)
                 : diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(userId);
 
         return rows.stream().map(row -> new GenreCountDTO(row.getGenre(), row.getCount())).toList();

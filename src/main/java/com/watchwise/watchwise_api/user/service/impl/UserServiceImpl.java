@@ -315,7 +315,7 @@ public class UserServiceImpl implements UserService {
                 .sumRuntimeMinutesByUserIdAndWatchedDateBetween(userId, windowStart, windowEnd);
         long totalTheaterVisits = diaryEntryRepository.countByUserIdAndWatchedInTheaterTrue(userId);
         List<GenreCountDTO> genreCountsMovies = toGenreCountDtos(
-                diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(userId));
+                diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(userId));
         List<GenreCountDTO> genreCountsEpisodes = toGenreCountDtos(
                 diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(userId));
         long followersCount = followerRepository.countByFollowedIdAndStatus(userId, FollowStatus.ACCEPTED);

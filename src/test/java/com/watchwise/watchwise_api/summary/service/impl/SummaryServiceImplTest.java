@@ -128,7 +128,7 @@ class SummaryServiceImplTest {
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
-        lenient().when(diaryEntryRepository.countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(any(), any(), any()))
+        lenient().when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
         lenient().when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(any(), any()))
                 .thenReturn(List.of());
@@ -216,7 +216,7 @@ class SummaryServiceImplTest {
     @DisplayName("[getSummary] Should Use The Movie Genre Query - When Type Is MOVIE")
     void shouldUseTheMovieGenreQueryWhenTypeIsMovie() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForMovies(lucasId))
+        when(diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(lucasId))
                 .thenReturn(List.of(genreCount("Drama", 3L)));
 
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
@@ -384,7 +384,7 @@ class SummaryServiceImplTest {
         when(diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(
                 eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
                 .thenReturn(List.of(genreCount("Action", 2)));
-        when(diaryEntryRepository.countEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(
+        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(
                 eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
                 .thenReturn(List.of(genreCount("Drama", 5)));
 
