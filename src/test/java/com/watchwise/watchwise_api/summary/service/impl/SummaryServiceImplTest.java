@@ -578,6 +578,19 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getMonthInReview] Should Use The Distinct Series Genre Query - When Type Is SERIES")
+    void shouldUseTheDistinctSeriesGenreQueryInMonthInReviewWhenTypeIsSeries() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(eq(lucasId), any(), any()))
+                .thenReturn(List.of(genreCount("Sci-Fi", 2L)));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(lucasId, lucasId, ContentType.SERIES, YearMonth.of(2026, 8));
+
+        assertThat(result.genreCounts()).containsExactly(new GenreCountDTO("Sci-Fi", 2L));
+        verify(diaryEntryRepository, never()).countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(any(), any(), any());
+    }
+
+    @Test
     @DisplayName("[getYearInReview] Should Return Top Watch Companions Scoped By Type And Year")
     void shouldReturnTopWatchCompanionsForYearInReview() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
@@ -638,6 +651,18 @@ class SummaryServiceImplTest {
         YearInReviewResponseDTO result = summaryService.getYearInReview(lucasId, lucasId, ContentType.MOVIE, 2026);
 
         assertThat(result.averageMinutesPerWeek()).isEqualTo(result.averageMinutesPerDay() * 7);
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Use The Distinct Series Genre Query - When Type Is SERIES")
+    void shouldUseTheDistinctSeriesGenreQueryInYearInReviewWhenTypeIsSeries() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(eq(lucasId), any(), any()))
+                .thenReturn(List.of(genreCount("Sci-Fi", 4L)));
+
+        YearInReviewResponseDTO result = summaryService.getYearInReview(lucasId, lucasId, ContentType.SERIES, 2026);
+
+        assertThat(result.genreCounts()).containsExactly(new GenreCountDTO("Sci-Fi", 4L));
     }
 
     @Test
