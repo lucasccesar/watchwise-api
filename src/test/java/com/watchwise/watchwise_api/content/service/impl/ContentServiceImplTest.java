@@ -5,8 +5,11 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
@@ -71,6 +74,9 @@ class ContentServiceImplTest {
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+        lenient().when(tmdbClient.getEpisodeFullDetails(any(), any(), any(), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
+                        null, null, null, null, null, null, null, null, null)));
     }
 
     @Test
@@ -403,7 +409,8 @@ class ContentServiceImplTest {
     @DisplayName("[getOrCreateReference] Should Not Verify Existence On TMDB - When Reference Already Exists")
     void shouldNotVerifyExistenceOnTmdbWhenReferenceAlreadyExists() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
-        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).build();
+        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE)
+                .runtimeMinutes(120).genres(List.of("Drama")).releaseYear(1999).countries(List.of("US")).build();
         ContentRefDTO responseDto = new ContentRefDTO(existing.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null);
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
@@ -1026,21 +1033,46 @@ class ContentServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getOrCreateReference] Should Accept RuntimeMinutes - When Type Is Movie")
-    void shouldAcceptRuntimeMinutesWhenTypeIsMovie() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null, 139, null);
-        Content mapped = Content.builder().tmdbId("100").type(ContentType.MOVIE).runtimeMinutes(139).build();
-        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).runtimeMinutes(139).build();
-        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null, 139, null);
+    @DisplayName("[getOrCreateReference] Should Derive RuntimeMinutes, Genres, ReleaseYear And Countries From TMDB - When Creating A New Movie")
+    void shouldDeriveMetadataFromTmdbWhenCreatingANewMovie() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        TmdbMovieFullDetails details = new TmdbMovieFullDetails(
+                "100", null, null, null, null, null, "1999-05-20", 139,
+                List.of(new TmdbGenre(1, "Thriller"), new TmdbGenre(2, "Drama")),
+                List.of(new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null);
+        Content mapped = Content.builder().tmdbId("100").type(ContentType.MOVIE).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "100", ContentType.MOVIE, null, null, null, null, null, null, null,
+                139, List.of("Drama", "Thriller"));
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.empty());
-        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(tmdbClient.getMovieFullDetails("100", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
+        when(contentMapper.contentRefCreationDtoToContent(any(ContentRefCreationDTO.class))).thenReturn(mapped);
         when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
+        ArgumentCaptor<ContentRefCreationDTO> captor = ArgumentCaptor.forClass(ContentRefCreationDTO.class);
+        verify(contentMapper).contentRefCreationDtoToContent(captor.capture());
+        assertThat(captor.getValue().runtimeMinutes()).isEqualTo(139);
+        assertThat(captor.getValue().genres()).containsExactly("Drama", "Thriller");
+        assertThat(captor.getValue().releaseYear()).isEqualTo(1999);
+        assertThat(captor.getValue().countries()).containsExactly("US");
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Movie And RuntimeMinutes Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsMovieAndRuntimeMinutesIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null, 45, null);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("runtimeMinutes must not be provided when type is MOVIE or SERIES, it is derived from TMDB");
+
+        verifyNoInteractions(contentRepository, contentMapper);
     }
 
     @Test
@@ -1050,7 +1082,7 @@ class ContentServiceImplTest {
 
         assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("runtimeMinutes must not be provided when type is SERIES");
+                .hasMessage("runtimeMinutes must not be provided when type is MOVIE or SERIES, it is derived from TMDB");
 
         verifyNoInteractions(contentRepository, contentMapper);
     }
@@ -1068,29 +1100,20 @@ class ContentServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different RuntimeMinutes Value")
-    void shouldThrowConflictExceptionWhenExistingContentHasADifferentRuntimeMinutesValue() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null, 139, null);
-        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("100").type(ContentType.MOVIE).runtimeMinutes(120).build();
-
-        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
-
-        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("This content is already registered with a different runtimeMinutes value");
-
-        verify(contentMapper, never()).contentToContentRefDto(any());
-    }
-
-    @Test
-    @DisplayName("[getOrCreateReference] Should Backfill RuntimeMinutes On The Existing Content - When It Was Never Set Before")
-    void shouldBackfillRuntimeMinutesOnTheExistingContentWhenItWasNeverSetBefore() {
+    @DisplayName("[getOrCreateReference] Should Backfill RuntimeMinutes, Genres, ReleaseYear And Countries On The Existing Movie From TMDB - When Never Set Before")
+    void shouldBackfillMetadataFromTmdbOnTheExistingMovieWhenNeverSetBefore() {
         UUID existingId = UUID.randomUUID();
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null, 139, null);
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
         Content existing = Content.builder().id(existingId).tmdbId("100").type(ContentType.MOVIE).build();
-        ContentRefDTO responseDto = new ContentRefDTO(existingId, "100", ContentType.MOVIE, null, null, null, null, null, null, null, 139, null);
+        TmdbMovieFullDetails details = new TmdbMovieFullDetails(
+                "100", null, null, null, null, null, "1999-05-20", 139,
+                List.of(new TmdbGenre(1, "Drama")), List.of(new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null);
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "100", ContentType.MOVIE, null, null, null, null, null, null, null,
+                139, List.of("Drama"));
 
         when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+        when(tmdbClient.getMovieFullDetails("100", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
         when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
         when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
         when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
@@ -1099,7 +1122,49 @@ class ContentServiceImplTest {
 
         assertThat(result).isEqualTo(responseDto);
         assertThat(existing.getRuntimeMinutes()).isEqualTo(139);
+        assertThat(existing.getGenres()).containsExactly("Drama");
+        assertThat(existing.getReleaseYear()).isEqualTo(1999);
+        assertThat(existing.getCountries()).containsExactly("US");
         verify(contentRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Not Call TMDB Or Change The Existing Movie - When It Already Has All Metadata")
+    void shouldNotCallTmdbOrChangeTheExistingMovieWhenItAlreadyHasAllMetadata() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        Content existing = Content.builder().id(existingId).tmdbId("100").type(ContentType.MOVIE)
+                .runtimeMinutes(139).genres(List.of("Drama")).releaseYear(1999).countries(List.of("US")).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "100", ContentType.MOVIE, null, null, null, null, null, null, null,
+                139, List.of("Drama"));
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        verifyNoInteractions(tmdbClient);
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Not Fail Or Overwrite The Existing Movie - When TMDB Backfill Is Unavailable")
+    void shouldNotFailOrOverwriteTheExistingMovieWhenTmdbBackfillIsUnavailable() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        Content existing = Content.builder().id(existingId).tmdbId("100").type(ContentType.MOVIE).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "100", ContentType.MOVIE, null, null, null, null, null, null, null);
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(existing));
+        when(tmdbClient.getMovieFullDetails("100", "en-US")).thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getRuntimeMinutes()).isNull();
+        verify(contentRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -1125,39 +1190,119 @@ class ContentServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When TrustedRuntimeMinutes Is False And Existing Content Has A Different RuntimeMinutes Value")
-    void shouldThrowConflictExceptionWhenTrustedRuntimeMinutesIsFalseAndExistingContentHasADifferentRuntimeMinutesValue() {
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When TrustedRuntimeMinutes Is False And RuntimeMinutes Is Present For Episode")
+    void shouldThrowBadRequestExceptionWhenTrustedRuntimeMinutesIsFalseAndRuntimeMinutesIsPresentForEpisode() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 1, null, null, 25, null);
-        Content existing = Content.builder().id(UUID.randomUUID()).type(ContentType.EPISODE).seriesTmdbId("200")
-                .seasonNumber(1).episodeNumber(1).runtimeMinutes(20).build();
-
-        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 1, ContentType.EPISODE))
-                .thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> contentService.getOrCreateReference(dto, false))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("This content is already registered with a different runtimeMinutes value");
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("runtimeMinutes must not be provided when type is EPISODE, it is derived from TMDB");
 
-        verify(contentMapper, never()).contentToContentRefDto(any());
+        verifyNoInteractions(contentRepository, contentMapper);
     }
 
     @Test
-    @DisplayName("[getOrCreateReference] Should Accept Genres - When Type Is Series")
-    void shouldAcceptGenresWhenTypeIsSeries() {
-        List<String> genres = List.of("Drama", "Thriller");
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, genres);
-        Content mapped = Content.builder().tmdbId("300").type(ContentType.SERIES).genres(genres).build();
-        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).genres(genres).build();
-        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null, null, genres);
+    @DisplayName("[getOrCreateReference] Should Not Call TMDB Or Change RuntimeMinutes - When TrustedRuntimeMinutes Is False And The Existing Episode Already Has A Value")
+    void shouldNotCallTmdbOrChangeRuntimeMinutesWhenTrustedRuntimeMinutesIsFalseAndTheExistingEpisodeAlreadyHasAValue() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 1, null, null);
+        Content existing = Content.builder().id(existingId).type(ContentType.EPISODE).seriesTmdbId("200")
+                .seasonNumber(1).episodeNumber(1).runtimeMinutes(20).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, null, ContentType.EPISODE, "200", 1, 1, null, null, null, null, 20, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(existing));
+        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto, false);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(existing.getRuntimeMinutes()).isEqualTo(20);
+        verifyNoInteractions(tmdbClient);
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Derive RuntimeMinutes From A New TMDB Call - When TrustedRuntimeMinutes Is False And Creating A New Episode")
+    void shouldDeriveRuntimeMinutesFromANewTmdbCallWhenTrustedRuntimeMinutesIsFalseAndCreatingANewEpisode() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 1, null, null);
+        Content mapped = Content.builder().type(ContentType.EPISODE).seriesTmdbId("200").seasonNumber(1).episodeNumber(1).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).type(ContentType.EPISODE).seriesTmdbId("200")
+                .seasonNumber(1).episodeNumber(1).runtimeMinutes(42).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), null, ContentType.EPISODE, "200", 1, 1, null, null, null, null, 42, null);
+        TmdbEpisodeFullDetails episodeDetails = new TmdbEpisodeFullDetails(null, null, null, null, 1, 1, 42, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getEpisodeFullDetails("200", 1, 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(episodeDetails));
+        when(contentMapper.contentRefCreationDtoToContent(any(ContentRefCreationDTO.class))).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto, false);
+
+        assertThat(result).isEqualTo(responseDto);
+        ArgumentCaptor<ContentRefCreationDTO> captor = ArgumentCaptor.forClass(ContentRefCreationDTO.class);
+        verify(contentMapper).contentRefCreationDtoToContent(captor.capture());
+        assertThat(captor.getValue().runtimeMinutes()).isEqualTo(42);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw NotFoundException - When TrustedRuntimeMinutes Is False And The Episode Number Does Not Exist On TMDB")
+    void shouldThrowNotFoundExceptionWhenTrustedRuntimeMinutesIsFalseAndTheEpisodeNumberDoesNotExistOnTmdb() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 99, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 99, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getEpisodeFullDetails("200", 1, 99, "en-US")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto, false))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No episode found on TMDB for the given id");
+
+        verify(contentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Derive Genres, ReleaseYear And Countries From TMDB - When Creating A New Series")
+    void shouldDeriveMetadataFromTmdbWhenCreatingANewSeries() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null);
+        TmdbTvFullDetails details = new TmdbTvFullDetails(
+                "300", null, null, null, null, null, "2010-03-14", null,
+                List.of(new TmdbGenre(1, "Thriller"), new TmdbGenre(2, "Drama")),
+                List.of(new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null, null, null, null);
+        Content mapped = Content.builder().tmdbId("300").type(ContentType.SERIES).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null,
+                null, List.of("Drama", "Thriller"));
 
         when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.empty());
-        when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
+        when(tmdbClient.getTvFullDetails("300", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
+        when(contentMapper.contentRefCreationDtoToContent(any(ContentRefCreationDTO.class))).thenReturn(mapped);
         when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
+        ArgumentCaptor<ContentRefCreationDTO> captor = ArgumentCaptor.forClass(ContentRefCreationDTO.class);
+        verify(contentMapper).contentRefCreationDtoToContent(captor.capture());
+        assertThat(captor.getValue().genres()).containsExactly("Drama", "Thriller");
+        assertThat(captor.getValue().releaseYear()).isEqualTo(2010);
+        assertThat(captor.getValue().countries()).containsExactly("US");
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When Type Is Series And Genres Is Present")
+    void shouldThrowBadRequestExceptionWhenTypeIsSeriesAndGenresIsPresent() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, List.of("Drama"));
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("genres must not be provided when type is MOVIE or SERIES, it is derived from TMDB");
+
+        verifyNoInteractions(contentRepository, contentMapper);
     }
 
     @Test
@@ -1182,42 +1327,6 @@ class ContentServiceImplTest {
                 .hasMessage("genres must not be provided when type is EPISODE");
 
         verifyNoInteractions(contentRepository, contentMapper);
-    }
-
-    @Test
-    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different Genres Value")
-    void shouldThrowConflictExceptionWhenExistingContentHasADifferentGenresValue() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, List.of("Drama"));
-        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).genres(List.of("Comedy")).build();
-
-        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.of(existing));
-
-        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("This content is already registered with a different genres value");
-
-        verify(contentMapper, never()).contentToContentRefDto(any());
-    }
-
-    @Test
-    @DisplayName("[getOrCreateReference] Should Backfill Genres On The Existing Content - When It Was Never Set Before")
-    void shouldBackfillGenresOnTheExistingContentWhenItWasNeverSetBefore() {
-        UUID existingId = UUID.randomUUID();
-        List<String> genres = List.of("Drama", "Thriller");
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, genres);
-        Content existing = Content.builder().id(existingId).tmdbId("300").type(ContentType.SERIES).build();
-        ContentRefDTO responseDto = new ContentRefDTO(existingId, "300", ContentType.SERIES, null, null, null, null, null, null, null, null, genres);
-
-        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.of(existing));
-        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
-        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
-        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
-
-        ContentRefDTO result = contentService.getOrCreateReference(dto);
-
-        assertThat(result).isEqualTo(responseDto);
-        assertThat(existing.getGenres()).isEqualTo(genres);
-        verify(contentRepository).saveAndFlush(existing);
     }
 
     @Test
@@ -1269,88 +1378,32 @@ class ContentServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different ReleaseYear Value")
-    void shouldThrowConflictExceptionWhenExistingContentHasADifferentReleaseYearValue() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("301", ContentType.MOVIE, null, null, null, null, null, null, null, 1999, null);
-        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("301").type(ContentType.MOVIE).releaseYear(2005).build();
+    @DisplayName("[getOrCreateReference] Should Normalize Genres And Countries Derived From TMDB - When Not Already Sorted")
+    void shouldNormalizeGenresAndCountriesDerivedFromTmdbWhenNotAlreadySorted() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null);
+        TmdbTvFullDetails details = new TmdbTvFullDetails(
+                "300", null, null, null, null, null, null, null,
+                List.of(new TmdbGenre(1, "Thriller"), new TmdbGenre(2, "Drama")),
+                List.of(new TmdbProductionCountry("gb", "United Kingdom"), new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null, null, null, null);
+        Content mapped = Content.builder().tmdbId("300").type(ContentType.SERIES).build();
+        Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).build();
+        ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null,
+                null, List.of("Drama", "Thriller"));
 
-        when(contentRepository.findByTmdbIdAndType("301", ContentType.MOVIE)).thenReturn(Optional.of(existing));
-
-        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("This content is already registered with a different releaseYear value");
-
-        verify(contentMapper, never()).contentToContentRefDto(any());
-    }
-
-    @Test
-    @DisplayName("[getOrCreateReference] Should Backfill ReleaseYear On The Existing Content - When It Was Never Set Before")
-    void shouldBackfillReleaseYearOnTheExistingContentWhenItWasNeverSetBefore() {
-        UUID existingId = UUID.randomUUID();
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("301", ContentType.MOVIE, null, null, null, null, null, null, null, 1999, null);
-        Content existing = Content.builder().id(existingId).tmdbId("301").type(ContentType.MOVIE).build();
-        ContentRefDTO responseDto = new ContentRefDTO(existingId, "301", ContentType.MOVIE, null, null, null, null, null, null, null, null, null, 1999, null);
-
-        when(contentRepository.findByTmdbIdAndType("301", ContentType.MOVIE)).thenReturn(Optional.of(existing));
-        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
-        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
-        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
+        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("300", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
+        when(contentMapper.contentRefCreationDtoToContent(any(ContentRefCreationDTO.class))).thenReturn(mapped);
+        when(contentRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(contentMapper.contentToContentRefDto(saved)).thenReturn(responseDto);
 
         ContentRefDTO result = contentService.getOrCreateReference(dto);
 
         assertThat(result).isEqualTo(responseDto);
-        assertThat(existing.getReleaseYear()).isEqualTo(1999);
-        verify(contentRepository).saveAndFlush(existing);
-    }
-
-    @Test
-    @DisplayName("[getOrCreateReference] Should Throw ConflictException - When Existing Content Has A Different Countries Value")
-    void shouldThrowConflictExceptionWhenExistingContentHasADifferentCountriesValue() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("302", ContentType.SERIES, null, null, null, null, null, null, null, null, List.of("US"));
-        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("302").type(ContentType.SERIES).countries(List.of("GB")).build();
-
-        when(contentRepository.findByTmdbIdAndType("302", ContentType.SERIES)).thenReturn(Optional.of(existing));
-
-        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("This content is already registered with a different countries value");
-
-        verify(contentMapper, never()).contentToContentRefDto(any());
-    }
-
-    @Test
-    @DisplayName("[getOrCreateReference] Should Backfill Countries On The Existing Content - When It Was Never Set Before")
-    void shouldBackfillCountriesOnTheExistingContentWhenItWasNeverSetBefore() {
-        UUID existingId = UUID.randomUUID();
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("302", ContentType.SERIES, null, null, null, null, null, null, null, null, List.of("US"));
-        Content existing = Content.builder().id(existingId).tmdbId("302").type(ContentType.SERIES).build();
-        ContentRefDTO responseDto = new ContentRefDTO(existingId, "302", ContentType.SERIES, null, null, null, null, null, null, null, null, null, null, List.of("US"));
-
-        when(contentRepository.findByTmdbIdAndType("302", ContentType.SERIES)).thenReturn(Optional.of(existing));
-        when(contentRepository.findById(existingId)).thenReturn(Optional.of(existing));
-        when(contentRepository.saveAndFlush(existing)).thenReturn(existing);
-        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
-
-        ContentRefDTO result = contentService.getOrCreateReference(dto);
-
-        assertThat(result).isEqualTo(responseDto);
-        assertThat(existing.getCountries()).isEqualTo(List.of("US"));
-        verify(contentRepository).saveAndFlush(existing);
-    }
-
-    @Test
-    @DisplayName("[getOrCreateReference] Should Not Throw Conflict - When Genres Are Resent In A Different Order")
-    void shouldNotThrowConflictWhenGenresAreResentInADifferentOrder() {
-        ContentRefCreationDTO dto = new ContentRefCreationDTO("300", ContentType.SERIES, null, null, null, null, null, null, List.of("Thriller", "Drama"));
-        Content existing = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).genres(List.of("Drama", "Thriller")).build();
-        ContentRefDTO responseDto = new ContentRefDTO(existing.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null, null, List.of("Drama", "Thriller"));
-
-        when(contentRepository.findByTmdbIdAndType("300", ContentType.SERIES)).thenReturn(Optional.of(existing));
-        when(contentMapper.contentToContentRefDto(existing)).thenReturn(responseDto);
-
-        ContentRefDTO result = contentService.getOrCreateReference(dto);
-
-        assertThat(result).isEqualTo(responseDto);
+        ArgumentCaptor<ContentRefCreationDTO> captor = ArgumentCaptor.forClass(ContentRefCreationDTO.class);
+        verify(contentMapper).contentRefCreationDtoToContent(captor.capture());
+        assertThat(captor.getValue().genres()).containsExactly("Drama", "Thriller");
+        assertThat(captor.getValue().countries()).containsExactly("GB", "US");
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {

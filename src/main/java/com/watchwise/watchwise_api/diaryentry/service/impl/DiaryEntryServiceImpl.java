@@ -8,8 +8,6 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
-import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
-import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
@@ -300,8 +298,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (content.type() == ContentType.SEASON) {
             seriesTmdbId = content.seriesTmdbId();
             bulkLogSeason(userId, content.seriesTmdbId(), content.seasonNumber(), content.isSeriesFinale(),
-                    dto.finaleEpisodeNumber(), dto.watchedDate(), created, ContentType.SEASON, companionIds, language,
-                    dto.episodeRuntimeMinutes());
+                    dto.finaleEpisodeNumber(), dto.watchedDate(), created, ContentType.SEASON, companionIds, language);
         } else {
             seriesTmdbId = content.tmdbId();
             bulkLogSeries(userId, content.tmdbId(), dto.finaleSeasonNumber(), dto.seasonFinaleEpisodeNumbers(),
@@ -543,7 +540,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private void bulkLogSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, Boolean isSeriesFinale,
             Integer explicitFinaleEpisodeNumber, LocalDate watchedDate, List<DiaryEntry> created, ContentType requestedType,
-            List<UUID> companionIds, String language, Map<Integer, Integer> episodeRuntimeMinutes) {
+            List<UUID> companionIds, String language) {
         TmdbSeasonFullDetails seasonDetails = fetchSeasonDetails(seriesTmdbId, seasonNumber, language);
         int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, explicitFinaleEpisodeNumber, seasonDetails);
         if (finaleEpisodeNumber > MAX_BULK_EPISODES && finaleEpisodeNumber > realSeasonEpisodeCount(seasonDetails)) {
@@ -552,11 +549,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
         assertWatchedDateNotBeforeRelease(watchedDate, episodeAirDate(seasonDetails, finaleEpisodeNumber));
 
+        Map<Integer, Integer> episodeRuntimeMinutes = episodeRuntimeMinutesFromTmdb(seasonDetails);
         for (int episodeNumber = 1; episodeNumber <= finaleEpisodeNumber; episodeNumber++) {
-            Integer runtimeMinutes = episodeRuntimeMinutes == null ? null : episodeRuntimeMinutes.get(episodeNumber);
             created.add(bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
                     episodeNumber == finaleEpisodeNumber, isSeriesFinale, watchedDate, created, requestedType, companionIds,
-                    runtimeMinutes, false));
+                    episodeRuntimeMinutes.get(episodeNumber), true));
         }
     }
 
@@ -679,7 +676,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber,
             Map<Integer, Integer> seasonFinaleEpisodeNumbers, LocalDate watchedDate, List<DiaryEntry> created,
             List<UUID> companionIds, String language) {
-        backfillSeriesMetadataIfNeeded(seriesTmdbId, language);
+        contentService.getOrCreateReference(new ContentRefCreationDTO(
+                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
 
         int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber, language);
 
@@ -715,58 +713,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         ContentType.SERIES, companionIds, episodeRuntimeMinutes.get(episodeNumber), true));
             }
         }
-    }
-
-    private void backfillSeriesMetadataIfNeeded(String seriesTmdbId, String language) {
-        Optional<Content> existing = contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES);
-        if (existing.isPresent() && hasMetadata(existing.get())) {
-            return;
-        }
-
-        Optional<TmdbTvFullDetails> seriesDetails = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional();
-        if (seriesDetails.isEmpty()) {
-            return;
-        }
-
-        List<String> genres = genreNames(seriesDetails.get().genres());
-        List<String> countries = countryCodes(seriesDetails.get().productionCountries());
-        Integer releaseYear = releaseYearOf(seriesDetails.get().firstAirDate());
-        if (genres.isEmpty() && countries.isEmpty() && releaseYear == null) {
-            return;
-        }
-
-        try {
-            contentService.getOrCreateReference(new ContentRefCreationDTO(
-                    seriesTmdbId, ContentType.SERIES, null, null, null, null, null, null,
-                    genres.isEmpty() ? null : genres, releaseYear, countries.isEmpty() ? null : countries));
-        } catch (ConflictException e) {
-            return;
-        }
-    }
-
-    private boolean hasMetadata(Content content) {
-        return content.getGenres() != null && !content.getGenres().isEmpty()
-                && content.getReleaseYear() != null
-                && content.getCountries() != null && !content.getCountries().isEmpty();
-    }
-
-    private List<String> genreNames(List<TmdbGenre> genres) {
-        if (genres == null) {
-            return List.of();
-        }
-        return genres.stream().map(TmdbGenre::name).toList();
-    }
-
-    private List<String> countryCodes(List<TmdbProductionCountry> countries) {
-        if (countries == null) {
-            return List.of();
-        }
-        return countries.stream().map(TmdbProductionCountry::isoCode).toList();
-    }
-
-    private Integer releaseYearOf(String firstAirDate) {
-        LocalDate date = parseTmdbDate(firstAirDate);
-        return date == null ? null : date.getYear();
     }
 
     private Integer explicitFinaleEpisodeNumberFor(Map<Integer, Integer> seasonFinaleEpisodeNumbers, int seasonNumber) {

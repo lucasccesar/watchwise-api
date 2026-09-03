@@ -5,7 +5,12 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -19,7 +24,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -44,25 +51,26 @@ public class ContentServiceImpl implements ContentService {
     @Override
     public ContentRefDTO getOrCreateReference(ContentRefCreationDTO contentRefCreationDTO, boolean trustedRuntimeMinutes) {
         ContentRefCreationDTO normalized = normalize(contentRefCreationDTO);
-        validate(normalized);
+        validate(normalized, trustedRuntimeMinutes);
 
         Optional<Content> existing = findExisting(normalized);
         if (existing.isPresent()) {
-            return contentMapper.contentToContentRefDto(reconcileExisting(existing.get(), normalized, trustedRuntimeMinutes));
+            ContentRefCreationDTO enriched = backfillMissingTmdbMetadata(normalized, existing.get());
+            return contentMapper.contentToContentRefDto(reconcileExisting(existing.get(), enriched, trustedRuntimeMinutes));
         }
 
-        assertExistsOnTmdb(normalized);
+        ContentRefCreationDTO enriched = resolveNewContentMetadata(normalized, trustedRuntimeMinutes);
 
         try {
             Content saved = newTransactionExecutor.runInNewTransaction(() -> {
-                if (normalized.type() == ContentType.SEASON && Boolean.TRUE.equals(normalized.isSeriesFinale())) {
-                    clearPreviousSeriesFinale(normalized.seriesTmdbId(), normalized.seasonNumber());
+                if (enriched.type() == ContentType.SEASON && Boolean.TRUE.equals(enriched.isSeriesFinale())) {
+                    clearPreviousSeriesFinale(enriched.seriesTmdbId(), enriched.seasonNumber());
                 }
-                if (normalized.type() == ContentType.EPISODE && Boolean.TRUE.equals(normalized.isSeasonFinale())) {
-                    clearPreviousSeasonFinale(normalized.seriesTmdbId(), normalized.seasonNumber(), normalized.episodeNumber());
+                if (enriched.type() == ContentType.EPISODE && Boolean.TRUE.equals(enriched.isSeasonFinale())) {
+                    clearPreviousSeasonFinale(enriched.seriesTmdbId(), enriched.seasonNumber(), enriched.episodeNumber());
                 }
 
-                Content content = contentMapper.contentRefCreationDtoToContent(normalized);
+                Content content = contentMapper.contentRefCreationDtoToContent(enriched);
                 LocalDateTime now = LocalDateTime.now();
                 content.setCreatedAt(now);
                 content.setUpdatedAt(now);
@@ -70,7 +78,7 @@ public class ContentServiceImpl implements ContentService {
             });
             return contentMapper.contentToContentRefDto(saved);
         } catch (DataIntegrityViolationException e) {
-            return contentMapper.contentToContentRefDto(resolveConcurrentCreation(normalized, e, trustedRuntimeMinutes));
+            return contentMapper.contentToContentRefDto(resolveConcurrentCreation(enriched, e, trustedRuntimeMinutes));
         }
     }
 
@@ -242,19 +250,110 @@ public class ContentServiceImpl implements ContentService {
         return null;
     }
 
-    private void assertExistsOnTmdb(ContentRefCreationDTO dto) {
-        TmdbLookupResult<?> result = switch (dto.type()) {
-            case MOVIE -> tmdbClient.getMovieFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE);
-            case SERIES -> tmdbClient.getTvFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE);
-            case SEASON, EPISODE -> tmdbClient.getTvFullDetails(dto.seriesTmdbId(), EXISTENCE_CHECK_LANGUAGE);
+    private ContentRefCreationDTO resolveNewContentMetadata(ContentRefCreationDTO dto, boolean trustedRuntimeMinutes) {
+        return switch (dto.type()) {
+            case MOVIE -> withMovieMetadata(dto,
+                    requireFound(tmdbClient.getMovieFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE), "movie"));
+            case SERIES -> withSeriesMetadata(dto,
+                    requireFound(tmdbClient.getTvFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE), "series"));
+            case SEASON -> {
+                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), EXISTENCE_CHECK_LANGUAGE), "series");
+                yield dto;
+            }
+            case EPISODE -> {
+                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), EXISTENCE_CHECK_LANGUAGE), "series");
+                if (trustedRuntimeMinutes) {
+                    yield dto;
+                }
+                TmdbEpisodeFullDetails episode = requireFound(tmdbClient.getEpisodeFullDetails(
+                        dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), EXISTENCE_CHECK_LANGUAGE), "episode");
+                yield withEpisodeRuntime(dto, episode.runtime());
+            }
         };
+    }
+
+    private ContentRefCreationDTO backfillMissingTmdbMetadata(ContentRefCreationDTO dto, Content existing) {
+        return switch (dto.type()) {
+            case MOVIE -> hasMovieOrSeriesMetadata(existing) && existing.getRuntimeMinutes() != null
+                    ? dto
+                    : tmdbClient.getMovieFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE).toOptional()
+                            .map(details -> withMovieMetadata(dto, details)).orElse(dto);
+            case SERIES -> hasMovieOrSeriesMetadata(existing)
+                    ? dto
+                    : tmdbClient.getTvFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE).toOptional()
+                            .map(details -> withSeriesMetadata(dto, details)).orElse(dto);
+            case EPISODE -> existing.getRuntimeMinutes() != null
+                    ? dto
+                    : tmdbClient.getEpisodeFullDetails(dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), EXISTENCE_CHECK_LANGUAGE)
+                            .toOptional().map(details -> withEpisodeRuntime(dto, details.runtime())).orElse(dto);
+            case SEASON -> dto;
+        };
+    }
+
+    private boolean hasMovieOrSeriesMetadata(Content content) {
+        return content.getGenres() != null && !content.getGenres().isEmpty()
+                && content.getReleaseYear() != null
+                && content.getCountries() != null && !content.getCountries().isEmpty();
+    }
+
+    private ContentRefCreationDTO withMovieMetadata(ContentRefCreationDTO dto, TmdbMovieFullDetails details) {
+        return new ContentRefCreationDTO(
+                dto.tmdbId(), dto.type(), dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(),
+                dto.isSeasonFinale(), dto.isSeriesFinale(), details.runtime(),
+                normalizeGenres(genreNames(details.genres())), releaseYearFromDate(details.releaseDate()),
+                normalizeCountries(countryCodes(details.productionCountries())));
+    }
+
+    private ContentRefCreationDTO withSeriesMetadata(ContentRefCreationDTO dto, TmdbTvFullDetails details) {
+        return new ContentRefCreationDTO(
+                dto.tmdbId(), dto.type(), dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(),
+                dto.isSeasonFinale(), dto.isSeriesFinale(), dto.runtimeMinutes(),
+                normalizeGenres(genreNames(details.genres())), releaseYearFromDate(details.firstAirDate()),
+                normalizeCountries(countryCodes(details.productionCountries())));
+    }
+
+    private ContentRefCreationDTO withEpisodeRuntime(ContentRefCreationDTO dto, Integer runtimeMinutes) {
+        if (runtimeMinutes == null) {
+            return dto;
+        }
+        return new ContentRefCreationDTO(
+                dto.tmdbId(), dto.type(), dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(),
+                dto.isSeasonFinale(), dto.isSeriesFinale(), runtimeMinutes, dto.genres(), dto.releaseYear(), dto.countries());
+    }
+
+    private List<String> genreNames(List<TmdbGenre> genres) {
+        if (genres == null || genres.isEmpty()) {
+            return null;
+        }
+        return genres.stream().map(TmdbGenre::name).toList();
+    }
+
+    private List<String> countryCodes(List<TmdbProductionCountry> countries) {
+        if (countries == null || countries.isEmpty()) {
+            return null;
+        }
+        return countries.stream().map(TmdbProductionCountry::isoCode).toList();
+    }
+
+    private Integer releaseYearFromDate(String date) {
+        if (date == null || date.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(date).getYear();
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    private <T> T requireFound(TmdbLookupResult<T> result, String subject) {
         if (result.isNotFound()) {
-            String subject = dto.type() == ContentType.SEASON || dto.type() == ContentType.EPISODE ? "series" : dto.type().name().toLowerCase();
             throw new NotFoundException("No " + subject + " found on TMDB for the given id");
         }
         if (result.isUnavailable()) {
             throw new TmdbUnavailableException("TMDB is currently unavailable");
         }
+        return result.toOptional().orElseThrow();
     }
 
     private Optional<Content> findExisting(ContentRefCreationDTO dto) {
@@ -265,7 +364,7 @@ public class ContentServiceImpl implements ContentService {
                 dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), dto.type());
     }
 
-    private void validate(ContentRefCreationDTO dto) {
+    private void validate(ContentRefCreationDTO dto, boolean trustedRuntimeMinutes) {
         if (dto.type() == null) {
             throw new BadRequestException("Type must be provided");
         }
@@ -281,8 +380,17 @@ public class ContentServiceImpl implements ContentService {
                 if (dto.isSeasonFinale() != null || dto.isSeriesFinale() != null) {
                     throw new BadRequestException("isSeasonFinale and isSeriesFinale must not be provided when type is MOVIE or SERIES");
                 }
-                if (dto.runtimeMinutes() != null && dto.type() != ContentType.MOVIE) {
-                    throw new BadRequestException("runtimeMinutes must not be provided when type is SERIES");
+                if (dto.runtimeMinutes() != null) {
+                    throw new BadRequestException("runtimeMinutes must not be provided when type is MOVIE or SERIES, it is derived from TMDB");
+                }
+                if (dto.genres() != null) {
+                    throw new BadRequestException("genres must not be provided when type is MOVIE or SERIES, it is derived from TMDB");
+                }
+                if (dto.releaseYear() != null) {
+                    throw new BadRequestException("releaseYear must not be provided when type is MOVIE or SERIES, it is derived from TMDB");
+                }
+                if (dto.countries() != null) {
+                    throw new BadRequestException("countries must not be provided when type is MOVIE or SERIES, it is derived from TMDB");
                 }
             }
             case SEASON -> {
@@ -323,6 +431,9 @@ public class ContentServiceImpl implements ContentService {
                 }
                 if (dto.countries() != null) {
                     throw new BadRequestException("countries must not be provided when type is EPISODE");
+                }
+                if (!trustedRuntimeMinutes && dto.runtimeMinutes() != null) {
+                    throw new BadRequestException("runtimeMinutes must not be provided when type is EPISODE, it is derived from TMDB");
                 }
             }
         }
