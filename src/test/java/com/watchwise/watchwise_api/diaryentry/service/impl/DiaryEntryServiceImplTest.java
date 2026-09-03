@@ -2054,17 +2054,100 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When The Season Exceeds The Bulk Episode Limit")
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When The Season Exceeds The Bulk Episode Limit And TMDB Cannot Verify It")
     void shouldThrowBadRequestExceptionWhenTheSeasonExceedsTheBulkEpisodeLimit() {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 101, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seasonRef, LocalDate.now(), DiaryEntryServiceImpl.MAX_BULK_EPISODES + 1, null, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("exceeding the bulk log limit");
+                .hasMessageContaining("exceeding the bulk log limit")
+                .hasMessageContaining("could not be verified against TMDB");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Allow The Season To Exceed The Bulk Episode Limit - When TMDB Confirms The Real Episode Count")
+    void shouldAllowTheSeasonToExceedTheBulkEpisodeLimitWhenTmdbConfirmsTheRealEpisodeCount() {
+        int totalEpisodes = DiaryEntryServiceImpl.MAX_BULK_EPISODES + 1;
+        List<TmdbEpisodeSummary> episodes = new ArrayList<>();
+        for (int episodeNumber = 1; episodeNumber <= totalEpisodes; episodeNumber++) {
+            episodes.add(new TmdbEpisodeSummary(episodeNumber, null, null, "2020-01-01", 45, null, null));
+        }
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(new TmdbSeasonFullDetails(null, null, null, null, null, null, episodes, null, null)));
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO refDto = inv.getArgument(0);
+                    return new ContentRefDTO(UUID.randomUUID(), null, ContentType.EPISODE, "900", 1,
+                            refDto.episodeNumber(), null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(inv -> buildEpisode("900", 1, null));
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(inv -> buildResponseDto(inv.getArgument(0)));
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), totalEpisodes, null, null);
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(totalEpisodes);
+        verify(contentService, times(totalEpisodes)).getOrCreateReference(any(ContentRefCreationDTO.class), eq(false));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When The Series Exceeds The Bulk Episode Limit And TMDB Cannot Verify It")
+    void shouldThrowBadRequestExceptionWhenTheSeriesExceedsTheBulkEpisodeLimit() {
+        int totalEpisodes = DiaryEntryServiceImpl.MAX_BULK_EPISODES + 1;
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seriesRef, LocalDate.now(), null, 1, Map.of(1, totalEpisodes));
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("exceeding the bulk log limit")
+                .hasMessageContaining("could not be verified against TMDB");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Allow The Series To Exceed The Bulk Episode Limit - When TMDB Confirms The Real Episode Count")
+    void shouldAllowTheSeriesToExceedTheBulkEpisodeLimitWhenTmdbConfirmsTheRealEpisodeCount() {
+        int totalEpisodes = DiaryEntryServiceImpl.MAX_BULK_EPISODES + 1;
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+                new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(), null, null, null, null, null, totalEpisodes, null, null)));
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenAnswer(inv -> {
+                    ContentRefCreationDTO refDto = inv.getArgument(0);
+                    return new ContentRefDTO(UUID.randomUUID(), null, ContentType.EPISODE, "900", 1,
+                            refDto.episodeNumber(), null, null, LocalDateTime.now(), LocalDateTime.now());
+                });
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(inv -> buildEpisode("900", 1, null));
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(inv -> buildResponseDto(inv.getArgument(0)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seriesRef, LocalDate.now(), null, 1, Map.of(1, totalEpisodes));
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(totalEpisodes);
+        verify(contentService, times(totalEpisodes)).getOrCreateReference(any(ContentRefCreationDTO.class), eq(true));
     }
 
     @Test

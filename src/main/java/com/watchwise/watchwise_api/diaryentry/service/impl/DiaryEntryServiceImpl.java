@@ -536,15 +536,16 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .toList();
     }
 
-    static final int MAX_BULK_EPISODES = 100;
+    static final int MAX_BULK_EPISODES = 2000;
 
     private void bulkLogSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, Boolean isSeriesFinale,
             Integer explicitFinaleEpisodeNumber, LocalDate watchedDate, List<DiaryEntry> created, ContentType requestedType,
             List<UUID> companionIds, String language, Map<Integer, Integer> episodeRuntimeMinutes) {
         TmdbSeasonFullDetails seasonDetails = fetchSeasonDetails(seriesTmdbId, seasonNumber, language);
         int finaleEpisodeNumber = resolveSeasonFinaleEpisodeNumber(seriesTmdbId, seasonNumber, explicitFinaleEpisodeNumber, seasonDetails);
-        if (finaleEpisodeNumber > MAX_BULK_EPISODES) {
-            throw new BadRequestException("Season has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
+        if (finaleEpisodeNumber > MAX_BULK_EPISODES && finaleEpisodeNumber > realSeasonEpisodeCount(seasonDetails)) {
+            throw new BadRequestException("Season has more than " + MAX_BULK_EPISODES
+                    + " episodes, exceeding the bulk log limit, and the requested episode count could not be verified against TMDB");
         }
         assertWatchedDateNotBeforeRelease(watchedDate, episodeAirDate(seasonDetails, finaleEpisodeNumber));
 
@@ -580,6 +581,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private int realSeasonEpisodeCount(TmdbSeasonFullDetails season) {
+        return season.episodes() == null ? 0 : season.episodes().size();
     }
 
     private int airedEpisodeCount(TmdbSeasonFullDetails season) {
@@ -675,7 +680,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                     explicitFinaleEpisodeNumberFor(seasonFinaleEpisodeNumbers, seasonNumber), seasonDetails);
         }
         if (totalEpisodes > MAX_BULK_EPISODES) {
-            throw new BadRequestException("Series has more than " + MAX_BULK_EPISODES + " episodes, exceeding the bulk log limit");
+            TmdbTvFullDetails series = tmdbClient.getTvFullDetails(seriesTmdbId, language).orElseThrow(this::tmdbUnavailable);
+            Integer realEpisodeCount = series.numberOfEpisodes();
+            if (realEpisodeCount == null || totalEpisodes > realEpisodeCount) {
+                throw new BadRequestException("Series has more than " + MAX_BULK_EPISODES
+                        + " episodes, exceeding the bulk log limit, and the requested episode count could not be verified against TMDB");
+            }
         }
 
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
