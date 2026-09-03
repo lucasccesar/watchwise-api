@@ -25,7 +25,7 @@ public interface UserMapper {
     User postUserDtoToUser(PostUserDTO postUserDTO);
 
     UserResponseDTO userToUserResponseDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsEpisodes,
+            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsSeries,
             long followersCount, long followingCount);
 
     UserPreviewDTO userToUserPreviewDto(User user);
@@ -33,7 +33,7 @@ public interface UserMapper {
     PublicUserDTO userToPublicUserDto(User user);
 
     PublicUserProfileDTO userToPublicUserProfileDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsEpisodes,
+            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsSeries,
             long followersCount, long followingCount);
 
     @AfterMapping

@@ -19,7 +19,7 @@ public record UserResponseDTO(
         long minutesWatchedLast30Days,
         long totalTheaterVisits,
         List<GenreCountDTO> genreCountsMovies,
-        List<GenreCountDTO> genreCountsEpisodes,
+        List<GenreCountDTO> genreCountsSeries,
         String banner,
         long followersCount,
         long followingCount,
