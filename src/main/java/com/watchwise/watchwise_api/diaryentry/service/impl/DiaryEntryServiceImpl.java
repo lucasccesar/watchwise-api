@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
@@ -174,7 +175,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     public DiaryEntryCreationResultDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO) {
         assertWatchedDateNotInFuture(diaryEntryCreationDTO.watchedDate());
         List<UUID> companionIds = validateCompanions(userId, diaryEntryCreationDTO.watchedWith());
-        ContentRefDTO contentRef = contentService.getOrCreateReference(diaryEntryCreationDTO.content());
+        ContentRefDTO contentRef = contentService.getOrCreateReference(resolveContentRefForCreation(userId, diaryEntryCreationDTO));
 
         User user = userRepository.getReferenceById(userId);
         Content content = contentRepository.getReferenceById(contentRef.id());
@@ -328,6 +329,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
         if (diaryEntryUpdateDTO.watchedDate() != null) {
             assertWatchedDateNotInFuture(diaryEntryUpdateDTO.watchedDate());
+            Content updatedContent = entry.getContent();
+            assertWatchedDateNotBeforeRelease(diaryEntryUpdateDTO.watchedDate(),
+                    resolveReleaseDate(updatedContent.getType(), updatedContent.getTmdbId(), updatedContent.getSeriesTmdbId(),
+                            updatedContent.getSeasonNumber(), updatedContent.getEpisodeNumber(), entry.getUser().getPreferredLanguage()));
             entry.setWatchedDate(diaryEntryUpdateDTO.watchedDate());
         }
         if (diaryEntryUpdateDTO.watchedInTheater() != null) {
@@ -370,6 +375,73 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (watchedDate != null && releaseDate != null && watchedDate.isBefore(releaseDate)) {
             throw new BadRequestException("watchedDate cannot predate the content's release date (" + releaseDate + ")");
         }
+    }
+
+    private LocalDate resolveReleaseDate(ContentType type, String tmdbId, String seriesTmdbId, Integer seasonNumber,
+            Integer episodeNumber, String language) {
+        return switch (type) {
+            case MOVIE -> tmdbClient.getMovieFullDetails(tmdbId, language).toOptional()
+                    .map(TmdbMovieFullDetails::releaseDate).map(this::parseTmdbDate).orElse(null);
+            case EPISODE -> tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language).toOptional()
+                    .map(season -> episodeAirDate(season, episodeNumber)).orElse(null);
+            case SEASON, SERIES -> null;
+        };
+    }
+
+    private ContentRefCreationDTO resolveContentRefForCreation(UUID userId, DiaryEntryCreationDTO dto) {
+        ContentRefCreationDTO content = dto.content();
+        if (content.type() != ContentType.EPISODE && content.type() != ContentType.MOVIE) {
+            return content;
+        }
+
+        String language = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"))
+                .getPreferredLanguage();
+
+        if (content.type() == ContentType.EPISODE) {
+            return withDerivedEpisodeFinaleFlags(content, dto.watchedDate(), language);
+        }
+
+        if (content.tmdbId() == null || content.tmdbId().isBlank()) {
+            return content;
+        }
+        assertWatchedDateNotBeforeRelease(dto.watchedDate(),
+                resolveReleaseDate(ContentType.MOVIE, content.tmdbId(), null, null, null, language));
+        return content;
+    }
+
+    private ContentRefCreationDTO withDerivedEpisodeFinaleFlags(ContentRefCreationDTO dto, LocalDate watchedDate, String language) {
+        if (dto.seriesTmdbId() == null || dto.seriesTmdbId().isBlank() || dto.seasonNumber() == null || dto.episodeNumber() == null) {
+            return dto;
+        }
+
+        Optional<TmdbSeasonFullDetails> seasonDetails = tmdbClient
+                .getSeasonFullDetails(dto.seriesTmdbId(), dto.seasonNumber(), language).toOptional();
+        if (seasonDetails.isEmpty()) {
+            return dto;
+        }
+
+        assertWatchedDateNotBeforeRelease(watchedDate, episodeAirDate(seasonDetails.get(), dto.episodeNumber()));
+
+        int airedEpisodeCount = airedEpisodeCount(seasonDetails.get());
+        if (airedEpisodeCount == 0) {
+            return dto;
+        }
+
+        boolean isSeasonFinale = dto.episodeNumber() == airedEpisodeCount;
+        Boolean seasonFinaleFlag = isSeasonFinale ? Boolean.TRUE : null;
+        Boolean seriesFinaleFlag = isSeasonFinale ? deriveSeriesFinaleFlag(dto.seriesTmdbId(), dto.seasonNumber(), language) : null;
+
+        return new ContentRefCreationDTO(dto.tmdbId(), dto.type(), dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(),
+                seasonFinaleFlag, seriesFinaleFlag, dto.runtimeMinutes(), dto.genres(), dto.releaseYear(), dto.countries());
+    }
+
+    private Boolean deriveSeriesFinaleFlag(String seriesTmdbId, Integer seasonNumber, String language) {
+        return tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional()
+                .map(series -> latestAiredSeasonNumber(series.seasons()))
+                .filter(latest -> latest >= 1 && seasonNumber != null && seasonNumber == latest)
+                .map(latest -> Boolean.TRUE)
+                .orElse(null);
     }
 
     private List<UUID> validateCompanions(UUID ownerId, List<UUID> companionIds) {

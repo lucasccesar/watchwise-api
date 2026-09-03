@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
@@ -192,6 +193,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new TmdbLookupResult.Found<>(emptySeasonDetails()));
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(emptySeriesDetails()));
+        lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(emptyMovieDetails()));
     }
 
     private TmdbSeasonFullDetails emptySeasonDetails() {
@@ -201,6 +204,11 @@ class DiaryEntryServiceImplTest {
     private TmdbTvFullDetails emptySeriesDetails() {
         return new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
                 List.of(), null, null, null, null, null, null, null, null);
+    }
+
+    private TmdbMovieFullDetails emptyMovieDetails() {
+        return new TmdbMovieFullDetails(null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null);
     }
 
     private TmdbSeasonFullDetails seasonDetailsWithRuntimes(Map<Integer, Integer> runtimeByEpisode) {
@@ -756,6 +764,149 @@ class DiaryEntryServiceImplTest {
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
         assertThat(contentRefCreationCaptor.getValue())
                 .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Derive IsSeasonFinale True - When Episode Number Matches The Season's Latest Aired Episode From TMDB")
+    void shouldDeriveIsSeasonFinaleTrueWhenEpisodeNumberMatchesTheSeasonsLatestAiredEpisodeFromTmdb() {
+        Content episode = buildEpisode("1399", 1, 2);
+        stubContentResolution(episode);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        DiaryEntry savedEntry = buildEntry(lucas, episode);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
+        when(tmdbClient.getSeasonFullDetails(eq("1399"), eq(1), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null,
+                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", null, null, null),
+                                new TmdbEpisodeSummary(2, null, null, "2020-01-08", null, null, null)),
+                        null, null)));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Override IsSeasonFinale To Null - When Episode Number Is Before The Season's Latest Aired Episode From TMDB")
+    void shouldOverrideIsSeasonFinaleToNullWhenEpisodeNumberIsBeforeTheSeasonsLatestAiredEpisodeFromTmdb() {
+        Content episode = buildEpisode("1399", 1, 1);
+        stubContentResolution(episode);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        DiaryEntry savedEntry = buildEntry(lucas, episode);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
+        when(tmdbClient.getSeasonFullDetails(eq("1399"), eq(1), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null,
+                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", null, null, null),
+                                new TmdbEpisodeSummary(2, null, null, "2020-01-08", null, null, null)),
+                        null, null)));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, true, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isNull();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Derive IsSeriesFinale True - When The Season Is Also The Series' Latest Aired Season From TMDB")
+    void shouldDeriveIsSeriesFinaleTrueWhenTheSeasonIsAlsoTheSeriesLatestAiredSeasonFromTmdb() {
+        Content episode = buildEpisode("1399", 4, 3);
+        stubContentResolution(episode);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        DiaryEntry savedEntry = buildEntry(lucas, episode);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
+        when(tmdbClient.getSeasonFullDetails(eq("1399"), eq(4), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null,
+                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", null, null, null),
+                                new TmdbEpisodeSummary(2, null, null, "2020-01-08", null, null, null),
+                                new TmdbEpisodeSummary(3, null, null, "2020-01-15", null, null, null)),
+                        null, null)));
+        when(tmdbClient.getTvFullDetails(eq("1399"), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(new TmdbSeasonSummary(3, null, null, "2019-01-01", 10, null),
+                                new TmdbSeasonSummary(4, null, null, "2020-01-01", 3, null)),
+                        null, null, null, null, null, null, null, null)));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 4, 3, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isTrue();
+        assertThat(contentRefCreationCaptor.getValue().isSeriesFinale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Fall Back To Client-Supplied IsSeasonFinale - When TMDB Has No Aired Episodes For The Season")
+    void shouldFallBackToClientSuppliedIsSeasonFinaleWhenTmdbHasNoAiredEpisodesForTheSeason() {
+        Content episode = buildEpisode("1399", 1, 5);
+        stubContentResolution(episode);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        DiaryEntry savedEntry = buildEntry(lucas, episode);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 5, true, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Throw BadRequestException - When WatchedDate Is Before The Episode's Air Date From TMDB")
+    void shouldThrowBadRequestExceptionWhenWatchedDateIsBeforeTheEpisodesAirDateFromTmdb() {
+        when(tmdbClient.getSeasonFullDetails(eq("1399"), eq(1), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null,
+                        List.of(new TmdbEpisodeSummary(2, null, null, "2030-01-01", null, null, null)),
+                        null, null)));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, null, null),
+                null, null, LocalDate.of(2024, 5, 1), null, null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("watchedDate cannot predate the content's release date");
+
+        verifyNoInteractions(contentService);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Throw BadRequestException - When WatchedDate Is Before The Movie's Release Date From TMDB")
+    void shouldThrowBadRequestExceptionWhenWatchedDateIsBeforeTheMoviesReleaseDateFromTmdb() {
+        when(tmdbClient.getMovieFullDetails(eq(fightClub.getTmdbId()), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbMovieFullDetails(null, null, null, null, null, null, "2030-01-01", null, null, null,
+                        null, null, null, null, null, null, null)));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
+                null, null, LocalDate.of(2024, 5, 1), null, null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("watchedDate cannot predate the content's release date");
+
+        verifyNoInteractions(contentService);
     }
 
     @Test
@@ -3136,6 +3287,23 @@ class DiaryEntryServiceImplTest {
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getWatchedDate()).isEqualTo(newDate);
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Throw BadRequestException - When Updated WatchedDate Is Before The Content's Release Date From TMDB")
+    void shouldThrowBadRequestExceptionWhenUpdatedWatchedDateIsBeforeTheContentsReleaseDateFromTmdb() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(tmdbClient.getMovieFullDetails(eq(fightClub.getTmdbId()), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbMovieFullDetails(null, null, null, null, null, null, "2030-01-01", null, null, null,
+                        null, null, null, null, null, null, null)));
+
+        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, entry.getId(),
+                new DiaryEntryUpdateDTO(null, null, LocalDate.of(2024, 3, 15), null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("watchedDate cannot predate the content's release date");
+
+        verify(diaryEntryRepository, never()).save(any());
     }
 
     @Test

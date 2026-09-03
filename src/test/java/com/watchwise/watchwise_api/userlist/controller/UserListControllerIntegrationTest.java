@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -123,6 +124,9 @@ class UserListControllerIntegrationTest {
         lenient().when(tmdbClient.getEpisodeFullDetails(any(), any(), any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                         null, null, null, null, null, null, null, null, null)));
+        lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
+                        null, null, null, null, null, null, List.of(), null, null)));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
