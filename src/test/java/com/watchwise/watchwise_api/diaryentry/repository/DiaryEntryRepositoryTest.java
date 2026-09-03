@@ -734,6 +734,23 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween] Should Not Double Count - When The Same Series Has Both A Direct SERIES Entry And Episode Entries In Range")
+    void shouldNotDoubleCountInDateRangeWhenTheSameSeriesHasBothADirectSeriesEntryAndEpisodeEntries() {
+        contentRepository.deleteAll();
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
+        LocalDate today = LocalDate.now();
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, episode), today));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, series), today));
+
+        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository
+                .countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(lucas.getId(), today.minusDays(1), today.plusDays(1));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getCount()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween] Should Not Count Again - When The Series Is Rewatched Inside The Same Window")
     void shouldNotCountAgainWhenTheSeriesIsRewatchedInsideTheSameWindow() {
         contentRepository.deleteAll();
