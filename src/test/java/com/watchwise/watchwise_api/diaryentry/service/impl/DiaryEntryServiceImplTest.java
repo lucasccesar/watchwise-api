@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
@@ -1980,8 +1982,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When Content Has Genres, ReleaseYear Or Countries")
-    void shouldThrowBadRequestExceptionWhenContentHasGenresReleaseYearOrCountries() {
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When A SEASON Bulk Request Has Genres, ReleaseYear Or Countries")
+    void shouldThrowBadRequestExceptionWhenSeasonBulkRequestHasGenresReleaseYearOrCountries() {
         ContentRefCreationDTO seasonRefWithGenres = new ContentRefCreationDTO(
                 null, ContentType.SEASON, "900", 1, null, null, null, null, List.of("Comedy"), null, null);
         DiaryEntryBulkCreationDTO dtoWithGenres = new DiaryEntryBulkCreationDTO(seasonRefWithGenres, LocalDate.now(), null, null, null);
@@ -1996,13 +1998,152 @@ class DiaryEntryServiceImplTest {
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dtoWithGenres))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("genres, releaseYear and countries must not be provided when bulk logging");
+                .hasMessage("genres, releaseYear and countries must not be provided when bulk logging a SEASON");
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dtoWithReleaseYear))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("genres, releaseYear and countries must not be provided when bulk logging");
+                .hasMessage("genres, releaseYear and countries must not be provided when bulk logging a SEASON");
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dtoWithCountries))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("genres, releaseYear and countries must not be provided when bulk logging");
+                .hasMessage("genres, releaseYear and countries must not be provided when bulk logging a SEASON");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Backfill SERIES Genres, ReleaseYear And Countries From TMDB - When Content Has No Metadata Yet")
+    void shouldBackfillSeriesGenresReleaseYearAndCountriesFromTmdbWhenContentHasNoMetadataYet() {
+        Content e1 = buildFinaleEpisode("900", 1, 1);
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+
+        when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(series));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+                new TmdbTvFullDetails(null, null, null, null, null, null, "2008-01-20", null,
+                        List.of(new TmdbGenre(80, "Crime"), new TmdbGenre(18, "Drama")),
+                        List.of(new TmdbProductionCountry("US", "United States")),
+                        null, List.of(), null, null, null, null, null, null, null, null)));
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenReturn(new ContentRefDTO(series.getId(), "900", ContentType.SERIES, null, null, null, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 1, Map.of(1, 1));
+
+        diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        ContentRefCreationDTO captured = contentRefCreationCaptor.getValue();
+        assertThat(captured.type()).isEqualTo(ContentType.SERIES);
+        assertThat(captured.tmdbId()).isEqualTo("900");
+        assertThat(captured.genres()).containsExactly("Crime", "Drama");
+        assertThat(captured.releaseYear()).isEqualTo(2008);
+        assertThat(captured.countries()).containsExactly("US");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Not Call TMDB For SERIES Metadata - When Content Already Has Genres, ReleaseYear And Countries")
+    void shouldNotCallTmdbForSeriesMetadataWhenContentAlreadyHasGenresReleaseYearAndCountries() {
+        Content e1 = buildFinaleEpisode("900", 1, 1);
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES)
+                .genres(List.of("Crime", "Drama")).releaseYear(2008).countries(List.of("US")).build();
+
+        when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(series));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 1, Map.of(1, 1));
+
+        diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        verify(tmdbClient, never()).getTvFullDetails(any(), any());
+        verify(contentService, never()).getOrCreateReference(any(ContentRefCreationDTO.class));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Complete The Bulk Log Normally - When SERIES Metadata Cannot Be Fetched From TMDB")
+    void shouldCompleteTheBulkLogNormallyWhenSeriesMetadataCannotBeFetchedFromTmdb() {
+        Content e1 = buildFinaleEpisode("900", 1, 1);
+
+        when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.empty());
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.empty());
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 1, Map.of(1, 1));
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(1);
+        verify(contentService, never()).getOrCreateReference(any(ContentRefCreationDTO.class));
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Complete The Bulk Log Normally - When SERIES Metadata Backfill Conflicts With An Already Registered Value")
+    void shouldCompleteTheBulkLogNormallyWhenSeriesMetadataBackfillConflictsWithAnAlreadyRegisteredValue() {
+        Content e1 = buildFinaleEpisode("900", 1, 1);
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+
+        when(contentRepository.findByTmdbIdAndType("900", ContentType.SERIES)).thenReturn(Optional.of(series));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(Optional.of(
+                new TmdbTvFullDetails(null, null, null, null, null, null, "2008-01-20", null,
+                        List.of(new TmdbGenre(80, "Crime")), null,
+                        null, List.of(), null, null, null, null, null, null, null, null)));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenThrow(new ConflictException("This content is already registered with a different genres value"));
+        when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage()))
+                .thenReturn(Optional.of(seasonDetailsWithRuntimes(Map.of(1, 47))));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenReturn(new ContentRefDTO(e1.getId(), e1.getTmdbId(), ContentType.EPISODE, "900", 1, 1, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+        when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 1, Map.of(1, 1));
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(1);
     }
 
     @Test

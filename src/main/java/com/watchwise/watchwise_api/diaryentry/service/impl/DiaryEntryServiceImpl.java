@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
@@ -283,8 +285,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (content.type() != ContentType.SEASON && content.type() != ContentType.SERIES) {
             throw new BadRequestException("Bulk logging only supports content of type SEASON or SERIES");
         }
-        if (content.genres() != null || content.releaseYear() != null || content.countries() != null) {
-            throw new BadRequestException("genres, releaseYear and countries must not be provided when bulk logging");
+        if (content.type() == ContentType.SEASON
+                && (content.genres() != null || content.releaseYear() != null || content.countries() != null)) {
+            throw new BadRequestException("genres, releaseYear and countries must not be provided when bulk logging a SEASON");
         }
         assertWatchedDateNotInFuture(dto.watchedDate());
         List<UUID> companionIds = validateCompanions(userId, dto.watchedWith());
@@ -669,6 +672,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber,
             Map<Integer, Integer> seasonFinaleEpisodeNumbers, LocalDate watchedDate, List<DiaryEntry> created,
             List<UUID> companionIds, String language) {
+        backfillSeriesMetadataIfNeeded(seriesTmdbId, language);
+
         int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber, language);
 
         Map<Integer, TmdbSeasonFullDetails> seasonDetailsByNumber = new LinkedHashMap<>();
@@ -703,6 +708,58 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         ContentType.SERIES, companionIds, episodeRuntimeMinutes.get(episodeNumber), true));
             }
         }
+    }
+
+    private void backfillSeriesMetadataIfNeeded(String seriesTmdbId, String language) {
+        Optional<Content> existing = contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES);
+        if (existing.isPresent() && hasMetadata(existing.get())) {
+            return;
+        }
+
+        Optional<TmdbTvFullDetails> seriesDetails = tmdbClient.getTvFullDetails(seriesTmdbId, language);
+        if (seriesDetails.isEmpty()) {
+            return;
+        }
+
+        List<String> genres = genreNames(seriesDetails.get().genres());
+        List<String> countries = countryCodes(seriesDetails.get().productionCountries());
+        Integer releaseYear = releaseYearOf(seriesDetails.get().firstAirDate());
+        if (genres.isEmpty() && countries.isEmpty() && releaseYear == null) {
+            return;
+        }
+
+        try {
+            contentService.getOrCreateReference(new ContentRefCreationDTO(
+                    seriesTmdbId, ContentType.SERIES, null, null, null, null, null, null,
+                    genres.isEmpty() ? null : genres, releaseYear, countries.isEmpty() ? null : countries));
+        } catch (ConflictException e) {
+            return;
+        }
+    }
+
+    private boolean hasMetadata(Content content) {
+        return content.getGenres() != null && !content.getGenres().isEmpty()
+                && content.getReleaseYear() != null
+                && content.getCountries() != null && !content.getCountries().isEmpty();
+    }
+
+    private List<String> genreNames(List<TmdbGenre> genres) {
+        if (genres == null) {
+            return List.of();
+        }
+        return genres.stream().map(TmdbGenre::name).toList();
+    }
+
+    private List<String> countryCodes(List<TmdbProductionCountry> countries) {
+        if (countries == null) {
+            return List.of();
+        }
+        return countries.stream().map(TmdbProductionCountry::isoCode).toList();
+    }
+
+    private Integer releaseYearOf(String firstAirDate) {
+        LocalDate date = parseTmdbDate(firstAirDate);
+        return date == null ? null : date.getYear();
     }
 
     private Integer explicitFinaleEpisodeNumberFor(Map<Integer, Integer> seasonFinaleEpisodeNumbers, int seasonNumber) {
