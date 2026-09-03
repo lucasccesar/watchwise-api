@@ -13,7 +13,7 @@ public record HomeSummaryResponseDTO(
         List<SeriesInProgressResponseDTO> nextEpisodes,
         List<DailyWatchCountDTO> watchCountByDayLast30Days,
         List<GenreCountDTO> genreCountsMoviesLast30Days,
-        List<GenreCountDTO> genreCountsEpisodesLast30Days,
+        List<GenreCountDTO> genreCountsSeriesLast30Days,
         List<DiaryEntryResponseDTO> recentlyWatched
 ) {
 }

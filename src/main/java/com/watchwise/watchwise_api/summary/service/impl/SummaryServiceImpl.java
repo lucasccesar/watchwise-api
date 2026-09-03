@@ -150,7 +150,7 @@ public class SummaryServiceImpl implements SummaryService {
                 .countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(userId, windowStart, windowEnd).stream()
                 .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
                 .toList();
-        List<GenreCountDTO> genreCountsEpisodesLast30Days = diaryEntryRepository
+        List<GenreCountDTO> genreCountsSeriesLast30Days = diaryEntryRepository
                 .countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(userId, windowStart, windowEnd).stream()
                 .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
                 .toList();
@@ -158,7 +158,7 @@ public class SummaryServiceImpl implements SummaryService {
         List<DiaryEntryResponseDTO> recentlyWatched = computeRecentlyWatched(userId);
 
         return new HomeSummaryResponseDTO(totalMinutesWatched, totalMoviesWatched, totalEpisodesWatched, nextEpisodes,
-                watchCountByDayLast30Days, genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, recentlyWatched);
+                watchCountByDayLast30Days, genreCountsMoviesLast30Days, genreCountsSeriesLast30Days, recentlyWatched);
     }
 
     private List<DiaryEntryResponseDTO> computeRecentlyWatched(UUID userId) {

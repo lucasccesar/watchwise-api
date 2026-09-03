@@ -396,7 +396,7 @@ class SummaryServiceImplTest {
         assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1)));
         assertThat(result.watchCountByDayLast30Days()).containsExactly(new DailyWatchCountDTO(LocalDate.of(2024, 5, 1), 3));
         assertThat(result.genreCountsMoviesLast30Days()).containsExactly(new GenreCountDTO("Action", 2));
-        assertThat(result.genreCountsEpisodesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));
+        assertThat(result.genreCountsSeriesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));
     }
 
     @Test
