@@ -333,16 +333,15 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("[login] Should Build Lockout Key From Remote Addr And Identifier - When Called")
-    void shouldBuildLockoutKeyFromRemoteAddrAndIdentifierWhenCalled() {
+    @DisplayName("[login] Should Build Lockout Key From Identifier Only - When Called")
+    void shouldBuildLockoutKeyFromIdentifierOnlyWhenCalled() {
         setAnonymous();
         LoginUserDTO loginUserDTO = new LoginUserDTO("  John.Doe@Email.com  ", "Password123");
-        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
         when(userService.login(loginUserDTO)).thenReturn(userResponseDTO);
 
         authController.login(loginUserDTO, request, response);
 
-        verify(attemptLockout).checkAllowed(eq("login|127.0.0.1|john.doe@email.com"), anyInt(), any());
+        verify(attemptLockout).checkAllowed(eq("login|john.doe@email.com"), anyInt(), any());
     }
 
     @Test

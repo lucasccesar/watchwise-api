@@ -115,7 +115,7 @@ public class AuthController {
 
         requestThrottler.checkAllowed(throttleKey("login", request), loginIpMaxRequests, Duration.ofMinutes(loginIpWindowMinutes));
 
-        String lockoutKey = buildLockoutKey(request, loginUserDTO.identifier());
+        String lockoutKey = buildLockoutKey(loginUserDTO.identifier());
         attemptLockout.checkAllowed(lockoutKey, loginMaxAttempts, Duration.ofMinutes(loginWindowMinutes));
 
         UserResponseDTO user;
@@ -206,8 +206,8 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
-    private String buildLockoutKey(HttpServletRequest request, String identifier) {
-        return "login|" + request.getRemoteAddr() + "|" + identifier.trim().toLowerCase();
+    private String buildLockoutKey(String identifier) {
+        return "login|" + identifier.trim().toLowerCase();
     }
 
     private String throttleKey(String action, HttpServletRequest request) {

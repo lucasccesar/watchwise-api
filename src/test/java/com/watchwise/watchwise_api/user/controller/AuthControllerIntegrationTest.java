@@ -305,8 +305,8 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[login] Should Not Block A Different Ip - When Another Ip Is Rate Limited")
-    void shouldNotBlockADifferentIpWhenAnotherIpIsRateLimited() throws Exception {
+    @DisplayName("[login] Should Still Block A Different Ip - When Same Identifier Is Rate Limited")
+    void shouldStillBlockADifferentIpWhenSameIdentifierIsRateLimited() throws Exception {
         mockMvc.perform(registerRequest("ratelimitipuser", "ratelimitipuser@email.com"))
                 .andExpect(status().isCreated());
 
@@ -321,7 +321,8 @@ class AuthControllerIntegrationTest {
                     req.setRemoteAddr("10.0.0.99");
                     return req;
                 }))
-                .andExpect(status().isOk());
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many attempts. Try again later."));
     }
 
     @Test
