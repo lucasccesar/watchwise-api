@@ -70,7 +70,7 @@ class ContentTrackingServiceImplTest {
     private ContentTrackingServiceImpl contentTrackingService;
 
     @Captor
-    private ArgumentCaptor<Notification> notificationCaptor;
+    private ArgumentCaptor<List<Notification>> notificationsCaptor;
 
     private Content movie;
     private UUID watchingUserId;
@@ -101,10 +101,12 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(notificationRepository).save(notificationCaptor.capture());
-        assertThat(notificationCaptor.getValue().getUser().getId()).isEqualTo(watchingUserId);
-        assertThat(notificationCaptor.getValue().getType()).isEqualTo(NotificationType.RELEASE);
-        assertThat(notificationCaptor.getValue().getContent()).isEqualTo(movie);
+        verify(notificationRepository).saveAll(notificationsCaptor.capture());
+        assertThat(notificationsCaptor.getValue()).hasSize(1);
+        Notification notification = notificationsCaptor.getValue().get(0);
+        assertThat(notification.getUser().getId()).isEqualTo(watchingUserId);
+        assertThat(notification.getType()).isEqualTo(NotificationType.RELEASE);
+        assertThat(notification.getContent()).isEqualTo(movie);
     }
 
     @Test
@@ -135,7 +137,7 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
-        verify(notificationRepository, never()).save(any());
+        verify(notificationRepository, never()).saveAll(any());
     }
 
     @Test
@@ -246,7 +248,7 @@ class ContentTrackingServiceImplTest {
 
         verify(tmdbClient, never()).getMovieDetails(any());
         verify(trackedContentStateRepository, never()).findByContentId(any());
-        verify(notificationRepository, never()).save(any());
+        verify(notificationRepository, never()).saveAll(any());
     }
 
     @Test
@@ -425,8 +427,9 @@ class ContentTrackingServiceImplTest {
         ArgumentCaptor<TrackedContentState> stateCaptor = ArgumentCaptor.forClass(TrackedContentState.class);
         verify(trackedContentStateRepository).save(stateCaptor.capture());
         assertThat(stateCaptor.getValue().getLastKnownStatus()).isEqualTo("Returning Series");
-        verify(notificationRepository).save(notificationCaptor.capture());
-        assertThat(notificationCaptor.getValue().getType()).isEqualTo(NotificationType.RENEWED);
+        verify(notificationRepository).saveAll(notificationsCaptor.capture());
+        assertThat(notificationsCaptor.getValue()).hasSize(1);
+        assertThat(notificationsCaptor.getValue().get(0).getType()).isEqualTo(NotificationType.RENEWED);
     }
 
     @Test

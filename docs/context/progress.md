@@ -3670,3 +3670,10 @@ rodado sempre comparava o status fresco contra ele mesmo — corrigido capturand
 Postgres real via Testcontainers. `docs/context/database-schema.html`, `business-rules.md`,
 `business-rules-summary.md` e `CLAUDE.md` (seção Avoid, agora com 7 exceções em vez de 6) atualizados
 junto.
+
+Item 4 da mesma auditoria também corrigido: `ContentTrackingServiceImpl.notifyWatchers` e
+`FollowedPersonTrackingServiceImpl.notifyFollowers` faziam um `notificationRepository.save(...)` por
+usuário notificado (`userIds.forEach(...)`) — trocado por montar a lista via
+`stream().map(...).toList()` e um único `saveAll(...)`, eliminando N round-trips ao banco por evento
+de notificação em massa. Testes existentes atualizados para capturar `List<Notification>` em vez de
+uma `Notification` por invocação.

@@ -227,15 +227,19 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
                 : watchlistEntryRepository.findUserIdsByContentId(content.getId());
 
         LocalDateTime now = LocalDateTime.now();
-        userIds.forEach(userId -> notificationRepository.save(Notification.builder()
-                .user(userRepository.getReferenceById(userId))
-                .type(event.type())
-                .message(buildMessage(content, event))
-                .content(content)
-                .isRead(false)
-                .createdAt(now)
-                .updatedAt(now)
-                .build()));
+        String message = buildMessage(content, event);
+        List<Notification> notifications = userIds.stream()
+                .map(userId -> Notification.builder()
+                        .user(userRepository.getReferenceById(userId))
+                        .type(event.type())
+                        .message(message)
+                        .content(content)
+                        .isRead(false)
+                        .createdAt(now)
+                        .updatedAt(now)
+                        .build())
+                .toList();
+        notificationRepository.saveAll(notifications);
     }
 
     private String buildMessage(Content content, ContentChangeEvent event) {

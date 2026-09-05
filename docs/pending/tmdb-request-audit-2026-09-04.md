@@ -99,15 +99,18 @@ fora de escopo, ver nota de item futuro no documento de proposta.
 
 ---
 
-## 4. 🟢 Notificações em massa: `save()` em loop em vez de `saveAll()`
+## 4. ✅ (resolvido 2026-09-05) Notificações em massa: `save()` em loop em vez de `saveAll()`
 
 Não é TMDB, mas é ineficiência geral encontrada no caminho:
 
-- `ContentTrackingServiceImpl.notifyWatchers` (linha 126) e
-  `FollowedPersonTrackingServiceImpl.notifyFollowers` (linha 104) fazem
-  `userIds.forEach(... notificationRepository.save(...))` — um `INSERT` por usuário notificado, em vez
-  de montar a lista e usar `saveAll`. Para um título popular com muitos seguidores/watchers, isso é N
-  round-trips ao banco em vez de 1.
+- `ContentTrackingServiceImpl.notifyWatchers` e `FollowedPersonTrackingServiceImpl.notifyFollowers`
+  faziam `userIds.forEach(... notificationRepository.save(...))` — um `INSERT` por usuário notificado,
+  em vez de montar a lista e usar `saveAll`. Para um título popular com muitos seguidores/watchers, isso
+  era N round-trips ao banco em vez de 1.
+
+**Resolvido:** os dois métodos agora montam a lista de `Notification` via `stream().map(...).toList()` e
+chamam `notificationRepository.saveAll(notifications)` uma única vez. Testes atualizados para capturar
+`List<Notification>` em vez de uma `Notification` por chamada.
 
 ---
 

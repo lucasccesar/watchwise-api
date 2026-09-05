@@ -60,7 +60,7 @@ class FollowedPersonTrackingServiceImplTest {
     private FollowedPersonTrackingServiceImpl followedPersonTrackingService;
 
     @Captor
-    private ArgumentCaptor<Notification> notificationCaptor;
+    private ArgumentCaptor<List<Notification>> notificationsCaptor;
 
     @Captor
     private ArgumentCaptor<TrackedPersonCredit> trackedPersonCreditCaptor;
@@ -91,10 +91,12 @@ class FollowedPersonTrackingServiceImplTest {
 
         followedPersonTrackingService.trackFollowedPeopleCredits();
 
-        verify(notificationRepository).save(notificationCaptor.capture());
-        assertThat(notificationCaptor.getValue().getType()).isEqualTo(NotificationType.FOLLOWED_PERSON_NEW_CREDIT);
-        assertThat(notificationCaptor.getValue().getPersonTmdbId()).isEqualTo("6193");
-        assertThat(notificationCaptor.getValue().getContent()).isEqualTo(content);
+        verify(notificationRepository).saveAll(notificationsCaptor.capture());
+        assertThat(notificationsCaptor.getValue()).hasSize(1);
+        Notification notification = notificationsCaptor.getValue().get(0);
+        assertThat(notification.getType()).isEqualTo(NotificationType.FOLLOWED_PERSON_NEW_CREDIT);
+        assertThat(notification.getPersonTmdbId()).isEqualTo("6193");
+        assertThat(notification.getContent()).isEqualTo(content);
     }
 
     @Test
@@ -109,7 +111,7 @@ class FollowedPersonTrackingServiceImplTest {
 
         followedPersonTrackingService.trackFollowedPeopleCredits();
 
-        verify(notificationRepository, never()).save(any());
+        verify(notificationRepository, never()).saveAll(any());
         verify(contentService, never()).getOrCreateReference(any());
     }
 
@@ -142,7 +144,7 @@ class FollowedPersonTrackingServiceImplTest {
         followedPersonTrackingService.trackFollowedPeopleCredits();
 
         verify(trackedPersonStateRepository, never()).findByPersonTmdbId(any());
-        verify(notificationRepository, never()).save(any());
+        verify(notificationRepository, never()).saveAll(any());
     }
 
     @Test
@@ -172,7 +174,7 @@ class FollowedPersonTrackingServiceImplTest {
         followedPersonTrackingService.trackFollowedPeopleCredits();
 
         verify(trackedPersonCreditRepository, times(3)).save(any(TrackedPersonCredit.class));
-        verify(notificationRepository, never()).save(any());
+        verify(notificationRepository, never()).saveAll(any());
         verify(followedPersonRepository, never()).findUserIdsByPersonTmdbId(any());
         verify(contentRepository, never()).getReferenceById(any());
     }
@@ -195,8 +197,9 @@ class FollowedPersonTrackingServiceImplTest {
 
         followedPersonTrackingService.trackFollowedPeopleCredits();
 
-        verify(notificationRepository, times(1)).save(notificationCaptor.capture());
-        assertThat(notificationCaptor.getValue().getContent()).isEqualTo(newCreditContent);
+        verify(notificationRepository, times(1)).saveAll(notificationsCaptor.capture());
+        assertThat(notificationsCaptor.getValue()).hasSize(1);
+        assertThat(notificationsCaptor.getValue().get(0).getContent()).isEqualTo(newCreditContent);
         verify(trackedPersonCreditRepository, times(1)).save(any(TrackedPersonCredit.class));
     }
 

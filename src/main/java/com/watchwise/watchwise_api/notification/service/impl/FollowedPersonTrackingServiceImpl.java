@@ -101,15 +101,18 @@ public class FollowedPersonTrackingServiceImpl implements FollowedPersonTracking
         LocalDateTime now = LocalDateTime.now();
         Content content = contentRepository.getReferenceById(contentRef.id());
 
-        followerIds.forEach(userId -> notificationRepository.save(Notification.builder()
-                .user(userRepository.getReferenceById(userId))
-                .type(NotificationType.FOLLOWED_PERSON_NEW_CREDIT)
-                .message("New title from someone you follow")
-                .content(content)
-                .personTmdbId(personTmdbId)
-                .isRead(false)
-                .createdAt(now)
-                .updatedAt(now)
-                .build()));
+        List<Notification> notifications = followerIds.stream()
+                .map(userId -> Notification.builder()
+                        .user(userRepository.getReferenceById(userId))
+                        .type(NotificationType.FOLLOWED_PERSON_NEW_CREDIT)
+                        .message("New title from someone you follow")
+                        .content(content)
+                        .personTmdbId(personTmdbId)
+                        .isRead(false)
+                        .createdAt(now)
+                        .updatedAt(now)
+                        .build())
+                .toList();
+        notificationRepository.saveAll(notifications);
     }
 }
