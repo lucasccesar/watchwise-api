@@ -8,7 +8,9 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -87,8 +89,12 @@ class UserControllerIntegrationTest {
     @Autowired
     private FollowerRepository followerRepository;
 
+    @Autowired
+    private WatchCompanionRepository watchCompanionRepository;
+
     @BeforeEach
     void setUp() {
+        watchCompanionRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
@@ -559,6 +565,40 @@ class UserControllerIntegrationTest {
         Optional<User> deletedUser = userRepository
                 .findByUsernameIgnoreCaseOrEmailIgnoreCase("deleteuser", "deleteuser");
         assertThat(deletedUser).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[deleteCurrentUser] Should Delete Account And Cascade The Watch Companion Row - When User Was Tagged As A Companion In Another User's Diary Entry")
+    void shouldDeleteAccountAndCascadeWatchCompanionRowWhenUserWasTaggedAsACompanionInAnotherUsersDiaryEntry() throws Exception {
+        mockMvc.perform(registerRequest("diaryowner", "diaryowner@email.com"))
+                .andExpect(status().isCreated());
+        User owner = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("diaryowner", "diaryowner")
+                .orElseThrow();
+
+        MvcResult companionRegisterResult = mockMvc.perform(registerRequest("companionuser", "companionuser@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        User companion = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("companionuser", "companionuser")
+                .orElseThrow();
+
+        Content movie = contentRepository.save(Content.builder()
+                .tmdbId("550").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        DiaryEntry diaryEntry = diaryEntryRepository.save(DiaryEntry.builder()
+                .user(owner).content(movie).watchNumber(1).watchedDate(LocalDate.now())
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        watchCompanionRepository.save(WatchCompanion.builder()
+                .diaryEntry(diaryEntry).user(companion).createdAt(LocalDateTime.now()).build());
+
+        Cookie companionAccessTokenCookie = companionRegisterResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie companionCsrfCookie = companionRegisterResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+
+        mockMvc.perform(deleteMeRequest(companionAccessTokenCookie, companionCsrfCookie, "{ \"password\": \"Password123\" }"))
+                .andExpect(status().isNoContent());
+
+        assertThat(userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("companionuser", "companionuser")).isEmpty();
+        assertThat(watchCompanionRepository.findAll()).isEmpty();
+        assertThat(diaryEntryRepository.findById(diaryEntry.getId())).isPresent();
     }
 
     @Test
