@@ -66,7 +66,7 @@ corrigido (`shouldStillBlockADifferentIpWhenSameIdentifierIsRateLimited` —
 `AuthControllerIntegrationTest`); teste unitário `AuthControllerTest` também atualizado
 (`shouldBuildLockoutKeyFromIdentifierOnlyWhenCalled`).
 
-### 3. 🟡 `request.getRemoteAddr()` sem `forward-headers-strategy` configurado em prod
+### 3. ✅ CORRIGIDO (2026-09-05) — `request.getRemoteAddr()` sem `forward-headers-strategy` configurado em prod
 
 **Arquivos:** `AuthController.java:210,214`, `application-prod.properties:31`
 
@@ -76,6 +76,13 @@ de todo rate-limit por IP (`throttleKey`, `buildLockoutKey`) — sempre retorna 
 cliente real. O rate-limit de login/register/refresh/oauth vira um contador **global compartilhado por
 todos os usuários** atrás do mesmo proxy; um único usuário gerando tráfego intenso pode bloquear
 login/registro pra todo mundo.
+
+**Corrigido:** `application-prod.properties:31` descomentado — `server.forward-headers-strategy=native`
+agora é ativo por padrão no profile `prod` (é um valor estático, sem segredo, então não conflita com a
+decisão pendente maior de "virar config real" registrada em `docs/pending/pending-to-deploy.md` item 1,
+que trata de segredos/infra ainda não provisionados). Comentário acima da linha atualizado pra refletir
+que a suposição "atrás de proxy" agora é o padrão assumido em prod, não mais opcional — quem fizer deploy
+sem reverse proxy na frente precisa remover a linha em vez de só deixá-la comentada.
 
 ### 4. 🟡 `login()` vaza existência de conta por timing (BCrypt só roda quando o usuário existe)
 

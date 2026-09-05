@@ -3713,3 +3713,20 @@ documentava o bypass (`shouldNotBlockADifferentIpWhenAnotherIpIsRateLimited`) fo
 comportamento corrigido (`shouldStillBlockADifferentIpWhenSameIdentifierIsRateLimited`); teste unitário
 correspondente em `AuthControllerTest` também atualizado. Suíte completa validada contra Postgres real via
 Testcontainers.
+
+## 2026-09-05 (4) — `forward-headers-strategy` habilitado no template de prod
+
+Item 3 (média severidade) de `docs/pending/audit-completa-2026-09-04.md`.
+`server.forward-headers-strategy=native` estava comentado em `application-prod.properties` junto com o
+resto do arquivo (um template só, nenhuma variável de prod de fato ativa — decisão maior e já rastreada
+em `docs/pending/pending-to-deploy.md` item 1). Sem essa flag, atrás de um reverse proxy/load balancer
+(cenário normal pra terminar HTTPS), `request.getRemoteAddr()` sempre retorna o IP do proxy — todo
+rate-limit por IP (`AttemptLockout`, `RequestThrottler`: login, registro, oauth, refresh) vira um contador
+global compartilhado por todos os usuários atrás do mesmo proxy, em vez de um limite por cliente.
+
+Corrigido descomentando só essa linha, antecipadamente ao resto do template — diferente das outras
+(`DB_URL`, `app.jwt.secret`, etc.), essa não depende de segredo/variável de ambiente, então não fazia
+sentido esperar a decisão maior de "virar config real" pra fechar esse gap específico. Comentário acima
+da linha reescrito pra deixar explícito que a suposição "atrás de proxy" agora é o padrão assumido em
+prod (quem fizer deploy sem reverse proxy precisa remover a linha, não só recomentar).
+`docs/pending/pending-to-deploy.md` (item 7) atualizado com uma nota sobre isso.

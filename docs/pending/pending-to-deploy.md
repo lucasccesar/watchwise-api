@@ -64,6 +64,13 @@ inteiramente dentro de métodos `@Transactional`. Ao ativar o profile de prod de
 de descomentar `spring.jpa.open-in-view=false`, `show-sql=false` e `format_sql=false` (mesmo arquivo,
 item 5 de `to-fix.md`).
 
+**Atualização 2026-09-05:** `server.forward-headers-strategy=native` (mesmo arquivo) já foi descomentado
+antecipadamente — corrigia item 3 (média severidade) de `docs/pending/audit-completa-2026-09-04.md`,
+onde sua ausência tornava todo rate-limit por IP (`AttemptLockout`/`RequestThrottler`) um contador
+global compartilhado atrás de um reverse proxy. Diferente das demais linhas do template, essa não
+depende de segredo/variável de ambiente, então não havia motivo pra esperar o resto do arquivo virar
+config real.
+
 ---
 
 ## Já está pronto (conferido, não precisa de nada)
