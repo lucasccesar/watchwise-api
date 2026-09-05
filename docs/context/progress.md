@@ -3730,3 +3730,22 @@ sentido esperar a decisão maior de "virar config real" pra fechar esse gap espe
 da linha reescrito pra deixar explícito que a suposição "atrás de proxy" agora é o padrão assumido em
 prod (quem fizer deploy sem reverse proxy precisa remover a linha, não só recomentar).
 `docs/pending/pending-to-deploy.md` (item 7) atualizado com uma nota sobre isso.
+
+## 2026-09-05 (5) — `login()` deixava de rodar BCrypt quando o identifier não existia, vazando existência de conta por timing
+
+Item 4 (média severidade) de `docs/pending/audit-completa-2026-09-04.md`. `UserServiceImpl.login`
+lançava `UnauthorizedException` direto do `orElseThrow` quando o identifier não batia com nenhum
+usuário, sem nunca chamar `passwordEncoder.matches(...)`. Como a mensagem de erro já era idêntica nos
+dois casos, não havia enumeration por texto — mas a resposta pra um identifier inexistente voltava quase
+instantânea, enquanto um identifier existente com senha errada pagava o custo deliberadamente lento do
+BCrypt (dezenas a centenas de ms). Essa diferença de tempo é mensurável remotamente com amostras
+suficientes e permite enumerar quais usernames/emails existem.
+
+Corrigido fazendo `login()` sempre chamar `passwordEncoder.matches(...)`, mesmo sem usuário encontrado —
+comparando contra `DUMMY_PASSWORD_HASH`, uma constante nova com um hash BCrypt válido (formato correto,
+nunca gerado a partir da senha de nenhum usuário real) só pra forçar o mesmo custo computacional nos dois
+casos. `Optional<User>` substitui o `orElseThrow` imediato; o `UnauthorizedException` só é lançado depois
+de comparar a senha, seja contra o hash real (usuário existe) ou o dummy (usuário não existe). Teste que
+antes provava `verifyNoInteractions(passwordEncoder, ...)` nesse cenário foi ajustado, e um teste novo
+(`shouldCompareAgainstADummyHashToEqualizeTimingWhenIdentifierDoesNotMatchAnyUser`) prova explicitamente a
+chamada contra o hash dummy. Suíte completa validada contra Postgres real via Testcontainers.

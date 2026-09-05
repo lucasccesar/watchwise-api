@@ -84,7 +84,7 @@ que trata de segredos/infra ainda não provisionados). Comentário acima da linh
 que a suposição "atrás de proxy" agora é o padrão assumido em prod, não mais opcional — quem fizer deploy
 sem reverse proxy na frente precisa remover a linha em vez de só deixá-la comentada.
 
-### 4. 🟡 `login()` vaza existência de conta por timing (BCrypt só roda quando o usuário existe)
+### 4. ✅ CORRIGIDO (2026-09-05) — `login()` vaza existência de conta por timing (BCrypt só roda quando o usuário existe)
 
 **Arquivo:** `user/service/impl/UserServiceImpl.java:261-276`
 
@@ -93,6 +93,15 @@ não existe, a resposta volta quase instantânea; quando existe e a senha está 
 `passwordEncoder.matches` roda BCrypt (deliberadamente lento, dezenas a centenas de ms). Essa diferença
 de tempo é mensurável remotamente com amostras suficientes e permite enumerar quais
 usernames/emails existem, apesar da mensagem genérica.
+
+**Corrigido:** `UserServiceImpl.login` agora sempre chama `passwordEncoder.matches(...)`, mesmo quando o
+identifier não existe — comparando contra um hash BCrypt fixo (`DUMMY_PASSWORD_HASH`, formato válido,
+nunca usado por nenhum usuário real) em vez de pular a chamada. Isso equaliza o custo computacional
+entre "usuário não existe" e "usuário existe mas senha errada", fechando a diferença de tempo mensurável.
+Teste que antes provava `verifyNoInteractions(passwordEncoder, ...)` nesse cenário foi ajustado — agora
+verifica só `userMapper` — e um teste novo
+(`shouldCompareAgainstADummyHashToEqualizeTimingWhenIdentifierDoesNotMatchAnyUser`) prova explicitamente
+que `passwordEncoder.matches` é chamado com o hash dummy.
 
 ### 5. 🟡 Rate limiting inconsistente em endpoints que disparam `getOrCreateReference` (custo TMDB)
 
