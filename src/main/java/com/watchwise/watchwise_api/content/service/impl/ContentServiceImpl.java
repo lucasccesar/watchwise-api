@@ -36,8 +36,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ContentServiceImpl implements ContentService {
 
-    private static final String EXISTENCE_CHECK_LANGUAGE = "en-US";
-
     private final ContentMapper contentMapper;
     private final ContentRepository contentRepository;
     private final NewTransactionExecutor newTransactionExecutor;
@@ -253,20 +251,20 @@ public class ContentServiceImpl implements ContentService {
     private ContentRefCreationDTO resolveNewContentMetadata(ContentRefCreationDTO dto, boolean trustedRuntimeMinutes) {
         return switch (dto.type()) {
             case MOVIE -> withMovieMetadata(dto,
-                    requireFound(tmdbClient.getMovieFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE), "movie"));
+                    requireFound(tmdbClient.getMovieFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "movie"));
             case SERIES -> withSeriesMetadata(dto,
-                    requireFound(tmdbClient.getTvFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE), "series"));
+                    requireFound(tmdbClient.getTvFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series"));
             case SEASON -> {
-                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), EXISTENCE_CHECK_LANGUAGE), "series");
+                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series");
                 yield dto;
             }
             case EPISODE -> {
-                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), EXISTENCE_CHECK_LANGUAGE), "series");
+                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series");
                 if (trustedRuntimeMinutes) {
                     yield dto;
                 }
                 TmdbEpisodeFullDetails episode = requireFound(tmdbClient.getEpisodeFullDetails(
-                        dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), EXISTENCE_CHECK_LANGUAGE), "episode");
+                        dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "episode");
                 yield withEpisodeRuntime(dto, episode.runtime());
             }
         };
@@ -276,15 +274,15 @@ public class ContentServiceImpl implements ContentService {
         return switch (dto.type()) {
             case MOVIE -> hasMovieOrSeriesMetadata(existing) && existing.getRuntimeMinutes() != null
                     ? dto
-                    : tmdbClient.getMovieFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE).toOptional()
+                    : tmdbClient.getMovieFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional()
                             .map(details -> withMovieMetadata(dto, details)).orElse(dto);
             case SERIES -> hasMovieOrSeriesMetadata(existing)
                     ? dto
-                    : tmdbClient.getTvFullDetails(dto.tmdbId(), EXISTENCE_CHECK_LANGUAGE).toOptional()
+                    : tmdbClient.getTvFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional()
                             .map(details -> withSeriesMetadata(dto, details)).orElse(dto);
             case EPISODE -> existing.getRuntimeMinutes() != null
                     ? dto
-                    : tmdbClient.getEpisodeFullDetails(dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), EXISTENCE_CHECK_LANGUAGE)
+                    : tmdbClient.getEpisodeFullDetails(dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
                             .toOptional().map(details -> withEpisodeRuntime(dto, details.runtime())).orElse(dto);
             case SEASON -> dto;
         };

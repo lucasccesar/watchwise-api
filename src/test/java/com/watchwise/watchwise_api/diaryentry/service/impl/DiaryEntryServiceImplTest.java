@@ -761,7 +761,7 @@ class DiaryEntryServiceImplTest {
         assertThat(captured.getWatchedInTheater()).isFalse();
         assertThat(captured.getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
         assertThat(captured.getIgnore()).isFalse();
-        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue())
                 .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null));
     }
@@ -788,7 +788,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isTrue();
     }
 
@@ -814,7 +814,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isNull();
     }
 
@@ -846,7 +846,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isTrue();
         assertThat(contentRefCreationCaptor.getValue().isSeriesFinale()).isTrue();
     }
@@ -868,8 +868,95 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture());
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue().isSeasonFinale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Pass Trusted RuntimeMinutes Derived From The Season Payload - When Creating A New Episode")
+    void shouldPassTrustedRuntimeMinutesDerivedFromTheSeasonPayloadWhenCreatingANewEpisode() {
+        Content episode = buildEpisode("1399", 1, 2);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        DiaryEntry savedEntry = buildEntry(lucas, episode);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
+        when(tmdbClient.getSeasonFullDetails(eq("1399"), eq(1), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null,
+                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", 30, null, null),
+                                new TmdbEpisodeSummary(2, null, null, "2020-01-08", 42, null, null)),
+                        null, null)));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "1399", 1, 2, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), eq(true));
+        assertThat(contentRefCreationCaptor.getValue().runtimeMinutes()).isEqualTo(42);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Pass Untrusted Null RuntimeMinutes - When The Season Payload Has No Runtime For The Episode")
+    void shouldPassUntrustedNullRuntimeMinutesWhenTheSeasonPayloadHasNoRuntimeForTheEpisode() {
+        Content episode = buildEpisode("1399", 1, 2);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(episode.getId())).thenReturn(episode);
+        DiaryEntry savedEntry = buildEntry(lucas, episode);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
+        when(tmdbClient.getSeasonFullDetails(eq("1399"), eq(1), any())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null,
+                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", 30, null, null),
+                                new TmdbEpisodeSummary(2, null, null, "2020-01-08", null, null, null)),
+                        null, null)));
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(false)))
+                .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "1399", 1, 2, null, null,
+                        LocalDateTime.now(), LocalDateTime.now()));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 2, null, null),
+                null, null, null, null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), eq(false));
+        assertThat(contentRefCreationCaptor.getValue().runtimeMinutes()).isNull();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Check Movie Release Date In The Language-Independent Lookup Language - When User Prefers A Different Language")
+    void shouldCheckMovieReleaseDateInTheLanguageIndependentLookupLanguageWhenUserPrefersADifferentLanguage() {
+        User lucasWithNonDefaultLanguage = User.builder()
+                .id(lucasId)
+                .username(lucas.getUsername())
+                .email(lucas.getEmail())
+                .password(lucas.getPassword())
+                .isProfilePublic(lucas.getIsProfilePublic())
+                .preferredLanguage("pt-BR")
+                .createdAt(lucas.getCreatedAt())
+                .updatedAt(lucas.getUpdatedAt())
+                .build();
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucasWithNonDefaultLanguage));
+        stubContentResolution(fightClub);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
+        DiaryEntry savedEntry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
+        when(diaryEntryMapper.diaryEntryToResponseDto(savedEntry, false, List.of())).thenReturn(buildResponseDto(savedEntry));
+
+        DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
+                null, null, LocalDate.of(2024, 5, 1), null, null, null);
+
+        diaryEntryService.createDiaryEntry(lucasId, dto);
+
+        verify(tmdbClient).getMovieFullDetails(fightClub.getTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, never()).getMovieFullDetails(fightClub.getTmdbId(), "pt-BR");
     }
 
     @Test
@@ -1029,7 +1116,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntry] Should Ignore IsRewatch And Set WatchNumber To 1 - When No Prior Entry Exists And Content Type Is EPISODE")
     void shouldIgnoreIsRewatchAndSetWatchNumberToOneWhenNoPriorEntryExistsAndContentTypeIsEpisode() {
         Content episode = buildEpisode("900", 1, 1);
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -1053,7 +1140,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntry] Should Ignore IsRewatch And Set WatchNumber To 1 - When No Prior Entry Exists And Content Type Is SEASON")
     void shouldIgnoreIsRewatchAndSetWatchNumberToOneWhenNoPriorEntryExistsAndContentTypeIsSeason() {
         Content season = buildSeason("900", 1);
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "900", 1, null, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -1077,7 +1164,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntry] Should Honor IsRewatch And Set WatchNumber To 2 - When No Prior Entry Exists But Content Type Is SERIES")
     void shouldHonorIsRewatchAndSetWatchNumberToTwoWhenNoPriorEntryExistsButContentTypeIsSeries() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(series.getId(), "900", ContentType.SERIES, null, null, null, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -1146,7 +1233,7 @@ class DiaryEntryServiceImplTest {
         Content episode = buildEpisode("900", 1, 1);
         Content seriesContent = buildContent("900", ContentType.SERIES);
 
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -1171,7 +1258,7 @@ class DiaryEntryServiceImplTest {
     void shouldNotAttemptRemovalWhenTheSeriesContentDoesNotExistYet() {
         Content episode = buildEpisode("900", 1, 1);
 
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(episode.getId(), null, ContentType.EPISODE, "900", 1, 1, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -1195,7 +1282,7 @@ class DiaryEntryServiceImplTest {
     void shouldRemoveTheMatchingWatchlistEntryWhenLoggingASeriesDirectly() {
         Content seriesContent = buildContent("900", ContentType.SERIES);
 
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(seriesContent.getId(), "900", ContentType.SERIES, null, null, null, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -1443,7 +1530,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
         verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verify(contentService, times(1)).getOrCreateReference(any(ContentRefCreationDTO.class));
+        verify(contentService, times(1)).getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean());
     }
 
     @Test
@@ -1592,7 +1679,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
         verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verify(contentService, times(1)).getOrCreateReference(any(ContentRefCreationDTO.class));
+        verify(contentService, times(1)).getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean());
     }
 
     @Test
@@ -1626,7 +1713,7 @@ class DiaryEntryServiceImplTest {
         ContentRefCreationDTO contentRef = new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, null, null);
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        when(contentService.getOrCreateReference(contentRef)).thenReturn(new ContentRefDTO(
+        when(contentService.getOrCreateReference(contentRef, false)).thenReturn(new ContentRefDTO(
                 loggedEpisode.getId(), null, ContentType.EPISODE, "1399", 1, 1, null, null,
                 LocalDateTime.now(), LocalDateTime.now()));
         when(contentRepository.getReferenceById(loggedEpisode.getId())).thenReturn(loggedEpisode);
@@ -1651,7 +1738,7 @@ class DiaryEntryServiceImplTest {
         ContentRefCreationDTO contentRef = new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 0, null, null, true);
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        when(contentService.getOrCreateReference(contentRef)).thenReturn(new ContentRefDTO(
+        when(contentService.getOrCreateReference(contentRef, false)).thenReturn(new ContentRefDTO(
                 specialsSeason.getId(), null, ContentType.SEASON, "1399", 0, null, null, true,
                 LocalDateTime.now(), LocalDateTime.now()));
         when(contentRepository.getReferenceById(specialsSeason.getId())).thenReturn(specialsSeason);
@@ -3885,7 +3972,7 @@ class DiaryEntryServiceImplTest {
     }
 
     private void stubContentResolution(Content content) {
-        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(), null, null, null,
                         null, null, LocalDateTime.now(), LocalDateTime.now()));
     }

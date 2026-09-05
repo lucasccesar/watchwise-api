@@ -175,7 +175,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     public DiaryEntryCreationResultDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO) {
         assertWatchedDateNotInFuture(diaryEntryCreationDTO.watchedDate());
         List<UUID> companionIds = validateCompanions(userId, diaryEntryCreationDTO.watchedWith());
-        ContentRefDTO contentRef = contentService.getOrCreateReference(resolveContentRefForCreation(userId, diaryEntryCreationDTO));
+        ResolvedContentRef resolvedContent = resolveContentRefForCreation(userId, diaryEntryCreationDTO);
+        ContentRefDTO contentRef = contentService.getOrCreateReference(resolvedContent.content(), resolvedContent.trustedRuntimeMinutes());
 
         User user = userRepository.getReferenceById(userId);
         Content content = contentRepository.getReferenceById(contentRef.id());
@@ -332,7 +333,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             Content updatedContent = entry.getContent();
             assertWatchedDateNotBeforeRelease(diaryEntryUpdateDTO.watchedDate(),
                     resolveReleaseDate(updatedContent.getType(), updatedContent.getTmdbId(), updatedContent.getSeriesTmdbId(),
-                            updatedContent.getSeasonNumber(), updatedContent.getEpisodeNumber(), entry.getUser().getPreferredLanguage()));
+                            updatedContent.getSeasonNumber(), updatedContent.getEpisodeNumber()));
             entry.setWatchedDate(diaryEntryUpdateDTO.watchedDate());
         }
         if (diaryEntryUpdateDTO.watchedInTheater() != null) {
@@ -378,20 +379,23 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private LocalDate resolveReleaseDate(ContentType type, String tmdbId, String seriesTmdbId, Integer seasonNumber,
-            Integer episodeNumber, String language) {
+            Integer episodeNumber) {
         return switch (type) {
-            case MOVIE -> tmdbClient.getMovieFullDetails(tmdbId, language).toOptional()
+            case MOVIE -> tmdbClient.getMovieFullDetails(tmdbId, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional()
                     .map(TmdbMovieFullDetails::releaseDate).map(this::parseTmdbDate).orElse(null);
-            case EPISODE -> tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language).toOptional()
-                    .map(season -> episodeAirDate(season, episodeNumber)).orElse(null);
+            case EPISODE -> tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
+                    .toOptional().map(season -> episodeAirDate(season, episodeNumber)).orElse(null);
             case SEASON, SERIES -> null;
         };
     }
 
-    private ContentRefCreationDTO resolveContentRefForCreation(UUID userId, DiaryEntryCreationDTO dto) {
+    private record ResolvedContentRef(ContentRefCreationDTO content, boolean trustedRuntimeMinutes) {
+    }
+
+    private ResolvedContentRef resolveContentRefForCreation(UUID userId, DiaryEntryCreationDTO dto) {
         ContentRefCreationDTO content = dto.content();
         if (content.type() != ContentType.EPISODE && content.type() != ContentType.MOVIE) {
-            return content;
+            return new ResolvedContentRef(content, false);
         }
 
         String language = userRepository.findById(userId)
@@ -403,37 +407,46 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         if (content.tmdbId() == null || content.tmdbId().isBlank()) {
-            return content;
+            return new ResolvedContentRef(content, false);
         }
         assertWatchedDateNotBeforeRelease(dto.watchedDate(),
-                resolveReleaseDate(ContentType.MOVIE, content.tmdbId(), null, null, null, language));
-        return content;
+                resolveReleaseDate(ContentType.MOVIE, content.tmdbId(), null, null, null));
+        return new ResolvedContentRef(content, false);
     }
 
-    private ContentRefCreationDTO withDerivedEpisodeFinaleFlags(ContentRefCreationDTO dto, LocalDate watchedDate, String language) {
+    private ResolvedContentRef withDerivedEpisodeFinaleFlags(ContentRefCreationDTO dto, LocalDate watchedDate, String language) {
         if (dto.seriesTmdbId() == null || dto.seriesTmdbId().isBlank() || dto.seasonNumber() == null || dto.episodeNumber() == null) {
-            return dto;
+            return new ResolvedContentRef(dto, false);
         }
 
         Optional<TmdbSeasonFullDetails> seasonDetails = tmdbClient
                 .getSeasonFullDetails(dto.seriesTmdbId(), dto.seasonNumber(), language).toOptional();
         if (seasonDetails.isEmpty()) {
-            return dto;
+            return new ResolvedContentRef(dto, false);
         }
 
         assertWatchedDateNotBeforeRelease(watchedDate, episodeAirDate(seasonDetails.get(), dto.episodeNumber()));
 
+        Integer runtimeMinutes = episodeRuntimeMinutesFromTmdb(seasonDetails.get()).get(dto.episodeNumber());
+        boolean trustedRuntimeMinutes = runtimeMinutes != null;
+
         int airedEpisodeCount = airedEpisodeCount(seasonDetails.get());
         if (airedEpisodeCount == 0) {
-            return dto;
+            return new ResolvedContentRef(withRuntimeMinutes(dto, runtimeMinutes), trustedRuntimeMinutes);
         }
 
         boolean isSeasonFinale = dto.episodeNumber() == airedEpisodeCount;
         Boolean seasonFinaleFlag = isSeasonFinale ? Boolean.TRUE : null;
         Boolean seriesFinaleFlag = isSeasonFinale ? deriveSeriesFinaleFlag(dto.seriesTmdbId(), dto.seasonNumber(), language) : null;
 
+        ContentRefCreationDTO resolved = new ContentRefCreationDTO(dto.tmdbId(), dto.type(), dto.seriesTmdbId(), dto.seasonNumber(),
+                dto.episodeNumber(), seasonFinaleFlag, seriesFinaleFlag, runtimeMinutes, dto.genres(), dto.releaseYear(), dto.countries());
+        return new ResolvedContentRef(resolved, trustedRuntimeMinutes);
+    }
+
+    private ContentRefCreationDTO withRuntimeMinutes(ContentRefCreationDTO dto, Integer runtimeMinutes) {
         return new ContentRefCreationDTO(dto.tmdbId(), dto.type(), dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(),
-                seasonFinaleFlag, seriesFinaleFlag, dto.runtimeMinutes(), dto.genres(), dto.releaseYear(), dto.countries());
+                dto.isSeasonFinale(), dto.isSeriesFinale(), runtimeMinutes, dto.genres(), dto.releaseYear(), dto.countries());
     }
 
     private Boolean deriveSeriesFinaleFlag(String seriesTmdbId, Integer seasonNumber, String language) {

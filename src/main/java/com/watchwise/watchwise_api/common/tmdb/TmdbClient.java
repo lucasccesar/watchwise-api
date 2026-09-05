@@ -16,6 +16,8 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class TmdbClient {
 
+    public static final String LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE = "en-US";
+
     private final RestClient tmdbRestClient;
 
     public Optional<TmdbMovieDetails> getMovieDetails(String tmdbId) {
