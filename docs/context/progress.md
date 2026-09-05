@@ -3677,3 +3677,39 @@ usuário notificado (`userIds.forEach(...)`) — trocado por montar a lista via
 `stream().map(...).toList()` e um único `saveAll(...)`, eliminando N round-trips ao banco por evento
 de notificação em massa. Testes existentes atualizados para capturar `List<Notification>` em vez de
 uma `Notification` por invocação.
+
+## 2026-09-05 (2) — `DELETE /users/me` quebrava com 500 se o usuário era companion em diário alheio
+
+Item 1 (alta severidade) de `docs/pending/audit-completa-2026-09-04.md`. `fk_watch_companions_user`
+(`watch_companions.user_id → users.id`, criada em `V35`) era a única FK pra `users` em todo o schema
+sem `ON DELETE CASCADE` — as outras 15+ já tinham. Um usuário marcado como "assistido com" no diário de
+outra pessoa (sem nunca precisar logar nada no próprio diário) não conseguia apagar a própria conta: a
+constraint barrava o delete, `UserServiceImpl.deleteAccount` não tratava
+`DataIntegrityViolationException`, e caía no catch-all genérico do `GlobalExceptionHandler` → `500`.
+
+Corrigido via `V44__add-cascade-delete-to-watch-companions-user-fk.sql` (drop + recria a constraint com
+`ON DELETE CASCADE`), em vez de tratar a exceção no service — mesmo raciocínio de domínio já aplicado ao
+FK de `diary_entry_id`: se um dos dois participantes do "assistimos juntos" some, o registro sozinho não
+faz mais sentido. Novo teste de integração
+(`UserControllerIntegrationTest.shouldDeleteAccountAndCascadeWatchCompanionRowWhenUserWasTaggedAsACompanionInAnotherUsersDiaryEntry`)
+prova o cenário: usuário B marcado como companion na `DiaryEntry` de A consegue `DELETE /users/me` com
+`204`, a linha de `watch_companions` some (cascade) e a `DiaryEntry` de A permanece intacta. Migração
+validada contra Postgres real via Testcontainers. `business-rules.md`/`business-rules-summary.md`
+atualizados junto.
+
+## 2026-09-05 (3) — Lockout de login por conta era contornável rotacionando IP
+
+Item 2 (média severidade) de `docs/pending/audit-completa-2026-09-04.md`. `AuthController.buildLockoutKey`
+combinava IP + identifier (`"login|" + request.getRemoteAddr() + "|" + identifier`) — um atacante fazendo
+brute-force distribuído contra uma conta específica (IPs diferentes: proxies, botnet, VPN) nunca acionava
+o lockout daquela conta, já que cada IP tinha contador de tentativas falhas independente. Inconsistente
+com o próprio código: `UserController.lockoutKey` (usado em patch/delete de conta) já usava só o
+identificador, sem IP.
+
+Corrigido removendo o componente de IP — a chave agora é só `"login|" + identifier.trim().toLowerCase()`.
+`requestThrottler` por IP (rate limit de requisições totais por IP, independente de credenciais) continua
+existindo sem mudanças, é uma camada complementar, não o lockout por conta. Teste de integração que antes
+documentava o bypass (`shouldNotBlockADifferentIpWhenAnotherIpIsRateLimited`) foi invertido pra provar o
+comportamento corrigido (`shouldStillBlockADifferentIpWhenSameIdentifierIsRateLimited`); teste unitário
+correspondente em `AuthControllerTest` também atualizado. Suíte completa validada contra Postgres real via
+Testcontainers.

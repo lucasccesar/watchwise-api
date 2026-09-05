@@ -1068,6 +1068,15 @@ constraints de tamanho/formato de DTO.
     `retractSeasonIfIncomplete`/`retractSeriesIfIncomplete`, `deleteAllDiaryEntriesForSeries`) já limpa
     os `WatchCompanion` dela automaticamente no banco, mesmo padrão de cascata via constraint já usado
     em `likes`.
+  - **`ON DELETE CASCADE` também no FK de `user_id` (`fk_watch_companions_user`), desde
+    `V44__add-cascade-delete-to-watch-companions-user-fk.sql` (2026-09-05)** — a tabela nasceu
+    (`V35`) sem cascade nesse FK, a única das 15+ FKs pra `users` no schema inteiro sem ela; um usuário
+    marcado como companion no diário de outra pessoa (sem nunca ter logado nada no próprio diário) não
+    conseguia `DELETE /users/me` — a constraint barrava o delete e virava `500` genérico, já que
+    `UserServiceImpl.deleteAccount` não trata `DataIntegrityViolationException`. Corrigido via migration
+    adicionando o cascade, em vez de tratar a exceção no service — se um dos dois participantes do
+    "assistimos juntos" some, o registro de companion sozinho não faz sentido de domínio de qualquer
+    forma, mesmo raciocínio já aplicado ao FK de `diary_entry_id`.
 - **`content` é imutável depois de criada a entrada** — `PATCH /diary/{id}` (`DiaryEntryUpdateDTO`) não
   aceita `content`; para logar um conteúdo diferente é preciso criar uma nova entrada, não editar a
   existente.

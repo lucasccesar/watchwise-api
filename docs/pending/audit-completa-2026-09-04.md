@@ -11,7 +11,7 @@ rastreado. Só investigação — nada foi implementado ainda.
 
 ## Alta severidade
 
-### 1. 🔴 `DELETE /users/me` quebra com 500 se o usuário já foi `watchedWith` (companion) em diário alheio
+### 1. ✅ CORRIGIDO (2026-09-05) — `DELETE /users/me` quebrava com 500 se o usuário já foi `watchedWith` (companion) em diário alheio
 
 **Arquivos:** `db/migration/V35__create-watch-companions-table.sql:7` + `UserServiceImpl.deleteAccount`
 (`user/service/impl/UserServiceImpl.java:285-293`)
@@ -30,11 +30,16 @@ ou suporte.
 um dos dois participantes do "assistimos juntos" some, o registro de companion sozinho não faz mais
 sentido.
 
+**Corrigido:** `V44__add-cascade-delete-to-watch-companions-user-fk.sql` adiciona `ON DELETE CASCADE` na
+constraint. Teste de integração novo
+(`UserControllerIntegrationTest.shouldDeleteAccountAndCascadeWatchCompanionRowWhenUserWasTaggedAsACompanionInAnotherUsersDiaryEntry`)
+prova o cenário fim a fim. `business-rules.md`/`business-rules-summary.md` atualizados.
+
 ---
 
 ## Média severidade
 
-### 2. 🟡 Lockout de login é por (IP + identifier), não só por identifier — bypass por rotação de IP
+### 2. ✅ CORRIGIDO (2026-09-05) — Lockout de login é por (IP + identifier), não só por identifier — bypass por rotação de IP
 
 **Arquivo:** `user/controller/AuthController.java:210` (`buildLockoutKey`)
 
@@ -51,6 +56,15 @@ conta.
 Contraste dentro do próprio código: `UserController.lockoutKey` (linha 139-141, usado em patch/delete
 de conta) usa **só o identificador do usuário**, sem IP — é o padrão correto que o projeto já usa em
 outro lugar. O login é a exceção inconsistente.
+
+**Corrigido:** `AuthController.buildLockoutKey` não recebe mais `HttpServletRequest`/IP — a chave passa
+a ser só `"login|" + identifier.trim().toLowerCase()`, igual ao padrão já usado em
+`UserController.lockoutKey`. O `requestThrottler` por IP (linha 116) continua intocado — ele é uma
+camada complementar, não o lockout por conta. Teste de integração que documentava o comportamento antigo
+(`shouldNotBlockADifferentIpWhenAnotherIpIsRateLimited`) foi invertido pra provar o comportamento
+corrigido (`shouldStillBlockADifferentIpWhenSameIdentifierIsRateLimited` —
+`AuthControllerIntegrationTest`); teste unitário `AuthControllerTest` também atualizado
+(`shouldBuildLockoutKeyFromIdentifierOnlyWhenCalled`).
 
 ### 3. 🟡 `request.getRemoteAddr()` sem `forward-headers-strategy` configurado em prod
 
