@@ -1216,7 +1216,19 @@ class UserServiceImplTest {
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("Invalid credentials");
 
-        verifyNoInteractions(passwordEncoder, userMapper);
+        verifyNoInteractions(userMapper);
+    }
+
+    @Test
+    @DisplayName("[login] Should Compare Against A Dummy Hash To Equalize Timing - When Identifier Does Not Match Any User")
+    void shouldCompareAgainstADummyHashToEqualizeTimingWhenIdentifierDoesNotMatchAnyUser() {
+        LoginUserDTO loginUserDTO = new LoginUserDTO("unknown@email.com", "Password123");
+        when(userRepository.findByUsernameIgnoreCase("unknown@email.com")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("unknown@email.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.login(loginUserDTO)).isInstanceOf(UnauthorizedException.class);
+
+        verify(passwordEncoder).matches("Password123", UserServiceImpl.DUMMY_PASSWORD_HASH);
     }
 
     @Test

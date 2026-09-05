@@ -55,6 +55,8 @@ public class UserServiceImpl implements UserService {
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
+    static final String DUMMY_PASSWORD_HASH =
+            "$2a$10$CwTycUXWue0Thq9StjUM0uJ8Pki7Q0OFPHiOEyDkQksJ0FUmnQWly";
 
     @Override
     public UserResponseDTO saveNewUser(PostUserDTO postUserDTO) {
@@ -260,14 +262,18 @@ public class UserServiceImpl implements UserService {
     @Override
     public UserResponseDTO login(LoginUserDTO loginUserDTO) {
         String identifier = loginUserDTO.identifier().trim();
-        User user = userRepository.findByUsernameIgnoreCase(identifier)
-                .or(() -> userRepository.findByEmailIgnoreCase(identifier))
-                .orElseThrow(() -> new UnauthorizedException("Invalid credentials"));
+        Optional<User> maybeUser = userRepository.findByUsernameIgnoreCase(identifier)
+                .or(() -> userRepository.findByEmailIgnoreCase(identifier));
 
-        if (!passwordEncoder.matches(loginUserDTO.password(), user.getPassword())) {
+        boolean passwordMatches = passwordEncoder.matches(
+                loginUserDTO.password(),
+                maybeUser.map(User::getPassword).orElse(DUMMY_PASSWORD_HASH));
+
+        if (maybeUser.isEmpty() || !passwordMatches) {
             throw new UnauthorizedException("Invalid credentials");
         }
 
+        User user = maybeUser.get();
         if (!Boolean.TRUE.equals(user.getIsEmailVerified())) {
             throw new ForbiddenException("Email not verified");
         }
