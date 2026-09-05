@@ -161,7 +161,7 @@ class ContentTrackingServiceImplTest {
         when(contentService.getOrCreateReference(any())).thenReturn(contentRef);
         when(contentRepository.findById(series.getId())).thenReturn(Optional.of(series));
         when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
-        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null, null)));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
 
         contentTrackingService.trackContentChanges();
@@ -177,7 +177,7 @@ class ContentTrackingServiceImplTest {
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
         when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
-        TmdbTvDetails details = new TmdbTvDetails("1399", "Returning Series", new TmdbNextEpisode("", 6, 5));
+        TmdbTvDetails details = new TmdbTvDetails("1399", "Returning Series", new TmdbNextEpisode("", 6, 5), null);
         when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(details));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
 
@@ -197,7 +197,7 @@ class ContentTrackingServiceImplTest {
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
         when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
-        TmdbTvDetails details = new TmdbTvDetails("1399", "Returning Series", new TmdbNextEpisode(null, 6, 5));
+        TmdbTvDetails details = new TmdbTvDetails("1399", "Returning Series", new TmdbNextEpisode(null, 6, 5), null);
         when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(details));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
 
@@ -220,7 +220,7 @@ class ContentTrackingServiceImplTest {
         when(contentService.getOrCreateReference(any())).thenReturn(contentRef);
         when(contentRepository.findById(seriesContent.getId())).thenReturn(Optional.of(seriesContent));
         when(trackedContentStateRepository.findByContentId(seriesContent.getId())).thenReturn(Optional.empty());
-        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null, null)));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
 
         contentTrackingService.trackContentChanges();
@@ -303,7 +303,7 @@ class ContentTrackingServiceImplTest {
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
         when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
         when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
-        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null, null)));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
 
         contentTrackingService.trackContentChanges();

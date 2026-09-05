@@ -45,6 +45,14 @@ public class TrackedContentState {
     @Setter
     private Integer nextEpisodeNumber;
 
+    @Column(name = "last_known_season_number")
+    @Setter
+    private Integer lastKnownSeasonNumber;
+
+    @Column(name = "last_known_season_air_date")
+    @Setter
+    private LocalDate lastKnownSeasonAirDate;
+
     @Column(name = "last_checked_at", nullable = false)
     @Setter
     private LocalDateTime lastCheckedAt;

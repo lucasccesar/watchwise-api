@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.notification.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
@@ -154,7 +155,9 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
     private String buildMessage(Content content, ContentChangeEvent event) {
         return switch (event.type()) {
             case RELEASE -> "New release available";
-            case ANNOUNCED_DATE -> "Release date announced: " + event.relevantDate();
+            case ANNOUNCED_DATE -> event.seasonNumber() != null
+                    ? "New season announced: Season " + event.seasonNumber() + " airs on " + event.relevantDate()
+                    : "Release date announced: " + event.relevantDate();
             case CANCELLED -> "This title was cancelled";
             case RENEWED -> "This series was renewed";
             case NEW_EPISODE -> "New episode available (S" + event.seasonNumber() + "E" + event.episodeNumber() + ")";
@@ -182,6 +185,14 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             state.setNextEpisodeAirDate(null);
             state.setNextEpisodeSeasonNumber(null);
             state.setNextEpisodeNumber(null);
+        }
+        TmdbSeasonSummary latestSeason = ContentChangeDetector.latestSeason(fresh.seasons());
+        if (latestSeason != null) {
+            state.setLastKnownSeasonNumber(latestSeason.seasonNumber());
+            state.setLastKnownSeasonAirDate(TmdbDateParser.parseDate(latestSeason.airDate()));
+        } else {
+            state.setLastKnownSeasonNumber(null);
+            state.setLastKnownSeasonAirDate(null);
         }
         state.setLastCheckedAt(LocalDateTime.now());
         trackedContentStateRepository.save(state);

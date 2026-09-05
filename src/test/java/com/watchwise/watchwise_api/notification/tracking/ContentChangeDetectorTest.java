@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.notification.tracking;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbNextEpisode;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.entity.TrackedContentState;
@@ -102,7 +103,7 @@ class ContentChangeDetectorTest {
     @DisplayName("[detectTvChange] Should Return RENEWED - When Status Moves From Ended To Returning Series")
     void shouldReturnRenewedWhenStatusMovesFromEndedToReturningSeries() {
         TrackedContentState previous = TrackedContentState.builder().lastKnownStatus("Ended").build();
-        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series", null);
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series", null, null);
 
         List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
 
@@ -113,7 +114,7 @@ class ContentChangeDetectorTest {
     @DisplayName("[detectTvChange] Should Return CANCELLED - When Status Changes To Canceled")
     void shouldReturnCancelledWhenStatusChangesToCanceledForTvShow() {
         TrackedContentState previous = TrackedContentState.builder().lastKnownStatus("Returning Series").build();
-        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Canceled", null);
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Canceled", null, null);
 
         List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
 
@@ -129,7 +130,7 @@ class ContentChangeDetectorTest {
                 .nextEpisodeSeasonNumber(6).nextEpisodeNumber(3)
                 .build();
         TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series",
-                new TmdbNextEpisode("2026-09-05", 6, 4));
+                new TmdbNextEpisode("2026-09-05", 6, 4), null);
 
         List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
 
@@ -147,7 +148,7 @@ class ContentChangeDetectorTest {
                 .nextEpisodeSeasonNumber(6).nextEpisodeNumber(3)
                 .build();
         TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series",
-                new TmdbNextEpisode("2026-09-05", 6, 4));
+                new TmdbNextEpisode("2026-09-05", 6, 4), null);
 
         List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
 
@@ -158,9 +159,97 @@ class ContentChangeDetectorTest {
     @Test
     @DisplayName("[detectTvChange] Should Return Empty List - When First Observation Already Shows Cancelled")
     void shouldReturnEmptyListWhenFirstObservationAlreadyShowsCancelled() {
-        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Canceled", null);
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Canceled", null, null);
 
         List<ContentChangeEvent> result = detector.detectTvChange(null, fresh, today);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[detectTvChange] Should Return RELEASE - When Status Transitions From Planned To Returning Series")
+    void shouldReturnReleaseWhenStatusTransitionsFromPlannedToReturningSeries() {
+        TrackedContentState previous = TrackedContentState.builder().lastKnownStatus("Planned").build();
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series", null, null);
+
+        List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
+
+        assertThat(result).extracting(ContentChangeEvent::type).containsExactly(NotificationType.RELEASE);
+    }
+
+    @Test
+    @DisplayName("[detectTvChange] Should Return Empty List - When Status Transitions Between Pre-Release Stages")
+    void shouldReturnEmptyListWhenStatusTransitionsBetweenPreReleaseStages() {
+        TrackedContentState previous = TrackedContentState.builder().lastKnownStatus("Planned").build();
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "In Production", null, null);
+
+        List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[detectTvChange] Should Return ANNOUNCED_DATE With Season Number - When A New Season's Air Date First Appears")
+    void shouldReturnAnnouncedDateWithSeasonNumberWhenANewSeasonsAirDateFirstAppears() {
+        TrackedContentState previous = TrackedContentState.builder()
+                .lastKnownStatus("Returning Series")
+                .lastKnownSeasonNumber(2).lastKnownSeasonAirDate(LocalDate.of(2025, 1, 1))
+                .build();
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", "", "2024-01-01", 10, null),
+                        new TmdbSeasonSummary(2, "Season 2", "", "2025-01-01", 8, null),
+                        new TmdbSeasonSummary(3, "Season 3", "", "2027-01-10", 0, null)));
+
+        List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
+
+        assertThat(result).extracting(ContentChangeEvent::type).containsExactly(NotificationType.ANNOUNCED_DATE);
+        assertThat(result.getFirst().relevantDate()).isEqualTo(LocalDate.of(2027, 1, 10));
+        assertThat(result.getFirst().seasonNumber()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("[detectTvChange] Should Return Empty List - When The Latest Season's Air Date Is Already Known")
+    void shouldReturnEmptyListWhenTheLatestSeasonsAirDateIsAlreadyKnown() {
+        TrackedContentState previous = TrackedContentState.builder()
+                .lastKnownStatus("Returning Series")
+                .lastKnownSeasonNumber(3).lastKnownSeasonAirDate(LocalDate.of(2027, 1, 10))
+                .build();
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(3, "Season 3", "", "2027-01-10", 0, null)));
+
+        List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[detectTvChange] Should Return Empty List - When The New Season's Air Date Is Still Unknown")
+    void shouldReturnEmptyListWhenTheNewSeasonsAirDateIsStillUnknown() {
+        TrackedContentState previous = TrackedContentState.builder()
+                .lastKnownStatus("Returning Series")
+                .lastKnownSeasonNumber(2).lastKnownSeasonAirDate(LocalDate.of(2025, 1, 1))
+                .build();
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(2, "Season 2", "", "2025-01-01", 8, null),
+                        new TmdbSeasonSummary(3, "Season 3", "", null, 0, null)));
+
+        List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[detectTvChange] Should Ignore Season Zero - When Computing The Latest Season")
+    void shouldIgnoreSeasonZeroWhenComputingTheLatestSeason() {
+        TrackedContentState previous = TrackedContentState.builder()
+                .lastKnownStatus("Returning Series")
+                .lastKnownSeasonNumber(1).lastKnownSeasonAirDate(LocalDate.of(2024, 1, 1))
+                .build();
+        TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", "", "2024-01-01", 10, null),
+                        new TmdbSeasonSummary(0, "Specials", "", "2027-05-01", 2, null)));
+
+        List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
 
         assertThat(result).isEmpty();
     }
@@ -174,7 +263,7 @@ class ContentChangeDetectorTest {
                 .nextEpisodeSeasonNumber(6).nextEpisodeNumber(4)
                 .build();
         TmdbTvDetails fresh = new TmdbTvDetails("1396", "Returning Series",
-                new TmdbNextEpisode("2026-09-05", 6, 4));
+                new TmdbNextEpisode("2026-09-05", 6, 4), null);
 
         List<ContentChangeEvent> result = detector.detectTvChange(previous, fresh, today);
 

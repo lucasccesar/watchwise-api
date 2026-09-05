@@ -1,0 +1,2 @@
+ALTER TABLE tracked_content_states ADD COLUMN last_known_season_number INTEGER;
+ALTER TABLE tracked_content_states ADD COLUMN last_known_season_air_date DATE;
