@@ -1,11 +1,11 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
+import com.github.benmanes.caffeine.cache.Cache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.annotation.Import;
@@ -15,9 +15,18 @@ import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ResponseCreator;
 import org.springframework.web.client.RestClient;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -26,11 +35,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Exercises the real {@code @Cacheable}-woven proxy — {@link TmdbClientTest} uses a bare
- * {@code new TmdbClient(...)} with no Spring context, so it never runs the caching AOP interceptor
- * and would not catch a broken {@code unless}/{@code key} SpEL expression (see the {@code unless =
- * "#result.isEmpty()"} bug caught manually via Postman: Spring unwraps an {@code Optional} return
- * value before evaluating {@code unless}, so {@code #result} is the unwrapped type, not the Optional).
+ * Exercises {@link TmdbClient} wired with the real {@link TmdbCacheConfig} caches — {@link TmdbClientTest}
+ * constructs {@code TmdbClient} with disposable, per-test Caffeine caches that are never reused across
+ * calls, so it never exercises the actual cache-hit / never-cache-a-failure behavior these caches exist
+ * for (see {@code TmdbClient.cachedLookup} — a computed {@code Unavailable} result must never be cached).
  */
 @SpringJUnitConfig
 @ContextConfiguration(classes = {TmdbCacheConfig.class, TmdbClientCachingTest.Config.class})
@@ -57,8 +65,13 @@ class TmdbClientCachingTest {
         }
 
         @Bean
-        TmdbClient tmdbClient(RestClient tmdbRestClient) {
-            return new TmdbClient(tmdbRestClient);
+        TmdbClient tmdbClient(RestClient tmdbRestClient,
+                Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache,
+                Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache,
+                Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache,
+                Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache) {
+            return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
+                    tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache);
         }
     }
 
@@ -69,12 +82,66 @@ class TmdbClientCachingTest {
     private MockRestServiceServer mockServer;
 
     @Autowired
-    private CacheManager cacheManager;
+    private Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
 
     @BeforeEach
     void resetExpectationsAndCache() {
         mockServer.reset();
-        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
+        tmdbMovieFullDetailsCache.invalidateAll();
+        tmdbTvFullDetailsCache.invalidateAll();
+        tmdbSeasonFullDetailsCache.invalidateAll();
+        tmdbEpisodeFullDetailsCache.invalidateAll();
+    }
+
+    @Test
+    @DisplayName("[getMovieFullDetails] Should Make Only One Real TMDB Call - When Concurrent Requests Race For The Same Uncached Key")
+    void shouldMakeOnlyOneRealTmdbCallWhenConcurrentRequestsRaceForTheSameUncachedKey() throws InterruptedException {
+        ResponseCreator slowSuccess = request -> {
+            try {
+                Thread.sleep(150);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return withSuccess("""
+                    {"id": "603", "title": "The Matrix"}
+                    """, MediaType.APPLICATION_JSON).createResponse(request);
+        };
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos&language=en-US"))
+                .andRespond(slowSuccess);
+
+        int concurrentCallers = 8;
+        ExecutorService executor = Executors.newFixedThreadPool(concurrentCallers);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        List<Future<TmdbLookupResult<TmdbMovieFullDetails>>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < concurrentCallers; i++) {
+                futures.add(executor.submit(() -> {
+                    startLatch.await();
+                    return tmdbClient.getMovieFullDetails("603", "en-US");
+                }));
+            }
+            startLatch.countDown();
+
+            for (Future<TmdbLookupResult<TmdbMovieFullDetails>> future : futures) {
+                assertThat(future.get(5, TimeUnit.SECONDS).toOptional()).isPresent();
+            }
+        } catch (ExecutionException | java.util.concurrent.TimeoutException e) {
+            throw new AssertionError(e);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        mockServer.verify();
     }
 
     @Test

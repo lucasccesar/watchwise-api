@@ -1,8 +1,8 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
+import com.github.benmanes.caffeine.cache.Cache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -19,6 +19,10 @@ public class TmdbClient {
     public static final String LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE = "en-US";
 
     private final RestClient tmdbRestClient;
+    private final Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache;
+    private final Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
+    private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
+    private final Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
 
     public Optional<TmdbMovieDetails> getMovieDetails(String tmdbId) {
         return callWithRetry(() -> tmdbRestClient.get()
@@ -44,9 +48,8 @@ public class TmdbClient {
                 "person " + personTmdbId).toOptional();
     }
 
-    @Cacheable(cacheNames = "tmdbMovieFullDetails", key = "#tmdbId + '|' + #language", unless = "#result.isUnavailable()")
     public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {
-        return callWithRetry(() -> tmdbRestClient.get()
+        return cachedLookup(tmdbMovieFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/movie/{id}")
                                 .queryParam("append_to_response", "credits,watch/providers,alternative_titles,videos")
@@ -54,12 +57,11 @@ public class TmdbClient {
                                 .build(tmdbId))
                         .retrieve()
                         .body(TmdbMovieFullDetails.class),
-                "movie full details " + tmdbId);
+                "movie full details " + tmdbId));
     }
 
-    @Cacheable(cacheNames = "tmdbTvFullDetails", key = "#tmdbId + '|' + #language", unless = "#result.isUnavailable()")
     public TmdbLookupResult<TmdbTvFullDetails> getTvFullDetails(String tmdbId, String language) {
-        return callWithRetry(() -> tmdbRestClient.get()
+        return cachedLookup(tmdbTvFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/tv/{id}")
                                 .queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos")
@@ -67,33 +69,43 @@ public class TmdbClient {
                                 .build(tmdbId))
                         .retrieve()
                         .body(TmdbTvFullDetails.class),
-                "tv full details " + tmdbId);
+                "tv full details " + tmdbId));
     }
 
-    @Cacheable(cacheNames = "tmdbSeasonFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #language", unless = "#result.isUnavailable()")
     public TmdbLookupResult<TmdbSeasonFullDetails> getSeasonFullDetails(String seriesTmdbId, Integer seasonNumber, String language) {
-        return callWithRetry(() -> tmdbRestClient.get()
-                        .uri(uriBuilder -> uriBuilder
-                                .path("/tv/{seriesId}/season/{seasonNumber}")
-                                .queryParam("append_to_response", "aggregate_credits,watch/providers")
-                                .queryParam("language", language)
-                                .build(seriesTmdbId, seasonNumber))
-                        .retrieve()
-                        .body(TmdbSeasonFullDetails.class),
-                "season full details " + seriesTmdbId + "/" + seasonNumber);
+        return cachedLookup(tmdbSeasonFullDetailsCache, seriesTmdbId + "|" + seasonNumber + "|" + language,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri(uriBuilder -> uriBuilder
+                                        .path("/tv/{seriesId}/season/{seasonNumber}")
+                                        .queryParam("append_to_response", "aggregate_credits,watch/providers")
+                                        .queryParam("language", language)
+                                        .build(seriesTmdbId, seasonNumber))
+                                .retrieve()
+                                .body(TmdbSeasonFullDetails.class),
+                        "season full details " + seriesTmdbId + "/" + seasonNumber));
     }
 
-    @Cacheable(cacheNames = "tmdbEpisodeFullDetails", key = "#seriesTmdbId + '|' + #seasonNumber + '|' + #episodeNumber + '|' + #language", unless = "#result.isUnavailable()")
     public TmdbLookupResult<TmdbEpisodeFullDetails> getEpisodeFullDetails(
             String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, String language) {
-        return callWithRetry(() -> tmdbRestClient.get()
-                        .uri(uriBuilder -> uriBuilder
-                                .path("/tv/{seriesId}/season/{seasonNumber}/episode/{episodeNumber}")
-                                .queryParam("language", language)
-                                .build(seriesTmdbId, seasonNumber, episodeNumber))
-                        .retrieve()
-                        .body(TmdbEpisodeFullDetails.class),
-                "episode full details " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber);
+        return cachedLookup(tmdbEpisodeFullDetailsCache,
+                seriesTmdbId + "|" + seasonNumber + "|" + episodeNumber + "|" + language,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri(uriBuilder -> uriBuilder
+                                        .path("/tv/{seriesId}/season/{seasonNumber}/episode/{episodeNumber}")
+                                        .queryParam("language", language)
+                                        .build(seriesTmdbId, seasonNumber, episodeNumber))
+                                .retrieve()
+                                .body(TmdbEpisodeFullDetails.class),
+                        "episode full details " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber));
+    }
+
+    private <T> TmdbLookupResult<T> cachedLookup(
+            Cache<String, TmdbLookupResult<T>> cache, String key, Supplier<TmdbLookupResult<T>> loader) {
+        TmdbLookupResult<T> cached = cache.get(key, ignoredKey -> {
+            TmdbLookupResult<T> result = loader.get();
+            return result.isUnavailable() ? null : result;
+        });
+        return cached != null ? cached : new TmdbLookupResult.Unavailable<>();
     }
 
     private <T> TmdbLookupResult<T> callWithRetry(Supplier<T> call, String description) {

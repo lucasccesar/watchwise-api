@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,8 @@ class TmdbClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.themoviedb.org/3");
         mockServer = MockRestServiceServer.bindTo(builder).build();
-        tmdbClient = new TmdbClient(builder.build());
+        tmdbClient = new TmdbClient(builder.build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
     }
 
     @Test
