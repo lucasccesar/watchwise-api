@@ -128,7 +128,7 @@ class DiaryEntryControllerIntegrationTest {
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(), null, null)));
         when(tmdbClient.getTvFullDetails(any(), any())).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 null, null, null, null, null, null, null, null, null, null, null, List.of(),
-                null, null, null, null, null, null, null, null)));
+                null, null, null, null, null, null, null, null, null)));
         lenient().when(tmdbClient.getMovieFullDetails(any(), any())).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
         lenient().when(tmdbClient.getEpisodeFullDetails(any(), any(), any(), any())).thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(

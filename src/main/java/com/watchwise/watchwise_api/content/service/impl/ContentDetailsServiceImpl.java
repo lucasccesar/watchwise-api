@@ -40,6 +40,8 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.notification.service.ContentTrackingService;
+import com.watchwise.watchwise_api.notification.tracking.ContentChangeDetector;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -69,6 +71,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     static final int MAX_BATCH_IDS = 100;
     private static final int RECENT_EPISODES_LIMIT = 3;
+    private static final int RECENT_SEASONS_LIMIT_WHEN_FROZEN = 2;
     private static final Set<String> ALLOWED_CREW_JOBS = Set.of(
             "Director", "Screenplay", "Executive Producer", "Production Manager",
             "First Assistant Director", "Director of Photography", "Supervising Art Director");
@@ -79,6 +82,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private final UserRepository userRepository;
     private final TmdbClient tmdbClient;
     private final ExecutorService tmdbSeasonFetchExecutor;
+    private final ContentTrackingService contentTrackingService;
 
     @Override
     public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId) {
@@ -151,8 +155,24 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private ContentDetailsDTO buildSeriesDetails(Content content, String language, String region) {
         TmdbTvFullDetails details = tmdbClient.getTvFullDetails(content.getTmdbId(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
-        List<TmdbSeasonFullDetails> allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), details.seasons(), language);
-        List<Integer> episodeRuntimes = episodeRuntimes(allSeasons);
+
+        List<TmdbSeasonFullDetails> allSeasons;
+        Integer averageRuntimeMinutes;
+        Integer totalRuntimeMinutes;
+
+        if (isTerminalSeriesStatus(details.status()) && content.getTotalRuntimeMinutes() != null) {
+            allSeasons = fetchAllSeasonsInParallel(
+                    content.getTmdbId(), latestSeasons(details.seasons(), RECENT_SEASONS_LIMIT_WHEN_FROZEN), language);
+            totalRuntimeMinutes = content.getTotalRuntimeMinutes();
+            averageRuntimeMinutes = averageFromStored(content.getTotalRuntimeMinutes(), content.getRuntimeMinutesEpisodeCount());
+        } else {
+            allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), details.seasons(), language);
+            List<Integer> episodeRuntimes = episodeRuntimes(allSeasons);
+            totalRuntimeMinutes = totalRuntimeMinutes(episodeRuntimes);
+            averageRuntimeMinutes = averageRuntime(episodeRuntimes);
+            persistRuntimeAggregate(content, totalRuntimeMinutes, episodeRuntimes.size());
+            contentTrackingService.reactivateAfterRevival(content, details.status());
+        }
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -162,8 +182,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 details.posterPath(),
                 details.backdropPath(),
                 parseDate(details.firstAirDate()),
-                averageRuntime(episodeRuntimes),
-                totalRuntimeMinutes(episodeRuntimes),
+                averageRuntimeMinutes,
+                totalRuntimeMinutes,
                 details.numberOfSeasons(),
                 details.numberOfEpisodes(),
                 genreNames(details.genres()),
@@ -514,6 +534,37 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return null;
         }
         return episodeRuntimes.stream().mapToInt(Integer::intValue).sum();
+    }
+
+    private boolean isTerminalSeriesStatus(String status) {
+        return ContentChangeDetector.ENDED_STATUS.equals(status) || ContentChangeDetector.CANCELED_STATUS.equals(status);
+    }
+
+    private List<TmdbSeasonSummary> latestSeasons(List<TmdbSeasonSummary> seasons, int limit) {
+        if (seasons == null) {
+            return List.of();
+        }
+        return seasons.stream()
+                .filter(season -> season.seasonNumber() != null)
+                .sorted(Comparator.comparing(TmdbSeasonSummary::seasonNumber).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private Integer averageFromStored(Integer total, Integer episodeCount) {
+        if (total == null || episodeCount == null || episodeCount == 0) {
+            return null;
+        }
+        return (int) Math.round(total / (double) episodeCount);
+    }
+
+    private void persistRuntimeAggregate(Content content, Integer total, int episodeCount) {
+        if (total == null) {
+            return;
+        }
+        content.setTotalRuntimeMinutes(total);
+        content.setRuntimeMinutesEpisodeCount(episodeCount);
+        contentRepository.save(content);
     }
 
     private List<EpisodeSummaryDTO> recentlyAiredEpisodes(List<TmdbSeasonFullDetails> seasons) {

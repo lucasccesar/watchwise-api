@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Watchwise — Modelo Lógico do Banco de Dados</title>
+<style>
+  body { font-family: sans-serif; background: #fff; padding: 24px; }
+  h1 { font-size: 20px; font-weight: 500; margin-bottom: 16px; }
+  #erd { overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Watchwise — Modelo lógico do banco de dados (v12)</h1>
+<div id="erd"></div>
+<p>
+  <strong>COMENTARIO</strong> pode ser feito em um <code>CONTEUDO</code>, uma <code>LISTA</code> ou um
+  <code>LOG</code> — exatamente um desses três FKs (<code>conteudo_id</code>, <code>lista_id</code>,
+  <code>log_id</code>) é preenchido por linha, nunca mais de um (regra reforçada por
+  <code>CHECK</code> constraint no banco, não representável na notação do diagrama acima).
+  <code>comentario_pai_id</code> é independente disso — quando preenchido, indica que a linha é uma
+  resposta a outro comentário, e deve apontar para um comentário com o mesmo alvo (mesmo
+  <code>conteudo_id</code>/<code>lista_id</code>/<code>log_id</code>), regra validada em nível de
+  aplicação.
+</p>
+<p>
+  <strong>COMENTARIO</strong> é sempre apagado em cascata junto com qualquer uma de suas quatro FKs
+  (decisão tomada com o usuário em 2026-08-20): apagar o <code>CONTEUDO</code>, a <code>LISTA</code>
+  ou o <code>LOG</code> alvo apaga os comentários daquele alvo (mesma convenção <code>ON DELETE
+  CASCADE</code> já usada em toda outra tabela que referencia essas três); apagar o <code>USUARIO</code>
+  apaga todos os comentários que ele escreveu, sem exceção — não existe um placeholder de "usuário
+  excluído" nem preservação de comentário órfão. <code>comentario_pai_id</code> (auto-referência) também
+  é <code>ON DELETE CASCADE</code>: apagar um comentário apaga em cascata toda a sub-árvore de respostas
+  abaixo dele, mesmo respostas escritas por outros usuários que não apagaram nada. <code>texto</code> tem
+  no máximo 280 caracteres, mesmo padrão de <code>DROPPED.comentario</code>. Uma "lista de listas" (ver
+  <strong>ITEM_LISTA</strong> abaixo) não recebe <code>COMENTARIO</code> — só uma lista comum (incluindo
+  uma lista filha aninhada dentro de uma lista de listas) pode.
+</p>
+<p>
+  <strong>CURTIDA</strong> pode ser feita em um <code>COMENTARIO</code>, um <code>LOG</code> ou uma
+  <code>LISTA</code> — exatamente um desses três FKs (<code>comentario_id</code>, <code>log_id</code>,
+  <code>lista_id</code>) é preenchido por linha, nunca mais de um nem nenhum (mesmo espírito do
+  polimorfismo de <code>COMENTARIO</code> acima), reforçado por <code>UNIQUE(usuario_id, alvo)</code> em
+  cada uma das três FKs — um usuário não curte o mesmo alvo duas vezes. Decisão tomada com o usuário em
+  2026-08-21: curtida em <code>LISTA</code> é direta (não depende de haver um <code>COMENTARIO</code> na
+  lista pra curtir) e segue a mesma regra de visibilidade de <code>GET /lista/{id}</code>. Mesma trava de
+  <code>COMENTARIO</code>: uma "lista de listas" não recebe <code>CURTIDA</code> — só uma lista comum
+  pode.
+</p>
+<p>
+  <code>quantidade_curtidas</code> (nova em <strong>COMENTARIO</strong>, <strong>LOG</strong> e
+  <strong>LISTA</strong>) é uma coluna desnormalizada, não uma <code>COUNT(*)</code> sobre
+  <code>CURTIDA</code> calculada por requisição — mantida incrementada/decrementada em conjunto com o
+  insert/delete da linha correspondente de <code>CURTIDA</code> (mesma transação). O estado "curtido pelo
+  usuário autenticado" (exposto como <code>likedByMe</code> no <code>openapi.yaml</code>) não é
+  denormalizado — é resolvido por uma consulta em lote (<code>usuario_id</code> igual ao viewer, mais
+  <code>IN</code> dos ids da página) contra <code>CURTIDA</code>, coberta pelo mesmo índice único que já
+  garante uma curtida por usuário por alvo (<code>UNIQUE(usuario_id, alvo)</code> acima), evitando o N+1
+  de uma checagem de existência por item da página.
+</p>
+<p>
+  Não existe uma entidade de avaliação separada: logar, avaliar e escrever uma review de um conteúdo
+  são a mesma ação. <code>nota</code> e <code>review</code> são campos opcionais direto em
+  <code>LOG</code> — dá para logar só "assisti", sem nota nem review. A nota atual de um usuário para
+  um conteúdo é a de seu <code>LOG</code> mais recente para esse par (por <code>created_at</code>, não
+  por <code>data_assistido</code>) — um reassistido com nota diferente simplesmente substitui a
+  anterior; não há tabela nem contador separado para isso, é uma consulta pela linha mais recente.
+  <code>numero_visualizacao</code> conta cada reassistida completa do conteúdo (1 = primeira vez), não
+  é mais um flag booleano de sim/não; completar uma temporada ou série pela segunda vez (ou mais) agora
+  gera automaticamente uma nova linha de <code>LOG</code> para ela, em vez de ser silenciosamente
+  ignorado como antes.
+  <code>data_assistido</code> é opcional; nem "não pode ser futura" nem "não pode ser anterior ao
+  lançamento do conteúdo" são validadas no backend (o lançamento é dado do TMDB, não armazenado
+  localmente) — as duas checagens ficam só no frontend.
+</p>
+<p>
+  <strong>TOP5</strong> é sempre por tipo — um usuário tem até 5 linhas com <code>tipo = 'MOVIE'</code>
+  e até 5 com <code>tipo = 'SERIES'</code> (nunca <code>SEASON</code>/<code>EPISODE</code>), cada
+  grupo com sua própria numeração de <code>posicao</code> (1 a 5). Constraints:
+  <code>UNIQUE(usuario_id, tipo, posicao)</code> e <code>UNIQUE(usuario_id, tipo, conteudo_id)</code>
+  — o mesmo conteúdo não pode aparecer duas vezes no top5 de um usuário. Não existe operação de
+  substituir a lista inteira nem de "mover" um item existente: só inserir (numa posição opcional —
+  se omitida, entra na próxima posição livre; se o grupo já tem 5, é obrigatória) e remover.
+  Inserir na posição <code>P</code> desloca <code>P, P+1, ...</code> uma casa pra baixo, descartando
+  quem estiver na posição 5; remover uma posição desloca as seguintes uma casa pra cima, fechando o
+  buraco. Ambas as operações mexem em várias linhas de uma vez e precisam ser atômicas.
+</p>
+<p>
+  <strong>WATCHLIST</strong> tem a mesma forma do <strong>TOP5</strong> (por <code>usuario_id</code> +
+  <code>tipo</code>, com <code>posicao</code> deslocando em inserção/remoção do mesmo jeito) mas sem
+  teto de 5 — não existe eviction, e <code>posicao</code> é sempre opcional (entra no final quando
+  omitida). Constraints: <code>UNIQUE(usuario_id, tipo, posicao)</code> e
+  <code>UNIQUE(usuario_id, tipo, conteudo_id)</code>. É a lista de "quero assistir depois", distinta de
+  <strong>LISTA</strong> — que é uma lista nomeada e criada livremente pelo usuário (ex: "Melhores ficções
+  científicas dos anos 90"), não uma fila por tipo de conteúdo.
+</p>
+<p>
+  <strong>DROPPED</strong> é um marcador de "parei de assistir esse conteúdo no meio" — por
+  <code>usuario_id</code> + <code>tipo</code> (só <code>MOVIE</code> ou <code>SERIES</code>, igual
+  <strong>TOP5</strong>/<strong>WATCHLIST</strong>; nunca <code>SEASON</code>/<code>EPISODE</code>
+  isolados), sem <code>posicao</code> nem nota, mas com um <code>comentario</code> opcional (igual
+  <strong>LOG</strong>) pra registrar o motivo. Uma linha por trinca
+  <code>usuario_id</code>+<code>tipo</code>+<code>conteudo_id</code>
+  (<code>UNIQUE(usuario_id, tipo, conteudo_id)</code>). Marcar e desmarcar manualmente são operações
+  idempotentes (marcar de novo ou desmarcar de novo não é erro), no mesmo espírito de
+  <strong>SEGUE_PESSOA</strong>. Até 2026-08-17 essa marcação só existia para <code>SERIES</code>
+  (entidade <code>SERIE_ABANDONADA</code>); passou a cobrir <code>MOVIE</code> também em 2026-08-18,
+  renomeada para <code>DROPPED</code>. Marcar como abandonado também remove automaticamente (se
+  existir) a linha de <code>WATCHLIST</code> do mesmo <code>usuario_id</code>+<code>tipo</code>+
+  <code>conteudo_id</code> — abandonar volta a ser "não quero mais assistir", então não faz sentido
+  continuar marcado como "quero assistir"; desmarcar como abandonado não reinsere de volta na
+  watchlist.
+</p>
+<p>
+  <strong>Registrar um <code>LOG</code> remove automaticamente de <code>WATCHLIST</code> e de
+  <code>DROPPED</code></strong> — logar volta a ser "estou assistindo/assisti", então não faz sentido
+  continuar marcado como "quero assistir" ou "abandonei". Se o <code>LOG</code> criado é de um
+  <code>CONTEUDO</code> com <code>tipo = 'MOVIE'</code>, remove (se existirem) as linhas de
+  <code>WATCHLIST</code> e de <code>DROPPED</code> (<code>tipo = 'MOVIE'</code>) do mesmo usuário com o
+  mesmo <code>conteudo_id</code>. Se é de <code>EPISODE</code>, <code>SEASON</code> ou
+  <code>SERIES</code>, resolve a série correspondente (pelo próprio <code>tmdb_id</code> se já for
+  <code>SERIES</code>, ou por <code>serie_tmdb_id</code> se for <code>SEASON</code>/<code>EPISODE</code>
+  — não é o mesmo <code>conteudo_id</code>, já que episódio/temporada e série são linhas de
+  <code>CONTEUDO</code> diferentes) e remove, se existirem, tanto a <code>WATCHLIST</code>
+  (<code>tipo = 'SERIES'</code>) quanto a <code>DROPPED</code> (<code>tipo = 'SERIES'</code>) do usuário
+  para essa série — assistir de novo, mesmo um único episódio, já conta como "não abandonei mais". Vale
+  tanto para <code>LOG</code> criado manualmente quanto para o auto-gerado por completude de
+  temporada/série (<code>gerado_automaticamente = true</code>), embora nesse segundo caso normalmente já
+  não haja mais nada para remover, pois o episódio que disparou a completude já teria removido antes. A
+  remoção é <em>best-effort</em>/idempotente (sem erro se não havia nada pra remover) e definitiva — apagar
+  esse <code>LOG</code> depois não reinsere a série/filme de volta em <code>WATCHLIST</code> nem
+  <code>DROPPED</code>.
+</p>
+<p>
+  <strong>ITEM_LISTA</strong> pode referenciar um <code>CONTEUDO</code> ou outra <code>LISTA</code>
+  ("lista de lista") — exatamente um dos dois FKs (<code>conteudo_id</code>, <code>lista_filha_id</code>)
+  é preenchido por linha, nunca os dois nem nenhum (regra reforçada por <code>CHECK</code> constraint no
+  banco, mesmo espírito do polimorfismo de <strong>COMENTARIO</strong> acima, só que com dois alvos).
+  Decisão tomada em 2026-08-18: a profundidade máxima é de um nível — uma "lista de listas" só pode
+  conter listas comuns, que por sua vez só contêm <code>CONTEUDO</code>; uma <code>LISTA</code> vira
+  "de conteúdo" ou "de listas" a partir do seu primeiro item, nunca mistura os dois tipos depois; e
+  <code>lista_filha_id</code> nunca pode apontar para a própria <code>lista_id</code> da linha (sem
+  ciclo). Uma "lista de listas" não recebe <code>COMENTARIO</code> nem <code>CURTIDA</code> — nem
+  indiretamente (curtida num comentário dela, que nem existe) nem diretamente (curtida na própria
+  <code>LISTA</code>) — diferente de uma lista comum, que pode receber os dois. Sem <code>nota</code>
+  própria — a avaliação de um conteúdo continua sendo só a de <code>LOG.nota</code>, não uma por item de
+  lista.
+</p>
+<p>
+  <strong>NOTIFICACAO</strong> ganhou a coluna <code>pessoa_tmdb_id</code> (nullable), preenchida apenas
+  quando <code>tipo = FOLLOWED_PERSON_NEW_CREDIT</code> — os demais tipos
+  (<code>RELEASE</code>, <code>ANNOUNCED_DATE</code>, <code>CANCELLED</code>, <code>RENEWED</code>,
+  <code>NEW_EPISODE</code>) usam só o <code>conteudo_id</code> já existente.
+</p>
+<p>
+  <strong>TRACKED_CONTENT_STATES</strong>, <strong>TRACKED_PERSON_STATES</strong> e
+  <strong>TRACKED_PERSON_CREDITS</strong> são tabelas internas de rastreamento, adicionadas em
+  2026-08-29 e <em>sem correspondência no modelo lógico original em português</em> — não existe
+  entidade PT equivalente na spec de origem, por isso já nascem com nome em inglês, seguindo a mesma
+  convenção de código do restante do projeto. Elas existem só para os dois jobs agendados
+  (<code>ContentTrackingJob</code>, diário, e <code>FollowedPersonTrackingJob</code>, semanal)
+  guardarem o último estado conhecido de cada <code>CONTEUDO</code> rastreado (via watchlist ou
+  diário em andamento) e de cada pessoa seguida no TMDB, para poder comparar contra a resposta mais
+  recente da API do TMDB e detectar mudanças (lançamento, data anunciada, cancelamento, renovação,
+  novo episódio, novo crédito de uma pessoa seguida) — nunca são expostas por nenhum endpoint da API,
+  são puramente um cache de suporte aos jobs. <code>TRACKED_CONTENT_STATES</code> tem uma linha por
+  <code>CONTEUDO</code> rastreado (<code>UNIQUE(content_id)</code>); <code>TRACKED_PERSON_STATES</code>
+  tem uma linha por pessoa TMDB seguida por pelo menos um usuário (<code>UNIQUE(person_tmdb_id)</code>),
+  e <code>TRACKED_PERSON_CREDITS</code> guarda, por pessoa rastreada, o conjunto de créditos TMDB já
+  vistos (<code>UNIQUE(tracked_person_state_id, credit_tmdb_id)</code>) — um crédito presente no TMDB
+  mas ausente aqui é o sinal de "crédito novo" que dispara uma notificação
+  <code>FOLLOWED_PERSON_NEW_CREDIT</code>.
+</p>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: false, theme: 'default', fontFamily: 'sans-serif', fontSize: '14px' });
+const def = `erDiagram
+  USUARIO ||--o{ COMENTARIO : escreve
+  USUARIO ||--o{ LISTA : cria
+  USUARIO ||--o{ LOG : registra
+  USUARIO ||--o{ CURTIDA : curte
+  USUARIO ||--o{ SEGUIDOR : segue
+  USUARIO ||--o{ TOP5 : escolhe
+  USUARIO ||--o{ SEGUE_PESSOA : segue
+  USUARIO ||--o{ NOTIFICACAO : recebe
+  USUARIO ||--o{ WATCHLIST : deseja_assistir
+  USUARIO ||--o{ DROPPED : abandona
+  CONTEUDO ||--o{ COMENTARIO : recebe
+  CONTEUDO ||--o{ LOG : registrado_em
+  CONTEUDO ||--o{ ITEM_LISTA : aparece_em
+  CONTEUDO ||--o{ TOP5 : e_escolhido
+  CONTEUDO ||--o{ NOTIFICACAO : gera
+  CONTEUDO ||--o{ WATCHLIST : e_desejado
+  CONTEUDO ||--o{ DROPPED : e_abandonado
+  LISTA ||--o{ ITEM_LISTA : contem
+  LISTA ||--o{ ITEM_LISTA : contem_como_lista_filha
+  LISTA ||--o{ COMENTARIO : recebe
+  LISTA ||--o{ CURTIDA : recebe
+  LOG ||--o{ COMENTARIO : recebe
+  COMENTARIO ||--o{ CURTIDA : recebe
+  COMENTARIO ||--o{ COMENTARIO : responde
+  LOG ||--o{ CURTIDA : recebe
+  CONTEUDO ||--o| TRACKED_CONTENT_STATES : e_rastreado_por
+  TRACKED_PERSON_STATES ||--o{ TRACKED_PERSON_CREDITS : contem
+
+  USUARIO {
+    int id PK
+    string nome
+    string email
+    string senha
+    string descricao
+    string foto_perfil
+    string banner
+    boolean conta_publica
+    string idioma_preferido
+    string regiao_preferida
+    timestamp created_at
+    timestamp updated_at
+  }
+  SEGUIDOR {
+    int seguidor_id FK
+    int seguido_id FK
+    string status
+    timestamp created_at
+  }
+  TOP5 {
+    int id PK
+    int usuario_id FK
+    int conteudo_id FK
+    string tipo
+    int posicao
+    string poster_personalizado
+    timestamp created_at
+    timestamp updated_at
+  }
+  SEGUE_PESSOA {
+    int usuario_id FK
+    string pessoa_tmdb_id
+    timestamp created_at
+  }
+  CONTEUDO {
+    int id PK
+    string tmdb_id
+    string tipo
+    string serie_tmdb_id
+    int numero_temporada
+    int numero_episodio
+    boolean e_finale_temporada
+    boolean e_finale_serie
+    int runtime_minutes
+    string[] genres
+    int release_year
+    string[] countries
+    int total_runtime_minutes
+    int runtime_minutes_episode_count
+    timestamp created_at
+    timestamp updated_at
+  }
+  COMENTARIO {
+    int id PK
+    int usuario_id FK
+    int conteudo_id FK
+    int lista_id FK
+    int log_id FK
+    int comentario_pai_id FK
+    string texto
+    boolean contem_spoiler
+    timestamp created_at
+    timestamp updated_at
+    int quantidade_curtidas
+  }
+  LISTA {
+    int id PK
+    int usuario_id FK
+    string nome
+    string descricao
+    string visibilidade "PUBLIC, FOLLOWERS ou PRIVATE"
+    timestamp created_at
+    timestamp updated_at
+    int quantidade_curtidas
+  }
+  ITEM_LISTA {
+    int id PK
+    int lista_id FK
+    int conteudo_id FK
+    int lista_filha_id FK
+    int posicao
+    string descricao
+    string poster_personalizado
+    timestamp created_at
+    timestamp updated_at
+  }
+  LOG {
+    int id PK
+    int usuario_id FK
+    int conteudo_id FK
+    int nota
+    string review
+    date data_assistido
+    int numero_visualizacao
+    boolean assistido_cinema
+    string poster_personalizado
+    boolean gerado_automaticamente
+    timestamp created_at
+    timestamp updated_at
+    int quantidade_curtidas
+  }
+  CURTIDA {
+    int id PK
+    int usuario_id FK
+    int comentario_id FK
+    int log_id FK
+    int lista_id FK
+    timestamp created_at
+  }
+  NOTIFICACAO {
+    int id PK
+    int usuario_id FK
+    int conteudo_id FK
+    string tipo
+    string mensagem
+    string pessoa_tmdb_id "nullable, só em FOLLOWED_PERSON_NEW_CREDIT"
+    boolean lida
+    timestamp created_at
+    timestamp updated_at
+  }
+  WATCHLIST {
+    int id PK
+    int usuario_id FK
+    int conteudo_id FK
+    string tipo
+    int posicao
+    timestamp created_at
+    timestamp updated_at
+  }
+  DROPPED {
+    int id PK
+    int usuario_id FK
+    int conteudo_id FK
+    string tipo
+    string comentario
+    timestamp created_at
+    timestamp updated_at
+  }
+  TRACKED_CONTENT_STATES {
+    uuid id PK
+    uuid content_id FK "UNIQUE"
+    date last_known_release_date
+    string last_known_status
+    date next_episode_air_date
+    int next_episode_season_number
+    int next_episode_number
+    int last_known_season_number
+    date last_known_season_air_date
+    timestamp last_checked_at
+  }
+  TRACKED_PERSON_STATES {
+    uuid id PK
+    string person_tmdb_id "UNIQUE"
+    timestamp last_checked_at
+  }
+  TRACKED_PERSON_CREDITS {
+    uuid id PK
+    uuid tracked_person_state_id FK
+    string credit_tmdb_id
+    string credit_type "MOVIE ou SERIES"
+  }`;
+const { svg } = await mermaid.render('erd-svg', def);
+document.getElementById('erd').innerHTML = svg;
+</script>
+</body>
+</html>

@@ -111,7 +111,7 @@ class UserListItemControllerIntegrationTest {
                         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
         lenient().when(tmdbClient.getEpisodeFullDetails(any(), any(), any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                         null, null, null, null, null, null, null, null, null)));

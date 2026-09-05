@@ -73,7 +73,7 @@ class ContentServiceImplTest {
                         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
         lenient().when(tmdbClient.getEpisodeFullDetails(any(), any(), any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                         null, null, null, null, null, null, null, null, null)));
@@ -1271,7 +1271,7 @@ class ContentServiceImplTest {
                 "300", null, null, null, null, null, "2010-03-14", null,
                 List.of(new TmdbGenre(1, "Thriller"), new TmdbGenre(2, "Drama")),
                 List.of(new TmdbProductionCountry("us", "United States")),
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
         Content mapped = Content.builder().tmdbId("300").type(ContentType.SERIES).build();
         Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).build();
         ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null,
@@ -1385,7 +1385,7 @@ class ContentServiceImplTest {
                 "300", null, null, null, null, null, null, null,
                 List.of(new TmdbGenre(1, "Thriller"), new TmdbGenre(2, "Drama")),
                 List.of(new TmdbProductionCountry("gb", "United Kingdom"), new TmdbProductionCountry("us", "United States")),
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
         Content mapped = Content.builder().tmdbId("300").type(ContentType.SERIES).build();
         Content saved = Content.builder().id(UUID.randomUUID()).tmdbId("300").type(ContentType.SERIES).build();
         ContentRefDTO responseDto = new ContentRefDTO(saved.getId(), "300", ContentType.SERIES, null, null, null, null, null, null, null,

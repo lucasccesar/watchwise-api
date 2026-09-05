@@ -13,6 +13,8 @@ public interface ContentMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "totalRuntimeMinutes", ignore = true)
+    @Mapping(target = "runtimeMinutesEpisodeCount", ignore = true)
     Content contentRefCreationDtoToContent(ContentRefCreationDTO contentRefCreationDTO);
 
     ContentRefDTO contentToContentRefDto(Content content);

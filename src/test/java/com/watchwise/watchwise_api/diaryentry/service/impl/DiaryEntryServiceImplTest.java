@@ -203,7 +203,7 @@ class DiaryEntryServiceImplTest {
 
     private TmdbTvFullDetails emptySeriesDetails() {
         return new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
-                List.of(), null, null, null, null, null, null, null, null);
+                List.of(), null, null, null, null, null, null, null, null, null);
     }
 
     private TmdbMovieFullDetails emptyMovieDetails() {
@@ -838,7 +838,7 @@ class DiaryEntryServiceImplTest {
                 new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
                         List.of(new TmdbSeasonSummary(3, null, null, "2019-01-01", 10, null),
                                 new TmdbSeasonSummary(4, null, null, "2020-01-01", 3, null)),
-                        null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null, null)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 4, 3, null, null),
@@ -2366,7 +2366,7 @@ class DiaryEntryServiceImplTest {
         int totalEpisodes = DiaryEntryServiceImpl.MAX_BULK_EPISODES + 1;
         when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
-                        List.of(), null, null, null, null, null, totalEpisodes, null, null)));
+                        List.of(), null, null, null, null, null, totalEpisodes, null, null, null)));
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
@@ -2801,7 +2801,7 @@ class DiaryEntryServiceImplTest {
                         new TmdbSeasonSummary(1, null, null, "2020-01-01", 1, null),
                         new TmdbSeasonSummary(2, null, null, "2021-01-01", 1, null),
                         new TmdbSeasonSummary(3, null, null, "2099-01-01", 1, null)),
-                        null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails(eq("900"), any(), eq(lucas.getPreferredLanguage()))).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
                         new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null)),
@@ -2898,7 +2898,7 @@ class DiaryEntryServiceImplTest {
                 new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null, List.of(
                         new TmdbSeasonSummary(1, null, null, "2020-01-01", 1, null),
                         new TmdbSeasonSummary(2, null, null, "2021-01-01", 1, null)),
-                        null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails(eq("900"), any(), eq(lucas.getPreferredLanguage()))).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
                         new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null)),
@@ -2940,7 +2940,7 @@ class DiaryEntryServiceImplTest {
                 new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null, List.of(
                         new TmdbSeasonSummary(1, null, null, "2099-01-01", 1, null),
                         new TmdbSeasonSummary(2, null, null, "2099-06-01", 1, null)),
-                        null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null, null)));
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seriesRef, LocalDate.now(), null, 5, null);

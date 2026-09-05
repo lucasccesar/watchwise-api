@@ -1,7 +1,10 @@
 package com.watchwise.watchwise_api.notification.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -32,6 +35,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -125,12 +129,94 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             return;
         }
 
-        newTransactionExecutor.runInNewTransaction(() -> {
-            TrackedContentState previous = trackedContentStateRepository.findByContentId(content.getId()).orElse(null);
-            List<ContentChangeEvent> events = contentChangeDetector.detectTvChange(previous, fresh.get(), LocalDate.now());
+        String previousStatus = newTransactionExecutor.runInNewTransaction(() -> {
+            TrackedContentState state = trackedContentStateRepository.findByContentId(content.getId()).orElse(null);
+            String status = state != null ? state.getLastKnownStatus() : null;
+            List<ContentChangeEvent> events = contentChangeDetector.detectTvChange(state, fresh.get(), LocalDate.now());
 
             events.forEach(e -> notifyWatchers(content, e));
-            saveSeriesState(content, previous, fresh.get());
+            incrementRuntimeForNewEpisodes(content, events);
+            saveSeriesState(content, state, fresh.get());
+            return status;
+        });
+
+        if (isTransitioningToTerminal(previousStatus, fresh.get().status())) {
+            reconcileRuntimeBeforeFreezing(content, fresh.get());
+        }
+    }
+
+    private boolean isTransitioningToTerminal(String previousStatus, String freshStatus) {
+        return !isTerminal(ContentType.SERIES, previousStatus) && isTerminal(ContentType.SERIES, freshStatus);
+    }
+
+    private void incrementRuntimeForNewEpisodes(Content content, List<ContentChangeEvent> events) {
+        if (content.getTotalRuntimeMinutes() == null) {
+            return;
+        }
+        events.stream()
+                .filter(event -> event.type() == NotificationType.NEW_EPISODE)
+                .forEach(event -> incrementRuntimeForEpisode(content, event.seasonNumber(), event.episodeNumber()));
+    }
+
+    private void incrementRuntimeForEpisode(Content content, Integer seasonNumber, Integer episodeNumber) {
+        tmdbClient.getEpisodeFullDetails(content.getTmdbId(), seasonNumber, episodeNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
+                .toOptional()
+                .map(TmdbEpisodeFullDetails::runtime)
+                .filter(Objects::nonNull)
+                .ifPresent(runtime -> {
+                    content.setTotalRuntimeMinutes(content.getTotalRuntimeMinutes() + runtime);
+                    content.setRuntimeMinutesEpisodeCount(
+                            (content.getRuntimeMinutesEpisodeCount() == null ? 0 : content.getRuntimeMinutesEpisodeCount()) + 1);
+                    contentRepository.save(content);
+                });
+    }
+
+    private void reconcileRuntimeBeforeFreezing(Content content, TmdbTvDetails fresh) {
+        if (fresh.seasons() == null) {
+            return;
+        }
+        int total = 0;
+        int count = 0;
+        for (TmdbSeasonSummary season : fresh.seasons()) {
+            if (season.seasonNumber() == null || season.seasonNumber() == 0) {
+                continue;
+            }
+            TmdbSeasonFullDetails seasonDetails = tmdbClient.getSeasonFullDetails(
+                            content.getTmdbId(), season.seasonNumber(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
+                    .toOptional().orElse(null);
+            if (seasonDetails == null || seasonDetails.episodes() == null) {
+                continue;
+            }
+            for (TmdbEpisodeSummary episode : seasonDetails.episodes()) {
+                if (episode.runtime() != null) {
+                    total += episode.runtime();
+                    count++;
+                }
+            }
+        }
+        content.setTotalRuntimeMinutes(count > 0 ? total : null);
+        content.setRuntimeMinutesEpisodeCount(count > 0 ? count : null);
+        contentRepository.save(content);
+    }
+
+    @Override
+    public void reactivateAfterRevival(Content content, String freshStatus) {
+        if (isTerminal(ContentType.SERIES, freshStatus)) {
+            return;
+        }
+        String previousStatus = trackedContentStateRepository.findLastKnownStatusByContentId(content.getId()).orElse(null);
+        if (!isTerminal(ContentType.SERIES, previousStatus)) {
+            return;
+        }
+        newTransactionExecutor.runInNewTransaction(() -> {
+            TrackedContentState state = trackedContentStateRepository.findByContentId(content.getId()).orElse(null);
+            if (state == null) {
+                return null;
+            }
+            state.setLastKnownStatus(freshStatus);
+            state.setLastCheckedAt(LocalDateTime.now());
+            trackedContentStateRepository.save(state);
+            notifyWatchers(content, new ContentChangeEvent(NotificationType.RENEWED, null, null, null));
             return null;
         });
     }

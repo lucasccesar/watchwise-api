@@ -1,11 +1,11 @@
 HELP.md
 target/
 .mvn/wrapper/maven-wrapper.jar
-CLAUDE.md
-docs/
-.claude
+# CLAUDE.md
+# docs/
+# .claude
 graphify-out/
-.superpowers/
+# .superpowers/
 !**/src/main/**/target/
 !**/src/test/**/target/
 

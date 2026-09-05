@@ -115,7 +115,7 @@ class CommentControllerIntegrationTest {
                         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {

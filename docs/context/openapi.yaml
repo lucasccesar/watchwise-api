@@ -1,0 +1,3793 @@
+openapi: 3.0.3
+info:
+  title: Watchwise API
+  description: >
+    API do Watchwise — plataforma para acompanhar, avaliar e comentar
+    filmes, séries e episódios.
+
+    Filmes, séries, elenco e premiações NÃO são armazenados no banco:
+    seus dados vêm sempre da API do TMDB. O backend guarda apenas uma
+    referência leve (tmdbId + tipo) para cada conteúdo que o usuário
+    interage (comenta, avalia, loga, adiciona a listas, etc), usada
+    como chave interna para conectar essas interações.
+  version: "0.3.0"
+
+servers:
+  - url: https://api.watchwise.app/v1
+    description: Produção (placeholder)
+
+tags:
+  - name: Auth
+  - name: Users
+  - name: Followers
+  - name: Follow People
+  - name: Top5
+  - name: Watchlist
+  - name: Dropped
+  - name: Content
+  - name: Comments
+  - name: Lists
+  - name: Diary
+  - name: Likes
+  - name: Notifications
+  - name: Search
+  - name: Feed
+
+security:
+  - cookieAuth: []
+
+paths:
+
+  # ---------- AUTH ----------
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Criar conta
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password]
+              properties:
+                username: { type: string, minLength: 3, maxLength: 60 }
+                email: { type: string, format: email, minLength: 11, maxLength: 60 }
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  maxLength: 255
+                  description: Deve conter ao menos uma letra maiúscula, uma minúscula e um dígito.
+                description:
+                  type: string
+                  maxLength: 280
+                  description: Biografia/descrição de perfil, definida pelo próprio usuário. Opcional no cadastro.
+                profilePicture:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  description: URL da foto de perfil escolhida pelo usuário. Opcional no cadastro; assume uma imagem padrão se omitido.
+                banner:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  description: URL do banner de perfil escolhido pelo usuário. Opcional no cadastro; sem valor default (nulo se omitido).
+                isProfilePublic:
+                  type: boolean
+                  default: true
+                  description: Se o perfil é público ou privado. Escolha do usuário; assume público se omitido.
+      responses:
+        "201":
+          description: >
+            Conta criada. Cookies HttpOnly de access token e refresh
+            token, e o cookie CSRF (XSRF-TOKEN), são emitidos na resposta.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponseDTO" }
+        "400":
+          description: Dados inválidos (falha de validação)
+        "409":
+          description: Username ou email já cadastrado, ou sessão já autenticada
+        "429":
+          description: >
+            Muitas tentativas de cadastro vindas desse IP. Tente
+            novamente após o período configurado.
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login com username ou email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, password]
+              properties:
+                identifier:
+                  type: string
+                  description: Username ou email cadastrado.
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: >
+            Login realizado. Cookies HttpOnly de access token e refresh
+            token, e o cookie CSRF (XSRF-TOKEN), são emitidos na resposta.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponseDTO" }
+        "401":
+          description: Credenciais inválidas
+        "409":
+          description: Sessão já autenticada
+        "429":
+          description: >
+            Muitas tentativas de login sem sucesso para essa combinação
+            de IP e identifier. Tente novamente após o período de bloqueio.
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Encerrar sessão
+      description: >
+        Revoga o refresh token do cookie httpOnly no banco (se presente e
+        reconhecido) e limpa os cookies de access token, refresh token e
+        CSRF. Idempotente — sempre limpa os cookies mesmo sem refresh
+        token válido.
+      security: []
+      responses:
+        "204":
+          description: Sessão encerrada; cookies de access, refresh e CSRF limpos
+
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Encerrar sessão em todos os dispositivos
+      description: >
+        Revoga todos os refresh tokens do usuário autenticado (não só o do
+        dispositivo atual) e limpa os cookies de access token, refresh
+        token e CSRF do dispositivo que fez a chamada. Exige o cookie CSRF
+        (XSRF-TOKEN) ecoado no header X-XSRF-TOKEN.
+      responses:
+        "204":
+          description: Sessão encerrada em todos os dispositivos; cookies de access, refresh e CSRF limpos
+        "401":
+          description: Não autenticado
+        "403":
+          description: Cookie ou header CSRF ausente ou inválido
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Renovar sessão
+      description: >
+        Lê o refresh token do cookie httpOnly, valida e rotaciona-o
+        (o token usado é revogado e um novo par de cookies é emitido).
+        Não recebe corpo de requisição — a autenticação é feita via cookie.
+      security: []
+      responses:
+        "204":
+          description: Sessão renovada; novos cookies de access e refresh token emitidos
+        "401":
+          description: Refresh token ausente, inválido, expirado ou revogado
+        "429":
+          description: >
+            Muitas chamadas de refresh vindas desse IP. Tente novamente
+            após o período configurado.
+
+  /auth/oauth/{provider}:
+    post:
+      tags: [Auth]
+      summary: Login via OAuth (ex Google)
+      description: >
+        Autentica um usuário já cadastrado, a partir de um e-mail
+        confirmado pelo provedor OAuth. Não registra conta nova: se não
+        existir um usuário local com esse e-mail, o cadastro segue pelo
+        fluxo tradicional em POST /auth/register (o frontend pode
+        pré-preencher o campo email com o valor devolvido no 404). Uma
+        conta com o mesmo e-mail é vinculada automaticamente,
+        independentemente de ter sido criada originalmente pelo
+        cadastro tradicional ou por um login OAuth anterior.
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [google] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, description: "Token OAuth do provedor" }
+      responses:
+        "400":
+          description: Provider fora do enum aceito (hoje só google)
+        "200":
+          description: >
+            Login realizado — já existia um usuário local com o e-mail
+            confirmado pelo provedor. Cookies HttpOnly de access token
+            e refresh token, e o cookie CSRF (XSRF-TOKEN), são emitidos
+            na resposta.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponseDTO" }
+        "401":
+          description: >
+            Token do provedor inválido ou expirado, ou o e-mail
+            retornado pelo provedor não é verificado
+            (email_verified = false).
+        "404":
+          description: >
+            Nenhum usuário local tem esse e-mail. O corpo traz o e-mail
+            confirmado pelo provedor, para o frontend pré-preencher a
+            tela de cadastro (POST /auth/register).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email: { type: string, format: email }
+        "409":
+          description: Sessão já autenticada
+        "429":
+          description: >
+            Muitas tentativas de login via OAuth vindas desse IP. Tente
+            novamente após o período configurado.
+
+  # ---------- USERS ----------
+  /users:
+    get:
+      tags: [Users]
+      summary: Buscar usuários por username
+      description: >
+        Retorna os usuários cujo username começa com o texto pesquisado
+        (case-insensitive), paginado, com resultados de correspondência
+        exata primeiro. Perfis privados também aparecem no resultado —
+        como cada item traz apenas uma prévia (foto, username e se o
+        perfil é público ou privado), nenhum dado restrito é exposto
+        aqui. O acesso aos dados completos de um perfil privado segue
+        as regras normais em GET /users/{userId}. Exige autenticação,
+        como qualquer outra rota fora da discover (ver Access policy
+        no CLAUDE.md).
+      parameters:
+        - name: username
+          in: query
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/UserPreviewDTO" }
+        "400": { description: Username ausente ou em branco }
+        "401": { description: Não autenticado }
+        "429": { description: "Muitas requisições de busca/consulta de perfil vindas desse usuário (bucket compartilhado com GET /users/{userId})" }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Obter usuário autenticado
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponseDTO" }
+        "401": { description: Não autenticado }
+        "404": { description: "Conta apagada em outra sessão entre a emissão do token e esta requisição" }
+    patch:
+      tags: [Users]
+      summary: Atualizar perfil do usuário autenticado
+      description: >
+        Todos os campos são opcionais; apenas os enviados são alterados.
+        Exige o cookie CSRF (XSRF-TOKEN) ecoado no header X-XSRF-TOKEN.
+        Trocar `password` ou `email` exige `currentPassword` com a senha
+        atual, como confirmação — os demais campos não exigem. Trocar
+        `password` ou `email` também revoga todos os refresh tokens do
+        usuário (mesmo efeito de `POST /auth/logout-all`), inclusive os de
+        outras sessões/dispositivos.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchUserDTO" }
+      responses:
+        "200":
+          description: Atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponseDTO" }
+        "400": { description: "Dados inválidos (falha de validação), ou currentPassword ausente ao trocar password/email" }
+        "401": { description: "Não autenticado, ou currentPassword incorreto ao trocar password/email" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Conta apagada em outra sessão entre a emissão do token e esta requisição" }
+        "409": { description: Username ou email já cadastrado }
+        "429": { description: "Muitas tentativas de currentPassword incorreto ao trocar password/email. Tente novamente após o período configurado." }
+    delete:
+      tags: [Users]
+      summary: Excluir a própria conta
+      description: >
+        Exclusão permanente da conta do usuário autenticado. Exige a
+        senha atual como confirmação, já que é uma ação irreversível.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, format: password }
+      responses:
+        "204": { description: Conta excluída }
+        "400": { description: Senha ausente ou em branco }
+        "401": { description: "Senha incorreta, ou não autenticado" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Conta já apagada em outra sessão entre a emissão do token e esta requisição" }
+        "429": { description: "Muitas tentativas de senha incorreta. Tente novamente após o período configurado." }
+
+  /users/{userId}:
+    get:
+      tags: [Users]
+      summary: Obter perfil público de um usuário
+      description: >
+        Retorna o perfil público do usuário (sem email). Se o perfil for
+        privado, retorna 403 — o acesso aos dados completos de um perfil
+        privado ainda não é suportado. Exige autenticação, como qualquer
+        outra rota fora da discover (ver Access policy no CLAUDE.md); a
+        privacidade do perfil (403 quando privado) é decidida pelo dono
+        do perfil, não por quem está olhando estar logado ou não.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicUserProfileDTO" }
+        "400": { description: userId não é um UUID válido }
+        "401": { description: Não autenticado }
+        "403": { description: Perfil privado }
+        "404": { description: Não encontrado }
+        "429": { description: "Muitas requisições de busca/consulta de perfil vindas desse usuário (bucket compartilhado com GET /users)" }
+
+  /users/{userId}/followers:
+    get:
+      tags: [Followers]
+      summary: Listar seguidores de um usuário
+      description: >
+        Se o perfil de {userId} for público, qualquer usuário autenticado
+        pode ver a lista. Se for privado, só o próprio dono do perfil ou
+        quem já o segue de verdade (relação com status ACCEPTED) pode
+        ver — do contrário, 403. Só aparecem seguidores com status
+        ACCEPTED (solicitações pendentes não contam).
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/PublicUserDTO" }
+        "400": { description: "Número ou tamanho de página inválido, ou userId não é um UUID válido" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/following:
+    get:
+      tags: [Followers]
+      summary: Listar quem o usuário segue
+      description: >
+        Mesma regra de acesso de GET /users/{userId}/followers. Só
+        aparecem relações com status ACCEPTED.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/PublicUserDTO" }
+        "400": { description: "Número ou tamanho de página inválido, ou userId não é um UUID válido" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/follow:
+    post:
+      tags: [Followers]
+      summary: Seguir um usuário (ou solicitar, se o perfil for privado)
+      description: >
+        Se o perfil de {userId} for público, a relação nasce já como
+        seguindo (status ACCEPTED). Se for privado, nasce como
+        solicitação pendente (status PENDING) — só vira seguidor de
+        verdade quando o dono do perfil aceitar em
+        POST /users/me/follow-requests/{requesterId}/accept.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "200":
+          description: >
+            Relação criada. O corpo indica se já ficou seguindo ou se a
+            solicitação ficou pendente de aceite.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [PENDING, ACCEPTED] }
+        "400": { description: "Tentativa de seguir a si mesmo, ou userId não é um UUID válido" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: Usuário-alvo não encontrado }
+        "409": { description: Já segue ou já solicitou seguir esse usuário }
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+    delete:
+      tags: [Followers]
+      summary: Deixar de seguir um usuário (ou cancelar solicitação pendente)
+      description: >
+        Funciona tanto para desfazer um follow já aceito quanto para
+        cancelar uma solicitação ainda pendente — as duas situações são
+        a mesma linha na tabela, só muda o status.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "204": { description: "Deixou de seguir, ou solicitação cancelada" }
+        "400": { description: userId não é um UUID válido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: Relação (seguindo ou solicitação) não existia }
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+
+  /users/me/follow-requests:
+    get:
+      tags: [Followers]
+      summary: Listar solicitações de seguir pendentes recebidas
+      description: >
+        Solicitações (status PENDING) que outros usuários enviaram pra
+        seguir o usuário autenticado, aguardando aceite ou recusa.
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/PublicUserDTO" }
+        "400": { description: Número ou tamanho de página inválido }
+
+  /users/me/follow-requests/{requesterId}/accept:
+    post:
+      tags: [Followers]
+      summary: Aceitar uma solicitação de seguir pendente
+      parameters:
+        - $ref: "#/components/parameters/requesterId"
+      responses:
+        "204": { description: Solicitação aceita — status vira ACCEPTED }
+        "400": { description: requesterId não é um UUID válido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: Não existe solicitação pendente desse usuário }
+
+  /users/me/follow-requests/{requesterId}:
+    delete:
+      tags: [Followers]
+      summary: Recusar uma solicitação de seguir pendente
+      parameters:
+        - $ref: "#/components/parameters/requesterId"
+      responses:
+        "204": { description: Solicitação recusada e removida }
+        "400": { description: requesterId não é um UUID válido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: Não existe solicitação pendente desse usuário }
+
+  /users/me/follow-people/{personTmdbId}:
+    post:
+      tags: [Follow People]
+      summary: Seguir um ator, diretor ou roteirista (referenciado pelo TMDB)
+      description: >
+        Sempre em nome do usuário autenticado — não existe conceito de
+        "solicitar" ou "seguir em nome de outro usuário" aqui, diferente
+        de POST /users/{userId}/follow. Idempotente: seguir uma pessoa
+        já seguida não é erro.
+      parameters:
+        - $ref: "#/components/parameters/personTmdbId"
+      responses:
+        "204": { description: Seguindo }
+        "400": { description: personTmdbId não é numérico, ou tem mais de 20 dígitos }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+    delete:
+      tags: [Follow People]
+      summary: Deixar de seguir uma pessoa
+      description: >
+        Sempre em nome do usuário autenticado. Idempotente: deixar de
+        seguir quem não era seguido não é erro.
+      parameters:
+        - $ref: "#/components/parameters/personTmdbId"
+      responses:
+        "204": { description: Deixou de seguir }
+        "400": { description: personTmdbId não é numérico, ou tem mais de 20 dígitos }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+
+  /users/{userId}/follow-people:
+    get:
+      tags: [Follow People]
+      summary: Listar pessoas do TMDB que um usuário segue
+      description: >
+        Mesma regra de acesso de GET /users/{userId}/followers: se o
+        perfil de {userId} for público, ou se for o próprio dono do
+        perfil, qualquer usuário autenticado pode ver a lista; se for
+        privado, só quem já o segue de verdade (relação com status
+        ACCEPTED) pode ver — do contrário, 403. Como pessoas do TMDB
+        não são armazenadas localmente, a resposta traz só os
+        personTmdbId seguidos, sem dados de nome/foto.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { type: string }
+        "400": { description: "Número ou tamanho de página inválido, ou userId não é um UUID válido" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/top5/{type}:
+    get:
+      tags: [Top5]
+      summary: Obter o Top 5 de filmes ou séries do usuário
+      description: >
+        type só aceita MOVIE ou SERIES — SEASON/EPISODE não são válidos para Top 5. Mesma regra
+        de acesso de GET /users/{userId}/followers: se o perfil de {userId} for público, ou se
+        for o próprio dono do perfil, qualquer usuário autenticado pode ver; se for privado, só
+        quem já o segue de verdade (relação com status ACCEPTED) pode ver — do contrário, 403.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/top5Type"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 5
+                items: { $ref: "#/components/schemas/Top5Entry" }
+        "400": { description: "type não é MOVIE nem SERIES, ou userId não é um UUID válido" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/me/top5/{type}:
+    post:
+      tags: [Top5]
+      summary: Inserir um conteúdo no Top 5 do usuário autenticado
+      description: >
+        Insere content na posição position, empurrando as posições seguintes uma casa para
+        baixo — o que estiver na posição 5 é removido do Top 5. position é opcional enquanto
+        houver menos de 5 entradas (insere na próxima posição livre); se já houver 5, é
+        obrigatório. Um conteúdo já presente no Top 5 não pode ser inserido de novo (409) —
+        não existe operação de "mover", só inserir/remover. Diferente de outros endpoints que
+        recebem conteúdo (comentários, itens de lista, diário), aqui basta o tmdbId: o type
+        já vem fixado no path e só MOVIE/SERIES são aceitos, então os campos de
+        SEASON/EPISODE de ContentRefCreation nunca se aplicariam a essa rota.
+      parameters:
+        - $ref: "#/components/parameters/top5Type"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tmdbId]
+              properties:
+                tmdbId: { type: string }
+                position: { type: integer, minimum: 1, maximum: 5, nullable: true }
+                customPosterUrl: { type: string, format: uri, nullable: true }
+      responses:
+        "201":
+          description: Inserido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Top5Entry" }
+        "400":
+          description: >
+            type não é MOVIE nem SERIES, ou position é obrigatório porque o Top 5 já tem 5
+            entradas, ou position é maior que a próxima posição livre (count + 1), ou tmdbId
+            ausente/inválido.
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404":
+          description: >
+            Esse tmdbId não corresponde a nenhum título real no TMDB — só verificado na
+            primeira vez que essa referência é criada (ver POST /contents/reference).
+        "409":
+          description: >
+            Esse conteúdo já está no Top 5 deste type, ou a posição informada já está ocupada
+            (corrida concorrente).
+        "502":
+          description: >
+            TMDB indisponível ao verificar a existência do tmdbId — só na primeira vez que
+            essa referência é criada (ver POST /contents/reference).
+
+  /users/me/top5/{type}/{top5EntryId}:
+    patch:
+      tags: [Top5]
+      summary: Editar o poster customizado de uma entrada do Top 5 do usuário autenticado
+      description: >
+        Único campo editável de uma entrada já existente — não existe operação de "mover", só
+        inserir/remover (ver POST/DELETE abaixo). null em customPosterUrl significa "não alterar".
+      parameters:
+        - $ref: "#/components/parameters/top5Type"
+        - name: top5EntryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Top5EntryPatch" }
+      responses:
+        "200":
+          description: Atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Top5Entry" }
+        "400": { description: "top5EntryId não é um UUID válido, ou customPosterUrl inválido (mais de 2048 caracteres ou não é uma URL)" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Entrada não encontrada, não pertence ao usuário autenticado, ou não é desse type" }
+    delete:
+      tags: [Top5]
+      summary: Remover uma entrada do Top 5 do usuário autenticado
+      description: Remove a entrada e desloca as posições seguintes uma casa para cima, fechando o buraco.
+      parameters:
+        - $ref: "#/components/parameters/top5Type"
+        - name: top5EntryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Removido }
+        "400": { description: top5EntryId não é um UUID válido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Entrada não encontrada, não pertence ao usuário autenticado, ou não é desse type" }
+
+  /users/{userId}/watchlist/{type}:
+    get:
+      tags: [Watchlist]
+      summary: Obter a watchlist (quero assistir) de filmes ou séries do usuário
+      description: >
+        type só aceita MOVIE ou SERIES — SEASON/EPISODE não são válidos para a watchlist, igual ao
+        Top 5. Diferente do Top 5, não tem teto de 5 entradas, então a resposta é paginada. Mesma
+        regra de acesso de GET /users/{userId}/followers: se o perfil de {userId} for público, ou
+        se for o próprio dono do perfil, qualquer usuário autenticado pode ver; se for privado, só
+        quem já o segue de verdade (relação com status ACCEPTED) pode ver — do contrário, 403.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/watchlistType"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK, ordenado por position crescente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/WatchlistEntry" }
+        "400": { description: "type não é MOVIE nem SERIES, número/tamanho de página inválido, ou userId não é um UUID válido" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/me/watchlist/{type}:
+    post:
+      tags: [Watchlist]
+      summary: Adicionar um conteúdo à watchlist do usuário autenticado
+      description: >
+        Insere content sempre na última posição da watchlist desse type — diferente do Top 5, não
+        existe teto nem eviction, e diferente do POST de Top 5, position não é aceito no corpo: um
+        item novo sempre entra no fim da fila, nunca opinando sobre onde entrar. A única forma de
+        adiantar um item é reordenar depois via PATCH. Um conteúdo já presente na watchlist desse
+        type não pode ser inserido de novo (409). Só o tmdbId é necessário: type já vem fixado no
+        path e só MOVIE/SERIES são aceitos.
+      parameters:
+        - $ref: "#/components/parameters/watchlistType"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tmdbId]
+              properties:
+                tmdbId: { type: string }
+      responses:
+        "201":
+          description: Inserido no fim da watchlist
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WatchlistEntry" }
+        "400": { description: "type não é MOVIE nem SERIES, ou tmdbId ausente/inválido" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404":
+          description: >
+            Esse tmdbId não corresponde a nenhum título real no TMDB — só verificado na
+            primeira vez que essa referência é criada (ver POST /contents/reference).
+        "409":
+          description: >
+            Esse conteúdo já está na watchlist deste type, ou a última posição foi ocupada por uma
+            inserção concorrente.
+        "502":
+          description: >
+            TMDB indisponível ao verificar a existência do tmdbId — só na primeira vez que
+            essa referência é criada (ver POST /contents/reference).
+
+  /users/me/watchlist/{type}/{watchlistEntryId}:
+    patch:
+      tags: [Watchlist]
+      summary: Reordenar uma entrada da watchlist do usuário autenticado
+      description: >
+        Move a entrada para position, deslocando as entradas entre a posição antiga e a nova uma
+        casa para abrir espaço — é a única forma de uma entrada avançar na watchlist, já que o
+        insert sempre entra no fim. position deve estar entre 1 e o total de entradas atuais dessa
+        watchlist (não é possível "mover para o fim" além do que já existe; para isso, remova e
+        insira de novo). Se position for igual à posição atual da entrada, não faz nada.
+      parameters:
+        - $ref: "#/components/parameters/watchlistType"
+        - name: watchlistEntryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position]
+              properties:
+                position: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Reordenado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WatchlistEntry" }
+        "400":
+          description: >
+            type não é MOVIE nem SERIES, watchlistEntryId não é um UUID válido, ou position
+            ausente/menor que 1/maior que o total de entradas atuais.
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Entrada não encontrada, não pertence ao usuário autenticado, ou não é desse type" }
+        "409": { description: Reordenação concorrente na mesma watchlist. Tente novamente. }
+    delete:
+      tags: [Watchlist]
+      summary: Remover uma entrada da watchlist do usuário autenticado
+      description: Remove a entrada e desloca as posições seguintes uma casa para cima, fechando o buraco.
+      parameters:
+        - $ref: "#/components/parameters/watchlistType"
+        - name: watchlistEntryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Removido }
+        "400": { description: watchlistEntryId não é um UUID válido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Entrada não encontrada, não pertence ao usuário autenticado, ou não é desse type" }
+
+  /users/{userId}/dropped/{type}:
+    get:
+      tags: [Dropped]
+      summary: Listar os filmes ou séries que o usuário abandonou no meio
+      description: >
+        type só aceita MOVIE ou SERIES — SEASON/EPISODE não são válidos, igual ao Top 5 e à
+        watchlist. Mesma regra de acesso de GET /users/{userId}/followers: se o perfil de {userId}
+        for público, ou se for o próprio dono do perfil, qualquer usuário autenticado pode ver; se
+        for privado, só quem já o segue de verdade (relação com status ACCEPTED) pode ver — do
+        contrário, 403.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/droppedType"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK, ordenado por createdAt decrescente
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/DroppedEntry" }
+        "400": { description: "type não é MOVIE nem SERIES, número/tamanho de página inválido, ou userId não é um UUID válido" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/me/dropped/{type}/{tmdbId}:
+    post:
+      tags: [Dropped]
+      summary: Marcar um filme ou série como abandonado
+      description: >
+        Sempre em nome do usuário autenticado. Idempotente: marcar um conteúdo já marcado não é
+        erro — se já existir uma marcação para esse type+tmdbId, comment (se informado) sobrescreve
+        o valor salvo; se omitido, a marcação existente não é alterada. Efeito colateral automático:
+        remove (se existir) a entrada correspondente na watchlist do usuário — abandonar volta a ser
+        "não quero mais assistir", então não faz sentido continuar marcado como "quero assistir".
+        Não apaga nem altera nenhuma DiaryEntry existente desse conteúdo — os dois convivem lado a
+        lado; logar de novo depois não desmarca automaticamente essa marcação em si (embora
+        POST /diary remova tanto a watchlist quanto essa marcação como efeito colateral separado —
+        ver DiaryEntryCreation).
+      parameters:
+        - $ref: "#/components/parameters/droppedType"
+        - name: tmdbId
+          in: path
+          required: true
+          description: tmdbId nativo do TMDB do filme/série (não é um ID interno do Watchwise).
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: string, nullable: true, maxLength: 280 }
+      responses:
+        "204": { description: Marcado como abandonado }
+        "400": { description: "type não é MOVIE nem SERIES, ou comment maior que 280 caracteres" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404":
+          description: >
+            Esse tmdbId não corresponde a nenhum título real no TMDB — só verificado na
+            primeira vez que essa referência é criada (ver POST /contents/reference).
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+        "502":
+          description: >
+            TMDB indisponível ao verificar a existência do tmdbId — só na primeira vez que
+            essa referência é criada (ver POST /contents/reference).
+    delete:
+      tags: [Dropped]
+      summary: Desmarcar um filme ou série como abandonado
+      description: Idempotente — desmarcar um conteúdo que não estava marcado não é erro.
+      parameters:
+        - $ref: "#/components/parameters/droppedType"
+        - name: tmdbId
+          in: path
+          required: true
+          description: tmdbId nativo do TMDB do filme/série (não é um ID interno do Watchwise).
+          schema: { type: string }
+      responses:
+        "204": { description: Desmarcado }
+        "400": { description: type não é MOVIE nem SERIES }
+        "403": { description: Cookie CSRF ausente ou inválido }
+
+  /users/{userId}/summary:
+    get:
+      tags: [Users]
+      summary: Resumo de atividade para a tela de Perfil (dividido entre Filme e Série)
+      description: >
+        type é obrigatório e escopa TODA a resposta — não existe uma variante "os dois juntos";
+        o cliente chama de novo ao trocar de aba, mesmo padrão de Top5Entry/WatchlistEntry/
+        DroppedEntry. Todos os números/listas abaixo são só do type pedido: MOVIE olha
+        DiaryEntry de conteúdo MOVIE; SERIES olha DiaryEntry de conteúdo EPISODE (é daí que vem
+        o tempo assistido/gêneros/notas de uma série — completar a série em si não soma tempo,
+        só marca conclusão) exceto recentActivity, que usa a DiaryEntry de nível SERIES (o
+        marcador de conclusão) em vez de episódios individuais. Não existe um serviço de domínio
+        próprio aqui — é só agregação sobre consultas que já existem em Diary/Dropped.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [MOVIE, SERIES] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Summary" }
+        "400": { description: "type ausente ou não é MOVIE/SERIES" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/summary/home:
+    get:
+      tags: [Users]
+      summary: Resumo de atividade para a tela Home
+      description: >
+        Sem type — combina MOVIE e SERIES/EPISODE, diferente de GET /users/{userId}/summary. Sem
+        serviço de domínio próprio, agrega consultas que já existem em Diary/Summary; as duas
+        janelas de 30 dias (watchCountByDayLast30Days/genreCounts*Last30Days) são rolantes a partir
+        de hoje, não o mês calendário do Month in Review. O preview de calendário de 7 dias da tela
+        (episódios/filmes que vão ser lançados) não está aqui — depende de data de lançamento
+        (TMDB), que Content nunca guarda; o cliente cruza nextEpisodes + GET /users/me/watchlist/{type}
+        com o TMDB.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HomeSummary" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/summary/month:
+    get:
+      tags: [Users]
+      summary: Month in Review (dividido em Movie Edition e Tv Edition), estilo Trakt
+      description: >
+        type escopa toda a resposta, mesma regra de GET /users/{userId}/summary. topSeriesByWatchTime
+        só é preenchido quando type=SERIES; topLongestMovies só quando type=MOVIE. topRated/bottomRated
+        são no nível do título (MOVIE/SERIES), não no nível de episódio — quem já está no Top5 do
+        usuário aparece primeiro dentro da lista já ordenada por nota.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [MOVIE, SERIES] }
+        - name: month
+          in: query
+          required: true
+          description: Formato YYYY-MM.
+          schema: { type: string, example: "2026-08" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonthInReview" }
+        "400": { description: "type ausente/inválido, ou month ausente/fora do formato YYYY-MM" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/summary/year:
+    get:
+      tags: [Users]
+      summary: Year in Review (dividido em Movie Edition e Tv Edition), estilo Trakt
+      description: >
+        Mesmas regras de escopo de GET /users/{userId}/summary/month, só que pro ano inteiro e com
+        limites de 10 em vez de 6. longestWatched combina, num único ranking, filmes (duração própria)
+        e séries (soma do runtime dos episódios assistidos no ano) — só um dos dois tipos é populado
+        por chamada, de acordo com o type pedido.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - name: type
+          in: query
+          required: true
+          schema: { type: string, enum: [MOVIE, SERIES] }
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, example: 2026 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/YearInReview" }
+        "400": { description: "type ausente/inválido, ou year ausente" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/summary/all-time:
+    get:
+      tags: [Users]
+      summary: All Time Stats, estilo Trakt
+      description: >
+        Ao contrário de summary/summary-month/summary-year, não tem parâmetro type — combina filme e
+        série numa resposta só. Contagens/gêneros que fariam sentido por tipo vêm em pares de listas
+        (ex. watchCountByYearMovies/watchCountByYearEpisodes, genreCountsMovies/genreCountsSeries);
+        rankings que fazem sentido misturados (mostLoggedContent, topRated, bottomRated) combinam os
+        dois tipos num só top 10. watchCountByDecade e watchCountByCountry dependem de releaseYear/
+        countries terem sido informados na referência do Content (campos opcionais — ver ContentRefCreation).
+      parameters:
+        - $ref: "#/components/parameters/userId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AllTimeStats" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/series/{seriesTmdbId}/episode-ratings:
+    get:
+      tags: [Users]
+      summary: Notas de episódios de um usuário para uma série, estilo SeriesGraph
+      description: >
+        Grade temporada x episódio com a nota que o usuário deu a cada episódio já assistido dessa
+        série. Em caso de rewatch (watchNumber > 1), usa a nota do watchNumber mais alto. Informações
+        da série (título, pôster, lista de temporadas/episódios) não vêm daqui — Content nunca guarda
+        esse dado, é trabalho do cliente buscar na TMDB usando o mesmo seriesTmdbId.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - name: seriesTmdbId
+          in: path
+          required: true
+          description: tmdbId nativo do TMDB da série (não é um ID interno do Watchwise).
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EpisodeRatingsGrid" }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  # ---------- CONTENT (referência local) ----------
+  /contents/reference:
+    post:
+      tags: [Content]
+      summary: >
+        Obter ou criar a referência local de um conteúdo do TMDB
+        (identificado por tmdbId + type, mais seriesTmdbId/seasonNumber/
+        episodeNumber quando type é SEASON ou EPISODE). Chamado
+        internamente sempre que o usuário interage pela primeira vez
+        com um filme, série, temporada ou episódio (comentar, avaliar,
+        logar, adicionar a lista, etc). Idempotente. Na primeira vez que
+        um tmdbId/seriesTmdbId é referenciado (nenhum Content local ainda
+        existe pra ele), o backend verifica a existência no TMDB antes de
+        criar a linha (MOVIE/SERIES via tmdbId; SEASON/EPISODE via
+        seriesTmdbId) — se a referência já existe localmente, essa
+        verificação é pulada (nunca chama o TMDB de novo pra algo que já
+        foi confirmado real antes, por qualquer usuário). Nessa mesma
+        checagem, pra MOVIE/SERIES, o backend também deriva
+        genres/releaseYear/countries (e runtimeMinutes, só pra MOVIE) da
+        resposta do TMDB já obtida — sem custo de chamada extra — e
+        preenche automaticamente numa referência já existente que ainda
+        não os tenha (best-effort, nunca bloqueia a requisição). Pra
+        EPISODE fora de um /diary/bulk (que já deriva runtimeMinutes por
+        conta própria), o backend faz uma chamada adicional ao TMDB pra
+        aquele episódio específico pra derivar runtimeMinutes — o que
+        também verifica, pela primeira vez, que aquele número de episódio
+        realmente existe (SEASON continua verificando só a série-mãe, não
+        o número da temporada em si). Ver ContentRefCreation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ContentRefCreation" }
+      responses:
+        "200":
+          description: Referência obtida ou criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContentRef" }
+        "400":
+          description: >
+            Combinação de campos inválida para o type informado (ex:
+            tmdbId ausente para MOVIE/SERIES, ou seriesTmdbId/seasonNumber
+            ausente para SEASON/EPISODE), ou runtimeMinutes/genres/releaseYear/
+            countries informados por um cliente — todos são sempre derivados
+            do TMDB pelo backend, nunca aceitos na requisição (ver
+            ContentRefCreation).
+        "404":
+          description: >
+            O tmdbId (MOVIE/SERIES) ou seriesTmdbId (SEASON) não corresponde
+            a nenhum título real no TMDB — só verificado na primeira vez que
+            essa referência é criada, nunca para uma já existente. Pra
+            EPISODE, também cobre o número do episódio específico não
+            corresponder a nenhum episódio real da temporada (verificado ao
+            derivar runtimeMinutes).
+        "409":
+          description: >
+            Outro episódio já está marcado como finale desta temporada, ou
+            outra temporada já está marcada como finale desta série (ver
+            isSeasonFinale/isSeriesFinale em ContentRefCreation).
+        "401":
+          description: Não autenticado
+        "403":
+          description: Cookie CSRF ausente ou inválido
+        "429":
+          description: >
+            Muitas chamadas vindas desse usuário. Tente novamente após o
+            período configurado.
+        "502":
+          description: >
+            TMDB indisponível após uma tentativa extra de retry, ao
+            verificar a existência do tmdbId/seriesTmdbId — só na primeira
+            vez que essa referência é criada (inclui a chamada extra pra
+            derivar runtimeMinutes de um EPISODE novo).
+
+  /contents/{contentId}/comments:
+    get:
+      tags: [Comments]
+      summary: Listar comentários de um conteúdo
+      description: Exige autenticação, como qualquer outra rota fora da discover (ver Access policy no CLAUDE.md).
+      parameters:
+        - $ref: "#/components/parameters/contentId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/Comment" }
+        "401": { description: Não autenticado }
+    post:
+      tags: [Comments]
+      summary: Comentar em um conteúdo
+      parameters:
+        - $ref: "#/components/parameters/contentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 280 }
+                parentCommentId: { type: string, format: uuid, nullable: true }
+                containsSpoiler: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Criado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+        "400": { description: "parentCommentId aponta para um comentário que não pertence a esse conteúdo" }
+        "401": { description: Não autenticado }
+        "404": { description: "Conteúdo não encontrado, ou parentCommentId não encontrado" }
+
+  /contents/{contentId}/stats:
+    get:
+      tags: [Content]
+      summary: Estatísticas agregadas de um conteúdo entre todos os usuários
+      description: >
+        Sem entidade própria — agregação de DiaryEntry/Comment por contentId. Um contentId sem
+        nenhuma interação ainda devolve averageScore null e os três contadores em 0, nunca 404.
+      parameters:
+        - $ref: "#/components/parameters/contentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContentStats" }
+        "401": { description: Não autenticado }
+
+  /contents/stats:
+    get:
+      tags: [Content]
+      summary: Estatísticas agregadas de vários conteúdos de uma vez (batch)
+      description: >
+        Mesma agregação de GET /contents/{contentId}/stats, evitando N chamadas — usado pela lista
+        de episódios de uma temporada. Devolve um item por id pedido, na mesma ordem, com stats
+        zeradas para qualquer id sem interação ainda.
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema: { type: array, items: { type: string, format: uuid }, maxItems: 100 }
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ContentStats" } }
+        "400": { description: "ids ausente/vazio, ou mais de 100 ids" }
+        "401": { description: Não autenticado }
+
+  /contents/{contentId}/details:
+    get:
+      tags: [Content]
+      summary: Detalhe de um conteúdo, resolvido pelo backend via proxy do TMDB
+      description: >
+        O backend resolve tmdbId (MOVIE/SERIES) ou seriesTmdbId+seasonNumber(+episodeNumber)
+        (SEASON/EPISODE) do Content, chama o TMDB com preferredLanguage do usuário autenticado
+        (ver UserResponseDTO), cacheia a resposta (chave inclui o idioma, não a região — Caffeine,
+        TTL configurável) e devolve já com o título resolvido (tradução → título alternativo da
+        preferredRegion do usuário → título original) e watchProviders já filtrado pra
+        preferredRegion. SEASON/EPISODE reaproveitam gêneros/países/elenco regular/criadores da
+        SERIES do mesmo seriesTmdbId (mesma resposta cacheada), igual à regra que Content.genres/
+        countries já usa. Nenhuma chamada ao TMDB é feita pelo cliente.
+      parameters:
+        - $ref: "#/components/parameters/contentId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContentDetailsDTO" }
+        "401": { description: Não autenticado }
+        "404": { description: Content ou usuário autenticado não encontrado }
+        "502": { description: TMDB indisponível após uma tentativa extra de retry }
+
+  /contents/details:
+    get:
+      tags: [Content]
+      summary: Detalhe de vários conteúdos de uma vez (batch), mesma resolução de GET /contents/{contentId}/details
+      description: >
+        Mesma resolução de GET /contents/{contentId}/details, evitando N chamadas — usado por toda
+        tela que lista Content (diário, listas, Top5, watchlist, feed, rankings de summary). Devolve
+        um item por id pedido, na mesma ordem.
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema: { type: array, items: { type: string, format: uuid }, maxItems: 100 }
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ContentDetailsDTO" } }
+        "400": { description: "ids ausente/vazio, ou mais de 100 ids" }
+        "401": { description: Não autenticado }
+        "404": { description: Algum content ou o usuário autenticado não encontrado }
+        "502": { description: TMDB indisponível após uma tentativa extra de retry }
+
+  /contents/{contentId}/reviews:
+    get:
+      tags: [Diary]
+      summary: Listar reviews de um conteúdo entre todos os usuários
+      description: >
+        DiaryEntry com comment preenchido, de qualquer usuário, escopado por contentId — diferente
+        de hasReview=true em GET /users/{userId}/diary (escopado por um único usuário). Cada review
+        segue a mesma regra de visibilidade de perfil privado já usada em curtidas/comentários de
+        diário (dono, perfil público, ou perfil privado que o viewer segue com status aceito).
+      parameters:
+        - $ref: "#/components/parameters/contentId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/DiaryEntry" }
+        "401": { description: Não autenticado }
+        "404": { description: Conteúdo não encontrado }
+
+  # ---------- COMMENTS (por id) ----------
+  /comments/{commentId}:
+    delete:
+      tags: [Comments]
+      summary: Remover um comentário próprio
+      parameters:
+        - $ref: "#/components/parameters/commentId"
+      responses:
+        "204": { description: Removido }
+        "401": { description: Não autenticado }
+        "404": { description: "Comentário não encontrado, ou não pertence ao usuário autenticado" }
+
+  /comments/{commentId}/like:
+    post:
+      tags: [Likes]
+      summary: Curtir um comentário
+      parameters:
+        - $ref: "#/components/parameters/commentId"
+      responses:
+        "204": { description: Curtido }
+        "401": { description: Não autenticado }
+        "403": { description: "O comentário está em uma lista ou registro de diário privado que o viewer não pode ver" }
+        "404": { description: Comentário não encontrado }
+    delete:
+      tags: [Likes]
+      summary: Remover curtida de um comentário
+      parameters:
+        - $ref: "#/components/parameters/commentId"
+      responses:
+        "204": { description: Curtida removida }
+        "401": { description: Não autenticado }
+
+  # ---------- LISTS ----------
+  /users/{userId}/lists:
+    get:
+      tags: [Lists]
+      summary: Listar as listas de um usuário
+      description: >
+        Duas camadas de visibilidade combinadas. Primeiro, a mesma regra padrão usada em
+        Top5/Watchlist/Dropped/DiaryEntry: se o perfil do dono for privado e o viewer não for o
+        próprio dono nem seguir o dono com status aceito, a requisição inteira é bloqueada com 403,
+        antes de sequer olhar as listas. Passada essa barreira (perfil público, ou viewer é o dono,
+        ou viewer segue o dono), cada lista tem sua própria visibilidade (PUBLIC/FOLLOWERS/PRIVATE —
+        ver UserListCreation): o dono sempre vê todas as suas listas; qualquer outro viewer só vê as
+        PUBLIC, mais as FOLLOWERS se de fato seguir o dono com status aceito — nunca vê PRIVATE.
+        Paginado, igual às demais listagens sem teto por usuário. Cada lista no array content já vem
+        com previewItems (até 5 primeiros itens de conteúdo) e nestedListsCount (ver schema UserList),
+        pensado pra renderizar a listagem sem precisar de uma chamada extra por lista.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+        - name: sortBy
+          in: query
+          description: >
+            rank, updatedAt, name e likesCount ordenam por coluna real de UserList (mais recente/
+            maior primeiro por padrão — ver sortDirection). itemsCount e commentsCount agregam
+            (JOIN + COUNT) numa query nativa própria, não pela coluna. Valor desconhecido é 400.
+          schema: { type: string, enum: [rank, updatedAt, name, likesCount, itemsCount, commentsCount] }
+        - name: sortDirection
+          in: query
+          description: "asc ou desc (default varia pelo campo — ver sortBy)."
+          schema: { type: string, enum: [asc, desc] }
+        - name: contentId
+          in: query
+          description: >
+            Quando informado, cada lista no array content vem com containsContent preenchido
+            (true/false) em vez de null, indicando se esse content já está na lista — pensado pra
+            tela de "adicionar a uma lista" a partir da tela de um content marcar as listas que já
+            o contêm. Um contentId que não existe simplesmente resolve containsContent=false pra
+            todas as listas, sem erro.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/UserList" }
+        "400": { description: "Número/tamanho de página inválido, sortBy desconhecido, ou userId não é um UUID válido" }
+        "403": { description: "Perfil do dono é privado e o viewer não é o dono nem o segue com status aceito" }
+        "404": { description: Usuário não encontrado }
+
+  /users/me/liked-lists:
+    get:
+      tags: [Lists]
+      summary: Listar as listas que o usuário autenticado curtiu
+      description: >
+        Sempre auto-visão (não existe GET /users/{userId}/liked-lists) — não precisa resolver
+        visibilidade de terceiro, já que o viewer só pode estar vendo as próprias curtidas.
+        Paginado, ordenado pela curtida mais recente primeiro. Cada lista no array content vem
+        no mesmo formato de GET /users/{userId}/lists (previewItems, nestedListsCount,
+        itemsCount, commentsCount etc.).
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/UserList" }
+        "400": { description: Número/tamanho de página inválido }
+
+  /users/me/lists:
+    post:
+      tags: [Lists]
+      summary: Criar uma nova lista para o usuário autenticado
+      description: >
+        Sempre em nome do usuário autenticado — diferente de GET /users/{userId}/lists (que aceita
+        qualquer userId pra ver listas de terceiros), não existe POST /users/{userId}/lists,
+        seguindo o mesmo padrão de /users/me/top5/{type}, /users/me/watchlist/{type} e
+        /users/me/dropped/{type}/{tmdbId}: a posse nunca depende de um userId vindo do cliente.
+        visibility omitido tem default PUBLIC.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserListCreation" }
+      responses:
+        "201":
+          description: Criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserList" }
+        "400": { description: name ausente/vazio }
+        "403": { description: Cookie CSRF ausente ou inválido }
+
+  /users/me/lists/bulk:
+    post:
+      tags: [Lists]
+      summary: Criar uma lista já populada com vários itens de conteúdo (filmes e/ou séries)
+      description: >
+        Atalho para não precisar chamar POST /users/me/lists seguido de N chamadas a
+        POST /lists/{listId}/items: cria a lista e insere todo o array items, na ordem enviada,
+        na mesma transação — tudo ou nada, um item inválido ou duplicado (dentro do próprio
+        payload ou já existente na lista, o que é impossível numa lista recém-criada) reverte a
+        lista inteira, não só o item que falhou. Cada item é resolvido pelo mesmo caminho
+        get-or-create idempotente usado por POST /contents/reference, e cai nas mesmas regras de
+        item único usadas por POST /lists/{listId}/items. Só aceita content (Conteudo) por item —
+        para adicionar uma lista aninhada como item, crie a lista aqui (sem itens ou com outros
+        filmes/séries) e use POST /lists/{listId}/items depois. items exige entre 1 e 100
+        entradas. visibility omitido tem default PUBLIC, igual a POST /users/me/lists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserListBulkCreation" }
+      responses:
+        "201":
+          description: Criada com os itens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserListDetailed" }
+        "400": { description: "name ausente/vazio, items ausente/vazio/maior que 100, ou algum item de content inválido" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404":
+          description: >
+            Algum tmdbId/seriesTmdbId dos items não corresponde a nenhum título real no TMDB —
+            só verificado na primeira vez que essa referência é criada (ver POST /contents/reference);
+            reverte a lista inteira, igual a qualquer outra falha do bulk.
+        "409": { description: "Dois itens do payload apontam para o mesmo conteúdo (duplicata dentro do próprio bulk)" }
+        "502":
+          description: >
+            TMDB indisponível ao verificar a existência de algum tmdbId/seriesTmdbId — só na
+            primeira vez que essa referência é criada (ver POST /contents/reference).
+
+  /lists/{listId}:
+    get:
+      tags: [Lists]
+      summary: Obter uma lista com seus itens
+      description: >
+        Visibilidade checada só pela própria lista (PUBLIC/FOLLOWERS/PRIVATE — ver
+        UserListCreation), nunca pelo perfil do dono estar público ou privado: diferente de
+        GET /users/{userId}/lists (que bloqueia a listagem inteira se o perfil do dono for privado
+        e o viewer não o seguir), aqui uma lista PUBLIC é acessível diretamente por qualquer
+        usuário autenticado mesmo que o perfil do dono seja privado. FOLLOWERS exige que o viewer
+        siga o dono com status aceito (ou seja o próprio dono); PRIVATE só o próprio dono.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+        - name: type
+          in: query
+          description: Filtra os itens por tipo de conteúdo (só aplicável a listas de conteúdo, não de listas aninhadas).
+          schema: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE] }
+        - name: genre
+          in: query
+          description: Filtra os itens cujo Content.genres (ver ContentRefCreation) contém esse gênero.
+          schema: { type: string }
+        - name: sortBy
+          in: query
+          description: >
+            Aplicado em memória sobre a lista de itens já carregada (sem paginação própria).
+            alfabética e data de lançamento não são suportadas — Content nunca guarda título nem
+            data de lançamento (dados só do TMDB); isso é sempre responsabilidade do cliente.
+            episodeAvgRating ordena por DiaryEntry.score médio dos episódios (EPISODE) do dono da
+            lista — nunca do viewer — calculado por série (item SERIES), por temporada (item
+            SEASON) ou pelo próprio episódio (item EPISODE); item MOVIE ou de lista aninhada não
+            tem esse valor. Itens sem nenhuma nota do dono sempre ficam por último,
+            independentemente de sortDirection.
+          schema: { type: string, enum: [position, dateAdded, duration, episodeAvgRating] }
+        - name: sortDirection
+          in: query
+          schema: { type: string, enum: [asc, desc] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserListDetailed" }
+        "400": { description: "listId não é um UUID válido, ou sortBy desconhecido" }
+        "403": { description: "Lista é FOLLOWERS e o viewer não segue o dono, ou lista é PRIVATE e o viewer não é o dono" }
+        "404": { description: Lista não encontrada }
+    patch:
+      tags: [Lists]
+      summary: Atualizar dados de uma lista
+      description: >
+        Patch parcial de verdade: name, description, visibility e rank são todos opcionais, e só o
+        campo enviado como não-null é alterado — o restante permanece como estava. Omitir ou mandar
+        null em qualquer um deles significa "não mexer nesse campo", igual ao PatchUserDTO de
+        PATCH /users/me. Não existe forma de limpar description para null via este endpoint depois
+        de definida (mesma limitação de PatchUserDTO). name, se enviado, não pode ser
+        vazio/só-espaço. rank reordena a lista entre as demais do mesmo dono (1 a N, N = quantidade
+        de listas já rankeadas) — uma lista sem rank ainda é adotada no fim da sequência antes de
+        mover. Só o dono da lista pode atualizar.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserListPatch" }
+      responses:
+        "200":
+          description: Atualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserList" }
+        "400": { description: "name enviado vazio/só-espaço, rank maior que a quantidade de listas rankeadas, ou listId não é um UUID válido" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Lista não encontrada, ou não pertence ao usuário autenticado" }
+        "409": { description: "rank reordenado concorrentemente por outra requisição" }
+    delete:
+      tags: [Lists]
+      summary: Remover uma lista
+      description: Só o dono da lista pode remover.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      responses:
+        "204": { description: Removida }
+        "400": { description: listId não é um UUID válido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Lista não encontrada, ou não pertence ao usuário autenticado" }
+
+  /lists/{listId}/items:
+    post:
+      tags: [Lists]
+      summary: Adicionar um item (conteúdo ou lista aninhada) à lista
+      description: >
+        Exatamente um entre content e childListId deve ser informado, nunca os dois nem nenhum (400).
+        Sem score neste endpoint — a nota de um conteúdo é sempre a de DiaryEntry, não uma por item de
+        lista; description é a única anotação livre aceita, para os dois formatos de item. childListId
+        pode apontar para uma lista do próprio usuário, ou para uma lista de outro usuário desde que
+        visível a quem está adicionando (PUBLIC sempre, FOLLOWERS só se seguir o dono com status
+        aceito — 403 caso contrário, mesma regra de visibilidade de GET /lists/{listId}); a lista
+        referenciada não pode já conter outras listas como item (profundidade máxima de um nível) nem
+        pode ser a própria lista (400 nos dois casos). Uma lista trava como "de conteúdo" ou "de listas"
+        a partir do seu primeiro item — tentar misturar os dois tipos na mesma lista devolve 400.
+        position é opcional: se omitido, o item entra na última posição; se informado, os itens a
+        partir dali deslocam +1 (400 se maior que a próxima posição livre). customPosterUrl só é
+        aceito quando content é informado — 400 se vier junto com childListId.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { $ref: "#/components/schemas/ContentRefCreation" }
+                childListId: { type: string, format: uuid }
+                position: { type: integer }
+                description: { type: string, maxLength: 400 }
+                customPosterUrl: { type: string, format: uri, nullable: true }
+      responses:
+        "201":
+          description: Adicionado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserListItem" }
+        "400":
+          description: >
+            Nem content nem childListId informado (ou os dois), position maior que a próxima posição
+            livre, childListId igual ao próprio listId, childListId aponta para uma lista que já
+            contém outras listas como item, a lista já está travada no tipo oposto (conteúdo x
+            lista aninhada), ou customPosterUrl informado junto com childListId.
+        "403": { description: "Cookie CSRF ausente ou inválido, ou childListId aponta para uma lista FOLLOWERS/PRIVATE não visível a quem está adicionando" }
+        "404":
+          description: >
+            Lista não encontrada (ou não pertence ao usuário autenticado), childListId não
+            encontrado, ou o tmdbId/seriesTmdbId de content não corresponde a nenhum título real
+            no TMDB (só verificado na primeira vez que essa referência é criada — ver
+            POST /contents/reference).
+        "409": { description: "Esse content (ou childListId) já está nessa lista, ou a posição foi ocupada por uma inserção concorrente" }
+        "502":
+          description: >
+            TMDB indisponível ao verificar a existência do tmdbId/seriesTmdbId de content — só na
+            primeira vez que essa referência é criada (ver POST /contents/reference).
+
+  /lists/{listId}/items/bulk:
+    post:
+      tags: [Lists]
+      summary: Adicionar vários itens de conteúdo a uma lista existente
+      description: >
+        Atalho para não precisar chamar POST /lists/{listId}/items uma vez por item: insere todo o
+        array items, na ordem enviada, na mesma transação — tudo ou nada, um item inválido ou
+        duplicado (dentro do próprio payload ou já existente na lista) reverte a operação inteira,
+        nenhum item fica inserido. Reaproveita o mesmo POST /lists/{listId}/items chamado uma vez por
+        item: cada item é resolvido pelo mesmo caminho get-or-create idempotente usado por
+        POST /contents/reference, sempre inserido na última posição livre (nenhum position é aceito
+        aqui — para posição explícita, use POST /lists/{listId}/items avulso), e cai nas mesmas regras
+        de item único e trava de tipo usadas por esse endpoint. Só aceita content (Conteudo) por item,
+        igual a POST /users/me/lists/bulk — não é possível inserir childListId em massa; para itens de
+        lista aninhada, use POST /lists/{listId}/items. items exige entre 1 e 100 entradas.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserListItemBulkCreation" }
+      responses:
+        "201":
+          description: Itens adicionados
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/UserListItem" }
+        "400":
+          description: >
+            items ausente/vazio/maior que 100, algum item de content inválido, ou a lista já está
+            travada como lista-de-listas (só aceita content).
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404":
+          description: >
+            Lista não encontrada (ou não pertence ao usuário autenticado), ou o
+            tmdbId/seriesTmdbId de algum item não corresponde a nenhum título real no TMDB (só
+            verificado na primeira vez que essa referência é criada — ver POST /contents/reference);
+            reverte a inserção inteira, igual a qualquer outra falha do bulk.
+        "409": { description: "Dois itens do payload apontam para o mesmo conteúdo, ou algum já está na lista" }
+        "502":
+          description: >
+            TMDB indisponível ao verificar a existência de algum tmdbId/seriesTmdbId — só na
+            primeira vez que essa referência é criada (ver POST /contents/reference).
+
+  /lists/{listId}/items/{itemId}:
+    patch:
+      tags: [Lists]
+      summary: Editar a posição e/ou a descrição de um item da lista
+      description: >
+        position e description são independentes e ambos opcionais — envie só o que quiser alterar.
+        Se position for informado e diferente da posição atual, move o item para lá, deslocando +1 ou
+        -1 os itens entre a posição antiga e a nova (mesmo algoritmo de reordenação de
+        PATCH /users/me/watchlist/{type}/{watchlistEntryId}); deve estar entre 1 e o total de itens
+        atuais dessa lista (não é possível "mover para o fim" além do que já existe; para isso, remova
+        e insira de novo). Se position for igual à posição atual, não faz nada com a posição. Preserva
+        o id/createdAt do item, ao contrário de remover e recriar. customPosterUrl só é aceito quando
+        o item é de content — 400 se o item alvo for de lista aninhada.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position: { type: integer, minimum: 1 }
+                description: { type: string, maxLength: 400 }
+                customPosterUrl: { type: string, format: uri, nullable: true }
+      responses:
+        "200":
+          description: Atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserListItem" }
+        "400":
+          description: >
+            position maior que o total de itens atuais da lista, itemId não é um UUID válido,
+            description maior que 400 caracteres, ou customPosterUrl informado contra um item de
+            lista aninhada.
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Lista não encontrada (ou não pertence ao usuário autenticado), ou item não encontrado" }
+        "409": { description: Reordenação concorrente no mesmo item. Tente novamente. }
+    delete:
+      tags: [Lists]
+      summary: Remover um item da lista
+      description: Só o dono da lista pode remover; remove e desloca -1 as posições seguintes.
+      parameters:
+        - $ref: "#/components/parameters/listId"
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Removido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Lista não encontrada (ou não pertence ao usuário autenticado), ou item não encontrado" }
+
+  /lists/{listId}/comments:
+    get:
+      tags: [Comments]
+      summary: Listar comentários de uma lista
+      parameters:
+        - $ref: "#/components/parameters/listId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/Comment" }
+        "401": { description: Não autenticado }
+    post:
+      tags: [Comments]
+      summary: Comentar em uma lista
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 280 }
+                parentCommentId: { type: string, format: uuid, nullable: true }
+                containsSpoiler: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Criado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+        "400": { description: "A lista é uma lista-de-listas e não pode receber comentários, ou parentCommentId aponta para um comentário que não pertence a essa lista" }
+        "401": { description: Não autenticado }
+        "403": { description: "A lista é privada, ou o viewer não segue o dono com status aceito" }
+        "404": { description: "Lista não encontrada, ou parentCommentId não encontrado" }
+
+  /lists/{listId}/like:
+    post:
+      tags: [Likes]
+      summary: Curtir uma lista
+      description: >
+        Só listas de conteúdo (não listas-de-listas) podem ser curtidas — mesma trava usada em
+        `POST /lists/{listId}/comments`. Segue a mesma regra de visibilidade de `GET /lists/{listId}`
+        (dono, `PUBLIC`, ou `FOLLOWERS` com status aceito).
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      responses:
+        "204": { description: Curtido }
+        "400": { description: "A lista é uma lista-de-listas e não pode ser curtida" }
+        "403": { description: "A lista é privada, ou o viewer não segue o dono com status aceito" }
+        "404": { description: Lista não encontrada }
+    delete:
+      tags: [Likes]
+      summary: Remover curtida de uma lista
+      parameters:
+        - $ref: "#/components/parameters/listId"
+      responses:
+        "204": { description: Curtida removida }
+
+  # ---------- DIARY / LOG ----------
+  /users/{userId}/diary:
+    get:
+      tags: [Diary]
+      summary: Histórico de conteúdos assistidos (diário)
+      description: >
+        Sem parâmetros, devolve o diário inteiro (todos os tipos), mais recente
+        primeiro. `year` é um atalho pra `dateFrom=01/01`/`dateTo=31/12` do
+        mesmo ano — usar `year` junto com `dateFrom`/`dateTo` é `400`.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - name: year
+          in: query
+          schema: { type: integer }
+        - name: type
+          in: query
+          description: Filtra por tipo de conteúdo (MOVIE/SERIES/SEASON/EPISODE).
+          schema: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE] }
+        - name: dateFrom
+          in: query
+          description: Início do range de watchedDate (inclusivo). Não pode ser combinado com year.
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          description: Fim do range de watchedDate (inclusivo). Não pode ser combinado com year.
+          schema: { type: string, format: date }
+        - name: hasReview
+          in: query
+          description: "true filtra só entradas com comment preenchido (Reviews); false só as sem review (History)."
+          schema: { type: boolean }
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/DiaryEntry" }
+        "400":
+          description: >
+            Número/tamanho de página inválido, year inválido, userId não é um
+            UUID válido, ou year combinado com dateFrom/dateTo.
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /users/{userId}/series-in-progress:
+    get:
+      tags: [Diary]
+      summary: Séries que o usuário está assistindo mas ainda não terminou
+      description: >
+        Sem entidade própria — derivado de DiaryEntry/Content: uma série entra na lista quando
+        há pelo menos uma DiaryEntry de EPISODE daquele seriesTmdbId e nenhuma DiaryEntry de
+        SERIES correspondente (série ainda não marcada como concluída). Ordenado por
+        lastWatchedDate desc — o único critério de ordenação que o backend consegue calcular.
+        maxSeasonNumber/maxEpisodeNumber refletem só até onde o usuário assistiu; % completo,
+        episódios/tempo faltantes e ordenação por data de lançamento dependem do total de
+        episódios da série (dado só do TMDB) e são responsabilidade do cliente.
+      parameters:
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/SeriesInProgress" }
+        "400": { description: Número/tamanho de página inválido, ou userId não é um UUID válido }
+        "403": { description: Perfil privado e quem pede não é seguidor aceito }
+        "404": { description: Usuário não encontrado }
+
+  /diary:
+    post:
+      tags: [Diary]
+      summary: Registrar que assistiu a um conteúdo
+      description: >
+        Efeito colateral automático: se content é MOVIE, remove (se existirem) tanto a entrada desse
+        filme na watchlist quanto a marcação de abandonado (DroppedEntry, type MOVIE) do usuário. Se
+        content é EPISODE, SEASON ou SERIES, resolve a série (por tmdbId direto se SERIES, por
+        seriesTmdbId se EPISODE/SEASON) e remove, se existirem, tanto a entrada dessa série na
+        watchlist quanto a marcação de abandonada (DroppedEntry, type SERIES) do usuário — assistir
+        de novo é tratado como "não abandonei mais". Em ambos os casos a remoção é best-effort/idempotente
+        (não há nada para remover na maioria das chamadas) e não é desfeita se essa DiaryEntry for
+        apagada depois — sair da watchlist/de dropped é definitivo, não é preciso adicionar de volta
+        manualmente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiaryEntryCreation" }
+      responses:
+        "201":
+          description: Registrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiaryEntryCreationResult" }
+        "400":
+          description: >
+            Combinação de campos de content inválida para o type informado, ou um campo
+            server-derived (runtimeMinutes/genres/releaseYear/countries) informado pelo cliente (ver
+            ContentRefCreation), watchedInTheater informado para content que não é MOVIE, ou
+            watchedDate no futuro.
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404":
+          description: >
+            O tmdbId (MOVIE/SERIES) ou seriesTmdbId (SEASON/EPISODE) de content não corresponde
+            a nenhum título real no TMDB — só verificado na primeira vez que essa referência é
+            criada (ver POST /contents/reference). Pra EPISODE, também cobre o número do episódio
+            específico não existir na temporada.
+        "409":
+          description: >
+            O episódio/temporada logado tem uma flag de finale que conflita
+            com outro Content já existente (ver isSeasonFinale/isSeriesFinale
+            em ContentRefCreation) — só ocorre se a auto-completude de
+            temporada/série disparar uma criação de Content em conflito —, ou
+            esse watch já foi registrado por uma requisição concorrente idêntica.
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+        "502":
+          description: >
+            TMDB indisponível ao verificar a existência do tmdbId/seriesTmdbId de content — só na
+            primeira vez que essa referência é criada (ver POST /contents/reference), incluindo a
+            chamada extra pra derivar runtimeMinutes de um EPISODE novo.
+
+  /diary/bulk:
+    post:
+      tags: [Diary]
+      summary: Registrar que assistiu a uma temporada ou série inteira
+      description: >
+        Mesmo efeito colateral de POST /diary sobre watchlist e dropped — como o bulk é sempre
+        SEASON ou SERIES, a série correspondente é removida (se presente) da watchlist e da
+        marcação de abandonada (DroppedEntry, type SERIES) do usuário. runtimeMinutes nunca é
+        aceito do cliente pra nenhum dos dois tipos (ver ContentRefCreation) — pra SEASON, o
+        backend deriva o runtime de cada episódio dos dados de temporada que já busca do TMDB pra
+        outras validações (finaleEpisodeNumber, watchedDate vs. data de lançamento), sem nenhuma
+        chamada extra; pra SERIES, deriva da mesma forma, uma temporada por vez, ao longo de todas
+        as temporadas envolvidas. genres/releaseYear/countries do content são sempre derivados do
+        TMDB pelo backend pra SERIES (rejeitados com 400 pra SEASON, que nunca os tem) — sempre uma
+        checagem no banco antes, pra nunca chamar o TMDB mais de uma vez pela mesma série; falha ao
+        buscar ou conflito com um valor já registrado são só ignorados (best-effort) quando a
+        referência da série já existe, nunca derrubam o log das entradas de diário.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiaryEntryBulkCreation" }
+      responses:
+        "201":
+          description: Registrado
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DiaryEntry" }
+        "400":
+          description: >
+            Tipo de conteúdo não é SEASON ou SERIES, um campo server-derived
+            (runtimeMinutes/genres/releaseYear/countries) foi informado no content (ver
+            ContentRefCreation), os dados de finale são insuficientes/inválidos (incluindo um
+            finaleEpisodeNumber/finaleSeasonNumber/entrada de seasonFinaleEpisodeNumbers explícito
+            usado como fallback que excede a contagem real de episódios/temporadas que o TMDB
+            reporta), a contagem de episódios pedida excede o teto flexível de 2000 e não pôde ser
+            verificada contra o TMDB, watchedDate no futuro, ou watchedDate anterior à data de
+            lançamento do último episódio efetivamente logado (checado contra o TMDB).
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404":
+          description: >
+            O seriesTmdbId de content não corresponde a nenhuma série real no TMDB — só
+            verificado na primeira vez que um dado episódio daquela série é referenciado (cada
+            EPISODE do bulk passa por essa checagem individualmente, mas como usa a mesma chamada
+            cacheada por seriesTmdbId, só a primeira dispara uma requisição real ao TMDB).
+        "409":
+          description: >
+            Conflito de flag de finale (mesma causa de POST /diary), ou um dos watches do lote já
+            foi registrado por uma requisição concorrente idêntica.
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+        "502":
+          description: >
+            TMDB indisponível após uma tentativa extra de retry — ao buscar o runtimeMinutes de uma
+            das temporadas envolvidas (ambos os tipos), ao buscar a temporada pra derivar
+            finaleEpisodeNumber/seasonFinaleEpisodeNumbers (o backend sempre tenta derivar do TMDB
+            primeiro, mesmo com um valor explícito enviado — um valor explícito só é usado como
+            fallback, e nesse caso não evita a busca à temporada), ao validar watchedDate (ambos os
+            tipos), ou ao verificar a existência do seriesTmdbId pra um episódio novo (ambos os tipos,
+            ver 404 acima). Exceção: a busca específica de finaleSeasonNumber (SERIES,
+            getTvFullDetails) não gera 502 se o cliente enviou um finaleSeasonNumber explícito — nesse
+            caso o valor explícito é aceito como fallback mesmo com essa chamada indisponível. Não
+            inclui a derivação de genres/releaseYear/countries (SERIES) quando a referência da série
+            já existe — essa é best-effort e nunca gera 502 nem qualquer outro erro; se a série
+            ainda não tem Content local, a mesma verificação de existência do POST /contents/reference
+            se aplica normalmente (404/502 podem ocorrer).
+
+  /diary/{diaryEntryId}:
+    patch:
+      tags: [Diary]
+      summary: Editar um registro do diário
+      parameters:
+        - $ref: "#/components/parameters/diaryEntryId"
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiaryEntryUpdate" }
+      responses:
+        "200":
+          description: Atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiaryEntry" }
+        "400": { description: "watchedInTheater informado para content que não é MOVIE, watchedDate no futuro, ou diaryEntryId não é um UUID válido" }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Registro não encontrado, ou não pertence ao usuário autenticado" }
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+    delete:
+      tags: [Diary]
+      summary: Remover um registro do diário
+      parameters:
+        - $ref: "#/components/parameters/diaryEntryId"
+        - name: overrideProtectedEntries
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >
+            Se `true`, remove também entradas com `autoGenerated = false` na cascata de deletes
+            (entradas criadas ou editadas manualmente). Por padrão (`false`), apenas entradas
+            com `autoGenerated = true` são removidas. Recomenda-se chamar `GET /diary/{diaryEntryId}/deletion-impact`
+            primeiro para pré-visualizar o impacto.
+      responses:
+        "204": { description: Removido }
+        "400": { description: diaryEntryId não é um UUID válido }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "404": { description: "Registro não encontrado, ou não pertence ao usuário autenticado" }
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+
+  /diary/series/{seriesTmdbId}:
+    delete:
+      tags: [Diary]
+      summary: Apagar todo o histórico de diário de uma série
+      description: >
+        Diferente de DELETE /diary/{diaryEntryId}, que só apaga a passada (watchNumber) da entrada
+        alvo, este endpoint remove TODAS as DiaryEntry (EPISODE, SEASON e SERIES) do usuário
+        autenticado para essa série, de qualquer watchNumber (todas as passadas/rewatches de uma
+        vez). Não passa pela proteção de autoGenerated — como é um pedido direto e explícito de
+        apagar tudo, não um efeito colateral de cascata, entradas manuais/editadas também são
+        removidas, sem parâmetro de override. Idempotente: se não houver nenhuma entrada para essa
+        série, devolve 204 do mesmo jeito.
+      parameters:
+        - name: seriesTmdbId
+          in: path
+          required: true
+          description: tmdbId nativo do TMDB da série (não é um ID interno do Watchwise).
+          schema: { type: string }
+      responses:
+        "204": { description: Removido (ou nada havia para remover) }
+        "401": { description: Não autenticado }
+        "403": { description: Cookie CSRF ausente ou inválido }
+        "429": { description: Muitas chamadas vindas desse usuário. Tente novamente após o período configurado. }
+
+  /diary/{diaryEntryId}/like:
+    post:
+      tags: [Likes]
+      summary: Curtir um registro do diário
+      parameters:
+        - $ref: "#/components/parameters/diaryEntryId"
+      responses:
+        "204": { description: Curtido }
+        "401": { description: Não autenticado }
+        "403": { description: "O registro do diário é privado e o viewer não segue o dono com status aceito" }
+        "404": { description: Registro do diário não encontrado }
+    delete:
+      tags: [Likes]
+      summary: Remover curtida de um registro do diário
+      parameters:
+        - $ref: "#/components/parameters/diaryEntryId"
+      responses:
+        "204": { description: Curtida removida }
+        "401": { description: Não autenticado }
+
+  /diary/{diaryEntryId}/deletion-impact:
+    get:
+      tags: [Diary]
+      summary: Pré-visualizar o impacto da exclusão de um registro do diário
+      parameters:
+        - $ref: "#/components/parameters/diaryEntryId"
+        - name: overrideProtectedEntries
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >
+            Mesmo parâmetro de `DELETE /diary/{diaryEntryId}`, e com o mesmo default (`false`) — a
+            pré-visualização executa a mesma cascata de delete com o valor informado, então o
+            resultado só corresponde ao delete real quando os dois são chamados com o mesmo valor.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeletionImpact" }
+        "400": { description: diaryEntryId não é um UUID válido }
+        "404": { description: "Registro não encontrado, ou não pertence ao usuário autenticado" }
+
+  /diary/{diaryEntryId}/comments:
+    get:
+      tags: [Comments]
+      summary: Listar comentários de um registro do diário
+      parameters:
+        - $ref: "#/components/parameters/diaryEntryId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/Comment" }
+        "401": { description: Não autenticado }
+    post:
+      tags: [Comments]
+      summary: Comentar em um registro do diário
+      parameters:
+        - $ref: "#/components/parameters/diaryEntryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 280 }
+                parentCommentId: { type: string, format: uuid, nullable: true }
+                containsSpoiler: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Criado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+        "400": { description: "parentCommentId aponta para um comentário que não pertence a esse registro do diário" }
+        "401": { description: Não autenticado }
+        "403": { description: "O registro do diário é privado e o viewer não segue o dono com status aceito" }
+        "404": { description: "Registro do diário não encontrado, ou parentCommentId não encontrado" }
+
+  # ---------- NOTIFICATIONS ----------
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Listar notificações do usuário autenticado
+      parameters:
+        - name: isRead
+          in: query
+          schema: { type: boolean }
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/Notification" }
+
+  /notifications/{notificationId}/read:
+    patch:
+      tags: [Notifications]
+      summary: Marcar notificação como lida
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Atualizada }
+
+  # ---------- SEARCH ----------
+  /search:
+    get:
+      tags: [Search]
+      summary: >
+        Busca geral. Filmes, séries e pessoas são buscados ao vivo na
+        API do TMDB (proxied); listas e usuários são buscados no
+        banco local.
+      description: Exige autenticação, como qualquer outra rota fora da discover (ver Access policy no CLAUDE.md).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [MOVIE, SERIES, PERSON, LIST, USER]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResult" }
+        "401": { description: Não autenticado }
+
+  # ---------- FEED ----------
+  /feed:
+    get:
+      tags: [Feed]
+      summary: Feed de atividades de quem o usuário segue
+      description: >
+        Timeline com os eventos recentes de quem o usuário autenticado segue
+        (Follower status ACCEPTED): registrou um DiaryEntry (assistiu um
+        filme/episódio, completou uma temporada/série), abandonou um
+        filme/série (DroppedEntry), ou atualizou o Top 5 de um tipo
+        (Top5Entry) — evento genérico, sem detalhar qual item entrou/saiu.
+        Nenhuma entidade nova: os três tipos de evento são agregados em
+        tempo de leitura (pull), não persistidos num "post" próprio. Ver
+        business-rules.md § Feed para a decisão de arquitetura (pull vs
+        push) e a paginação por cursor em vez de página numerada. Curtidas/
+        comentários são deliberadamente só para eventos DIARY_ENTRY
+        (reaproveitando POST /diary/{id}/like e GET/POST
+        /diary/{id}/comments via FeedItem.id) — DROPPED e TOP5_UPDATE não
+        devem ter curtida/comentário, por design. DiaryEntry com ignore =
+        true (episódio/temporada auto-logado como degrau mecânico de um
+        POST /diary/bulk de nível superior — ver DiaryEntry.ignore) nunca
+        aparece aqui, evitando spam de um bulk log inteiro.
+      parameters:
+        - name: cursor
+          in: query
+          description: >
+            Cursor opaco (base64) da última página lida, devolvido como
+            nextCursor na resposta anterior. Omitido na primeira chamada.
+          schema: { type: string }
+        - name: size
+          in: query
+          description: Itens por página (máximo 50). Assume 20 se omitido.
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CursorPageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/FeedItem" }
+        "400": { description: "size <= 0, ou cursor malformado" }
+        "401": { description: Não autenticado }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: >
+        Token de acesso JWT entregue como cookie HttpOnly (access_token)
+        no registro/login. Endpoints que alteram estado fora de /auth/**
+        também exigem o cookie CSRF (XSRF-TOKEN) ecoado no header
+        X-XSRF-TOKEN.
+
+  parameters:
+    userId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    contentId:
+      name: contentId
+      in: path
+      required: true
+      description: ID local da referência de conteúdo (ver /contents/reference)
+      schema: { type: string, format: uuid }
+    commentId:
+      name: commentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    listId:
+      name: listId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    diaryEntryId:
+      name: diaryEntryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    top5Type:
+      name: type
+      in: path
+      required: true
+      description: Só MOVIE ou SERIES são válidos para Top 5.
+      schema: { type: string, enum: [MOVIE, SERIES] }
+    watchlistType:
+      name: type
+      in: path
+      required: true
+      description: Só MOVIE ou SERIES são válidos para a watchlist.
+      schema: { type: string, enum: [MOVIE, SERIES] }
+    droppedType:
+      name: type
+      in: path
+      required: true
+      description: Só MOVIE ou SERIES são válidos para marcar como abandonado.
+      schema: { type: string, enum: [MOVIE, SERIES] }
+    personTmdbId:
+      name: personTmdbId
+      in: path
+      required: true
+      description: ID nativo do TMDB (não é um ID interno do Watchwise). Só dígitos, até 20 caracteres.
+      schema: { type: string, pattern: "^\\d{1,20}$" }
+    requesterId:
+      name: requesterId
+      in: path
+      required: true
+      description: ID do usuário que enviou a solicitação de seguir.
+      schema: { type: string, format: uuid }
+    page:
+      name: page
+      in: query
+      description: Página 1-based. Assume 1 se omitida.
+      schema: { type: integer, default: 1 }
+    size:
+      name: size
+      in: query
+      description: Itens por página (máximo 1000). Assume 20 se omitido.
+      schema: { type: integer, default: 20 }
+
+  schemas:
+    PageMeta:
+      type: object
+      description: >
+        Pagination metadata shared by every paginated list endpoint's response envelope.
+        page is 1-based, matching the page query parameter — not Spring's internal 0-based
+        page index.
+      properties:
+        page: { type: integer, minimum: 1 }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        hasNext: { type: boolean }
+
+    CursorPageMeta:
+      type: object
+      description: >
+        Pagination envelope for cursor-paginated endpoints (currently just
+        GET /feed). Deliberately not PageMeta: unlike offset pagination, a
+        feed receives constant inserts, so an offset/page number would skip
+        or duplicate items as new events land while the client scrolls (see
+        business-rules.md § Feed). No totalElements/totalPages — a COUNT
+        over the merged three-source query isn't worth paying for a number
+        nobody needs to jump to a specific page of a feed.
+      properties:
+        size: { type: integer }
+        nextCursor: { type: string, nullable: true, description: "Null when hasNext is false." }
+        hasNext: { type: boolean }
+
+    UserResponseDTO:
+      description: Perfil completo, retornado apenas para o próprio usuário autenticado.
+      allOf:
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            username: { type: string }
+            email: { type: string, format: email }
+            description: { type: string, nullable: true }
+            profilePicture: { type: string, format: uri }
+            banner: { type: string, format: uri, nullable: true }
+            isProfilePublic: { type: boolean }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+            preferredLanguage:
+              type: string
+              example: "en-US"
+              description: >
+                Idioma preferido pro proxy de detalhe do TMDB (GET
+                /contents/{contentId}/details) — formato TMDB
+                (ISO-639-1_ISO-3166-1). Default "en-US" pra conta nova.
+            preferredRegion:
+              type: string
+              example: "US"
+              description: >
+                Região preferida (ISO 3166-1 alpha-2) usada só pra escolher
+                a linha de watchProviders dentro da resposta já cacheada do
+                TMDB — nunca é enviada como parâmetro pro TMDB. Default "US"
+                pra conta nova.
+        - $ref: "#/components/schemas/WatchTimeStats"
+        - $ref: "#/components/schemas/FollowCounts"
+
+    PublicUserDTO:
+      type: object
+      description: >
+        Perfil público compacto de outro usuário — não inclui email nem
+        estatísticas de tempo assistido. Usado sempre que um usuário é
+        exibido dentro de uma lista paginada (seguidores, seguindo,
+        solicitações pendentes, resultado de busca) — nunca combinado com
+        WatchTimeStats para não gerar uma consulta de agregação por item
+        da página (ver PublicUserProfileDTO para o perfil de um único
+        usuário).
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        description: { type: string, nullable: true }
+        profilePicture: { type: string, format: uri }
+        banner: { type: string, format: uri, nullable: true }
+        isProfilePublic: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    WatchTimeStats:
+      type: object
+      description: >
+        Combinado via allOf em UserResponseDTO e PublicUserProfileDTO —
+        nunca usado como schema autônomo. Calculado somando runtimeMinutes
+        só de DiaryEntry do tipo MOVIE/EPISODE (ver ContentRefCreation) —
+        entradas SEASON/SERIES são marcadores sintéticos de conclusão e
+        não têm runtime próprio, então ficam de fora pra não contar tempo
+        em dobro. Content sem runtimeMinutes/genres contribui 0 —
+        undercount aceito, já que o backend nunca busca esse dado do TMDB
+        sozinho.
+      properties:
+        totalMinutesWatched: { type: integer, description: "Soma acumulada (all-time) de runtimeMinutes." }
+        minutesWatchedLast30Days: { type: integer, description: "Mesma soma, restrita a watchedDate nos últimos 30 dias." }
+        totalTheaterVisits: { type: integer, description: "COUNT de DiaryEntry (sempre MOVIE — ver DiaryEntry.watchedInTheater) com watchedInTheater=true, all-time." }
+        genreCountsMovies:
+          type: array
+          description: >
+            Quantidade de DiaryEntry de MOVIE por gênero (all-time, sem
+            recorte de tempo), ordenado do maior pro menor. Cada rewatch
+            soma de novo. Mesma semântica de AllTimeStats.genreCountsMovies.
+          items:
+            type: object
+            properties:
+              genre: { type: string }
+              count: { type: integer }
+        genreCountsSeries:
+          type: array
+          description: >
+            Quantidade de SERIES distintas iniciadas por gênero (all-time,
+            sem recorte de tempo, não precisa ter sido concluída),
+            ordenado do maior pro menor. Um rewatch de uma série já
+            iniciada não soma de novo. Gênero de um episódio é resolvido a
+            partir do Content SERIES com o mesmo seriesTmdbId (episódio
+            não carrega genres próprio). Mesma semântica de
+            AllTimeStats.genreCountsSeries.
+          items:
+            type: object
+            properties:
+              genre: { type: string }
+              count: { type: integer }
+
+    PublicUserProfileDTO:
+      description: >
+        Perfil público completo de outro usuário, usado só em GET
+        /users/{userId} (não em listas paginadas — ver PublicUserDTO).
+      allOf:
+        - $ref: "#/components/schemas/PublicUserDTO"
+        - $ref: "#/components/schemas/WatchTimeStats"
+        - $ref: "#/components/schemas/FollowCounts"
+
+    FollowCounts:
+      type: object
+      description: >
+        Combinado via allOf em UserResponseDTO e PublicUserProfileDTO —
+        nunca usado como schema autônomo. Calculado a cada request
+        (COUNT sobre Follower com status ACCEPTED), não desnormalizado.
+      properties:
+        followersCount: { type: integer, description: "Quantidade de Follower aceitos com followed = este usuário." }
+        followingCount: { type: integer, description: "Quantidade de Follower aceitos com follower = este usuário." }
+
+    PatchUserDTO:
+      type: object
+      properties:
+        username: { type: string, minLength: 3, maxLength: 60 }
+        email: { type: string, format: email, minLength: 11, maxLength: 60 }
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 255
+          description: Deve conter ao menos uma letra maiúscula, uma minúscula e um dígito.
+        description: { type: string, maxLength: 280 }
+        profilePicture: { type: string, format: uri, maxLength: 2048 }
+        banner: { type: string, format: uri, maxLength: 2048, nullable: true }
+        isProfilePublic: { type: boolean }
+        currentPassword:
+          type: string
+          format: password
+          description: >
+            Obrigatório apenas quando `password` ou `email` forem enviados
+            com um valor diferente do atual — confirma a identidade do
+            usuário antes de trocar um campo de autenticação.
+        preferredLanguage:
+          type: string
+          pattern: "^[a-z]{2}-[A-Z]{2}$"
+          example: "pt-BR"
+          description: Formato TMDB (ISO-639-1_ISO-3166-1), ex. en-US, pt-BR.
+        preferredRegion:
+          type: string
+          pattern: "^[A-Z]{2}$"
+          example: "BR"
+          description: ISO 3166-1 alpha-2.
+
+    UserPreviewDTO:
+      type: object
+      description: >
+        Versão resumida do usuário para resultados de busca. Não inclui
+        email, descrição nem outros dados restritos, por isso pode ser
+        retornada mesmo para perfis privados.
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        profilePicture: { type: string, format: uri }
+        isProfilePublic: { type: boolean }
+
+    ContentRefCreation:
+      type: object
+      required: [type]
+      description: >
+        Identifica um conteúdo do TMDB. Para MOVIE e SERIES, o tmdbId
+        (ID nativo do próprio filme/série) é obrigatório e basta
+        sozinho para buscar detalhes no TMDB (`/movie/{tmdbId}`,
+        `/tv/{tmdbId}`). SEASON e EPISODE não têm endpoint de busca
+        direta por ID no TMDB — exigem a chave composta série +
+        temporada (+ episódio) — por isso não usam tmdbId (o ID
+        próprio de uma temporada/episódio no TMDB não serve pra buscar
+        nada) e em vez disso exigem seriesTmdbId e seasonNumber
+        (episodeNumber também, só em EPISODE):
+        `/tv/{seriesTmdbId}/season/{seasonNumber}` e
+        `/tv/{seriesTmdbId}/season/{seasonNumber}/episode/{episodeNumber}`.
+      properties:
+        tmdbId:
+          type: string
+          description: Obrigatório quando type é MOVIE ou SERIES; ausente em SEASON/EPISODE.
+        type: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE] }
+        seriesTmdbId:
+          type: string
+          description: Obrigatório quando type é SEASON ou EPISODE; ausente em MOVIE/SERIES.
+        seasonNumber:
+          type: integer
+          minimum: 0
+          description: >
+            Obrigatório quando type é SEASON ou EPISODE; ausente em MOVIE/SERIES.
+            Aceita 0 (temporada "Specials" do TMDB); negativo é rejeitado com 400.
+        episodeNumber:
+          type: integer
+          minimum: 1
+          description: Obrigatório quando type é EPISODE; ausente nos demais. Valores menores que 1 são rejeitados com 400.
+        isSeasonFinale:
+          type: boolean
+          nullable: true
+          description: >
+            Only accepted when type is EPISODE. True if this is the last episode of its season.
+            On POST /diary and POST /diary/bulk, this value is only a fallback used when TMDB
+            has no aired-episode data for the season yet — whenever TMDB does have that data,
+            the server derives this itself and overrides whatever is sent here. POST
+            /contents/reference honors the value as sent.
+        isSeriesFinale:
+          type: boolean
+          nullable: true
+          description: >
+            Accepted when type is EPISODE (describing the season this episode belongs to) or
+            SEASON. True if this is the last season of the series. Same server-derivation
+            override on POST /diary and POST /diary/bulk as isSeasonFinale above.
+        runtimeMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1200
+          nullable: true
+          readOnly: true
+          description: >
+            Server-derived from TMDB, never accepted from the client — sending a non-null value returns 400
+            for every type (MOVIE, SERIES, SEASON, EPISODE). Only meaningful for MOVIE and EPISODE (a
+            SEASON/SERIES has no single runtime of its own): for a new MOVIE it's read from the same TMDB
+            call already made to verify the tmdbId exists; for a new EPISODE (outside a /diary/bulk SERIES
+            or SEASON request, which already derive it from TMDB themselves) the backend makes one extra
+            TMDB call per episode, cached afterward, which also verifies that specific episode number exists.
+            If TMDB has no runtime for it, this content simply contributes 0 to any watch-time aggregation.
+        genres:
+          type: array
+          items: { type: string }
+          nullable: true
+          readOnly: true
+          description: >
+            Server-derived from TMDB, never accepted from the client — sending a non-null value returns 400
+            for every type. Only meaningful for MOVIE/SERIES (a SEASON/EPISODE has no genres of its own in
+            TMDB — episode-level watch-time-by-genre aggregation resolves genres from the SERIES-type Content
+            sharing the same seriesTmdbId). Genre names from TMDB, not IDs. Derived once per content (from the
+            same TMDB call already made to verify the tmdbId exists, for a new reference) and reused by
+            everyone who references it afterward; if TMDB has no genres for it, this content simply
+            contributes nothing to genreCounts.
+        releaseYear:
+          type: integer
+          minimum: 1870
+          maximum: 2100
+          nullable: true
+          readOnly: true
+          description: >
+            Server-derived from TMDB, never accepted from the client — sending a non-null value returns 400
+            for every type. Only meaningful for MOVIE/SERIES (a SEASON/EPISODE has no release year of its own
+            in TMDB — episode-level aggregation by decade resolves releaseYear from the SERIES-type Content
+            sharing the same seriesTmdbId). Derived once per content and reused by everyone who references it
+            afterward.
+        countries:
+          type: array
+          items: { type: string }
+          nullable: true
+          readOnly: true
+          description: >
+            Server-derived from TMDB, never accepted from the client — sending a non-null value returns 400
+            for every type. Only meaningful for MOVIE/SERIES (a SEASON/EPISODE has no production countries of
+            its own in TMDB — episode-level aggregation by country resolves countries from the SERIES-type
+            Content sharing the same seriesTmdbId). ISO 3166-1 alpha-2 country codes from TMDB's
+            production_countries. Derived once per content and reused by everyone who references it afterward.
+
+    ContentRef:
+      allOf:
+        - $ref: "#/components/schemas/ContentRefCreation"
+        - type: object
+          properties:
+            id: { type: string, format: uuid, description: "ID local, usado nas demais rotas" }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+
+    Top5Entry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [MOVIE, SERIES] }
+        content: { $ref: "#/components/schemas/ContentRef" }
+        position: { type: integer, minimum: 1, maximum: 5 }
+        customPosterUrl: { type: string, format: uri, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Top5EntryPatch:
+      type: object
+      description: >
+        The only editable field on an existing Top 5 entry — there is still no "move" operation,
+        matching insertEntry's existing insert/remove-only model. null means "leave unchanged".
+      properties:
+        customPosterUrl: { type: string, format: uri, nullable: true }
+
+    FeedItem:
+      type: object
+      description: >
+        One feed event (GET /feed). Not a stored entity — derived at read
+        time from DiaryEntry, DroppedEntry, or Top5Entry (see eventType).
+        Fields not applicable to a given eventType are null.
+      properties:
+        eventType: { type: string, enum: [DIARY_ENTRY, DROPPED, TOP5_UPDATE] }
+        id:
+          type: string
+          format: uuid
+          description: >
+            Id of the underlying DiaryEntry/DroppedEntry/Top5Entry row. For
+            eventType=DIARY_ENTRY, usable as diaryEntryId in
+            POST /diary/{id}/like and GET/POST /diary/{id}/comments.
+            DROPPED/TOP5_UPDATE deliberately have no like/comment target.
+        user: { $ref: "#/components/schemas/UserPreviewDTO" }
+        content:
+          allOf:
+            - $ref: "#/components/schemas/ContentRef"
+          nullable: true
+          description: Null when eventType is TOP5_UPDATE.
+        top5Type:
+          type: string
+          enum: [MOVIE, SERIES]
+          nullable: true
+          description: Only set when eventType is TOP5_UPDATE.
+        score: { type: integer, nullable: true, description: "Only set when eventType is DIARY_ENTRY." }
+        comment: { type: string, nullable: true, description: "Set when eventType is DIARY_ENTRY or DROPPED." }
+        likesCount: { type: integer, nullable: true, description: "Only set when eventType is DIARY_ENTRY." }
+        likedByMe: { type: boolean, nullable: true, description: "Only set when eventType is DIARY_ENTRY." }
+        watchedWith:
+          type: array
+          items: { $ref: "#/components/schemas/UserPreviewDTO" }
+          nullable: true
+          description: Same as DiaryEntry.watchedWith. Only set when eventType is DIARY_ENTRY.
+        createdAt: { type: string, format: date-time }
+
+    WatchlistEntry:
+      type: object
+      description: Same shape as Top5Entry, but with no upper bound on position — there is no 5-item cap.
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [MOVIE, SERIES] }
+        content: { $ref: "#/components/schemas/ContentRef" }
+        position: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DroppedEntry:
+      type: object
+      description: >
+        Marks that the user stopped watching a MOVIE or SERIES partway through. Independent of
+        DiaryEntry — does not affect and is not affected by any existing diary history for that
+        content. Originally scoped to SERIES only (DroppedSeriesEntry); widened to include MOVIE on
+        2026-08-18.
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [MOVIE, SERIES] }
+        content: { $ref: "#/components/schemas/ContentRef" }
+        comment: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Summary:
+      type: object
+      description: >
+        Resposta de GET /users/{userId}/summary, inteiramente escopada pelo type pedido
+        (MOVIE ou SERIES) — ver descrição do endpoint.
+      properties:
+        watchTime:
+          type: object
+          properties:
+            totalMinutesWatched: { type: integer }
+            minutesWatchedLast30Days: { type: integer }
+        genreCounts:
+          type: array
+          description: >
+            Do type pedido. MOVIE: quantidade de DiaryEntry por gênero
+            (rewatch soma). SERIES: quantidade de séries distintas
+            iniciadas por gênero (rewatch não soma de novo) — ver
+            WatchTimeStats.genreCountsMovies/genreCountsSeries.
+          items:
+            type: object
+            properties:
+              genre: { type: string }
+              count: { type: integer }
+        ratingsDistribution:
+          type: array
+          description: Histograma de score (1-10) das DiaryEntry com nota, do type pedido.
+          items:
+            type: object
+            properties:
+              score: { type: integer }
+              count: { type: integer }
+        recentEpisodes:
+          type: array
+          description: Últimos 4 episódios assistidos. Sempre vazio quando type=MOVIE.
+          items: { $ref: "#/components/schemas/DiaryEntry" }
+        recentReviews:
+          type: array
+          description: Últimas 5 DiaryEntry com comment preenchido, do type pedido.
+          items: { $ref: "#/components/schemas/DiaryEntry" }
+        recentActivity:
+          type: array
+          description: >
+            Últimos 6 eventos (concluído ou abandonado) do type pedido, mesclados de DiaryEntry
+            (nível MOVIE/SERIES) e DroppedEntry e ordenados por data mais recente.
+          items:
+            type: object
+            properties:
+              content: { $ref: "#/components/schemas/ContentRef" }
+              status: { type: string, enum: [COMPLETED, DROPPED] }
+              comment: { type: string, nullable: true }
+              activityDate: { type: string, format: date-time }
+
+    MonthInReview:
+      type: object
+      description: Resposta de GET /users/{userId}/summary/month, escopada pelo type e month pedidos.
+      properties:
+        recentWatched: { type: array, items: { $ref: "#/components/schemas/DiaryEntry" }, description: "Até 6, mais recentes primeiro." }
+        topRated: { type: array, items: { $ref: "#/components/schemas/DiaryEntry" }, description: "Até 6, melhor nota primeiro; quem está no Top5 do usuário aparece primeiro dentro do grupo." }
+        bottomRated: { type: array, items: { $ref: "#/components/schemas/DiaryEntry" }, description: "Até 6, pior nota primeiro; mesma regra de promoção do Top5." }
+        ratingsDistribution:
+          type: array
+          items: { type: object, properties: { score: { type: integer }, count: { type: integer } } }
+        watchCount: { type: integer }
+        minutesWatched: { type: integer }
+        firstWatchedDate: { type: string, format: date, nullable: true }
+        lastWatchedDate: { type: string, format: date, nullable: true }
+        minutesPerDay:
+          type: array
+          items: { type: object, properties: { watchedDate: { type: string, format: date }, minutesWatched: { type: integer } } }
+        watchCountByDayOfWeek:
+          type: array
+          description: "dayOfWeek segue ISO-8601 (1=segunda ... 7=domingo)."
+          items: { type: object, properties: { dayOfWeek: { type: integer, minimum: 1, maximum: 7 }, count: { type: integer } } }
+        genreCounts:
+          type: array
+          description: >
+            Do type pedido, escopado ao mês. MOVIE: quantidade de
+            DiaryEntry por gênero no mês (rewatch soma). SERIES:
+            quantidade de séries distintas com pelo menos uma DiaryEntry
+            no mês, por gênero (rewatch de uma série já contada no mês
+            não soma de novo).
+          items: { type: object, properties: { genre: { type: string }, count: { type: integer } } }
+        topSeriesByWatchTime:
+          type: array
+          description: Top 3 séries por tempo assistido no mês. Só preenchido quando type=SERIES.
+          items: { type: object, properties: { seriesTmdbId: { type: string }, totalMinutesWatched: { type: integer } } }
+        topLongestMovies:
+          type: array
+          description: Top 3 filmes mais longos assistidos no mês. Só preenchido quando type=MOVIE.
+          items: { $ref: "#/components/schemas/ContentRef" }
+        topWatchCompanions:
+          type: array
+          description: >
+            Top 3 pessoas que o usuário assistiu com (WatchCompanion), por quantidade de tags no
+            mês, escopado pelo type pedido (mesma regra de EPISODE-para-SERIES do resto da
+            resposta). Cada rewatch marcado conta separadamente.
+          items:
+            type: object
+            properties:
+              companion: { $ref: "#/components/schemas/UserPreviewDTO" }
+              watchCount: { type: integer }
+
+    YearInReview:
+      type: object
+      description: Resposta de GET /users/{userId}/summary/year, escopada pelo type e year pedidos.
+      properties:
+        ratingsDistribution:
+          type: array
+          items: { type: object, properties: { score: { type: integer }, count: { type: integer } } }
+        watchCount: { type: integer }
+        minutesWatched: { type: integer }
+        averageMinutesPerMonth: { type: number }
+        averageMinutesPerWeek: { type: number }
+        averageMinutesPerDay: { type: number }
+        watchCountByMonth:
+          type: array
+          items: { type: object, properties: { month: { type: integer, minimum: 1, maximum: 12 }, count: { type: integer } } }
+        watchCountByDayOfWeek:
+          type: array
+          items: { type: object, properties: { dayOfWeek: { type: integer, minimum: 1, maximum: 7 }, count: { type: integer } } }
+        firstWatchedDate: { type: string, format: date, nullable: true }
+        lastWatchedDate: { type: string, format: date, nullable: true }
+        longestWatched:
+          type: array
+          description: >
+            Até 10, duração total desc. Pra MOVIE, é o runtimeMinutes do próprio filme; pra SERIES, é a
+            soma do runtimeMinutes dos episódios assistidos no ano daquela série (seriesTmdbId).
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [MOVIE, SERIES] }
+              tmdbId: { type: string, nullable: true }
+              seriesTmdbId: { type: string, nullable: true }
+              totalMinutesWatched: { type: integer }
+        genreCounts:
+          type: array
+          description: Mesma regra de MonthInReview.genreCounts, escopado pro ano pedido.
+          items: { type: object, properties: { genre: { type: string }, count: { type: integer } } }
+        topRated: { type: array, items: { $ref: "#/components/schemas/DiaryEntry" }, description: "Até 10, mesma regra de promoção do Top5 de MonthInReview." }
+        bottomRated: { type: array, items: { $ref: "#/components/schemas/DiaryEntry" } }
+        topWatchCompanions:
+          type: array
+          description: Mesma regra de MonthInReview.topWatchCompanions, escopado pro ano pedido.
+          items:
+            type: object
+            properties:
+              companion: { $ref: "#/components/schemas/UserPreviewDTO" }
+              watchCount: { type: integer }
+
+    AllTimeStats:
+      type: object
+      description: Resposta de GET /users/{userId}/summary/all-time. Sem type — combina MOVIE e SERIES.
+      properties:
+        totalMoviesWatched: { type: integer }
+        totalEpisodesWatched: { type: integer }
+        totalMinutesWatched: { type: integer }
+        totalTheaterVisits: { type: integer, description: "COUNT de DiaryEntry com watchedInTheater=true, all-time — ver WatchTimeStats." }
+        averageMinutesPerMonth: { type: number }
+        averageMinutesPerWeek: { type: number }
+        averageMinutesPerDay: { type: number }
+        watchCountByYearMovies:
+          type: array
+          items: { type: object, properties: { year: { type: integer }, count: { type: integer } } }
+        watchCountByYearEpisodes:
+          type: array
+          items: { type: object, properties: { year: { type: integer }, count: { type: integer } } }
+        watchCountByDecade:
+          type: array
+          description: Combina MOVIE e SERIES por título distinto. Vazio se releaseYear nunca foi informado.
+          items: { type: object, properties: { decade: { type: integer }, count: { type: integer } } }
+        watchCountByCountry:
+          type: array
+          description: Combina MOVIE e SERIES por título distinto. Vazio se countries nunca foi informado.
+          items: { type: object, properties: { country: { type: string }, count: { type: integer } } }
+        mostLoggedContent:
+          type: array
+          description: Top 10 MOVIE/SERIES por quantidade de DiaryEntry (rewatches contam), all-time.
+          items:
+            type: object
+            properties:
+              content: { $ref: "#/components/schemas/ContentRef" }
+              count: { type: integer }
+        genreCountsMovies:
+          type: array
+          description: Mesma regra de WatchTimeStats.genreCountsMovies, sem recorte de tempo.
+          items: { type: object, properties: { genre: { type: string }, count: { type: integer } } }
+        genreCountsSeries:
+          type: array
+          description: Mesma regra de WatchTimeStats.genreCountsSeries, sem recorte de tempo.
+          items: { type: object, properties: { genre: { type: string }, count: { type: integer } } }
+        topRated: { type: array, items: { $ref: "#/components/schemas/DiaryEntry" }, description: "Top 10 combinando MOVIE e SERIES, mesma regra de promoção do Top5." }
+        bottomRated: { type: array, items: { $ref: "#/components/schemas/DiaryEntry" } }
+        topWatchCompanions:
+          type: array
+          description: >
+            Mesma regra de MonthInReview.topWatchCompanions, sem escopo de type nem de data —
+            combina MOVIE e SERIES (via EPISODE), all-time.
+          items:
+            type: object
+            properties:
+              companion: { $ref: "#/components/schemas/UserPreviewDTO" }
+              watchCount: { type: integer }
+
+    EpisodeRatingsGrid:
+      type: object
+      description: Resposta de GET /users/{userId}/series/{seriesTmdbId}/episode-ratings.
+      properties:
+        seriesTmdbId: { type: string }
+        episodes:
+          type: array
+          items:
+            type: object
+            properties:
+              seasonNumber: { type: integer }
+              episodeNumber: { type: integer }
+              score: { type: integer, nullable: true }
+
+    ContentStats:
+      type: object
+      description: >
+        Resposta de GET /contents/{contentId}/stats e GET /contents/stats. Agregação sobre
+        DiaryEntry/Comment cruzando todos os usuários — averageScore/playsCount/reviewsCount
+        somam só DiaryEntry de usuários com perfil público (isProfilePublic = true); um contentId
+        sem nenhuma interação ainda devolve averageScore null e os três contadores em 0, nunca 404.
+      properties:
+        contentId: { type: string, format: uuid }
+        averageScore: { type: number, nullable: true, description: "Média de score entre as DiaryEntry de perfil público desse conteúdo. null quando nenhuma tem score." }
+        playsCount: { type: integer, description: "COUNT(DiaryEntry) de perfil público — inclui rewatch (watchNumber > 1)." }
+        reviewsCount: { type: integer, description: "COUNT(DiaryEntry) de perfil público com comment preenchido, mesma semântica de hasReview." }
+        commentsCount: { type: integer, description: "COUNT(Comment) desse conteúdo — Comment não tem visibilidade própria, sempre contado." }
+
+    ContentDetailsDTO:
+      type: object
+      description: >
+        Resposta de GET /contents/{contentId}/details e GET /contents/details — dados do TMDB
+        resolvidos e cacheados pelo backend (nunca chamado direto pelo cliente). Campos são
+        condicionais por type, mesmo padrão de MonthInReview/YearInReview: seasons só em SERIES,
+        episodes só em SEASON, guestStars em EPISODE e SEASON (nunca em SERIES — ver campo
+        guestStars), creators em SERIES e SEASON. cast em SEASON vem
+        do aggregate_credits próprio daquela temporada (TMDB expõe isso por temporada, com
+        episodeCount já reescopado — ver CastMember.episodeCount), sem chamada TMDB extra; cast em
+        EPISODE reaproveita o elenco regular da SERIES do mesmo seriesTmdbId (episódio não tem
+        aggregate_credits próprio no TMDB), watchProviders em EPISODE é sempre vazio (TMDB não tem
+        esse dado por episódio). totalRuntimeMinutes/recentEpisodes (só SERIES) buscam todas as
+        temporadas da série em paralelo (uma chamada por temporada, cada uma cacheada
+        individualmente) — só acontece de verdade na primeira vez que a série é pedida depois de
+        expirar do cache; chamadas seguintes reaproveitam o cache de cada temporada.
+        budget/revenue só existem em MOVIE (0 do TMDB vira null); productionCompanies/crew/videos
+        existem em MOVIE/SERIES e são herdados por SEASON/EPISODE da SERIES do mesmo seriesTmdbId;
+        crew é filtrado por uma lista fixa de jobs (ver seção Content de business-rules.md).
+      properties:
+        contentId: { type: string, format: uuid }
+        type: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE] }
+        title:
+          type: string
+          nullable: true
+          description: >
+            Resolvido nessa ordem: título traduzido pro preferredLanguage do usuário → título
+            alternativo do TMDB pra preferredRegion do usuário (só MOVIE/SERIES) → título original.
+            SEASON/EPISODE não têm essa cadeia de fallback (TMDB não tem alternative_titles pra
+            esses tipos) — fica nulo/genérico se o idioma escolhido não tiver tradução.
+        overview: { type: string, nullable: true }
+        posterPath: { type: string, nullable: true, description: "Path relativo do TMDB (ex. /abc123.jpg) — cliente monta a URL final com o base de imagem do TMDB. Em EPISODE é o still_path (frame do episódio), TMDB não tem pôster próprio de episódio." }
+        backdropPath: { type: string, nullable: true, description: "null em SEASON/EPISODE — TMDB não tem backdrop próprio pra esses tipos." }
+        releaseDate: { type: string, format: date, nullable: true }
+        runtimeMinutes:
+          type: integer
+          nullable: true
+          description: >
+            Duração própria (MOVIE/EPISODE), média de episódio (SERIES, a partir de todos os
+            episódios de todas as temporadas exceto a 0) ou média de episódio só daquela temporada
+            (SEASON, a partir dos episódios já buscados em GET /tv/{id}/season/{n}, sem chamada
+            extra). null se nenhum episódio no escopo tem runtime conhecido.
+        totalRuntimeMinutes:
+          type: integer
+          nullable: true
+          description: >
+            Preenchido em SERIES (soma runtime de todos os episódios de todas as temporadas exceto
+            a 0 — busca paralela de cada temporada, cada uma cacheada individualmente) e em SEASON
+            (soma só dos episódios daquela temporada, sem chamada extra). Episódio sem runtime
+            conhecido contribui 0 (undercount aceito); null se nenhum episódio no escopo tem
+            runtime conhecido.
+        numberOfSeasons: { type: integer, nullable: true, description: "Só preenchido em SERIES — number_of_seasons do TMDB, sem chamada extra (já vem no corpo base de GET /tv/{id}). Inclui a temporada 0 (Specials) se ela existir, ao contrário de totalRuntimeMinutes/recentEpisodes." }
+        numberOfEpisodes:
+          type: integer
+          nullable: true
+          description: >
+            Em SERIES é passthrough de number_of_episodes do TMDB, sem chamada extra — inclui a
+            temporada 0 (Specials) se existir, mesma ressalva de numberOfSeasons. Em SEASON é a
+            contagem de episodes[] daquela temporada (tamanho da lista já buscada em GET
+            /tv/{id}/season/{n}, sem chamada extra) — sempre inclui episódio ainda não exibido,
+            diferente de seasons[].airedEpisodeCount.
+        genres:
+          type: array
+          items: { type: string }
+          description: Nomes de gênero do TMDB. Em SEASON/EPISODE, resolvido via a SERIES do mesmo seriesTmdbId.
+        countries:
+          type: array
+          items: { type: string }
+          description: Códigos ISO 3166-1 alpha-2. Mesma resolução via SERIES em SEASON/EPISODE.
+        cast:
+          type: array
+          items: { $ref: "#/components/schemas/CastMember" }
+          description: >
+            Elenco regular. MOVIE usa credits; SERIES usa aggregate_credits da própria série;
+            SEASON usa aggregate_credits da própria temporada (episodeCount escopado a essa
+            temporada); EPISODE reaproveita aggregate_credits da SERIES (episodeCount escopado à
+            série inteira, TMDB não tem aggregate_credits por episódio).
+        guestStars:
+          type: array
+          items: { $ref: "#/components/schemas/CastMember" }
+          description: >
+            Preenchido em EPISODE (guest_stars do próprio episódio) e em SEASON (guest_stars de
+            todos os episódios daquela temporada, já embutidos na resposta de GET
+            /tv/{id}/season/{n} — sem chamada TMDB extra — agregados por pessoa: mesmo id em mais
+            de um episódio aparece uma vez só, com episodeCount contando em quantos episódios
+            daquela temporada apareceu e character/profilePath da primeira aparição). Sempre vazio
+            em SERIES — TMDB só expõe guest_stars por episódio, agregar pra série inteira exigiria
+            uma chamada extra por episódio (N+1), fora do orçamento de 1 chamada por temporada
+            deste endpoint.
+        creators:
+          type: array
+          items: { type: object, properties: { name: { type: string }, profilePath: { type: string, nullable: true } } }
+          description: >
+            Preenchido em SERIES e em SEASON (reaproveita created_by da SERIES do mesmo
+            seriesTmdbId, já buscada nesse mesmo request pra genres/countries — sem chamada TMDB
+            extra). TMDB não tem creators por temporada.
+        watchProviders:
+          type: array
+          description: >
+            Já filtrado pra preferredRegion do usuário autenticado — o TMDB devolve todas as
+            regiões numa única resposta cacheada (não é parâmetro de chamada), a seleção é feita
+            pelo backend na montagem da resposta. Vazio se a região do usuário não tiver provider
+            cadastrado no TMDB, ou sempre em EPISODE (TMDB não tem esse dado por episódio).
+          items:
+            type: object
+            properties:
+              providerName: { type: string }
+              logoPath: { type: string, nullable: true }
+              type: { type: string, enum: [flatrate, rent, buy] }
+        seasons:
+          type: array
+          description: Só preenchido em SERIES — vem de graça no corpo base de GET /tv/{id} do TMDB, sem chamada extra.
+          items:
+            type: object
+            properties:
+              seasonNumber: { type: integer }
+              name: { type: string }
+              posterPath: { type: string, nullable: true }
+              airDate: { type: string, format: date, nullable: true }
+              episodeCount:
+                type: integer
+                nullable: true
+                description: >
+                  Total de episódios que o TMDB tem cadastrado pra essa temporada — inclui episódios
+                  agendados/ainda não exibidos numa temporada em exibição. Não usar isso pra decidir
+                  quantos episódios marcar como assistidos em POST /diary/bulk; usar
+                  airedEpisodeCount.
+              airedEpisodeCount:
+                type: integer
+                nullable: true
+                description: >
+                  Quantos episódios dessa temporada já foram ao ar (airDate <= hoje) — calculado
+                  pelo backend a partir dos mesmos dados de episódio já buscados pra
+                  totalRuntimeMinutes/recentEpisodes, sem chamada TMDB extra. É o número certo pra
+                  montar finaleEpisodeNumber/seasonFinaleEpisodeNumbers de POST /diary/bulk sem
+                  incluir episódios futuros. null quando os detalhes daquela temporada não puderam
+                  ser buscados no TMDB (falha pontual) — nesse caso não assuma 0, trate como
+                  desconhecido.
+        episodes:
+          type: array
+          description: Só preenchido em SEASON — vem de graça no corpo base de GET /tv/{id}/season/{n} do TMDB, sem chamada extra.
+          items: { $ref: "#/components/schemas/EpisodeSummary" }
+        recentEpisodes:
+          type: array
+          description: >
+            Só preenchido em SERIES — até os 3 episódios mais recentes já lançados (airDate <= hoje),
+            entre todas as temporadas, ordenados do mais recente pro mais antigo. Episódio futuro
+            (ainda não foi ao ar) nunca aparece aqui. Busca as mesmas respostas de temporada usadas
+            em totalRuntimeMinutes, sem chamada TMDB extra além dessas.
+          items: { $ref: "#/components/schemas/EpisodeSummary" }
+        budget:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Só preenchido em MOVIE — orçamento em dólares americanos, do TMDB. TMDB usa 0 pra "não
+            informado", tratado como null pelo backend (não um orçamento real de $0). Sempre null em
+            SERIES/SEASON/EPISODE — o endpoint /tv/{id} do TMDB não tem esse campo.
+        revenue:
+          type: integer
+          format: int64
+          nullable: true
+          description: Mesma regra de budget (0 do TMDB vira null), também só preenchido em MOVIE.
+        productionCompanies:
+          type: array
+          description: >
+            Em MOVIE/SERIES vem do próprio corpo base do TMDB, sem chamada extra. Em SEASON/EPISODE,
+            herdado da SERIES do mesmo seriesTmdbId (mesmo padrão de genres/countries/creators).
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string }
+              logoPath: { type: string, nullable: true }
+              originCountry: { type: string, nullable: true }
+        crew:
+          type: array
+          description: >
+            Equipe técnica filtrada por uma lista fixa de jobs (Director, Screenplay, Executive
+            Producer, Production Manager, First Assistant Director, Director of Photography,
+            Supervising Art Director) — pessoas com nenhum job dessa lista não aparecem. MOVIE usa
+            credits.crew; SERIES usa aggregate_credits.crew da própria série; SEASON/EPISODE herdam
+            o aggregate_credits.crew da SERIES do mesmo seriesTmdbId. Um registro por pessoa — jobs
+            agrupados numa lista quando a mesma pessoa tem mais de um job que bate no filtro.
+          items:
+            type: object
+            properties:
+              id: { type: integer, description: "TMDB person id." }
+              name: { type: string }
+              profilePath: { type: string, nullable: true }
+              jobs: { type: array, items: { type: string } }
+        videos:
+          type: array
+          description: >
+            Vídeos que o TMDB retorna, filtrados a site=YouTube (outros sites como Vimeo são
+            descartados) — sem filtro por type/official além disso, o cliente decide o que exibir
+            entre trailers/teasers/clipes etc. MOVIE/SERIES usam o próprio videos.results;
+            SEASON/EPISODE herdam o da SERIES do mesmo seriesTmdbId (TMDB não tem vídeos por
+            temporada/episódio).
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+                description: "Identificador do vídeo no YouTube, usado para montar url."
+              name: { type: string }
+              site: { type: string, description: "Sempre YouTube — outros sites são filtrados no backend." }
+              type: { type: string, description: "Ex. Trailer, Teaser, Clip, Featurette, Behind the Scenes, Bloopers." }
+              official: { type: boolean }
+              language: { type: string, nullable: true, description: "iso_639_1 do TMDB." }
+              publishedAt: { type: string, format: date-time, nullable: true }
+              url:
+                type: string
+                description: "URL de reprodução pronta, montada pelo backend a partir de key (https://www.youtube.com/watch?v={key})."
+
+    EpisodeSummary:
+      type: object
+      properties:
+        seasonNumber: { type: integer }
+        episodeNumber: { type: integer }
+        name: { type: string }
+        airDate: { type: string, format: date, nullable: true }
+        runtime: { type: integer, nullable: true }
+        stillPath: { type: string, nullable: true }
+
+    CastMember:
+      type: object
+      properties:
+        id: { type: integer, description: "TMDB person id." }
+        name: { type: string }
+        character: { type: string, nullable: true }
+        profilePath: { type: string, nullable: true }
+        episodeCount:
+          type: integer
+          nullable: true
+          description: >
+            Quantidade de episódios em que essa pessoa aparece. Escopo varia por tela: na tela de
+            Série (cast de ContentDetailsDTO com type=SERIES) é o total na série inteira; na tela
+            de Temporada (type=SEASON) é só nessa temporada (TMDB expõe aggregate_credits por
+            temporada também, com episode_count já reescopado — nenhuma chamada TMDB extra além da
+            já feita pra buscar a temporada). Em MOVIE e nos guestStars de EPISODE, sempre null
+            (filme não tem conceito de episódio; guest star já é específico daquele episódio). No
+            cast reaproveitado por EPISODE (elenco regular da SERIES), é o total na série inteira,
+            mesma fonte da tela de Série. Nos guestStars de SEASON, é calculado pelo backend (não
+            vem do TMDB) contando em quantos episódios daquela temporada o guest star apareceu, ao
+            agregar os guest_stars de cada episódio de episodes[] da temporada.
+
+    HomeSummary:
+      type: object
+      description: Resposta de GET /users/{userId}/summary/home.
+      properties:
+        totalMinutesWatched: { type: integer }
+        totalMoviesWatched: { type: integer }
+        totalEpisodesWatched: { type: integer }
+        nextEpisodes:
+          type: array
+          items: { $ref: "#/components/schemas/SeriesInProgress" }
+          description: "Até 6, mesma fonte/ordenação de GET /users/{userId}/series-in-progress. 'Próximo episódio' é maxEpisodeNumber+1 dentro de maxSeasonNumber, calculado pelo cliente."
+        watchCountByDayLast30Days:
+          type: array
+          description: Contagem de DiaryEntry (MOVIE+EPISODE) por dia, janela rolante dos últimos 30 dias corridos — não mês calendário.
+          items: { type: object, properties: { watchedDate: { type: string, format: date }, count: { type: integer } } }
+        genreCountsMoviesLast30Days:
+          type: array
+          description: Mesma regra de MonthInReview.genreCounts pra MOVIE, mas em janela rolante de 30 dias.
+          items: { type: object, properties: { genre: { type: string }, count: { type: integer } } }
+        genreCountsSeriesLast30Days:
+          type: array
+          description: Mesma regra de MonthInReview.genreCounts pra SERIES, mas em janela rolante de 30 dias.
+          items: { type: object, properties: { genre: { type: string }, count: { type: integer } } }
+        recentlyWatched:
+          type: array
+          description: Até 4, mescla DiaryEntry de MOVIE e EPISODE (exclui SEASON/SERIES sintéticos) ordenado por createdAt desc.
+          items: { $ref: "#/components/schemas/DiaryEntry" }
+
+    Comment:
+      type: object
+      description: >
+        Exactly one of contentId, listId, diaryEntryId is present per comment — the
+        resource it was posted on. parentCommentId is independent of that and, when
+        present, points to the comment this one replies to (same target as the parent).
+        Deleted in cascade whenever its content/list/diary target is deleted, whenever
+        its author's account is deleted (no "[deleted user]" placeholder — the comment
+        itself is gone, along with the entire reply subtree below it, even replies from
+        other users), or whenever its parent comment is deleted. A list locked as a
+        "list of lists" never accepts comments — only a regular list (including a child
+        list nested inside one) can.
+      properties:
+        id: { type: string, format: uuid }
+        user: { $ref: "#/components/schemas/PublicUserDTO" }
+        contentId: { type: string, format: uuid, nullable: true }
+        listId: { type: string, format: uuid, nullable: true }
+        diaryEntryId: { type: string, format: uuid, nullable: true }
+        parentCommentId: { type: string, format: uuid, nullable: true }
+        text: { type: string, maxLength: 280 }
+        containsSpoiler: { type: boolean, default: false }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        likesCount: { type: integer, description: "Contador desnormalizado de curtidas (Like com comentario_id apontando pra este comentário), mantido em conjunto com o insert/delete de Like — não é uma COUNT ao vivo por requisição." }
+        likedByMe: { type: boolean, description: "Se o usuário autenticado que fez a requisição curtiu este comentário. Resolvido em lote (uma query indexada por user_id + IN dos ids da página), não uma checagem por comentário." }
+
+    UserListCreation:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        visibility:
+          type: string
+          enum: [PUBLIC, FOLLOWERS, PRIVATE]
+          default: PUBLIC
+          description: >
+            PUBLIC: qualquer usuário autenticado vê a lista, mesmo sem seguir o dono e mesmo que o
+            perfil do dono seja privado. FOLLOWERS: só o dono e quem o segue com status aceito.
+            PRIVATE: só o dono.
+
+    UserListPatch:
+      type: object
+      description: >
+        Todos os campos opcionais — omitir ou mandar null em qualquer um significa "não alterar
+        esse campo". name, se enviado, não pode ser vazio/só-espaço.
+      properties:
+        name: { type: string }
+        description: { type: string }
+        visibility:
+          type: string
+          enum: [PUBLIC, FOLLOWERS, PRIVATE]
+        rank:
+          type: integer
+          minimum: 1
+          description: >
+            Reordena a lista entre as demais do mesmo dono. Não pode passar da quantidade de listas
+            já rankeadas do dono (400) — ver descrição completa em PATCH /lists/{listId}.
+
+    UserList:
+      allOf:
+        - $ref: "#/components/schemas/UserListCreation"
+        - type: object
+          description: >
+            Sem o dono embutido: todo endpoint que retorna esse schema já tem o dono implícito no
+            contexto da chamada (userId no path, ou o usuário autenticado em /users/me/lists e
+            /lists/{listId}) — diferente de um resultado de busca que lista listas de vários
+            usuários diferentes, onde o dono precisaria vir explícito.
+          properties:
+            id: { type: string, format: uuid }
+            watchedPercentage: { type: number, format: float, description: "Percentual dos itens de content da lista (ignora itens de lista aninhada) que o usuário autenticado que fez a requisição já assistiu (tem ao menos uma DiaryEntry pra esse content), não o dono da lista. 0.0 quando a lista não tem nenhum item de content." }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+            previewItems:
+              type: array
+              maxItems: 5
+              items: { $ref: "#/components/schemas/ContentRef" }
+              description: >
+                Os até 5 primeiros itens de conteúdo da lista, ordenados por position. Vazio quando a
+                lista ainda não tem itens, ou quando ela está travada como lista-de-listas (nesse caso
+                ver nestedListsCount) — uma UserList nunca mistura content e lista aninhada no mesmo
+                item (ver UserListItem).
+            nestedListsCount:
+              type: integer
+              description: >
+                Quantidade de listas aninhadas na lista, só maior que 0 quando ela está travada como
+                lista-de-listas (nesse caso previewItems vem sempre vazio). Não há preview das listas
+                aninhadas em si aqui — para isso, use GET /lists/{listId}, que devolve os itens completos.
+            likesCount: { type: integer, description: "Contador desnormalizado de curtidas (Like com lista_id apontando pra esta lista), mantido em conjunto com o insert/delete de Like — não é uma COUNT ao vivo por requisição." }
+            likedByMe: { type: boolean, description: "Se o usuário autenticado que fez a requisição curtiu esta lista. Resolvido em lote (uma query indexada por user_id + IN dos ids da página) em GET /users/{userId}/lists, e por uma checagem individual (mesma query, um único id) nas demais respostas." }
+            itemsCount: { type: integer, description: "Quantidade total de itens da lista (content + lista aninhada somados). Em UserListDetailed é só items.length; em GET /users/{userId}/lists é uma COUNT em lote (mesmo padrão de nestedListsCount/watchedPercentage)." }
+            commentsCount: { type: integer, description: "Quantidade de comentários (Comment com list_id apontando pra esta lista). Não é desnormalizado como likesCount — é uma COUNT calculada na mesma leva de queries que os outros contadores desta resposta." }
+            totalRuntimeMinutes: { type: integer, description: "Soma de runtimeMinutes dos itens de content da lista (ver ContentRefCreation) — itens de lista aninhada não têm runtime próprio e ficam de fora da soma. Content sem runtimeMinutes contribui 0." }
+            containsContent:
+              type: boolean
+              nullable: true
+              description: >
+                Se esse content já está na lista. Só resolvido (true/false) quando a requisição
+                passa o parâmetro contentId (ver GET /users/{userId}/lists); null em qualquer outra
+                resposta que usa este schema (POST/PATCH /users/me/lists, GET /users/me/liked-lists),
+                onde não há um content de referência pra comparar.
+            itemScope:
+              type: string
+              nullable: true
+              enum: [MOVIE_OR_SERIES, SEASON, EPISODE, LIST, MIXED]
+              description: >
+                Grupo de tipo de conteúdo ao qual esta lista está travada no momento, inferido dos itens
+                de conteúdo já presentes (ver UserListItem). Null quando a lista ainda não tem nenhum
+                item de conteúdo e aceita qualquer tipo. MIXED indica uma lista anterior a essa
+                restrição que já mistura mais de um grupo — nesse caso ela não aceita mais nenhum item
+                de conteúdo novo.
+            rank:
+              type: integer
+              nullable: true
+              description: >
+                Posição manual entre as demais listas do mesmo dono (1 a N). null numa lista que
+                ainda não foi rankeada — cai no fim quando ordenado por rank. Atribuído
+                automaticamente (N+1) na criação; reordenado via PATCH /lists/{listId}.
+
+    UserListBulkCreation:
+      allOf:
+        - $ref: "#/components/schemas/UserListCreation"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items: { $ref: "#/components/schemas/ContentRefCreation" }
+
+    UserListItemBulkCreation:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: "#/components/schemas/ContentRefCreation" }
+
+    UserListPreview:
+      type: object
+      description: Versão enxuta de UserList usada para representar uma lista aninhada dentro de UserListItem.childList, sem embutir os próprios itens.
+      properties:
+        id: { type: string, format: uuid }
+        user: { $ref: "#/components/schemas/UserPreviewDTO" }
+        name: { type: string }
+        visibility: { type: string, enum: [PUBLIC, FOLLOWERS, PRIVATE] }
+
+    UserListDetailed:
+      allOf:
+        - $ref: "#/components/schemas/UserList"
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/UserListItem" }
+
+    UserListItem:
+      type: object
+      description: >
+        content e childList são mutuamente exclusivos — exatamente um deles vem preenchido por item,
+        nunca os dois. Sem score: a nota de um conteúdo é sempre a de DiaryEntry, não uma por item de
+        lista.
+      properties:
+        id: { type: string, format: uuid }
+        content: { $ref: "#/components/schemas/ContentRef" }
+        childList:
+          allOf:
+            - $ref: "#/components/schemas/UserListPreview"
+          nullable: true
+        position: { type: integer }
+        description: { type: string, nullable: true }
+        customPosterUrl: { type: string, format: uri, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    DiaryEntryCreation:
+      type: object
+      required: [content]
+      description: >
+        Logging, rating and reviewing a content are a single action — there is no separate
+        rating/review resource. score and comment are optional per entry, so a user can log
+        a watch without rating or reviewing it. A user's "current" rating for a content is
+        the score of their most recently created diary entry for it, not an average — a
+        rewatch with a different score simply supersedes the previous one.
+      properties:
+        content: { $ref: "#/components/schemas/ContentRefCreation" }
+        comment: { type: string, nullable: true }
+        score: { type: integer, minimum: 1, maximum: 10, nullable: true }
+        watchedDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Rejected with 400 if in the future. Should also not predate the content's release date
+            (TMDB data, not stored locally) — this second rule is not validated server-side here (a
+            single-entry write never calls TMDB), so it stays a client-side responsibility. See
+            DiaryEntryBulkCreation.watchedDate for the SEASON/SERIES bulk path, which does validate
+            it, since that path already calls TMDB anyway.
+        isRewatch:
+          type: boolean
+          nullable: true
+          default: false
+          description: >
+            Only affects the first log of a content, where it pushes watchNumber from 1 to 2
+            ("I had already watched this before logging it in the app"). On every later log of
+            the same content it is ignored, because MAX(watchNumber) + 1 is already >= 2. Not stored.
+        watchedInTheater:
+          type: boolean
+          nullable: true
+          description: Only allowed for content of type MOVIE — a non-null value for any other type returns 400.
+        customPosterUrl: { type: string, format: uri, nullable: true }
+        watchedWith:
+          type: array
+          items: { type: string, format: uuid }
+          maxItems: 20
+          nullable: true
+          description: >
+            User ids of who this content was watched with. Each id must be a user the caller
+            follows (Follower status ACCEPTED) — 400 otherwise — and cannot include the caller's
+            own id. See DiaryEntry.watchedWith and business-rules.md § DiaryEntry.
+
+    DiaryEntryBulkCreation:
+      type: object
+      required: [content]
+      description: >
+        Bulk logging of a complete season or series. Only supports SEASON and SERIES content types.
+        Each episode gets a fresh watchNumber pass (matching single-entry re-log semantics).
+        finaleEpisodeNumber/finaleSeasonNumber/seasonFinaleEpisodeNumbers are all optional. Resolution
+        order (see each field's own description below): an existing finale Content already known in
+        the database always wins, with no TMDB call and no client value consulted; otherwise the
+        server tries to derive the value itself from TMDB first, and an explicit client value is used
+        only as a fallback for when TMDB can't answer (an announced-but-unreleased season/series, or
+        TMDB partially unavailable) — a client-supplied value never overrides a TMDB-derived one, even
+        when they differ. When the fallback value is actually used, it's validated against the real
+        episode/season count TMDB otherwise reports for that season/series (independent of air date)
+        and rejected with 400 if it exceeds it — this closes a gap where an explicit value used to be
+        trusted with no upper bound of its own. A season/series whose derivation would land on 0 (TMDB
+        has no episode/season aired yet) AND has no explicit fallback value supplied still fails with
+        400, same message as before this field became optional. Soft cap of 2000 episodes per
+        request (summed across every season for SERIES) — a request above that is rejected with 400
+        unless it matches TMDB's own reported episode count for the season/series (episodes()
+        array length for a SEASON request, number_of_episodes for a SERIES request), in which case
+        it is allowed through with no further cap, since a real, TMDB-verified show (e.g. a
+        long-running soap opera) can genuinely exceed 2000 episodes. This only matters when
+        finaleEpisodeNumber/seasonFinaleEpisodeNumbers are supplied explicitly above what TMDB's
+        own aired-episode count would have derived — the server-derived case is always backed by
+        real TMDB data already. runtimeMinutes is never accepted from the client in content (see
+        ContentRefCreation) — for both SEASON and SERIES requests the server derives it from TMDB
+        itself, one season at a time, from the same TmdbSeasonFullDetails call already made for
+        finaleEpisodeNumber derivation and the watchedDate-vs-release-date check below, so this
+        never costs an extra TMDB call beyond what the request already pays. Unlike every other
+        runtimeMinutes-carrying call (single-entry POST /diary, POST /contents/reference), a
+        divergent already-registered runtimeMinutes value on an episode is NOT rejected with 409
+        here — it's overwritten with the TMDB-sourced value, since it's backend-derived rather than
+        client-supplied. If TMDB is unavailable while fetching a season's own details, the whole
+        request fails with 502 rather than logging with a guess, regardless of whether an explicit
+        finaleEpisodeNumber/seasonFinaleEpisodeNumbers value was supplied for that season. The one
+        narrow exception is finaleSeasonNumber's own TMDB lookup on a SERIES request (getTvFullDetails,
+        used to find the series' latest aired season): if that specific call is unavailable but the
+        client supplied an explicit finaleSeasonNumber, the request proceeds trusting it (with no upper
+        bound to validate against, since no real season count is available) instead of failing —
+        preserves resilience for a client that already knows the value, even though every other TMDB
+        dependency in this same request (season details, runtimeMinutes) still fails hard with 502 if
+        genuinely unavailable. content.genres/releaseYear/countries are never accepted from the
+        client either (see ContentRefCreation) — rejected with 400 for a SEASON request (a season
+        has no genre/year/country of its own in TMDB); for a SERIES request the server derives all
+        three from TMDB itself, once per series (checking whether the shared SERIES Content already
+        has them set before bothering to call TMDB at all, so this never costs more than one real
+        TMDB call per series, ever, across every user). Unlike runtimeMinutes derivation, this is
+        best-effort once the SERIES Content already exists: TMDB unavailable or a conflict against
+        an already-registered value is silently skipped rather than surfaced as 502/409 — this
+        metadata is an enrichment, never a reason to block logging the actual watch. The first time
+        a given series' Content is created, the usual POST /contents/reference existence check
+        still applies (404/502 possible), same as any other new MOVIE/SERIES reference.
+      properties:
+        content: { $ref: "#/components/schemas/ContentRefCreation" }
+        watchedDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Applied to all episodes logged in this bulk request. Rejected with 400 if in the
+            future. Also rejected with 400 if it predates the release date of the last episode
+            actually logged (the SEASON's finaleEpisodeNumber, or the SERIES' finale season's
+            finale episode) — checked against the same TMDB season data already fetched for
+            runtimeMinutes/finale derivation, so unlike single-entry POST/PATCH /diary this rule
+            IS validated server-side here.
+        finaleEpisodeNumber:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: >
+            SEASON only. If no existing finale episode Content exists, the server first tries to
+            derive this from TMDB's season details as the count of episodes whose air date is not in
+            the future (same rule a client would otherwise have to apply itself from
+            ContentDetailsDTO.seasons[].airedEpisodeCount — never from seasons[].episodeCount, TMDB's
+            total episode count, which can include unreleased episodes for a season still airing) —
+            when TMDB can answer, this derived value is used and any value supplied here is ignored.
+            An explicit value here is only used as a fallback when TMDB has no aired episode yet, and
+            in that case it's validated against the season's real episode count as known by TMDB
+            (episodes().size(), independent of air date) — a value exceeding it is rejected with 400.
+            Values below 1 are also rejected with 400.
+        finaleSeasonNumber:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: >
+            SERIES only. If no existing finale season Content exists, the server first tries to derive
+            this from TMDB's series details as the highest season number (excluding season
+            0/specials) whose air date is not in the future — when TMDB can answer, this derived value
+            is used and any value supplied here is ignored. An explicit value here is only used as a
+            fallback when TMDB has no aired season yet (or its own lookup is unavailable — see the
+            resilience note above), and in that case, if TMDB's real season count is known, it's
+            validated against it (a value exceeding it is rejected with 400). Values below 1 are also
+            rejected with 400.
+        seasonFinaleEpisodeNumbers:
+          type: object
+          additionalProperties: { type: integer, minimum: 1 }
+          nullable: true
+          description: >
+            SERIES only. Maps a season number (as a string key) to that season's finale episode
+            number, for any season in the 1..finaleSeasonNumber range that has no known finale
+            episode Content yet — e.g. `{"1": 10, "2": 8}`. A season already known in the database
+            (isSeasonFinale = true on one of its episodes) ignores its entry here, if present; a
+            season missing from this map (and with no known finale Content) is resolved from TMDB the
+            same way finaleEpisodeNumber is for a SEASON bulk request — TMDB's own derivation takes
+            priority, and an entry here is only used, and validated, as the same kind of fallback. A
+            value below 1 is rejected with 400.
+        watchedWith:
+          type: array
+          items: { type: string, format: uuid }
+          maxItems: 20
+          nullable: true
+          description: >
+            Same validation as DiaryEntryCreation.watchedWith, applied identically to every
+            episode created by this bulk request — not per-episode. See DiaryEntry.watchedWith.
+
+    DiaryEntryUpdate:
+      type: object
+      description: >
+        Partial update for a diary entry. content is immutable after creation — a diary
+        entry always refers to the content it was created for, so it isn't a field here;
+        only comment, score, watchedDate, watchedInTheater and customPosterUrl
+        can change. A null field means "leave unchanged".
+      properties:
+        comment: { type: string, nullable: true }
+        score: { type: integer, minimum: 1, maximum: 10, nullable: true }
+        watchedDate:
+          type: string
+          format: date
+          nullable: true
+          description: >
+            Rejected with 400 if in the future. Should also not predate the content's release date
+            (TMDB data, not stored locally) — this second rule is not validated server-side here (a
+            single-entry write never calls TMDB), so it stays a client-side responsibility. See
+            DiaryEntryBulkCreation.watchedDate for the SEASON/SERIES bulk path, which does validate
+            it, since that path already calls TMDB anyway.
+        watchedInTheater:
+          type: boolean
+          nullable: true
+          description: Only allowed for content of type MOVIE — a non-null value for any other type returns 400.
+        customPosterUrl: { type: string, format: uri, nullable: true }
+        watchedWith:
+          type: array
+          items: { type: string, format: uuid }
+          maxItems: 20
+          nullable: true
+          description: >
+            Same validation as DiaryEntryCreation.watchedWith. Null means "leave unchanged"; any
+            list (including an empty one) replaces the current companions entirely.
+
+    DiaryEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        content: { $ref: "#/components/schemas/ContentRef" }
+        comment: { type: string, nullable: true }
+        score: { type: integer, nullable: true }
+        watchedDate: { type: string, format: date, nullable: true }
+        watchNumber:
+          type: integer
+          description: How many times the user has logged this content (1 = first watch). Calculated server-side, never accepted on write.
+        watchedInTheater: { type: boolean, nullable: true }
+        customPosterUrl: { type: string, format: uri, nullable: true }
+        autoGenerated:
+          type: boolean
+          description: True when this entry was created automatically because the user finished every episode of the season (or every season of the series), not by direct user action.
+        ignore:
+          type: boolean
+          description: >
+            True when this entry only exists as a mechanical stepping-stone toward a higher-level
+            content type the user actually requested (an episode auto-logged while bulk-logging its
+            season/series, or a season auto-completed while bulk-logging its series) — orthogonal to
+            autoGenerated, which protects against cascade deletion, not feed visibility. GET /feed
+            excludes entries with ignore = true; every other diary listing (GET /users/{id}/diary,
+            episode-ratings, etc.) still shows them. Editing an entry (PATCH /diary/{id}) resets
+            ignore to false, same as autoGenerated. See business-rules.md § DiaryEntry.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        likesCount: { type: integer, description: "Contador desnormalizado de curtidas (Like com log_id apontando pra este registro), mantido em conjunto com o insert/delete de Like — não é uma COUNT ao vivo por requisição." }
+        likedByMe: { type: boolean, description: "Se o usuário autenticado que fez a requisição curtiu este registro de diário. Resolvido em lote (uma query indexada por user_id + IN dos ids da página) em GET /users/{id}/diary, e por uma checagem individual (mesma query, um único id) em PATCH /diary/{id}; sempre false em POST /diary e /diary/bulk (registro recém-criado)." }
+        watchedWith:
+          type: array
+          items: { $ref: "#/components/schemas/UserPreviewDTO" }
+          description: >
+            Who this specific entry (this watchNumber pass) was watched with — never carries over
+            to a rewatch. Empty for a directly-logged entry with no companions. For an
+            auto-generated season/series completion entry, populated only when every one of its
+            direct children (episodes for a season, seasons for a series) was watched with the
+            exact same set of people (computed once, when the completion entry is created — never
+            revisited later). No confirmation/notification flow: the tagged user is never asked
+            and never sees the tag anywhere on their own profile/diary. See business-rules.md §
+            DiaryEntry.
+
+    SeriesInProgress:
+      type: object
+      description: Progresso de uma série que o usuário começou mas ainda não completou.
+      properties:
+        seriesTmdbId: { type: string }
+        maxSeasonNumber: { type: integer, description: Maior número de temporada com pelo menos um episódio assistido. }
+        maxEpisodeNumber: { type: integer, description: Maior número de episódio assistido dentro de maxSeasonNumber. }
+        lastWatchedDate: { type: string, format: date, description: Data (watchedDate, ou a data de criação do registro quando watchedDate não foi informado) do episódio mais recente assistido dessa série. }
+
+    DiaryEntryCreationResult:
+      type: object
+      description: >
+        Response envelope for POST /diary. Logging a single episode can cascade into
+        auto-completing its season and/or series (see DiaryEntry.autoGenerated) — this
+        envelope surfaces those auto-generated entries alongside the entry that was
+        directly logged, so a client can tell from a single log call whether it also
+        completed a season/series without a follow-up request.
+      properties:
+        entry: { $ref: "#/components/schemas/DiaryEntry" }
+        completedSeason:
+          allOf: [{ $ref: "#/components/schemas/DiaryEntry" }]
+          nullable: true
+          description: The auto-generated season entry, present only when logging this episode completed its season.
+        completedSeries:
+          allOf: [{ $ref: "#/components/schemas/DiaryEntry" }]
+          nullable: true
+          description: The auto-generated series entry, present only when logging this episode/season completed its series.
+
+    DeletionImpactItem:
+      type: object
+      description: A diary entry that would be deleted if the queried entry is deleted (dry-run computation, no data actually deleted).
+      properties:
+        id: { type: string, format: uuid, description: "Id of the diary entry that would be deleted." }
+        type: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE] }
+        watchedDate: { type: string, format: date, nullable: true }
+        watchNumber: { type: integer }
+        autoGenerated:
+          type: boolean
+          description: >
+            True when this entry was created automatically by the completion cascade. This — not hasReview —
+            is the protection flag: an entry with autoGenerated = false is only removed when
+            overrideProtectedEntries is true.
+        hasReview:
+          type: boolean
+          description: >
+            True when this entry has a comment or a score. It is a severity hint for the client (how much
+            user-authored content is at stake), not the protection flag — a bare PATCH sets
+            autoGenerated = false without adding a comment or score.
+
+    DeletionImpact:
+      type: object
+      description: >
+        Deletion-impact preview for a diary entry. Calling DELETE on this entry would trigger cascade deletions
+        of season and series completion entries that depend on the entry being watched. This endpoint is a dry-run —
+        it really runs the same delete path inside a transaction that is always rolled back, so the list matches
+        exactly what a DELETE with the same overrideProtectedEntries value would remove, without persisting anything.
+      properties:
+        wouldDelete:
+          type: array
+          items: { $ref: "#/components/schemas/DeletionImpactItem" }
+          description: >
+            Diary entries that would be deleted as a cascade effect, in the order they would be deleted.
+            The queried entry itself is always deleted and is not repeated in this list.
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [RELEASE, ANNOUNCED_DATE, CANCELLED, RENEWED, NEW_EPISODE, FOLLOWED_PERSON_NEW_CREDIT]
+        message: { type: string }
+        content: { $ref: "#/components/schemas/ContentRef" }
+        personTmdbId: { type: string, nullable: true, description: "Presente apenas quando type = FOLLOWED_PERSON_NEW_CREDIT." }
+        isRead: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    SearchResult:
+      type: object
+      properties:
+        contents:
+          type: array
+          description: Resultado ao vivo do TMDB (filmes/séries)
+          items:
+            type: object
+            properties:
+              tmdbId: { type: string }
+              type: { type: string, enum: [MOVIE, SERIES] }
+              title: { type: string }
+              posterUrl: { type: string, format: uri }
+              year: { type: integer }
+        people:
+          type: array
+          description: Resultado ao vivo do TMDB
+          items:
+            type: object
+            properties:
+              tmdbId: { type: string }
+              name: { type: string }
+              photo: { type: string, format: uri }
+        lists:
+          type: array
+          items: { $ref: "#/components/schemas/UserList" }
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/PublicUserDTO" }

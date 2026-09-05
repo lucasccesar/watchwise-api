@@ -69,6 +69,14 @@ public class Content {
     @Setter
     private List<String> countries;
 
+    @Column(name = "total_runtime_minutes")
+    @Setter
+    private Integer totalRuntimeMinutes;
+
+    @Column(name = "runtime_minutes_episode_count")
+    @Setter
+    private Integer runtimeMinutesEpisodeCount;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;
