@@ -14,8 +14,9 @@ import java.util.Optional;
 @Component
 public class ContentChangeDetector {
 
-    private static final String CANCELED_STATUS = "Canceled";
-    private static final String RELEASED_STATUS = "Released";
+    public static final String CANCELED_STATUS = "Canceled";
+    public static final String RELEASED_STATUS = "Released";
+    public static final String ENDED_STATUS = "Ended";
 
     public Optional<ContentChangeEvent> detectMovieChange(TrackedContentState previous, TmdbMovieDetails fresh, LocalDate today) {
         if (previous == null) {
@@ -64,6 +65,6 @@ public class ContentChangeDetector {
     }
 
     private boolean isEndedOrCancelled(String status) {
-        return "Ended".equals(status) || CANCELED_STATUS.equals(status);
+        return ENDED_STATUS.equals(status) || CANCELED_STATUS.equals(status);
     }
 }

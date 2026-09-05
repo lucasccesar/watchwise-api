@@ -75,6 +75,10 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
 
     private void processTrackedContent(Content content) {
         try {
+            String lastKnownStatus = trackedContentStateRepository.findLastKnownStatusByContentId(content.getId()).orElse(null);
+            if (isTerminal(content.getType(), lastKnownStatus)) {
+                return;
+            }
             if (content.getType() == ContentType.MOVIE) {
                 processMovie(content);
             } else if (content.getType() == ContentType.SERIES) {
@@ -83,6 +87,19 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         } catch (RuntimeException e) {
             log.warn("Failed to process tracked content {} ({}): {}", content.getId(), content.getTmdbId(), e.getMessage());
         }
+    }
+
+    private boolean isTerminal(ContentType type, String lastKnownStatus) {
+        if (lastKnownStatus == null) {
+            return false;
+        }
+        return switch (type) {
+            case MOVIE -> ContentChangeDetector.RELEASED_STATUS.equals(lastKnownStatus)
+                    || ContentChangeDetector.CANCELED_STATUS.equals(lastKnownStatus);
+            case SERIES -> ContentChangeDetector.ENDED_STATUS.equals(lastKnownStatus)
+                    || ContentChangeDetector.CANCELED_STATUS.equals(lastKnownStatus);
+            default -> false;
+        };
     }
 
     private void processMovie(Content content) {

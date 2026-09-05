@@ -231,6 +231,87 @@ class ContentTrackingServiceImplTest {
     }
 
     @Test
+    @DisplayName("[trackContentChanges] Should Not Call TMDB - When Movie Last Known Status Is Released")
+    void shouldNotCallTmdbWhenMovieLastKnownStatusIsReleased() {
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(movie));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(movie.getId())).thenReturn(Optional.of("Released"));
+
+        contentTrackingService.trackContentChanges();
+
+        verify(tmdbClient, never()).getMovieDetails(any());
+        verify(trackedContentStateRepository, never()).findByContentId(any());
+        verify(notificationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Not Call TMDB - When Movie Last Known Status Is Canceled")
+    void shouldNotCallTmdbWhenMovieLastKnownStatusIsCanceled() {
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(movie));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(movie.getId())).thenReturn(Optional.of("Canceled"));
+
+        contentTrackingService.trackContentChanges();
+
+        verify(tmdbClient, never()).getMovieDetails(any());
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Not Call TMDB - When Series Last Known Status Is Ended")
+    void shouldNotCallTmdbWhenSeriesLastKnownStatusIsEnded() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Ended"));
+
+        contentTrackingService.trackContentChanges();
+
+        verify(tmdbClient, never()).getTvDetails(any());
+        verify(trackedContentStateRepository, never()).findByContentId(any());
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Not Call TMDB - When Series Last Known Status Is Canceled")
+    void shouldNotCallTmdbWhenSeriesLastKnownStatusIsCanceled() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Canceled"));
+
+        contentTrackingService.trackContentChanges();
+
+        verify(tmdbClient, never()).getTvDetails(any());
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Still Call TMDB - When No Previous Tracked State Exists")
+    void shouldStillCallTmdbWhenNoPreviousTrackedStateExists() {
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(movie));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(movie.getId())).thenReturn(Optional.empty());
+        when(trackedContentStateRepository.findByContentId(movie.getId())).thenReturn(Optional.empty());
+        when(tmdbClient.getMovieDetails("603")).thenReturn(Optional.of(new TmdbMovieDetails("603", "", "Planned")));
+        when(contentChangeDetector.detectMovieChange(any(), any(), any())).thenReturn(Optional.empty());
+
+        contentTrackingService.trackContentChanges();
+
+        verify(tmdbClient).getMovieDetails("603");
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Still Call TMDB - When Series Last Known Status Is Returning Series")
+    void shouldStillCallTmdbWhenSeriesLastKnownStatusIsReturningSeries() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null)));
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
+
+        contentTrackingService.trackContentChanges();
+
+        verify(tmdbClient).getTvDetails("1399");
+    }
+
+    @Test
     @DisplayName("[trackContentChanges] Should Continue Processing Other Content - When Resolving A Diary-Derived Series Reference Fails")
     void shouldContinueProcessingOtherContentWhenResolvingADiaryDerivedSeriesReferenceFails() {
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(movie));
