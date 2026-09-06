@@ -10,8 +10,8 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 public record UserListBulkCreationDTO(
-        @NotBlank String name,
-        String description,
+        @NotBlank @Size(max = 255) String name,
+        @Size(max = 400) String description,
         UserListVisibility visibility,
         @NotEmpty @Size(max = 100) List<@Valid ContentRefCreationDTO> items
 ) {

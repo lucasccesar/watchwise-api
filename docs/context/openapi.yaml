@@ -3296,8 +3296,8 @@ components:
       type: object
       required: [name]
       properties:
-        name: { type: string }
-        description: { type: string }
+        name: { type: string, maxLength: 255 }
+        description: { type: string, maxLength: 400 }
         visibility:
           type: string
           enum: [PUBLIC, FOLLOWERS, PRIVATE]
@@ -3313,8 +3313,8 @@ components:
         Todos os campos opcionais — omitir ou mandar null em qualquer um significa "não alterar
         esse campo". name, se enviado, não pode ser vazio/só-espaço.
       properties:
-        name: { type: string }
-        description: { type: string }
+        name: { type: string, maxLength: 255 }
+        description: { type: string, maxLength: 400 }
         visibility:
           type: string
           enum: [PUBLIC, FOLLOWERS, PRIVATE]

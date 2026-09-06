@@ -901,6 +901,52 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createUserList] Should Return BadRequest And Not Persist - When Name Exceeds 255 Characters")
+    void shouldReturnBadRequestAndNotPersistWhenNameExceeds255Characters() throws Exception {
+        RegisteredUser user = registerUser("createlistnametoolong");
+
+        mockMvc.perform(createRequest(user, creationBody("a".repeat(256), null, null)))
+                .andExpect(status().isBadRequest());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserList] Should Return Created - When Name Is Exactly 255 Characters")
+    void shouldReturnCreatedWhenNameIsExactly255Characters() throws Exception {
+        RegisteredUser user = registerUser("createlistnamemax");
+        String name = "a".repeat(255);
+
+        mockMvc.perform(createRequest(user, creationBody(name, null, null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value(name));
+    }
+
+    @Test
+    @DisplayName("[createUserList] Should Return BadRequest And Not Persist - When Description Exceeds 400 Characters")
+    void shouldReturnBadRequestAndNotPersistWhenDescriptionExceeds400Characters() throws Exception {
+        RegisteredUser user = registerUser("createlistdesctoolong");
+
+        mockMvc.perform(createRequest(user, creationBody("My list", "a".repeat(401), null)))
+                .andExpect(status().isBadRequest());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserList] Should Return Created - When Description Is Exactly 400 Characters")
+    void shouldReturnCreatedWhenDescriptionIsExactly400Characters() throws Exception {
+        RegisteredUser user = registerUser("createlistdescmax");
+        String description = "a".repeat(400);
+
+        mockMvc.perform(createRequest(user, creationBody("My list", description, null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.description").value(description));
+    }
+
+    @Test
     @DisplayName("[createUserList] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForCreate() throws Exception {
         RegisteredUser user = registerUser("createlistnoauth");
@@ -978,6 +1024,32 @@ class UserListControllerIntegrationTest {
         String body = "{ \"items\": [" + contentRefJson("100", "MOVIE") + "] }";
 
         mockMvc.perform(createBulkRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return BadRequest And Not Persist - When Name Exceeds 255 Characters")
+    void shouldReturnBadRequestAndNotPersistWhenNameExceeds255CharactersOnBulkCreate() throws Exception {
+        RegisteredUser user = registerUser("bulklistnametoolong");
+        String items = "[" + contentRefJson("100", "MOVIE") + "]";
+
+        mockMvc.perform(createBulkRequest(user, bulkCreationBody("a".repeat(256), null, UserListVisibility.PUBLIC, items)))
+                .andExpect(status().isBadRequest());
+
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        assertThat(userListRepository.findByUserId(entity.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createUserListWithItems] Should Return BadRequest And Not Persist - When Description Exceeds 400 Characters")
+    void shouldReturnBadRequestAndNotPersistWhenDescriptionExceeds400CharactersOnBulkCreate() throws Exception {
+        RegisteredUser user = registerUser("bulklistdesctoolong");
+        String items = "[" + contentRefJson("100", "MOVIE") + "]";
+
+        mockMvc.perform(createBulkRequest(user, bulkCreationBody("My list", "a".repeat(401), UserListVisibility.PUBLIC, items)))
                 .andExpect(status().isBadRequest());
 
         User entity = userRepository.findById(user.id()).orElseThrow();
@@ -1108,6 +1180,34 @@ class UserListControllerIntegrationTest {
 
         UserList untouched = userListRepository.findById(list.getId()).orElseThrow();
         assertThat(untouched.getName()).isEqualTo("Old name");
+    }
+
+    @Test
+    @DisplayName("[updateUserList] Should Return BadRequest And Not Persist - When Name Exceeds 255 Characters")
+    void shouldReturnBadRequestAndNotPersistWhenNameExceeds255CharactersOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatelistnametoolong");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Old name", true);
+
+        mockMvc.perform(updateRequest(user, list.getId(), patchBody("a".repeat(256), null, null)))
+                .andExpect(status().isBadRequest());
+
+        UserList untouched = userListRepository.findById(list.getId()).orElseThrow();
+        assertThat(untouched.getName()).isEqualTo("Old name");
+    }
+
+    @Test
+    @DisplayName("[updateUserList] Should Return BadRequest And Not Persist - When Description Exceeds 400 Characters")
+    void shouldReturnBadRequestAndNotPersistWhenDescriptionExceeds400CharactersOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatelistdesctoolong");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Old name", true);
+
+        mockMvc.perform(updateRequest(user, list.getId(), patchBody(null, "a".repeat(401), null)))
+                .andExpect(status().isBadRequest());
+
+        UserList untouched = userListRepository.findById(list.getId()).orElseThrow();
+        assertThat(untouched.getDescription()).isNull();
     }
 
     @Test
