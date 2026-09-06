@@ -1672,7 +1672,7 @@ class DiaryEntryControllerIntegrationTest {
         String body = """
                 {
                     "content": { "type": "SEASON", "seriesTmdbId": "914", "seasonNumber": 1 },
-                    "finaleEpisodeNumber": 101
+                    "finaleEpisodeNumber": 2001
                 }
                 """;
 
@@ -1707,7 +1707,7 @@ class DiaryEntryControllerIntegrationTest {
                 {
                     "content": { "type": "SERIES", "tmdbId": "916" },
                     "finaleSeasonNumber": 2,
-                    "seasonFinaleEpisodeNumbers": { "1": 5, "2": 101 }
+                    "seasonFinaleEpisodeNumbers": { "1": 5, "2": 2001 }
                 }
                 """;
 

@@ -15,9 +15,9 @@ import jakarta.validation.constraints.Size;
 public record DiaryEntryBulkCreationDTO(
         @NotNull @Valid ContentRefCreationDTO content,
         LocalDate watchedDate,
-        @Min(1) @Max(100) Integer finaleEpisodeNumber,
+        @Min(1) @Max(2000) Integer finaleEpisodeNumber,
         @Min(1) @Max(100) Integer finaleSeasonNumber,
-        Map<@Min(1) @Max(100) Integer, @Min(1) @Max(100) Integer> seasonFinaleEpisodeNumbers,
+        Map<@Min(1) @Max(100) Integer, @Min(1) @Max(2000) Integer> seasonFinaleEpisodeNumbers,
         @Size(max = 20) List<UUID> watchedWith
 ) {
     public DiaryEntryBulkCreationDTO(ContentRefCreationDTO content, LocalDate watchedDate, Integer finaleEpisodeNumber,
