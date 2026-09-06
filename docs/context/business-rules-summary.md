@@ -60,11 +60,13 @@ Para o detalhe completo (classe/método, motivação, exemplos), ver `business-r
 - Rejeitar uma solicitação a remove (não fica em estado "rejeitada") — pode pedir de novo do zero.
 - Tornar o perfil público aceita em cascata todas as solicitações pendentes recebidas.
 - Regra de visibilidade padrão (repetida em vários domínios, incl. Watchlist, Dropped e a listagem de UserList): dado só visível se perfil público, ou viewer é o dono, ou viewer segue o dono com status aceito — senão 403.
+- Listagem de followers/following ordena por `createdAt DESC, id DESC` (tie-breaker adicionado 2026-09-06).
 
 ## FollowedPerson
 
 - Seguir/deixar de seguir uma pessoa do TMDB é idempotente (diferente do `Follower`, que dá 409 em duplicata).
 - `personTmdbId` só aceita dígitos, até 20 caracteres.
+- `GET /users/{userId}/follow-people` ordena por `createdAt DESC, id DESC` (antes não tinha ordenação nenhuma; corrigido 2026-09-06).
 
 ## Top5Entry
 
@@ -227,7 +229,7 @@ Para o detalhe completo (classe/método, motivação, exemplos), ver `business-r
 ## Notification
 
 - `RENEWED` é heurística, não status literal do TMDB: status anterior `Ended`/`Canceled` virando `Returning Series`; `CANCELLED` tem prioridade sobre `RENEWED` no mesmo diff.
-- Tabela de diff por chamada ao TMDB (`ContentChangeDetector`): `ANNOUNCED_DATE` (data futura nova), `RELEASE` (data conhecida já chegou), `CANCELLED` (status virou Canceled), `RENEWED` (ver acima, só série), `NEW_EPISODE` (próximo episódio conhecido já chegou, só série); `FOLLOWED_PERSON_NEW_CREDIT` vem de um fluxo separado (crédito TMDB novo de uma pessoa seguida).
+- Tabela de diff por chamada ao TMDB (`ContentChangeDetector`): `ANNOUNCED_DATE` (data futura nova), `RELEASE` (transição de status pra Released — não comparação de data, fix 2026-08-30 pra parar de reenviar todo dia), `CANCELLED` (status virou Canceled), `RENEWED` (ver acima, só série), `NEW_EPISODE` (próximo episódio conhecido já chegou, só série); `FOLLOWED_PERSON_NEW_CREDIT` vem de um fluxo separado (crédito TMDB novo de uma pessoa seguida).
 - Uma única chamada `/movie/{id}`/`/tv/{id}` alimenta vários tipos de notificação de uma vez (status+data+próximo episódio no mesmo payload) — evita multiplicar chamadas TMDB por tipo.
 - Deduplicação: `Content` rastreado tanto pela watchlist quanto por diário em andamento é checado uma única vez por execução do `ContentTrackingJob` (merge por `content.getId()`).
 - Público por tipo, por design: `NEW_EPISODE` avisa quem está assistindo a série no diário; `RELEASE`/`ANNOUNCED_DATE`/`CANCELLED`/`RENEWED` avisam quem tem o título na watchlist; `FOLLOWED_PERSON_NEW_CREDIT` avisa quem segue a pessoa — três fontes diferentes, não uma lacuna.

@@ -550,6 +550,9 @@ constraints de tamanho/formato de DTO.
   `GET /users/{userId}/lists`, não em `GET /lists/{listId}`, que checa só a visibilidade da própria
   lista): dados de um usuário só são visíveis para terceiros se o perfil for público **ou** o viewer
   for o próprio dono **ou** o viewer seguir o dono com `status = ACCEPTED`; caso contrário, `403`.
+- **`findByFollowedIdAndStatus`/`findByFollowerIdAndStatus` (followers/following) ordenam por
+  `createdAt DESC, id DESC`, não só `createdAt DESC`** (`FollowerRepository`, tie-breaker adicionado
+  2026-09-06) — ver convenção geral em `CLAUDE.md` → Architecture → Pagination.
 
 ## FollowedPerson
 
@@ -561,6 +564,10 @@ constraints de tamanho/formato de DTO.
   — `400` caso contrário. IDs de pessoa do TMDB são sempre numéricos; a checagem também evita que um
   valor não-numérico mas curto grude permanentemente como "pessoa seguida" e que um valor longo demais
   estoure a coluna `VARCHAR(20)` (que antes virava `500` sem handler).
+- **`findByUserId` (`GET /users/{userId}/follow-people`) ordena por `createdAt DESC, id DESC`**
+  (`FollowedPersonRepository`, 2026-09-06) — antes era um derived query method sem `ORDER BY` nenhum,
+  ordem arbitrária a critério do plano de execução do Postgres. Ver convenção geral em `CLAUDE.md` →
+  Architecture → Pagination.
 
 ## Top5Entry
 
@@ -1888,9 +1895,13 @@ constraints de tamanho/formato de DTO.
   `ContentTrackingServiceImpl.processMovie`/`processSeries`):
   - `ANNOUNCED_DATE`: não havia `lastKnownReleaseDate` registrado e o TMDB agora traz uma data de
     lançamento futura (`freshReleaseDate.isAfter(today)`).
-  - `RELEASE`: havia um `lastKnownReleaseDate` registrado e essa data já chegou ou passou
-    (`!today.isBefore(previousReleaseDate)`) — dispara uma vez, no primeiro run em que a data vira
-    presente/passado.
+  - `RELEASE`: transição de status, não comparação de data — status anterior conhecido, não nulo e
+    diferente de `Released`, e o status fresco do TMDB já é `Released`
+    (`previousStatus != null && !RELEASED_STATUS.equals(previousStatus) && RELEASED_STATUS.equals(fresh.status())`).
+    Corrigido em 2026-08-30 (commit `cdd5fcb`) depois de uma versão anterior baseada em data
+    (`!today.isBefore(previousReleaseDate)`) reenviar `RELEASE` todo dia após o lançamento — a condição
+    de data permanece verdadeira pra sempre uma vez satisfeita, então só a transição de status garante
+    o disparo único.
   - `CANCELLED` (filme ou série): status anterior diferente de `Canceled` e status atual é `Canceled`.
   - `RENEWED` (só série): ver heurística acima.
   - `NEW_EPISODE` (só série): havia um `nextEpisodeAirDate` registrado no estado anterior e essa data já

@@ -114,19 +114,22 @@ service, sem acesso lazy na camada de view.
 **Correção:** adicionar `spring.jpa.open-in-view=false` em `application.properties` (ou dev/prod), e
 descomentar no template de prod.
 
-### 4. 🟡 Doc: `GET /notifications` e `GET /search` não seguem a convenção de paginação do projeto
+### 4. ✅ PARCIALMENTE FECHADO (2026-09-06) — Doc: `GET /search` não segue a convenção de paginação do projeto
 
 **Origem:** `openapi-review-2026-08-21.md` #5. **Reconferido em 2026-08-24:** ainda presente —
 `GET /notifications` (openapi.yaml:1609) devolve array puro sem `page`/`size`; `GET /search`
 (openapi.yaml:1639) idem.
 
-Todo outro endpoint de listagem envelopa `content` no `PageMeta` (`page`/`size`/`totalElements`/
-`totalPages`/`hasNext`) — convenção documentada e deliberada (ver `CLAUDE.md` → Architecture →
-Pagination). Notificações em particular não têm limite natural por usuário — isso vira uma
-inconsistência real assim que `Notification` for de fato implementado (ainda não existe no código).
+**Reconferido em 2026-09-06 (item 11 de `docs/pending/audit-completa-2026-09-04.md`):**
+`GET /notifications` já usa o envelope `PageMeta` (`content`/`page`/`size`/`totalElements`/
+`totalPages`/`hasNext`), tanto no código (`NotificationController`) quanto no `openapi.yaml` — essa
+parte do item está fechada, provavelmente desde a implementação de `Notification`. Só `GET /search`
+continua sem paginação, mas `/search` **não está implementado ainda** (nenhum controller/service no
+código), então isso não é uma divergência código-vs-doc hoje — é escopo pendente do próprio endpoint,
+a ser resolvido quando `/search` for implementado (ver Fase 8 em `development-stages.md`).
 
-**Considerar:** aplicar o mesmo envelope `PageMeta` + params `page`/`size` nos dois, ao menos nas
-partes de `SearchResult` que vêm do banco local (`lists`, `users`).
+**Considerar, quando `/search` for implementado:** aplicar o mesmo envelope `PageMeta` + params
+`page`/`size`, ao menos nas partes de `SearchResult` que vêm do banco local (`lists`, `users`).
 
 ---
 

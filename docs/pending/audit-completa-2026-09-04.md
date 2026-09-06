@@ -128,7 +128,7 @@ mesmo critério já usado em `DroppedEntry`. Testes de integração novos em
 exceder o limite e o isolamento por usuário. `business-rules.md`/`business-rules-summary.md`
 atualizados.
 
-### 6. 🟡 `UserList.name`/`description` sem `@Size` → nome grande vira `500` em vez de `400`
+### 6. ✅ CORRIGIDO (2026-09-06) — `UserList.name`/`description` sem `@Size` → nome grande vira `500` em vez de `400`
 
 **Arquivos:** `userlist/dto/UserListCreationDTO.java:7`, `UserListBulkCreationDTO.java:13`,
 `UserListPatchDTO.java`
@@ -144,7 +144,15 @@ em nenhuma das três DTOs — não quebra no banco, mas foge do padrão já usad
 mostra que o projeto já tem essa convenção, só não foi aplicada aqui. Bate com o item 4 do checklist
 "Recurring bug patterns" do próprio `CLAUDE.md`.
 
-### 7. 🟡 `GET /users/{userId}/follow-people` pagina sem nenhuma ordenação
+**Corrigido:** `@Size(max = 255)` em `name` e `@Size(max = 400)` em `description` (mesmo limite já usado
+por `UserListItem`) adicionados nas três DTOs (`UserListCreationDTO`, `UserListBulkCreationDTO` —
+herdado por `UserListBulkCreation` no `openapi.yaml` via `allOf` —, `UserListPatchDTO`). `openapi.yaml`
+(`UserListCreation`/`UserListPatch`) ganhou `maxLength` correspondente nos dois campos, seguindo a
+convenção já usada em `User`/`Comment`/`UserListItem`. Testes de integração novos em
+`UserListControllerIntegrationTest` provam `400` acima do limite e `201`/`200` exatamente no limite,
+pros três endpoints (`POST /users/me/lists`, `POST /users/me/lists/bulk`, `PATCH /lists/{listId}`).
+
+### 7. ✅ CORRIGIDO (2026-09-06) — `GET /users/{userId}/follow-people` pagina sem nenhuma ordenação
 
 **Arquivo:** `followedperson/repository/FollowedPersonRepository.java:20`
 (`Page<FollowedPerson> findByUserId(UUID userId, Pageable pageable)`)
@@ -156,7 +164,11 @@ critério do plano de execução do Postgres, podendo mudar entre duas chamadas 
 itens duplicados ou pulados entre páginas. Aqui não é só falta de tie-breaker secundário — não existe
 ordenação primária alguma.
 
-### 8. 🟡 Paginação de followers/following: fix marcado "corrigido" em `to-fix.md` ficou incompleto
+**Corrigido:** `findByUserId` convertido de derived query para `@Query` explícita com
+`ORDER BY f.createdAt DESC, f.id DESC` — já nasce com tie-breaker (id) em vez de precisar de um segundo
+fix depois, mesmo padrão do item 8 abaixo.
+
+### 8. ✅ CORRIGIDO (2026-09-06) — Paginação de followers/following: fix marcado "corrigido" em `to-fix.md` ficou incompleto
 
 **Arquivo:** `follower/repository/FollowerRepository.java:35,43`
 (`ORDER BY f.createdAt DESC` em `findByFollowedIdAndStatus`/`findByFollowerIdAndStatus`)
@@ -174,7 +186,35 @@ código: `diaryentry/repository/DiaryEntryRepository.java:33` usa
 `ORDER BY createdAt DESC` sem `, id DESC` — apesar de outra query no mesmo arquivo (linha 33) já usar o
 padrão correto com tie-breaker. Inconsistência dentro do próprio `DiaryEntryRepository`.
 
-### 9. 🟡 `business-rules.md` desatualizado sobre a lógica de `RELEASE` em `ContentChangeDetector`
+**Corrigido:** tie-breaker `, id DESC`/`ASC` adicionado nas duas queries do `FollowerRepository` e na
+query relacionada de `DiaryEntryRepository`. Varredura adicional por todo `ORDER BY` de queries
+paginadas (`Page<T>`) ordenadas só por `createdAt` sem segunda coluna encontrou o mesmo gap em mais
+cinco lugares — corrigidos junto, mesma classe de bug: `CommentRepository.findByContentIdOrderByCreatedAtAsc`/
+`findByListIdOrderByCreatedAtAsc`/`findByDiaryEntryIdOrderByCreatedAtAsc` (`, c.id ASC`),
+`DiaryEntryRepository.findByUserIdWithFilters`/`findReviewsByContentId` (`, d.id DESC`),
+`DroppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc` (`, d.id DESC`),
+`LikeRepository.findLikedListsByUserId` (`, l.id DESC`), e as duas queries nativas de
+`UserListRepository.findByUserIdOrderByItemsCount`/`findByUserIdOrderByCommentsCount` (que já
+desempatavam por `created_at DESC` como critério secundário à contagem, mas esse próprio critério não
+era único — `ul.id DESC` adicionado como terciário). Consultas do tipo "top N" com `Pageable` usado só
+como limite fixo (`DiaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc`,
+`WatchCompanionRepository.countGroupedByCompanionUserId*`) ficaram de fora — não são paginação
+incremental entre chamadas, e `business-rules.md` já documenta esse desempate como deliberadamente
+ausente ("sem desempate explícito no 3º lugar").
+
+**Achado relacionado, fora de escopo, não corrigido:** `UserListRepository.findByUserId`/
+`findByUserIdAndVisibilityIn` (usadas por `GET /users/{userId}/lists`/`GET /users/me/lists` quando
+`sortBy` não é passado) recebem um `PageRequest` **sem nenhum `Sort`**
+(`PageRequestFactory.build(pageNumber, pageSize)`, sem overload de sort) — mesma classe de bug do item
+7 original (sem ordenação nenhuma), não só falta de tie-breaker. E quando `sortBy` é passado,
+`PageRequestFactory.build(..., sortBy, sortDirection)` monta um `Sort` de uma coluna só, sem
+tie-breaker por `id`, reintroduzindo o item 8 pro caso genérico. Consertar isso corretamente significa
+mudar `PageRequestFactory` — o ponto único que toda paginação do projeto já usa — para sempre anexar um
+tie-breaker por `id`/aplicar um sort padrão quando nenhum é pedido; um comportamento novo o suficiente
+pra merecer o processo de "Announce → Ask → Implement" do `CLAUDE.md` em vez de ser resolvido
+silenciosamente dentro desta auditoria. Registrado aqui pra decisão futura, não implementado.
+
+### 9. ✅ CORRIGIDO (2026-09-06) — `business-rules.md` desatualizado sobre a lógica de `RELEASE` em `ContentChangeDetector`
 
 **Arquivos:** `docs/context/business-rules.md:1778-1780` vs
 `notification/tracking/ContentChangeDetector.java:32-34`
@@ -191,11 +231,16 @@ foi atualizada junto, violando a própria regra do `CLAUDE.md` de manter `busine
 sincronia com mudanças de regra de negócio. Problema real: quem ler a doc hoje entende uma lógica que
 não existe mais — e pode reintroduzir o bug de re-disparo se implementar "de acordo com a doc".
 
+**Corrigido:** bullet reescrito em `business-rules.md` (e no resumo equivalente em
+`business-rules-summary.md`) pra descrever a transição de status real, com a data e o commit do fix
+citados como contexto de por que a versão baseada em data foi abandonada. Só documentação — nenhum
+código mudou.
+
 ---
 
 ## Baixa severidade / informativo
 
-### 10. 🟢 `GET /diary/{diaryEntryId}/deletion-impact` sem rate limit, apesar de executar a cascata de deletes real
+### 10. ✅ CORRIGIDO (2026-09-06) — `GET /diary/{diaryEntryId}/deletion-impact` sem rate limit, apesar de executar a cascata de deletes real
 
 **Arquivo:** `diaryentry/controller/DiaryEntryController.java:127-133`
 
@@ -205,13 +250,25 @@ só desfaz no final via `markCurrentTransactionRollbackOnly()`. O par de escrita
 `DELETE /diary/{diaryEntryId}`, é throttled (`diaryActionKey`); essa rota de "simulação" paga a mesma
 carga de escrita no banco (deletes reais, cascata calculada) e pode ser chamada sem limite.
 
-### 11. 🟢 Nota de divergência: `to-fix.md` item 4 está parcialmente desatualizado
+**Corrigido:** `requestThrottler.checkAllowed(diaryActionKey(), ...)` adicionado em `getDeletionImpact`,
+reaproveitando o mesmo bucket `diary-action` (não um novo) já usado por
+`createDiaryEntry`/`updateDiaryEntry`/`deleteDiaryEntry` — decisão deliberada, já que a rota paga
+exatamente o mesmo custo de escrita que o `DELETE` real, então faz sentido consumir a mesma cota em vez
+de uma cota isolada maior. Teste de integração novo em `DiaryEntryControllerIntegrationTest` prova o
+`429` reaproveitando o mesmo cenário dos testes de throttle de `createDiaryEntry`/`deleteDiaryEntry` já
+existentes.
+
+### 11. ✅ CORRIGIDO (2026-09-06) — Nota de divergência: `to-fix.md` item 4 está parcialmente desatualizado
 
 `to-fix.md` item 4 diz que `GET /notifications` devolve array puro sem `page`/`size`. Reconferido agora:
 **`/notifications` já usa o envelope `PageMeta`** tanto no código quanto no `openapi.yaml` — só
 `/search` continua sem paginação, mas `/search` **não está implementado** ainda, então não há
 divergência código-vs-doc ali, é feature pendente. Vale atualizar/fechar a parte de `/notifications`
 desse item em `to-fix.md`.
+
+**Corrigido:** `to-fix.md` item 4 atualizado — título e corpo reescritos pra refletir que só `GET
+/search` segue pendente (feature ainda não implementada, não uma divergência de doc), com uma nota de
+"reconferido em 2026-09-06" preservando o histórico do que já foi verificado antes.
 
 ---
 

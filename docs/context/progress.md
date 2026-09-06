@@ -3769,3 +3769,58 @@ integração novos em ambos os controllers provam o `429` ao exceder o limite e 
 usuário; testes unitários dos dois controllers atualizados para mockar `RequestThrottler` (injeção via
 construtor). `docs/context/business-rules.md`/`business-rules-summary.md` atualizados. Suíte completa
 (85 testes entre os dois controllers) validada contra Postgres real via Testcontainers.
+
+## 2026-09-06 (2) — Itens 6–11 de `audit-completa-2026-09-04.md` fechados
+
+Última leva pendente da auditoria completa de 2026-09-04.
+
+**Item 6 (média)** — `UserList.name`/`description` sem `@Size`, nome acima de 255 caracteres virava
+`500` (Postgres rejeitando `VARCHAR(255)`) em vez de `400`. `@Size(max = 255)` em `name` e
+`@Size(max = 400)` em `description` (mesmo limite de `UserListItem`) adicionados em
+`UserListCreationDTO`/`UserListBulkCreationDTO`/`UserListPatchDTO`; `openapi.yaml` (`UserListCreation`/
+`UserListPatch`) ganhou `maxLength` correspondente. Testes de integração novos provam `400` acima do
+limite e sucesso exatamente no limite, nos três endpoints de escrita.
+
+**Item 7 (média)** — `GET /users/{userId}/follow-people` paginava sem nenhum `ORDER BY`.
+`FollowedPersonRepository.findByUserId` convertido de derived query para `@Query` explícita com
+`ORDER BY f.createdAt DESC, f.id DESC`.
+
+**Item 8 (média)** — fix de paginação de followers/following marcado "corrigido" em `to-fix.md` ficou
+incompleto: `ORDER BY createdAt DESC` sem tie-breaker secundário, ordem instável entre páginas pra
+linhas criadas no mesmo milissegundo. Tie-breaker `, id DESC`/`ASC` adicionado nas duas queries de
+`FollowerRepository` e na query relacionada já achada fora do escopo original
+(`DiaryEntryRepository.findByUserIdOrderByCreatedAtDesc`). Varredura por todo o código encontrou a
+mesma classe de bug em mais cinco lugares, corrigidos junto:
+`CommentRepository.findByContentIdOrderByCreatedAtAsc`/`findByListIdOrderByCreatedAtAsc`/
+`findByDiaryEntryIdOrderByCreatedAtAsc`, `DiaryEntryRepository.findByUserIdWithFilters`/
+`findReviewsByContentId`, `DroppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc`,
+`LikeRepository.findLikedListsByUserId`, e as duas queries nativas de
+`UserListRepository.findByUserIdOrderByItemsCount`/`findByUserIdOrderByCommentsCount` (que já
+desempatavam por `created_at DESC`, mas esse critério secundário também não era único — `id DESC`
+acrescentado como terciário). Consultas "top N" que usam `Pageable` só como limite fixo de uma única
+chamada (não paginação incremental) ficaram de fora, por documentação já existente em
+`business-rules.md` sobre desempate deliberadamente ausente ali. Convenção geral documentada em
+`CLAUDE.md` → Architecture → Pagination; achado relacionado mas fora de escopo (`PageRequestFactory`
+não aplica tie-breaker nenhum por padrão) registrado ali e no próprio `audit-completa-2026-09-04.md`
+pra decisão futura, não implementado. Testes de integração/repositório novos em
+`FollowerRepositoryTest`/`FollowedPersonRepositoryTest` provam ordenação por `createdAt` decrescente e
+estabilidade de ordem entre chamadas repetidas quando `createdAt` empata.
+
+**Item 9 (média)** — `business-rules.md` descrevia a lógica de `RELEASE` em `ContentChangeDetector`
+como baseada em comparação de data (versão anterior ao fix do commit `cdd5fcb`, 2026-08-30); o código
+real usa transição de status. Bullet reescrito em `business-rules.md`/`business-rules-summary.md` pra
+refletir o código atual — só documentação, nenhum código mudou.
+
+**Item 10 (baixa)** — `GET /diary/{diaryEntryId}/deletion-impact` sem rate limit, apesar de executar a
+cascata de deletes real internamente (desfeita via rollback). `requestThrottler.checkAllowed` adicionado
+reaproveitando o mesmo bucket `diary-action` já usado por `createDiaryEntry`/`updateDiaryEntry`/
+`deleteDiaryEntry` — decisão deliberada, já que a rota paga o mesmo custo de escrita que o `DELETE`
+real. Teste de integração novo prova `429` reaproveitando o cenário dos testes de throttle de diary já
+existentes.
+
+**Item 11 (baixa)** — `to-fix.md` item 4 desatualizado: dizia que `GET /notifications` não usava o
+envelope `PageMeta`, mas já usa há tempo. Item reescrito pra refletir que só `GET /search` (não
+implementado ainda) segue pendente.
+
+`docs/pending/audit-completa-2026-09-04.md` marcado com todos os 11 itens fechados. Suíte completa
+(2198 testes) validada contra Postgres real via Testcontainers.
