@@ -1202,6 +1202,32 @@ class ContentServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When IsSeriesFinale Is True And IsSeasonFinale Is Absent For Episode")
+    void shouldThrowBadRequestExceptionWhenIsSeriesFinaleIsTrueAndIsSeasonFinaleIsAbsentForEpisode() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 1, null, true);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto, false))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("isSeriesFinale must not be true when isSeasonFinale is not true, "
+                        + "a series finale episode is always its season's finale episode too");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Throw BadRequestException - When IsSeriesFinale Is True And IsSeasonFinale Is Explicitly False For Episode")
+    void shouldThrowBadRequestExceptionWhenIsSeriesFinaleIsTrueAndIsSeasonFinaleIsExplicitlyFalseForEpisode() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 1, false, true);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto, false))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("isSeriesFinale must not be true when isSeasonFinale is not true, "
+                        + "a series finale episode is always its season's finale episode too");
+
+        verifyNoInteractions(contentRepository, contentMapper);
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Not Call TMDB Or Change RuntimeMinutes - When TrustedRuntimeMinutes Is False And The Existing Episode Already Has A Value")
     void shouldNotCallTmdbOrChangeRuntimeMinutesWhenTrustedRuntimeMinutesIsFalseAndTheExistingEpisodeAlreadyHasAValue() {
         UUID existingId = UUID.randomUUID();

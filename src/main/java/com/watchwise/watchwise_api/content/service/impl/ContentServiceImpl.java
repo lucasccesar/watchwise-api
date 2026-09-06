@@ -433,6 +433,10 @@ public class ContentServiceImpl implements ContentService {
                 if (!trustedRuntimeMinutes && dto.runtimeMinutes() != null) {
                     throw new BadRequestException("runtimeMinutes must not be provided when type is EPISODE, it is derived from TMDB");
                 }
+                if (Boolean.TRUE.equals(dto.isSeriesFinale()) && !Boolean.TRUE.equals(dto.isSeasonFinale())) {
+                    throw new BadRequestException("isSeriesFinale must not be true when isSeasonFinale is not true, "
+                            + "a series finale episode is always its season's finale episode too");
+                }
             }
         }
     }
