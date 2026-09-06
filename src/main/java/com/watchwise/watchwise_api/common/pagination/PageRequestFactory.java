@@ -42,9 +42,13 @@ public class PageRequestFactory {
             return PageRequest.of(queryPageNumber, queryPageSize);
         }
 
-        Sort sort = (sortDirection == null || !sortDirection.equals("desc"))
-                ? Sort.by(Sort.Order.asc(sortBy))
-                : Sort.by(Sort.Order.desc(sortBy));
+        if (sortDirection != null && !sortDirection.equals("asc") && !sortDirection.equals("desc")) {
+            throw new BadRequestException("sortDirection must be one of: asc, desc");
+        }
+
+        Sort sort = "desc".equals(sortDirection)
+                ? Sort.by(Sort.Order.desc(sortBy))
+                : Sort.by(Sort.Order.asc(sortBy));
         return PageRequest.of(queryPageNumber, queryPageSize, sort);
     }
 }

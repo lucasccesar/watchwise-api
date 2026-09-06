@@ -124,4 +124,20 @@ class PageRequestFactoryTest {
 
         assertThat(pageRequest.getSort()).isEqualTo(Sort.by(Sort.Order.desc("username")));
     }
+
+    @Test
+    @DisplayName("[build] Should Throw BadRequestException - When Sort Direction Is Uppercase")
+    void shouldThrowBadRequestExceptionWhenSortDirectionIsUppercase() {
+        assertThatThrownBy(() -> pageRequestFactory.build(1, 10, "username", "DESC"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("sortDirection must be one of: asc, desc");
+    }
+
+    @Test
+    @DisplayName("[build] Should Throw BadRequestException - When Sort Direction Is An Unrecognized Value")
+    void shouldThrowBadRequestExceptionWhenSortDirectionIsAnUnrecognizedValue() {
+        assertThatThrownBy(() -> pageRequestFactory.build(1, 10, "username", "descending"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("sortDirection must be one of: asc, desc");
+    }
 }

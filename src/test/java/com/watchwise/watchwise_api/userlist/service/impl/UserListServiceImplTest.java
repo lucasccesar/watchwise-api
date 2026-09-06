@@ -541,6 +541,18 @@ class UserListServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUserLists] Should Throw BadRequestException - When SortDirection Is Invalid")
+    void shouldThrowBadRequestExceptionWhenSortDirectionIsInvalid() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> userListService.getUserLists(lucasId, lucasId, 1, 10, "rank", "DESC", null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("sortDirection must be one of: asc, desc");
+
+        verifyNoInteractions(userListRepository);
+    }
+
+    @Test
     @DisplayName("[getUserLists] Should Use The ItemsCount Native Query - When SortBy Is ItemsCount")
     void shouldUseTheItemsCountNativeQueryWhenSortByIsItemsCount() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
@@ -741,6 +753,19 @@ class UserListServiceImplTest {
         assertThatThrownBy(() -> userListService.getUserListById(lucasId, list.getId(), null, null, "unknownField", null))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("sortBy must be one of: position, dateAdded, duration, episodeAvgRating");
+
+        verifyNoInteractions(userListItemService);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Throw BadRequestException - When Item SortDirection Is Invalid")
+    void shouldThrowBadRequestExceptionWhenItemSortDirectionIsInvalid() {
+        UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+
+        assertThatThrownBy(() -> userListService.getUserListById(lucasId, list.getId(), null, null, "duration", "DESC"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("sortDirection must be one of: asc, desc");
 
         verifyNoInteractions(userListItemService);
     }

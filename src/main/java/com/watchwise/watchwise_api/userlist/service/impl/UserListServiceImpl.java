@@ -83,6 +83,7 @@ public class UserListServiceImpl implements UserListService {
         if (sortBy != null && !GENERIC_SORT_FIELDS.contains(sortBy) && !AGGREGATE_SORT_FIELDS.contains(sortBy)) {
             throw new BadRequestException("sortBy must be one of: rank, updatedAt, name, likesCount, itemsCount, commentsCount");
         }
+        assertValidSortDirection(sortDirection);
 
         List<UserListVisibility> visibilities = isOwner
                 ? List.of(UserListVisibility.values())
@@ -168,6 +169,12 @@ public class UserListServiceImpl implements UserListService {
                 itemsCount, commentsCount, totalRuntimeMinutes, itemScope, null);
     }
 
+    private void assertValidSortDirection(String sortDirection) {
+        if (sortDirection != null && !sortDirection.equals("asc") && !sortDirection.equals("desc")) {
+            throw new BadRequestException("sortDirection must be one of: asc, desc");
+        }
+    }
+
     private void assertCanViewLists(User target, boolean isOwner, boolean viewerFollowsTarget) {
         if (isOwner || Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerFollowsTarget) {
             return;
@@ -195,6 +202,7 @@ public class UserListServiceImpl implements UserListService {
         if (sortBy != null && !ITEM_SORT_FIELDS.contains(sortBy)) {
             throw new BadRequestException("sortBy must be one of: position, dateAdded, duration, episodeAvgRating");
         }
+        assertValidSortDirection(sortDirection);
 
         List<UserListItemResponseDTO> allItems = userListItemService.getItems(viewerId, listId);
         List<UserListItemResponseDTO> items = filterAndSortItems(
