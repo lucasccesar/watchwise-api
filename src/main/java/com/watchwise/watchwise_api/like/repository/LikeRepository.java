@@ -42,7 +42,7 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
     @Query("SELECT l.list.id FROM Like l WHERE l.user.id = :userId AND l.list.id IN :listIds")
     Set<UUID> findLikedListIds(@Param("userId") UUID userId, @Param("listIds") Collection<UUID> listIds);
 
-    @Query("SELECT l.list FROM Like l WHERE l.user.id = :userId AND l.list IS NOT NULL ORDER BY l.createdAt DESC")
+    @Query("SELECT l.list FROM Like l WHERE l.user.id = :userId AND l.list IS NOT NULL ORDER BY l.createdAt DESC, l.id DESC")
     Page<UserList> findLikedListsByUserId(@Param("userId") UUID userId, Pageable pageable);
 
 }

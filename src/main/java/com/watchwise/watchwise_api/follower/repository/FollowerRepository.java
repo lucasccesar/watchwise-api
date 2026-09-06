@@ -32,7 +32,7 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
     @Query("""
             SELECT f FROM Follower f JOIN FETCH f.follower
             WHERE f.followed.id = :followedId AND f.status = :status
-            ORDER BY f.createdAt DESC
+            ORDER BY f.createdAt DESC, f.id DESC
             """)
     Page<Follower> findByFollowedIdAndStatus(
             @Param("followedId") UUID followedId, @Param("status") FollowStatus status, Pageable pageable);
@@ -40,7 +40,7 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
     @Query("""
             SELECT f FROM Follower f JOIN FETCH f.followed
             WHERE f.follower.id = :followerId AND f.status = :status
-            ORDER BY f.createdAt DESC
+            ORDER BY f.createdAt DESC, f.id DESC
             """)
     Page<Follower> findByFollowerIdAndStatus(
             @Param("followerId") UUID followerId, @Param("status") FollowStatus status, Pageable pageable);

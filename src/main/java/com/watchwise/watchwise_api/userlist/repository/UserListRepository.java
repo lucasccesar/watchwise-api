@@ -59,7 +59,8 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
             ORDER BY
               CASE WHEN :sortDirection = 'ASC' THEN COUNT(uli.id) END ASC,
               CASE WHEN :sortDirection = 'DESC' THEN COUNT(uli.id) END DESC,
-              ul.created_at DESC
+              ul.created_at DESC,
+              ul.id DESC
             """,
             countQuery = """
             SELECT COUNT(*) FROM user_lists ul
@@ -80,7 +81,8 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
             ORDER BY
               CASE WHEN :sortDirection = 'ASC' THEN COUNT(c.id) END ASC,
               CASE WHEN :sortDirection = 'DESC' THEN COUNT(c.id) END DESC,
-              ul.created_at DESC
+              ul.created_at DESC,
+              ul.id DESC
             """,
             countQuery = """
             SELECT COUNT(*) FROM user_lists ul

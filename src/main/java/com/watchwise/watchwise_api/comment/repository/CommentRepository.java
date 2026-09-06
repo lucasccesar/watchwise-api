@@ -43,13 +43,13 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
     @Query("UPDATE Comment c SET c.likesCount = c.likesCount - 1 WHERE c.id = :id AND c.likesCount > 0")
     void decrementLikesCount(@Param("id") UUID id);
 
-    @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.content.id = :contentId ORDER BY c.createdAt ASC")
+    @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.content.id = :contentId ORDER BY c.createdAt ASC, c.id ASC")
     Page<Comment> findByContentIdOrderByCreatedAtAsc(@Param("contentId") UUID contentId, Pageable pageable);
 
-    @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.list.id = :listId ORDER BY c.createdAt ASC")
+    @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.list.id = :listId ORDER BY c.createdAt ASC, c.id ASC")
     Page<Comment> findByListIdOrderByCreatedAtAsc(@Param("listId") UUID listId, Pageable pageable);
 
-    @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.diaryEntry.id = :diaryEntryId ORDER BY c.createdAt ASC")
+    @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.diaryEntry.id = :diaryEntryId ORDER BY c.createdAt ASC, c.id ASC")
     Page<Comment> findByDiaryEntryIdOrderByCreatedAtAsc(@Param("diaryEntryId") UUID diaryEntryId, Pageable pageable);
 
     @Query("""

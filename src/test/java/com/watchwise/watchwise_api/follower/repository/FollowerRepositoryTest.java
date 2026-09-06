@@ -207,6 +207,22 @@ class FollowerRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByFollowedIdAndStatus] Should Return Entries In The Same Order Across Repeated Calls - When Entries Share The Same CreatedAt")
+    void shouldReturnEntriesInTheSameOrderAcrossRepeatedCallsWhenEntriesShareTheSameCreatedAtOnFindByFollowedIdAndStatus() {
+        LocalDateTime tiedCreatedAt = LocalDateTime.now();
+        followerRepository.save(buildFollowerWithCreatedAt(lucas, joao, FollowStatus.ACCEPTED, tiedCreatedAt));
+        followerRepository.saveAndFlush(buildFollowerWithCreatedAt(marina, joao, FollowStatus.ACCEPTED, tiedCreatedAt));
+        entityManager.clear();
+
+        Page<Follower> firstCall = followerRepository.findByFollowedIdAndStatus(joao.getId(), FollowStatus.ACCEPTED, PageRequest.of(0, 10));
+        entityManager.clear();
+        Page<Follower> secondCall = followerRepository.findByFollowedIdAndStatus(joao.getId(), FollowStatus.ACCEPTED, PageRequest.of(0, 10));
+
+        assertThat(firstCall.getContent().stream().map(follower -> follower.getFollower().getId()).toList())
+                .isEqualTo(secondCall.getContent().stream().map(follower -> follower.getFollower().getId()).toList());
+    }
+
+    @Test
     @DisplayName("[countByFollowedIdAndStatus] Should Count Only Accepted Followers Of The Given User")
     void shouldCountOnlyAcceptedFollowersOfTheGivenUser() {
         followerRepository.save(buildFollower(lucas, joao, FollowStatus.ACCEPTED));
@@ -253,6 +269,22 @@ class FollowerRepositoryTest {
         assertThat(result.getContent())
                 .extracting(follower -> follower.getFollowed().getId())
                 .containsExactly(marina.getId(), joao.getId());
+    }
+
+    @Test
+    @DisplayName("[findByFollowerIdAndStatus] Should Return Entries In The Same Order Across Repeated Calls - When Entries Share The Same CreatedAt")
+    void shouldReturnEntriesInTheSameOrderAcrossRepeatedCallsWhenEntriesShareTheSameCreatedAtOnFindByFollowerIdAndStatus() {
+        LocalDateTime tiedCreatedAt = LocalDateTime.now();
+        followerRepository.save(buildFollowerWithCreatedAt(lucas, joao, FollowStatus.ACCEPTED, tiedCreatedAt));
+        followerRepository.saveAndFlush(buildFollowerWithCreatedAt(lucas, marina, FollowStatus.ACCEPTED, tiedCreatedAt));
+        entityManager.clear();
+
+        Page<Follower> firstCall = followerRepository.findByFollowerIdAndStatus(lucas.getId(), FollowStatus.ACCEPTED, PageRequest.of(0, 10));
+        entityManager.clear();
+        Page<Follower> secondCall = followerRepository.findByFollowerIdAndStatus(lucas.getId(), FollowStatus.ACCEPTED, PageRequest.of(0, 10));
+
+        assertThat(firstCall.getContent().stream().map(follower -> follower.getFollowed().getId()).toList())
+                .isEqualTo(secondCall.getContent().stream().map(follower -> follower.getFollowed().getId()).toList());
     }
 
     @Test

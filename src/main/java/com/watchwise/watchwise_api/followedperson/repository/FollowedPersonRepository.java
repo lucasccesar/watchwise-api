@@ -17,7 +17,8 @@ public interface FollowedPersonRepository extends JpaRepository<FollowedPerson, 
 
     boolean existsByUserIdAndPersonTmdbId(UUID userId, String personTmdbId);
 
-    Page<FollowedPerson> findByUserId(UUID userId, Pageable pageable);
+    @Query("SELECT f FROM FollowedPerson f WHERE f.user.id = :userId ORDER BY f.createdAt DESC, f.id DESC")
+    Page<FollowedPerson> findByUserId(@Param("userId") UUID userId, Pageable pageable);
 
     @Query("SELECT DISTINCT f.personTmdbId FROM FollowedPerson f")
     List<String> findDistinctPersonTmdbIds();

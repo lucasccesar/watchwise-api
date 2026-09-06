@@ -168,11 +168,46 @@ class FollowedPersonRepositoryTest {
         assertThat(result.getContent()).isEmpty();
     }
 
+    @Test
+    @DisplayName("[findByUserId] Should Return Entries Ordered By Most Recently Created First - When Multiple Entries Exist")
+    void shouldReturnEntriesOrderedByMostRecentlyCreatedFirstWhenMultipleEntriesExist() {
+        LocalDateTime now = LocalDateTime.now();
+        followedPersonRepository.save(buildFollowedPersonWithCreatedAt(lucas, "111", now.minusMinutes(1)));
+        followedPersonRepository.saveAndFlush(buildFollowedPersonWithCreatedAt(lucas, "222", now));
+        entityManager.clear();
+
+        Page<FollowedPerson> result = followedPersonRepository.findByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent())
+                .extracting(FollowedPerson::getPersonTmdbId)
+                .containsExactly("222", "111");
+    }
+
+    @Test
+    @DisplayName("[findByUserId] Should Return Entries In The Same Order Across Repeated Calls - When Entries Share The Same CreatedAt")
+    void shouldReturnEntriesInTheSameOrderAcrossRepeatedCallsWhenEntriesShareTheSameCreatedAt() {
+        LocalDateTime tiedCreatedAt = LocalDateTime.now();
+        followedPersonRepository.save(buildFollowedPersonWithCreatedAt(lucas, "333", tiedCreatedAt));
+        followedPersonRepository.saveAndFlush(buildFollowedPersonWithCreatedAt(lucas, "444", tiedCreatedAt));
+        entityManager.clear();
+
+        Page<FollowedPerson> firstCall = followedPersonRepository.findByUserId(lucas.getId(), PageRequest.of(0, 10));
+        entityManager.clear();
+        Page<FollowedPerson> secondCall = followedPersonRepository.findByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(firstCall.getContent().stream().map(FollowedPerson::getPersonTmdbId).toList())
+                .isEqualTo(secondCall.getContent().stream().map(FollowedPerson::getPersonTmdbId).toList());
+    }
+
     private FollowedPerson buildFollowedPerson(User user, String personTmdbId) {
+        return buildFollowedPersonWithCreatedAt(user, personTmdbId, LocalDateTime.now());
+    }
+
+    private FollowedPerson buildFollowedPersonWithCreatedAt(User user, String personTmdbId, LocalDateTime createdAt) {
         return FollowedPerson.builder()
                 .user(user)
                 .personTmdbId(personTmdbId)
-                .createdAt(LocalDateTime.now())
+                .createdAt(createdAt)
                 .build();
     }
 

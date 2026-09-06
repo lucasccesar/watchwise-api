@@ -41,7 +41,7 @@ public interface DroppedEntryRepository extends JpaRepository<DroppedEntry, UUID
     @Query("""
             SELECT d FROM DroppedEntry d JOIN FETCH d.content
             WHERE d.user.id = :userId AND d.type = :type
-            ORDER BY d.createdAt DESC
+            ORDER BY d.createdAt DESC, d.id DESC
             """)
     Page<DroppedEntry> findByUserIdAndTypeOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("type") ContentType type, Pageable pageable);

@@ -46,7 +46,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     @Query("UPDATE DiaryEntry d SET d.likesCount = d.likesCount - 1 WHERE d.id = :id AND d.likesCount > 0")
     void decrementLikesCount(@Param("id") UUID id);
 
-    @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.content WHERE d.user.id = :userId ORDER BY d.createdAt DESC")
+    @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.content WHERE d.user.id = :userId ORDER BY d.createdAt DESC, d.id DESC")
     Page<DiaryEntry> findByUserIdOrderByCreatedAtDesc(@Param("userId") UUID userId, Pageable pageable);
 
     @Query("""
@@ -58,7 +58,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             AND (:hasReview IS NULL
                  OR (:hasReview = TRUE AND d.comment IS NOT NULL)
                  OR (:hasReview = FALSE AND d.comment IS NULL))
-            ORDER BY d.createdAt DESC
+            ORDER BY d.createdAt DESC, d.id DESC
             """)
     Page<DiaryEntry> findByUserIdWithFilters(
             @Param("userId") UUID userId,
@@ -749,7 +749,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                      WHERE f.follower.id = :viewerId AND f.followed.id = u.id
                      AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
                  ))
-            ORDER BY d.createdAt DESC
+            ORDER BY d.createdAt DESC, d.id DESC
             """)
     Page<DiaryEntry> findReviewsByContentId(
             @Param("contentId") UUID contentId, @Param("viewerId") UUID viewerId, Pageable pageable);
