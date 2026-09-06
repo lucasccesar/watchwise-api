@@ -781,6 +781,18 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Throw BadRequestException - When SeriesTmdbId Is Only Whitespace")
+    void shouldThrowBadRequestExceptionWhenSeriesTmdbIdIsOnlyWhitespace() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsGrid(lucasId, lucasId, "   "))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("seriesTmdbId must be provided");
+
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
     @DisplayName("[getEpisodeRatingsGrid] Should Use The Highest WatchNumber Score - When An Episode Was Rewatched")
     void shouldUseTheHighestWatchNumberScoreWhenAnEpisodeWasRewatched() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));

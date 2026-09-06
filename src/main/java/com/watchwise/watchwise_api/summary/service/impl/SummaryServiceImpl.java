@@ -376,6 +376,9 @@ public class SummaryServiceImpl implements SummaryService {
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanViewSummary(viewerId, userId, target);
 
+        if (seriesTmdbId != null) {
+            seriesTmdbId = seriesTmdbId.trim();
+        }
         if (StringUtils.isEmpty(seriesTmdbId)) {
             throw new BadRequestException("seriesTmdbId must be provided");
         }
