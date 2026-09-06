@@ -129,6 +129,8 @@ public class DiaryEntryController {
             @PathVariable UUID diaryEntryId,
             @RequestParam(required = false, defaultValue = "false") boolean overrideProtectedEntries
     ) {
+        requestThrottler.checkAllowed(diaryActionKey(), diaryActionMaxRequests, Duration.ofMinutes(diaryActionWindowMinutes));
+
         return ResponseEntity.ok(diaryEntryService.computeDeletionImpact(getCurrentUserId(), diaryEntryId, overrideProtectedEntries));
     }
 
