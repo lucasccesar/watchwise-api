@@ -11,7 +11,7 @@ no outro documento). Reaproveitei os 5 revisores da auditoria anterior, cada um 
 
 ## Achados
 
-### 1. 🟡 `sortDirection` aceita qualquer valor e vira `ASC` silenciosamente — `sortBy`, no mesmo request, é rigoroso
+### 1. ✅ CORRIGIDO (2026-09-06) — `sortDirection` aceita qualquer valor e vira `ASC` silenciosamente — `sortBy`, no mesmo request, é rigoroso
 
 **Arquivo raiz:** `common/pagination/PageRequestFactory.java:45-47`
 
@@ -32,7 +32,17 @@ verdade foi ignorado. Alcançável via `GET /users/{userId}/lists`, `GET /users/
 paginação, qualquer outro service que futuramente use o overload com `sortBy`/`sortDirection` herda o
 mesmo problema.
 
-### 2. 🟡 `Content` tipo `EPISODE` aceita `isSeriesFinale=true` sem `isSeasonFinale=true`
+**Corrigido:** `PageRequestFactory.build` agora rejeita `sortDirection` fora de `asc`/`desc`
+(case-sensitive, igual ao `enum` já documentado em `openapi.yaml`) com `400`. Como
+`UserListServiceImpl` tem dois caminhos que usam `sortDirection` sem passar pelo overload de 4
+argumentos (a query nativa agregada de `itemsCount`/`commentsCount`, e o sort em memória de
+`filterAndSortItems`), um `assertValidSortDirection` novo roda logo no início de
+`getUserLists`/`getUserListById`, junto da validação de `sortBy` já existente, cobrindo os dois ramos
+que herdariam o bug mesmo com a fábrica corrigida. Testes novos em `PageRequestFactoryTest` e
+`UserListServiceImplTest` (`getUserLists`/`getUserListById`); `openapi.yaml` ganhou a nota explícita
+"Valor desconhecido é 400" que `sortBy` já tinha.
+
+### 2. ✅ CORRIGIDO (2026-09-06) — `Content` tipo `EPISODE` aceita `isSeriesFinale=true` sem `isSeasonFinale=true`
 
 **Arquivo:** `content/service/impl/ContentServiceImpl.java`, método `validate()`, bloco `case EPISODE`
 (~linhas 419-438)
@@ -50,7 +60,15 @@ outra camada: a constraint de banco `ck_contents_finale_flags_by_type`
 não-nula, não a relação entre as duas. O dado fica inerte (`maybeCompleteSeries` só olha episódios com
 `isSeasonFinale=true`), mas ainda assim é um `400` que deveria ter acontecido e não aconteceu.
 
-### 3. 🟡 `POST /users/me/follow-people/{personTmdbId}` aceita qualquer id numérico sem verificar existência no TMDB — sempre 204
+**Corrigido:** `validate()` agora rejeita `Boolean.TRUE.equals(dto.isSeriesFinale()) &&
+!Boolean.TRUE.equals(dto.isSeasonFinale())` com `400` no bloco `case EPISODE`. Confirmado que nenhum
+caminho server-derivado (`DiaryEntryServiceImpl.withDerivedEpisodeFinaleFlags`/`bulkLogEpisode`)
+consegue produzir essa combinação — os dois já computam `seriesFinaleFlag` condicionado a
+`isSeasonFinale` ser `true` — então a checagem só rejeita entrada de fato inconsistente vinda de
+`POST /contents/reference` direto ou do fallback client-supplied de `POST /diary`. Testes novos em
+`ContentServiceImplTest` (ausente e `false` explícito).
+
+### 3. ✅ CORRIGIDO (2026-09-06) — `POST /users/me/follow-people/{personTmdbId}` aceita qualquer id numérico sem verificar existência no TMDB — sempre 204
 
 **Arquivos:** `followedperson/service/impl/FollowedPersonServiceImpl.java:35-58` (`followPerson`) +
 `validatePersonTmdbId` (linhas 68-72)
@@ -70,7 +88,16 @@ criar referência nova, mudança de 2026-09-03 documentada no `CLAUDE.md`, justa
 caminho de escrita da aplicação verificava se um `tmdbId` fornecido pelo cliente correspondia a algo
 real") — o mesmo raciocínio nunca foi replicado para `personTmdbId`.
 
-### 4. 🟢 `preferredLanguage`/`preferredRegion` só validam formato — código inexistente falha silenciosamente em outro endpoint, dias depois
+**Corrigido:** novo `TmdbClient.getPersonDetails` (`/person/{id}`, sem `append_to_response` — endpoint
+leve, só existência) devolve `TmdbLookupResult<TmdbPersonDetails>`, mesmo padrão sealed
+Found/NotFound/Unavailable de `getMovieFullDetails`/`getTvFullDetails`. `FollowedPersonServiceImpl.
+followPerson` chama `assertPersonExistsOnTmdb` depois do early-return de idempotência (re-seguir
+alguém já seguido nunca paga a chamada extra) e antes de criar a linha: `NotFound` → `404`,
+`Unavailable` → `502`. Testes novos em `FollowedPersonServiceImplTest` (unitário, mock de
+`TmdbClient`) e `FollowedPersonControllerIntegrationTest` (`@MockitoBean TmdbClient`, cenários 404 e
+502 fim a fim).
+
+### 4. ✅ CORRIGIDO (2026-09-06) — `preferredLanguage`/`preferredRegion` só validam formato — código inexistente falha silenciosamente em outro endpoint, dias depois
 
 **Arquivo:** `user/dto/PatchUserDTO.java:23-26` (mesmos regexes em `PostUserDTO`, se aplicável)
 
@@ -92,7 +119,14 @@ ver "nenhum provedor de streaming disponível" pra todo conteúdo, pra sempre, s
 `language` nas chamadas TMDB — o TMDB não rejeita idioma desconhecido, só devolve dados no idioma
 padrão, então o "erro" nunca chega como erro nenhum.
 
-### 5. 🟢 `SummaryServiceImpl.getEpisodeRatingsGrid` — `seriesTmdbId` só-espaço passa pelo `isEmpty` sem trim
+**Corrigido:** `UserServiceImpl.validatePreferredLanguage`/`validatePreferredRegion`, chamados de
+`applyPatch` só quando o valor muda, validam a existência real do código via
+`java.util.Locale.getISOLanguages()`/`getISOCountries()` (populados pela própria JVM, sem chamada de
+rede) — um valor bem formado mas inexistente (`"zz-ZZ"`/`"ZZ"`) agora é `400`. `PostUserDTO` não tem
+esses campos (não aplicável no registro). Testes novos em `UserServiceImplTest`; `openapi.yaml`
+atualizado com a nota de validação em duas camadas.
+
+### 5. ✅ CORRIGIDO (2026-09-06) — `SummaryServiceImpl.getEpisodeRatingsGrid` — `seriesTmdbId` só-espaço passa pelo `isEmpty` sem trim
 
 **Arquivo:** `summary/service/impl/SummaryServiceImpl.java:379-381`
 
@@ -110,11 +144,15 @@ devolve `200` com `episodes: []` em vez de rejeitar com 400. Outros lugares do c
 o mesmo padrão. Severidade baixa (edge case de entrada só-espaço via URL), mas é exatamente o padrão
 pedido.
 
+**Corrigido:** `trim()` aplicado em `seriesTmdbId` antes da checagem `StringUtils.isEmpty`, mesmo
+padrão de `ContentServiceImpl.normalize`/`trimOrNull` e `UserServiceImpl.getUsersByUsername`. Teste
+novo em `SummaryServiceImplTest` (só-espaço) além do já existente (vazio).
+
 ---
 
 ## Achado adjacente (categoria oposta — sinalizado porque apareceu no caminho)
 
-### 🟢 `@Max(100)` em `DiaryEntryBulkCreationDTO` contradiz `MAX_BULK_EPISODES=2000` do service
+### ✅ CORRIGIDO (2026-09-06) — `@Max(100)` em `DiaryEntryBulkCreationDTO` contradiz `MAX_BULK_EPISODES=2000` do service
 
 **Arquivo:** `diaryentry/dto/DiaryEntryBulkCreationDTO.java:18-20`
 
@@ -126,6 +164,15 @@ Bean Validation roda antes do service, então qualquer override acima de 100 é 
 validação genérica, nunca alcançando a lógica que validaria contra a contagem real do TMDB até 2000.
 Parece um resquício esquecido da mudança 100→2000. Sinalizado à parte por não se encaixar no critério
 desta busca (aqui o cliente *recebe* um 400 — só que um 400 indevido).
+
+**Corrigido:** `finaleEpisodeNumber` e os **valores** de `seasonFinaleEpisodeNumbers` (números de
+episódio, os que de fato somam contra `MAX_BULK_EPISODES`) elevados pra `@Max(2000)`.
+`finaleSeasonNumber` e as **chaves** do mapa (números de *temporada*) ficaram em `@Max(100)`
+deliberadamente — não entram na soma, só limitam o laço de temporadas, e nenhuma série real chega
+perto de 100 temporadas. `openapi.yaml` ganhou `maximum` explícito nos três campos (nunca tinha sido
+documentado antes). Dois testes de integração existentes que fixavam o limite antigo em 101
+(`DiaryEntryControllerIntegrationTest`) atualizados pra 2001, provando o novo teto continua rejeitado
+acima dele.
 
 ---
 

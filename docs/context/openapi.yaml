@@ -1385,7 +1385,7 @@ paths:
           schema: { type: string, enum: [rank, updatedAt, name, likesCount, itemsCount, commentsCount] }
         - name: sortDirection
           in: query
-          description: "asc ou desc (default varia pelo campo — ver sortBy)."
+          description: "asc ou desc (default varia pelo campo — ver sortBy). Valor desconhecido é 400."
           schema: { type: string, enum: [asc, desc] }
         - name: contentId
           in: query
@@ -1539,6 +1539,7 @@ paths:
           schema: { type: string, enum: [position, dateAdded, duration, episodeAvgRating] }
         - name: sortDirection
           in: query
+          description: "asc ou desc. Valor desconhecido é 400."
           schema: { type: string, enum: [asc, desc] }
       responses:
         "200":
@@ -2549,12 +2550,18 @@ components:
           type: string
           pattern: "^[a-z]{2}-[A-Z]{2}$"
           example: "pt-BR"
-          description: Formato TMDB (ISO-639-1_ISO-3166-1), ex. en-US, pt-BR.
+          description: >
+            Formato TMDB (ISO-639-1_ISO-3166-1), ex. en-US, pt-BR. Validado em duas camadas: o
+            formato aqui, e cada metade contra os códigos ISO-639-1/ISO-3166-1 reais conhecidos
+            pela JVM (`java.util.Locale`) — um valor com o formato certo mas inexistente (ex.
+            "zz-ZZ") é rejeitado com 400, não aceito silenciosamente.
         preferredRegion:
           type: string
           pattern: "^[A-Z]{2}$"
           example: "BR"
-          description: ISO 3166-1 alpha-2.
+          description: >
+            ISO 3166-1 alpha-2. Mesma validação em duas camadas de preferredLanguage — um código
+            com o formato certo mas inexistente é rejeitado com 400.
 
     UserPreviewDTO:
       type: object
@@ -3559,6 +3566,7 @@ components:
         finaleEpisodeNumber:
           type: integer
           minimum: 1
+          maximum: 2000
           nullable: true
           description: >
             SEASON only. If no existing finale episode Content exists, the server first tries to
@@ -3574,6 +3582,7 @@ components:
         finaleSeasonNumber:
           type: integer
           minimum: 1
+          maximum: 100
           nullable: true
           description: >
             SERIES only. If no existing finale season Content exists, the server first tries to derive
@@ -3586,7 +3595,7 @@ components:
             rejected with 400.
         seasonFinaleEpisodeNumbers:
           type: object
-          additionalProperties: { type: integer, minimum: 1 }
+          additionalProperties: { type: integer, minimum: 1, maximum: 2000 }
           nullable: true
           description: >
             SERIES only. Maps a season number (as a string key) to that season's finale episode

@@ -35,6 +35,16 @@ constraints de tamanho/formato de DTO.
   `true` (não sobrescreve um `null` já ausente). Diferente de `clearPreviousSeriesFinale`, isso não
   transfere `isSeriesFinale` pro episódio novo — o cliente precisa reenviar o hint explicitamente ali se
   quiser que ele também carregue esse status.
+- **`validate()` rejeita `isSeriesFinale=true` num `EPISODE` sem `isSeasonFinale=true` no mesmo request**
+  (`ContentServiceImpl.validate`, bloco `case EPISODE`, adicionado 2026-09-06 — item 2 de
+  `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`) — como `isSeriesFinale` num `EPISODE` só faz
+  sentido como hint condicionado a ele também ser o finale da temporada (ver bullet acima), um
+  `EPISODE` com `isSeriesFinale=true` e `isSeasonFinale` ausente ou `false` é um estado logicamente
+  contraditório. Antes disso, `POST /contents/reference` aceitava essa combinação com `200`,
+  persistindo uma linha `Content` inconsistente (inerte na prática, já que `maybeCompleteSeries` só
+  olha episódios com `isSeasonFinale=true`, mas ainda assim um `400` que deveria ter acontecido e não
+  acontecia). Checagem em `Boolean.TRUE.equals(...)`, então `isSeasonFinale=null` (o default) também
+  é rejeitado junto com `isSeasonFinale=false` explícito.
 - **Limpar a finale antiga e criar o novo `Content` commitam atomicamente** (`ContentServiceImpl.getOrCreateReference`):
   `clearPreviousSeriesFinale`/`clearPreviousSeasonFinale` rodam dentro da mesma lambda `REQUIRES_NEW`
   (`NewTransactionExecutor`) que cria e salva o novo `Content`, não numa transação separada anterior.
@@ -399,6 +409,17 @@ constraints de tamanho/formato de DTO.
   `GET /contents/{contentId}/details`/`GET /contents/details` (ver § Content) — `preferredLanguage`
   decide o idioma pedido ao TMDB, `preferredRegion` decide qual linha de `watchProviders`/qual
   título alternativo usar, nunca é enviado como parâmetro pro TMDB.
+- **`preferredLanguage`/`preferredRegion` validados em duas camadas: formato (`@Pattern`) e
+  existência real do código (`UserServiceImpl.validatePreferredLanguage`/`validatePreferredRegion`,
+  contra `java.util.Locale.getISOLanguages()`/`getISOCountries()`, adicionado 2026-09-06 — item 4 de
+  `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`)** — o `@Pattern` sozinho só garante o
+  formato (`xx-XX`/`XX`), não que o código exista; um valor como `"zz-ZZ"`/`"ZZ"` passava a validação
+  e era persistido com `200`. O problema só aparecia depois, num endpoint completamente diferente:
+  `ContentDetailsServiceImpl.watchProviders` (ver § Content) não encontrava a região no mapa do TMDB e
+  devolvia `List.of()` silenciosamente — o usuário via "nenhum provedor disponível" pra sempre, sem
+  indício de que a causa era o código salvo no próprio perfil. Checado só quando o valor muda
+  (`patchUserDTO.preferredLanguage() != null && !....equals(user.getPreferredLanguage())`), mesmo
+  padrão de todo outro campo de `applyPatch`.
 - **Login exige e-mail verificado** (`UserServiceImpl.login`) — credenciais corretas mas
   `isEmailVerified = false` retorna `403` (`Email not verified`), não autentica.
 - **Registro/login rejeitam quem já tem sessão válida** (`AuthController.isAuthenticated()`) —
@@ -560,6 +581,20 @@ constraints de tamanho/formato de DTO.
   `unfollowPerson`) — seguir quem já é seguido não dá erro (só retorna sem fazer nada), e deixar de
   seguir quem não era seguido também não dá erro. Diferente do `Follower` (seguir usuário duas vezes é
   `409`).
+- **`followPerson` verifica a existência da pessoa no TMDB antes de criar a referência** (chama
+  `TmdbClient.getPersonDetails` — `/person/{id}`, endpoint leve, sem `append_to_response`, diferente
+  de `getPersonCombinedCredits` usado pelo job de tracking — mapeando `NotFound` → `404` e
+  `Unavailable` → `502`, adicionado 2026-09-06, item 3 de
+  `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`) — antes, `validatePersonTmdbId` só checava
+  formato (`\d{1,20}`), então qualquer id numérico bem formado mas inexistente (`"999999999999"`)
+  era aceito com `204` como se tivesse funcionado; a única verificação real acontecia dias depois,
+  dentro do job agendado (`FollowedPersonTrackingServiceImpl.processPerson`), que ao receber
+  `Optional.empty()` (TMDB 404 ou indisponível, indistinguíveis nesse método antigo) simplesmente
+  retornava sem log nem notificação — o usuário nunca descobria que seguiu um id inválido. Mesmo
+  raciocínio já aplicado a `Content` (`ContentServiceImpl.getOrCreateReference`, 2026-09-03), agora
+  replicado aqui. A checagem só roda depois do early-return de idempotência (`existsByUserId
+  AndPersonTmdbId`), então re-seguir uma pessoa já seguida nunca paga o custo de uma chamada TMDB
+  extra.
 - **`personTmdbId` só aceita dígitos, até 20 caracteres** (`FollowedPersonServiceImpl.validatePersonTmdbId`)
   — `400` caso contrário. IDs de pessoa do TMDB são sempre numéricos; a checagem também evita que um
   valor não-numérico mas curto grude permanentemente como "pessoa seguida" e que um valor longo demais
@@ -1155,7 +1190,7 @@ constraints de tamanho/formato de DTO.
   (`diaryBulkActionKey`), não o de `DELETE /diary/{id}`.
 - **Apagamento cascata respeita proteção de `autoGenerated` com flag de override opcional** (`DiaryEntryServiceImpl.deleteDiaryEntry`, `retractSeasonIfIncomplete`, `retractSeriesIfIncomplete`, `wipeSeriesHistory`, todos passando pelo helper único `deleteRespectingProtection`) — quando um usuário deleta um episódio/temporada/série, as entradas da temporada/série relacionadas que perderiam sustento são automaticamente retraídas; por padrão, só as entradas com `autoGenerated = true` são deletadas, preservando entradas criadas ou editadas manualmente (`autoGenerated = false`). O parâmetro `overrideProtectedEntries` (query parameter `?overrideProtectedEntries=true` em `DELETE /diary/{id}`, default `false`) permite, quando ativado, incluir também entradas com `autoGenerated = false` na retirada — essa é uma "confirmação explícita" de que o usuário quer mesmo deletar o histórico manual. Recomenda-se chamar `GET /diary/{id}/deletion-impact` primeiro para pré-visualizar quais entradas seriam impactadas.
 - **Editar uma `DiaryEntry` (mesmo que nenhum campo mude de fato) desliga `autoGenerated`** (`DiaryEntryServiceImpl.updateDiaryEntry`) — uma vez que o usuário chama `PATCH` numa entrada, ela deixa de poder ser retraída automaticamente por `retractSeasonIfIncomplete`/`retractSeriesIfIncomplete`, mesmo que os episódios/temporadas que a sustentavam sejam apagados depois.
-- **Bulk logging de temporada/série é restrito a 100 episódios no total** (`DiaryEntryServiceImpl.createDiaryEntriesInBulk`, constante `MAX_BULK_EPISODES`) — tentar logar uma temporada/série com mais de 100 episódios no total devolve `400`. Bulk logging só aceita tipo `SEASON` ou `SERIES` (`400` para outros tipos); para `SEASON` exige o número do último episódio (via `finaleEpisodeNumber` no DTO ou buscando um `EPISODE` existente com `isSeasonFinale = true`); para `SERIES` exige o número da última temporada (via `finaleSeasonNumber` no DTO ou buscando uma `SEASON` existente com `isSeriesFinale = true`) **e**, para cada temporada de `1` até essa última, o número do episódio final daquela temporada — resolvido, nessa ordem, por um `EPISODE` já existente com `isSeasonFinale = true` ou por uma entrada explícita em `seasonFinaleEpisodeNumbers` (`DiaryEntryBulkCreationDTO`, mapa `seasonNumber -> finaleEpisodeNumber`, `DiaryEntryServiceImpl.explicitFinaleEpisodeNumberFor`); sem nenhuma das duas fontes para alguma temporada intermediária, o bulk inteiro falha com `400` antes de criar qualquer entrada. Isso permite logar uma série multi-temporada inteira numa única chamada mesmo que nenhuma temporada tenha sido logada antes (bastando informar o mapa completo), sem depender de chamadas `SEASON` prévias para estabelecer os finais no banco. Todos os episódios logados em um único bulk call recebem a mesma `watchedDate` (o campo único de data fornecido na requisição se aplica a toda a passada). Cada episódio ganha uma passada "fresca" (`watchNumber = MAX + 1` para aquele `userId`+`contentId`), idêntico ao comportamento de um re-log individual. A resposta inclui, além das entradas de episódio, qualquer `DiaryEntry` de temporada/série auto-gerada que a cascata de completude criar durante o batch (`triggerCompletionCascade` retorna o `CompletionSignal` do que criou, e `bulkLogEpisode` adiciona `completedSeason`/`completedSeries` à lista retornada quando não-nulos); se uma única chamada de `bulkLogEpisode` disparar múltiplas passadas de rewatch completo (catch-up), só a última entrada auto-gerada de cada nível (temporada/série) é incluída na resposta — as passadas intermediárias são persistidas normalmente, só não aparecem nessa resposta específica.
+- **Bulk logging de temporada/série é restrito a 2000 episódios no total** (`DiaryEntryServiceImpl.createDiaryEntriesInBulk`, constante `MAX_BULK_EPISODES`) — tentar logar uma temporada/série com mais de 2000 episódios no total devolve `400`. `DiaryEntryBulkCreationDTO.finaleEpisodeNumber` e os **valores** de `seasonFinaleEpisodeNumbers` (números de episódio) são limitados por `@Max(2000)`, acompanhando `MAX_BULK_EPISODES` — antes ficavam presos em `@Max(100)`, um resquício da mudança de 100→2000 (`MAX_BULK_EPISODES`, 2026-09-03) que nunca chegou até essas anotações: Bean Validation rodando antes do service rejeitava com `400` genérico qualquer override entre 101 e 2000, sem nunca alcançar a lógica que validaria a contagem real contra o TMDB (corrigido 2026-09-06, achado adjacente de `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`). `finaleSeasonNumber` e as **chaves** de `seasonFinaleEpisodeNumbers` (números de *temporada*, não de episódio) continuam em `@Max(100)` — não participam da soma contra `MAX_BULK_EPISODES` (só limitam o laço `for (season = 1; season <= finaleSeasonNumber; ...)`), e nenhuma série real tem perto de 100 temporadas, então não havia contradição a corrigir ali. Bulk logging só aceita tipo `SEASON` ou `SERIES` (`400` para outros tipos); para `SEASON` exige o número do último episódio (via `finaleEpisodeNumber` no DTO ou buscando um `EPISODE` existente com `isSeasonFinale = true`); para `SERIES` exige o número da última temporada (via `finaleSeasonNumber` no DTO ou buscando uma `SEASON` existente com `isSeriesFinale = true`) **e**, para cada temporada de `1` até essa última, o número do episódio final daquela temporada — resolvido, nessa ordem, por um `EPISODE` já existente com `isSeasonFinale = true` ou por uma entrada explícita em `seasonFinaleEpisodeNumbers` (`DiaryEntryBulkCreationDTO`, mapa `seasonNumber -> finaleEpisodeNumber`, `DiaryEntryServiceImpl.explicitFinaleEpisodeNumberFor`); sem nenhuma das duas fontes para alguma temporada intermediária, o bulk inteiro falha com `400` antes de criar qualquer entrada. Isso permite logar uma série multi-temporada inteira numa única chamada mesmo que nenhuma temporada tenha sido logada antes (bastando informar o mapa completo), sem depender de chamadas `SEASON` prévias para estabelecer os finais no banco. Todos os episódios logados em um único bulk call recebem a mesma `watchedDate` (o campo único de data fornecido na requisição se aplica a toda a passada). Cada episódio ganha uma passada "fresca" (`watchNumber = MAX + 1` para aquele `userId`+`contentId`), idêntico ao comportamento de um re-log individual. A resposta inclui, além das entradas de episódio, qualquer `DiaryEntry` de temporada/série auto-gerada que a cascata de completude criar durante o batch (`triggerCompletionCascade` retorna o `CompletionSignal` do que criou, e `bulkLogEpisode` adiciona `completedSeason`/`completedSeries` à lista retornada quando não-nulos); se uma única chamada de `bulkLogEpisode` disparar múltiplas passadas de rewatch completo (catch-up), só a última entrada auto-gerada de cada nível (temporada/série) é incluída na resposta — as passadas intermediárias são persistidas normalmente, só não aparecem nessa resposta específica.
 - **Pré-visualização de impacto de exclusão (dry-run) executando o delete real numa transação que nunca é commitada** (`GET /diary/{diaryEntryId}/deletion-impact`, `DiaryEntryServiceImpl.computeDeletionImpact`) — retorna a lista de `DiaryEntry`s que seriam deletadas como efeito cascata se a entrada consultada fosse de fato apagada, sem persistir nada. Em vez de recalcular "o que aconteceria" com uma fórmula derivada à mão, o método chama literalmente o caminho de delete real (`deleteDiaryEntry`, na sobrecarga privada que recebe um acumulador `List<DiaryEntry>`) e depois chama `TransactionAspectSupport.currentTransactionStatus().setRollbackOnly()`, garantindo que a transação inteira seja revertida ao final da requisição. O acumulador é preenchido por `deleteRespectingProtection` — o único ponto onde a cascata de fato deleta — então a lista devolvida é exatamente o que foi apagado dentro da transação revertida, na ordem em que foi apagado; a entrada consultada em si sempre é apagada e não é repetida na lista. Isso torna estruturalmente impossível o preview divergir do delete (é um código só, não dois), corrigindo dois bugs anteriores: a primeira versão simulava a deleção calculando `minEpisodeWatchCount(...) - 1` na mão, e a segunda aplicava o delete do episódio mas **não** aplicava as retrações de temporada que ela própria previa antes de calcular as candidatas de série — então a `DiaryEntry` de série sumia do preview (`minSeasonWatchMax` computado alto demais) e o usuário confirmava um delete com `overrideProtectedEntries = true` sem nunca ver que uma review de série seria destruída junto.
 - **O preview usa o mesmo `overrideProtectedEntries` do delete** (query parameter em `GET /diary/{diaryEntryId}/deletion-impact`, default `false`, igual ao `DELETE`) — como o preview roda o delete de verdade, o filtro de proteção por `autoGenerated` também vale ali: com `false` (default) a lista traz só o que o delete padrão apagaria; com `true` traz também as entradas manuais que seriam destruídas. Cada item carrega `id` (para o cliente mapear de volta para a entrada) e `autoGenerated` (a flag de proteção de fato). O campo `hasReview` é `true` quando a entrada tem `comment` ou `score` não-nulo — é uma dica de severidade para a UI (quanto conteúdo escrito pelo usuário está em jogo), **não** a flag de proteção: `updateDiaryEntry` zera `autoGenerated` em qualquer `PATCH`, então existe entrada protegida (`autoGenerated = false`) sem nenhum `comment` nem `score`.
 - **`computeDeletionImpact` roda sempre numa transação física própria** (`@Transactional(propagation = Propagation.REQUIRES_NEW)`) — como o método marca a transação corrente como rollback-only por construção, rodar dentro da transação de um chamador envenenaria essa transação (`UnexpectedRollbackException` no commit, ou perda silenciosa das escritas do chamador). Com `REQUIRES_NEW` o dry-run sempre ganha e descarta a sua própria transação, independente de quem chamar. O `setRollbackOnly()` só é chamado quando `TransactionSynchronizationManager.isActualTransactionActive()` é verdadeiro, para permanecer chamável de testes unitários com Mockito puro (sem proxy/transação real do Spring).
@@ -1342,6 +1377,20 @@ constraints de tamanho/formato de DTO.
   CASE WHEN ... = 'DESC' THEN ... END DESC` na própria query nativa — necessário porque bind
   parameter não pode substituir a palavra-chave `ASC`/`DESC` diretamente em SQL. `sortBy` fora dessa
   lista de seis valores é `400` (`UserListServiceImpl.getUserLists`).
+- **`sortDirection` fora de `asc`/`desc` (case-sensitive) é `400`, não silenciosamente tratado como
+  `asc`** (`PageRequestFactory.build`, mais `UserListServiceImpl.assertValidSortDirection` chamado no
+  início de `getUserLists`/`getUserListById` — adicionado 2026-09-06, item 1 de
+  `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`) — antes, `"desc".equals(sortDirection)` era a
+  única checagem em todo lugar que usa `sortDirection` (`PageRequestFactory`, e os três pontos de
+  `UserListServiceImpl` que decidem `ASC`/`DESC` pra query nativa ou pro comparator em memória);
+  qualquer valor que não fosse exatamente a string `"desc"` minúscula — `"DESC"` (forma comum de
+  cliente), `"descending"`, um typo — silenciosamente virava ascendente, dando a entender que o
+  parâmetro foi aceito quando na verdade foi ignorado. `openapi.yaml` já documentava `sortDirection`
+  como `enum: [asc, desc]`; a validação agora força esse contrato de verdade. `assertValidSortDirection`
+  existe porque `PageRequestFactory.build` sozinho não cobre os dois ramos de `UserListServiceImpl` que
+  nunca chegam a chamar o overload de 4 argumentos (`itemsCount`/`commentsCount` via query nativa, e o
+  sort em memória de `filterAndSortItems`) — os dois herdariam o mesmo bug silenciosamente se só a
+  fábrica fosse corrigida.
 - **Filtro/ordenação de itens em `GET /lists/{listId}`** — aplicado inteiramente em memória sobre a
   lista de itens já carregada (`UserListServiceImpl.filterAndSortItems`), já que essa rota nunca foi
   paginada e a lista inteira é buscada de qualquer forma. `type` filtra por `content.type`; `genre`
@@ -1710,6 +1759,15 @@ constraints de tamanho/formato de DTO.
   (incluindo `null`, ausente) é `400` — validado no service, não via `@RequestParam(required = true)`,
   pra devolver o `ApiError` padrão do projeto em vez do erro de parâmetro ausente default do Spring (ver
   `CLAUDE.md` § "Don't let Spring's default error bodies leak through").
+- **`GET /users/{userId}/series/{seriesTmdbId}/episode-ratings` (`getEpisodeRatingsGrid`) faz `trim()`
+  em `seriesTmdbId` antes de checar vazio, não só depois** (`SummaryServiceImpl.getEpisodeRatingsGrid`,
+  corrigido 2026-09-06 — item 5 de `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`) —
+  `io.micrometer.common.util.StringUtils.isEmpty` só checa `null`/`length()==0`, sem trim embutido; um
+  `seriesTmdbId` composto só de espaços passava nessa checagem, chegava em
+  `findEpisodeEntriesBySeriesForUser(userId, "   ")`, não encontrava nada, e o endpoint devolvia `200`
+  com `episodes: []` em vez de rejeitar com `400` — mesmo padrão de `trim()`-antes-de-checar já usado
+  em `ContentServiceImpl.normalize`/`trimOrNull` e `UserServiceImpl.getUsersByUsername`, só que faltava
+  aqui.
 - **Sem `SummaryService` de domínio próprio — é só orquestração sobre consultas que já existem** —
   `SummaryServiceImpl` não introduz regra de negócio nova; cada campo da resposta reaproveita uma query
   ou serviço de `Diary`/`Dropped` já existente, só adicionando o filtro por `type`.

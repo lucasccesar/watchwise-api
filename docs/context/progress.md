@@ -3824,3 +3824,50 @@ implementado ainda) segue pendente.
 
 `docs/pending/audit-completa-2026-09-04.md` marcado com todos os 11 itens fechados. Suíte completa
 (2198 testes) validada contra Postgres real via Testcontainers.
+
+## 2026-09-06 (3) — Todos os achados de `erros-silenciosos-sem-400-2026-09-04.md` fechados
+
+Busca focada em erros silenciosamente engolidos que deveriam retornar `400` (5 achados + 1 achado
+adjacente de categoria oposta).
+
+**Item 1** — `sortDirection` fora de `asc`/`desc` (case-sensitive) virava `asc` silenciosamente em vez
+de `400`, tanto em `PageRequestFactory.build` quanto nos três pontos de `UserListServiceImpl` que
+decidem `ASC`/`DESC` fora desse overload (query nativa agregada de `itemsCount`/`commentsCount`, sort
+em memória de `filterAndSortItems`). Corrigido com validação em ambos os lugares — `PageRequestFactory`
+pra fechar o caso genérico, e `UserListServiceImpl.assertValidSortDirection` (chamado no início de
+`getUserLists`/`getUserListById`) pra fechar os dois ramos que nunca chamam o `build` de 4 argumentos.
+
+**Item 2** — `Content` tipo `EPISODE` aceitava `isSeriesFinale=true` sem `isSeasonFinale=true` (estado
+logicamente contraditório) com `200`, persistindo uma linha inconsistente. `ContentServiceImpl.validate`
+agora rejeita essa combinação com `400` no bloco `EPISODE`; confirmado que nenhum caminho
+server-derivado consegue produzir esse estado, então a checagem só barra entrada de fato inválida.
+
+**Item 3** — `POST /users/me/follow-people/{personTmdbId}` aceitava qualquer id numérico bem formado
+sem verificar existência real no TMDB, sempre devolvendo `204`. Novo `TmdbClient.getPersonDetails`
+(`/person/{id}`, leve) mais `FollowedPersonServiceImpl.assertPersonExistsOnTmdb` fecham a mesma lacuna
+já fechada pra `Content` em 2026-09-03 — `404`/`502`, chamado só depois do early-return de idempotência.
+
+**Item 4** — `preferredLanguage`/`preferredRegion` só validavam formato via `@Pattern`, não existência
+real do código — um valor como `"zz-ZZ"`/`"ZZ"` era aceito com `200` e só quebrava silenciosamente dias
+depois, num endpoint completamente diferente (`watchProviders` de `GET /contents/{contentId}/details`
+devolvendo lista vazia pra sempre). `UserServiceImpl` ganhou validação contra
+`java.util.Locale.getISOLanguages()`/`getISOCountries()`, chamada só quando o valor muda em `applyPatch`.
+
+**Item 5** — `SummaryServiceImpl.getEpisodeRatingsGrid` não fazia `trim()` em `seriesTmdbId` antes de
+checar vazio; um valor só de espaços passava e devolvia `200` com lista vazia em vez de `400`. Corrigido
+com `trim()` antes da checagem, mesmo padrão já usado em `ContentServiceImpl`/`UserServiceImpl`.
+
+**Achado adjacente** — `DiaryEntryBulkCreationDTO.finaleEpisodeNumber`/valores de
+`seasonFinaleEpisodeNumbers` continuavam com `@Max(100)`, resquício da mudança 100→2000 de
+`MAX_BULK_EPISODES` (2026-09-03) que nunca chegou até essas anotações — Bean Validation rejeitava com
+`400` genérico qualquer override entre 101-2000 antes de alcançar a validação real contra o TMDB.
+Elevados pra `@Max(2000)`; `finaleSeasonNumber`/chaves do mapa (números de temporada, não de episódio)
+ficaram em `@Max(100)` deliberadamente, por não participarem da soma. `openapi.yaml` ganhou `maximum`
+explícito nos três campos.
+
+Testes novos/atualizados em `PageRequestFactoryTest`, `UserListServiceImplTest`, `ContentServiceImplTest`,
+`FollowedPersonServiceImplTest`, `FollowedPersonControllerIntegrationTest`, `UserServiceImplTest`,
+`SummaryServiceImplTest`, `DiaryEntryControllerIntegrationTest`. `docs/context/business-rules.md`/
+`business-rules-summary.md`/`openapi.yaml` atualizados; `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`
+marcado com os 6 achados fechados. Suíte completa (2211 testes) validada contra Postgres real via
+Testcontainers.
