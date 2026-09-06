@@ -905,6 +905,18 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateUser] Should Throw BadRequestException - When PreferredLanguage Has A Well-Formed But Nonexistent Language Or Region")
+    void shouldThrowBadRequestExceptionWhenPreferredLanguageHasAWellFormedButNonexistentLanguageOrRegion() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, "zz-ZZ", null);
+
+        assertThatThrownBy(() -> userService.updateUser(savedUser, patchUserDTO))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("preferredLanguage must be a real language-region combination, e.g. en-US");
+
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
     @DisplayName("[updateUser] Should Update PreferredRegion - When A Different Value Is Provided")
     void shouldUpdatePreferredRegionWhenDifferentValueProvided() {
         PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, null, "BR");
@@ -930,6 +942,18 @@ class UserServiceImplTest {
         userService.updateUser(savedUser, patchUserDTO);
 
         assertThat(savedUser.getPreferredRegion()).isEqualTo("US");
+    }
+
+    @Test
+    @DisplayName("[updateUser] Should Throw BadRequestException - When PreferredRegion Is Well-Formed But Nonexistent")
+    void shouldThrowBadRequestExceptionWhenPreferredRegionIsWellFormedButNonexistent() {
+        PatchUserDTO patchUserDTO = new PatchUserDTO(null, null, null, null, null, null, null, null, null, "ZZ");
+
+        assertThatThrownBy(() -> userService.updateUser(savedUser, patchUserDTO))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("preferredRegion must be a real ISO 3166-1 alpha-2 code, e.g. US");
+
+        verify(userRepository, never()).saveAndFlush(any());
     }
 
     @Test

@@ -37,7 +37,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -57,6 +59,8 @@ public class UserServiceImpl implements UserService {
     static final int WATCH_TIME_WINDOW_DAYS = 30;
     static final String DUMMY_PASSWORD_HASH =
             "$2a$10$CwTycUXWue0Thq9StjUM0uJ8Pki7Q0OFPHiOEyDkQksJ0FUmnQWly";
+    static final Set<String> ISO_LANGUAGES = Set.of(Locale.getISOLanguages());
+    static final Set<String> ISO_COUNTRIES = Set.of(Locale.getISOCountries());
 
     @Override
     public UserResponseDTO saveNewUser(PostUserDTO postUserDTO) {
@@ -160,10 +164,12 @@ public class UserServiceImpl implements UserService {
         }
 
         if (patchUserDTO.preferredLanguage() != null && !patchUserDTO.preferredLanguage().equals(user.getPreferredLanguage())) {
+            validatePreferredLanguage(patchUserDTO.preferredLanguage());
             user.setPreferredLanguage(patchUserDTO.preferredLanguage());
         }
 
         if (patchUserDTO.preferredRegion() != null && !patchUserDTO.preferredRegion().equals(user.getPreferredRegion())) {
+            validatePreferredRegion(patchUserDTO.preferredRegion());
             user.setPreferredRegion(patchUserDTO.preferredRegion());
         }
 
@@ -181,6 +187,20 @@ public class UserServiceImpl implements UserService {
     private void validateUsernameLength(String trimmedUsername) {
         if (trimmedUsername.length() < MIN_USERNAME_LENGTH) {
             throw new BadRequestException("Username must be at least " + MIN_USERNAME_LENGTH + " characters long");
+        }
+    }
+
+    private void validatePreferredLanguage(String preferredLanguage) {
+        String language = preferredLanguage.substring(0, 2);
+        String region = preferredLanguage.substring(3);
+        if (!ISO_LANGUAGES.contains(language) || !ISO_COUNTRIES.contains(region)) {
+            throw new BadRequestException("preferredLanguage must be a real language-region combination, e.g. en-US");
+        }
+    }
+
+    private void validatePreferredRegion(String preferredRegion) {
+        if (!ISO_COUNTRIES.contains(preferredRegion)) {
+            throw new BadRequestException("preferredRegion must be a real ISO 3166-1 alpha-2 code, e.g. US");
         }
     }
 
