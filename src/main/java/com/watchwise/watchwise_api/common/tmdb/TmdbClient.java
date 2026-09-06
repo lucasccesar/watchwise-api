@@ -48,6 +48,14 @@ public class TmdbClient {
                 "person " + personTmdbId).toOptional();
     }
 
+    public TmdbLookupResult<TmdbPersonDetails> getPersonDetails(String personTmdbId) {
+        return callWithRetry(() -> tmdbRestClient.get()
+                        .uri("/person/{id}", personTmdbId)
+                        .retrieve()
+                        .body(TmdbPersonDetails.class),
+                "person details " + personTmdbId);
+    }
+
     public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {
         return cachedLookup(tmdbMovieFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder

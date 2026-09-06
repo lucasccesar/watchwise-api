@@ -3,7 +3,11 @@ package com.watchwise.watchwise_api.followedperson.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
@@ -58,6 +62,9 @@ class FollowedPersonServiceImplTest {
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
 
+    @Mock
+    private TmdbClient tmdbClient;
+
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
@@ -91,6 +98,8 @@ class FollowedPersonServiceImplTest {
 
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+        lenient().when(tmdbClient.getPersonDetails(any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbPersonDetails(personTmdbId)));
     }
 
     @Test
@@ -127,6 +136,34 @@ class FollowedPersonServiceImplTest {
 
         verify(followedPersonRepository, never()).saveAndFlush(any());
         verify(userRepository, never()).findById(any());
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Throw NotFoundException - When The Person Does Not Exist On TMDB")
+    void shouldThrowNotFoundExceptionWhenThePersonDoesNotExistOnTmdb() {
+        when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
+        when(tmdbClient.getPersonDetails(personTmdbId)).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        assertThatThrownBy(() -> followedPersonService.followPerson(userId, personTmdbId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No person found on TMDB for the given id");
+
+        verify(followedPersonRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(userRepository, newTransactionExecutor);
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Throw TmdbUnavailableException - When TMDB Is Unavailable")
+    void shouldThrowTmdbUnavailableExceptionWhenTmdbIsUnavailable() {
+        when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
+        when(tmdbClient.getPersonDetails(personTmdbId)).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        assertThatThrownBy(() -> followedPersonService.followPerson(userId, personTmdbId))
+                .isInstanceOf(TmdbUnavailableException.class);
+
+        verify(followedPersonRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(userRepository, newTransactionExecutor);
     }
 
     @Test
@@ -174,7 +211,7 @@ class FollowedPersonServiceImplTest {
         assertThatThrownBy(() -> followedPersonService.followPerson(userId, "abc"))
                 .isInstanceOf(BadRequestException.class);
 
-        verifyNoInteractions(followedPersonRepository, userRepository);
+        verifyNoInteractions(followedPersonRepository, userRepository, tmdbClient);
     }
 
     @Test
@@ -183,7 +220,7 @@ class FollowedPersonServiceImplTest {
         assertThatThrownBy(() -> followedPersonService.followPerson(userId, "123456789012345678901"))
                 .isInstanceOf(BadRequestException.class);
 
-        verifyNoInteractions(followedPersonRepository, userRepository);
+        verifyNoInteractions(followedPersonRepository, userRepository, tmdbClient);
     }
 
     @Test

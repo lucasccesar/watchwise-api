@@ -3,7 +3,10 @@ package com.watchwise.watchwise_api.followedperson.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.followedperson.entity.FollowedPerson;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
@@ -30,6 +33,7 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
     private final FollowerRepository followerRepository;
     private final NewTransactionExecutor newTransactionExecutor;
     private final PageRequestFactory pageRequestFactory;
+    private final TmdbClient tmdbClient;
 
     @Override
     public void followPerson(UUID userId, String personTmdbId) {
@@ -38,6 +42,8 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
         if (followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)) {
             return;
         }
+
+        assertPersonExistsOnTmdb(personTmdbId);
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
@@ -68,6 +74,16 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
     private void validatePersonTmdbId(String personTmdbId) {
         if (personTmdbId == null || !personTmdbId.matches("\\d{1,20}")) {
             throw new BadRequestException("personTmdbId must be a numeric TMDB id up to 20 digits");
+        }
+    }
+
+    private void assertPersonExistsOnTmdb(String personTmdbId) {
+        TmdbLookupResult<?> result = tmdbClient.getPersonDetails(personTmdbId);
+        if (result.isNotFound()) {
+            throw new NotFoundException("No person found on TMDB for the given id");
+        }
+        if (result.isUnavailable()) {
+            throw new TmdbUnavailableException("TMDB is currently unavailable");
         }
     }
 

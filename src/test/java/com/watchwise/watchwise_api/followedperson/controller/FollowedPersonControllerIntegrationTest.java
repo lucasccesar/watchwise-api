@@ -4,6 +4,9 @@ import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
 import com.watchwise.watchwise_api.followedperson.repository.FollowedPersonRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -17,6 +20,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -27,6 +31,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -64,12 +71,18 @@ class FollowedPersonControllerIntegrationTest {
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @MockitoBean
+    private TmdbClient tmdbClient;
+
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         followedPersonRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
+
+        lenient().when(tmdbClient.getPersonDetails(any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbPersonDetails("603")));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
@@ -152,6 +165,30 @@ class FollowedPersonControllerIntegrationTest {
 
         mockMvc.perform(followPersonRequest(user, "not-a-number"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Return NotFound And Not Persist - When The Person Does Not Exist On TMDB")
+    void shouldReturnNotFoundAndNotPersistWhenThePersonDoesNotExistOnTmdb() throws Exception {
+        RegisteredUser user = registerUser("followpersonnotfoundtmdb");
+        when(tmdbClient.getPersonDetails("999999999")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        mockMvc.perform(followPersonRequest(user, "999999999"))
+                .andExpect(status().isNotFound());
+
+        assertThat(followedPersonRepository.findByUserIdAndPersonTmdbId(user.id(), "999999999")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[followPerson] Should Return BadGateway And Not Persist - When TMDB Is Unavailable")
+    void shouldReturnBadGatewayAndNotPersistWhenTmdbIsUnavailable() throws Exception {
+        RegisteredUser user = registerUser("followpersontmdbdown");
+        when(tmdbClient.getPersonDetails("603")).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(followPersonRequest(user, "603"))
+                .andExpect(status().isBadGateway());
+
+        assertThat(followedPersonRepository.findByUserIdAndPersonTmdbId(user.id(), "603")).isEmpty();
     }
 
     @Test
