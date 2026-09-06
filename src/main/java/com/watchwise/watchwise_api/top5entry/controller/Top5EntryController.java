@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.top5entry.controller;
 
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryPatchDTO;
@@ -7,11 +8,13 @@ import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -21,6 +24,12 @@ import java.util.UUID;
 public class Top5EntryController {
 
     private final Top5EntryService top5EntryService;
+    private final RequestThrottler requestThrottler;
+
+    @Value("${app.rate-limit.top5-action.max-requests}")
+    private int top5ActionMaxRequests;
+    @Value("${app.rate-limit.top5-action.window-minutes}")
+    private long top5ActionWindowMinutes;
 
     @GetMapping("/{userId}/top5/{type}")
     public ResponseEntity<List<Top5EntryResponseDTO>> getTop5(
@@ -35,6 +44,8 @@ public class Top5EntryController {
             @PathVariable MovieOrSeriesType type,
             @Valid @RequestBody Top5EntryCreationDTO top5EntryCreationDTO
     ) {
+        requestThrottler.checkAllowed(top5ActionKey(), top5ActionMaxRequests, Duration.ofMinutes(top5ActionWindowMinutes));
+
         Top5EntryResponseDTO created = top5EntryService.insertEntry(getCurrentUserId(), type.toContentType(), top5EntryCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -56,6 +67,10 @@ public class Top5EntryController {
     ) {
         Top5EntryResponseDTO updated = top5EntryService.updateEntry(getCurrentUserId(), type.toContentType(), top5EntryId, top5EntryPatchDTO);
         return ResponseEntity.ok(updated);
+    }
+
+    private String top5ActionKey() {
+        return "top5-action|" + getCurrentUserId();
     }
 
     private UUID getCurrentUserId() {

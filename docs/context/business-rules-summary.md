@@ -77,6 +77,7 @@ Para o detalhe completo (classe/método, motivação, exemplos), ver `business-r
 - Mesmo conteúdo não pode entrar duas vezes no Top5 do mesmo tipo (constraint única).
 - Deslocamento de posição continua sendo um loop item a item (`save`/`flush` por linha), de propósito — a técnica de duas queries em massa de `WatchlistEntry`/`UserListItem` foi tentada e revertida, pois `position` aqui tem `CHECK` de teto (1 a 5) que a "estacionada" em offset gigante viola imediatamente. Capado em 5, o loop nunca é um problema de escala.
 - `customPosterUrl` é o único campo editável numa entrada já existente — aceito no POST e num novo PATCH `/users/me/top5/{type}/{top5EntryId}` (2026-08-29); antes só existia inserir/remover.
+- `insertEntry` é limitado por `RequestThrottler` (`top5-action`, 20/5min) — fecha gap de custo TMDB sem limite via `getOrCreateReference` (2026-09-06).
 
 ## WatchlistEntry
 
@@ -89,6 +90,7 @@ Para o detalhe completo (classe/método, motivação, exemplos), ver `business-r
 - Remover uma entrada fecha o buraco.
 - Mesmo conteúdo não pode entrar duas vezes na watchlist do mesmo tipo (constraint única).
 - `removeEntryIfPresent` é a variante best-effort (não lança 404), usada pelo `DiaryEntry` ao logar.
+- `insertEntry` é limitado por `RequestThrottler` (`watchlist-action`, 20/5min) — mesma correção do Top5Entry (2026-09-06).
 
 ## DroppedEntry
 

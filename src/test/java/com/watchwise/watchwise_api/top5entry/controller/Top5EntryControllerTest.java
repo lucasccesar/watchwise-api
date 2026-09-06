@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.top5entry.controller;
 
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
@@ -33,6 +34,9 @@ class Top5EntryControllerTest {
 
     @Mock
     private Top5EntryService top5EntryService;
+
+    @Mock
+    private RequestThrottler requestThrottler;
 
     @InjectMocks
     private Top5EntryController top5EntryController;

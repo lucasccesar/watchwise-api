@@ -103,7 +103,7 @@ verifica só `userMapper` — e um teste novo
 (`shouldCompareAgainstADummyHashToEqualizeTimingWhenIdentifierDoesNotMatchAnyUser`) prova explicitamente
 que `passwordEncoder.matches` é chamado com o hash dummy.
 
-### 5. 🟡 Rate limiting inconsistente em endpoints que disparam `getOrCreateReference` (custo TMDB)
+### 5. ✅ CORRIGIDO (2026-09-06) — Rate limiting inconsistente em endpoints que disparam `getOrCreateReference` (custo TMDB)
 
 **Arquivos:** `watchlist/controller/WatchlistEntryController.java:37-44`,
 `top5entry/controller/Top5EntryController.java:33-40`
@@ -116,6 +116,17 @@ verificação/derivação via TMDB para um `tmdbId` novo que `POST /contents/ref
 nenhum**. Um usuário autenticado pode enumerar `tmdbId`s distintos via
 `POST /users/me/watchlist/{type}` ou `POST /users/me/top5/{type}` sem limite algum, contornando
 exatamente o controle que os outros quatro endpoints foram construídos pra impor.
+
+**Corrigido:** mesmo padrão do `DroppedEntryController` replicado nos dois controllers —
+`requestThrottler.checkAllowed(...)` adicionado antes da chamada ao service em
+`WatchlistEntryController.insertEntry`/`Top5EntryController.insertEntry`, com chaves por usuário
+(`watchlist-action|<userId>`, `top5-action|<userId>`) e propriedades novas
+`app.rate-limit.watchlist-action`/`app.rate-limit.top5-action` (20 requisições/5 min em dev). Os
+demais endpoints dos dois controllers não chamam `getOrCreateReference`, então continuam sem throttle,
+mesmo critério já usado em `DroppedEntry`. Testes de integração novos em
+`WatchlistEntryControllerIntegrationTest`/`Top5EntryControllerIntegrationTest` provam o `429` ao
+exceder o limite e o isolamento por usuário. `business-rules.md`/`business-rules-summary.md`
+atualizados.
 
 ### 6. 🟡 `UserList.name`/`description` sem `@Size` → nome grande vira `500` em vez de `400`
 

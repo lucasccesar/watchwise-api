@@ -455,6 +455,38 @@ class WatchlistEntryControllerIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @DisplayName("[insertEntry] Should Return TooManyRequests - When Requests From The Same User Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
+        RegisteredUser user = registerUser("throttleinsertwatchlist");
+
+        for (int i = 0; i < 20; i++) {
+            mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("t" + i)))
+                    .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("t20")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[insertEntry] Should Not Block A Different User - When Another User Is Rate Limited")
+    void shouldNotBlockADifferentUserWhenAnotherUserIsRateLimited() throws Exception {
+        RegisteredUser userA = registerUser("watchlistactionuserA");
+        RegisteredUser userB = registerUser("watchlistactionuserB");
+
+        for (int i = 0; i < 20; i++) {
+            mockMvc.perform(insertRequest(userA, ContentType.MOVIE, contentBody("t" + i)))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(insertRequest(userA, ContentType.MOVIE, contentBody("t20")))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(insertRequest(userB, ContentType.MOVIE, contentBody("550")))
+                .andExpect(status().isCreated());
+    }
+
     // ---------- PATCH /users/me/watchlist/{type}/{watchlistEntryId} ----------
 
     @Test

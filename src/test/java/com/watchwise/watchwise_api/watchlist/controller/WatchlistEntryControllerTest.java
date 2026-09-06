@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.watchlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
@@ -36,6 +37,9 @@ class WatchlistEntryControllerTest {
 
     @Mock
     private WatchlistEntryService watchlistEntryService;
+
+    @Mock
+    private RequestThrottler requestThrottler;
 
     @InjectMocks
     private WatchlistEntryController watchlistEntryController;

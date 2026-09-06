@@ -3749,3 +3749,23 @@ de comparar a senha, seja contra o hash real (usuário existe) ou o dummy (usuá
 antes provava `verifyNoInteractions(passwordEncoder, ...)` nesse cenário foi ajustado, e um teste novo
 (`shouldCompareAgainstADummyHashToEqualizeTimingWhenIdentifierDoesNotMatchAnyUser`) prova explicitamente a
 chamada contra o hash dummy. Suíte completa validada contra Postgres real via Testcontainers.
+
+## 2026-09-06 — Rate limiting adicionado em `WatchlistEntry.insertEntry`/`Top5Entry.insertEntry`
+
+Item 5 (média severidade) de `docs/pending/audit-completa-2026-09-04.md`. `POST /users/me/watchlist/{type}`
+e `POST /users/me/top5/{type}` chamam `ContentService.getOrCreateReference` — o mesmo caminho com custo
+de verificação/derivação via TMDB que já era protegido por `RequestThrottler` em `POST /contents/reference`,
+`POST /diary`/`POST /diary/bulk` e `POST /users/me/dropped/{type}/{tmdbId}` — mas ficavam sem nenhum
+throttle, permitindo enumerar `tmdbId`s distintos sem limite via qualquer um desses dois endpoints.
+
+Corrigido replicando o mesmo padrão já usado em `DroppedEntryController`/`ContentController`: nova chave
+de rate limit por usuário (`watchlist-action|<userId>`, `top5-action|<userId>`), novas propriedades
+`app.rate-limit.watchlist-action`/`app.rate-limit.top5-action` (20 requisições/5 min em dev, comentadas
+no template de prod como as demais) e `requestThrottler.checkAllowed(...)` antes de delegar ao service em
+`WatchlistEntryController.insertEntry`/`Top5EntryController.insertEntry`. Os demais endpoints dos dois
+controllers (`getWatchlist`/`moveEntry`/`removeEntry`, `getTop5`/`removeEntry`/`updateEntry`) continuam
+sem throttle — não chamam `getOrCreateReference`, mesmo critério já usado em `DroppedEntry`. Testes de
+integração novos em ambos os controllers provam o `429` ao exceder o limite e que ele é isolado por
+usuário; testes unitários dos dois controllers atualizados para mockar `RequestThrottler` (injeção via
+construtor). `docs/context/business-rules.md`/`business-rules-summary.md` atualizados. Suíte completa
+(85 testes entre os dois controllers) validada contra Postgres real via Testcontainers.

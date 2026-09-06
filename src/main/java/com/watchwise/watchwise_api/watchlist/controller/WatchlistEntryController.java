@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.watchlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
@@ -8,12 +9,14 @@ import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Duration;
 import java.util.UUID;
 
 @RestController
@@ -22,6 +25,12 @@ import java.util.UUID;
 public class WatchlistEntryController {
 
     private final WatchlistEntryService watchlistEntryService;
+    private final RequestThrottler requestThrottler;
+
+    @Value("${app.rate-limit.watchlist-action.max-requests}")
+    private int watchlistActionMaxRequests;
+    @Value("${app.rate-limit.watchlist-action.window-minutes}")
+    private long watchlistActionWindowMinutes;
 
     @GetMapping("/{userId}/watchlist/{type}")
     public ResponseEntity<PageResponseDTO<WatchlistEntryResponseDTO>> getWatchlist(
@@ -39,6 +48,8 @@ public class WatchlistEntryController {
             @PathVariable MovieOrSeriesType type,
             @Valid @RequestBody WatchlistEntryCreationDTO watchlistEntryCreationDTO
     ) {
+        requestThrottler.checkAllowed(watchlistActionKey(), watchlistActionMaxRequests, Duration.ofMinutes(watchlistActionWindowMinutes));
+
         WatchlistEntryResponseDTO created = watchlistEntryService.insertEntry(getCurrentUserId(), type.toContentType(), watchlistEntryCreationDTO);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
@@ -60,6 +71,10 @@ public class WatchlistEntryController {
     ) {
         watchlistEntryService.removeEntry(getCurrentUserId(), type.toContentType(), watchlistEntryId);
         return ResponseEntity.noContent().build();
+    }
+
+    private String watchlistActionKey() {
+        return "watchlist-action|" + getCurrentUserId();
     }
 
     private UUID getCurrentUserId() {

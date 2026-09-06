@@ -487,6 +487,38 @@ class Top5EntryControllerIntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    @DisplayName("[insertEntry] Should Return TooManyRequests - When Requests From The Same User Exceed The Configured Max")
+    void shouldReturnTooManyRequestsWhenRequestsFromTheSameUserExceedTheConfiguredMax() throws Exception {
+        RegisteredUser user = registerUser("throttleinserttop5");
+
+        for (int i = 0; i < 20; i++) {
+            mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("t" + i, 1)))
+                    .andExpect(status().isCreated());
+        }
+
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("t20", 1)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Too many requests. Try again later."));
+    }
+
+    @Test
+    @DisplayName("[insertEntry] Should Not Block A Different User - When Another User Is Rate Limited")
+    void shouldNotBlockADifferentUserWhenAnotherUserIsRateLimited() throws Exception {
+        RegisteredUser userA = registerUser("top5actionuserA");
+        RegisteredUser userB = registerUser("top5actionuserB");
+
+        for (int i = 0; i < 20; i++) {
+            mockMvc.perform(insertRequest(userA, ContentType.MOVIE, contentBody("t" + i, 1)))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(insertRequest(userA, ContentType.MOVIE, contentBody("t20", 1)))
+                .andExpect(status().isTooManyRequests());
+
+        mockMvc.perform(insertRequest(userB, ContentType.MOVIE, contentBody("550", null)))
+                .andExpect(status().isCreated());
+    }
+
     // ---------- DELETE /users/me/top5/{type}/{top5EntryId} ----------
 
     @Test

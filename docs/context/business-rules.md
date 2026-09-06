@@ -608,6 +608,15 @@ constraints de tamanho/formato de DTO.
   2026-08-29) — antes desse endpoint, Top5Entry só tinha inserir/remover, sem nenhuma operação de
   update; `null` no patch significa "não alterar", sem forma de limpar um poster já definido de volta
   pra `null`, mesma limitação que `DiaryEntry` já tem.
+- **`insertEntry` (`POST /users/me/top5/{type}`) é limitado por `RequestThrottler`** (chave
+  `top5-action|<userId>`, `app.rate-limit.top5-action`, 20 requisições/5 min por padrão em dev) —
+  adicionado em 2026-09-06 fechando o item 5 de `docs/pending/audit-completa-2026-09-04.md`: o método
+  chama `ContentService.getOrCreateReference`, o mesmo caminho com custo de verificação/derivação via
+  TMDB que já era limitado em `POST /contents/reference`, `POST /diary`/`POST /diary/bulk` e
+  `POST /users/me/dropped/{type}/{tmdbId}`, mas ficara sem throttle nenhum aqui, permitindo enumerar
+  `tmdbId`s distintos sem limite. `getTop5`/`removeEntry` continuam sem throttle — não chamam
+  `getOrCreateReference`, mesmo critério já usado pra decidir quais endpoints de `DroppedEntry` são
+  limitados.
 
 ## WatchlistEntry
 
@@ -654,6 +663,12 @@ constraints de tamanho/formato de DTO.
   remover, e é resolvida por `userId`+`type`+`contentId` (não por id da entrada), já que quem chama
   não sabe se existe nada pra remover. Único consumidor hoje: `DiaryEntryServiceImpl`, ao logar um
   conteúdo (ver regra em DiaryEntry sobre remoção automática da watchlist/dropped).
+- **`insertEntry` (`POST /users/me/watchlist/{type}`) é limitado por `RequestThrottler`** (chave
+  `watchlist-action|<userId>`, `app.rate-limit.watchlist-action`, 20 requisições/5 min por padrão em
+  dev) — mesma correção e mesmo motivo do item equivalente em Top5Entry (item 5 de
+  `docs/pending/audit-completa-2026-09-04.md`): chama `ContentService.getOrCreateReference` sem
+  throttle nenhum antes dessa correção. `getWatchlist`/`moveEntry`/`removeEntry` continuam sem
+  throttle — não chamam `getOrCreateReference`.
 
 ## DroppedEntry
 
