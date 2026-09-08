@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:/Users/Lucas C/.local/bin/graphify.EXE\" hook-guard search"
+          }
+        ],
+        "matcher": "Bash|Grep"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:/Users/Lucas C/.local/bin/graphify.EXE\" hook-guard read"
+          }
+        ],
+        "matcher": "Read|Glob"
+      }
+    ]
+  }
+}

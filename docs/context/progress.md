@@ -3871,3 +3871,24 @@ Testes novos/atualizados em `PageRequestFactoryTest`, `UserListServiceImplTest`,
 `business-rules-summary.md`/`openapi.yaml` atualizados; `docs/pending/erros-silenciosos-sem-400-2026-09-04.md`
 marcado com os 6 achados fechados. Suíte completa (2211 testes) validada contra Postgres real via
 Testcontainers.
+
+## 2026-09-07 — Preparacao da Busca (Fase 8)
+
+Primeiros itens da Fase 8 preparados sem introduzir entidade nova: `openapi.yaml` agora documenta
+`GET /search` com `q` de no minimo 3 caracteres, `page` 1-based, `size` limitado a 20, `400` para
+parametros invalidos e `502` para falha no TMDB. O contrato tambem separou os DTOs de resultado de busca:
+`SearchContentDTO` mistura filmes e series no mesmo grupo `contents`, `SearchPersonDTO` representa pessoas
+vindas do TMDB, e `SearchUserListDTO` representa listas locais com dono, cinco primeiros itens e contagem de
+listas aninhadas.
+
+No codigo Java, o pacote `search.dto` ganhou os records correspondentes e `SearchResultDTO` passou a carregar
+`contents`, `people`, `lists` e `users` com tipos proprios da busca. No lado local, `UserListRepository` ganhou
+a consulta paginada `findVisibleByNameContainingIgnoreCase`, com `JOIN FETCH` do dono da lista, ordenacao
+estavel por nome/id e filtro de visibilidade: listas proprias sempre entram, listas publicas entram para
+qualquer usuario autenticado, listas de seguidores entram apenas quando existe follow aceito, e listas privadas
+de terceiros ficam fora.
+
+Cobertura focada adicionada em `SearchResultDTOTest` e `UserListRepositoryTest`: os testes verificam o shape
+dos DTOs de busca, o filtro de visibilidade da busca local de listas e o uso de termo escapado para tratar `%`
+como caractere literal em vez de wildcard do SQL. Suite completa Maven validada contra Postgres real via
+Testcontainers: 2214 testes, 0 falhas, 0 erros.

@@ -3,6 +3,9 @@ package com.watchwise.watchwise_api.userlist.repository;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -58,6 +61,9 @@ class UserListRepositoryTest {
     @Autowired
     private com.watchwise.watchwise_api.userlist.repository.UserListItemRepository userListItemRepository;
 
+    @Autowired
+    private FollowerRepository followerRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -67,6 +73,7 @@ class UserListRepositoryTest {
     @BeforeEach
     void setUp() {
         userListItemRepository.deleteAll();
+        followerRepository.deleteAll();
         userListRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
@@ -147,6 +154,42 @@ class UserListRepositoryTest {
                 lucas.getId(), List.of(UserListVisibility.PUBLIC), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findVisibleByNameContainingIgnoreCase] Should Return Only Lists Visible To Viewer - When Names Match")
+    void shouldReturnOnlyListsVisibleToViewerWhenNamesMatch() {
+        userListRepository.save(buildListWithVisibility(lucas, "My private space list", UserListVisibility.PRIVATE));
+        userListRepository.save(buildListWithVisibility(marina, "Public space list", UserListVisibility.PUBLIC));
+        userListRepository.save(buildListWithVisibility(marina, "Followers space list", UserListVisibility.FOLLOWERS));
+        userListRepository.saveAndFlush(buildListWithVisibility(marina, "Private space list", UserListVisibility.PRIVATE));
+        followerRepository.saveAndFlush(Follower.builder()
+                .follower(lucas)
+                .followed(marina)
+                .status(FollowStatus.ACCEPTED)
+                .createdAt(LocalDateTime.now())
+                .build());
+        entityManager.clear();
+
+        Page<UserList> result = userListRepository.findVisibleByNameContainingIgnoreCase(
+                lucas.getId(), "space", PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(UserList::getName)
+                .containsExactlyInAnyOrder("My private space list", "Public space list", "Followers space list");
+        assertThat(result.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("[findVisibleByNameContainingIgnoreCase] Should Treat Percent As Literal - When Query Is Escaped")
+    void shouldTreatPercentAsLiteralWhenQueryIsEscaped() {
+        userListRepository.save(buildListWithVisibility(lucas, "100% space", UserListVisibility.PUBLIC));
+        userListRepository.saveAndFlush(buildListWithVisibility(lucas, "1000 space", UserListVisibility.PUBLIC));
+        entityManager.clear();
+
+        Page<UserList> result = userListRepository.findVisibleByNameContainingIgnoreCase(
+                lucas.getId(), "100\\%", PageRequest.of(0, 20));
+
+        assertThat(result.getContent()).extracting(UserList::getName).containsExactly("100% space");
     }
 
     @Test

@@ -28,6 +28,46 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
 
     Page<UserList> findByUserIdAndVisibilityIn(UUID userId, Collection<UserListVisibility> visibilities, Pageable pageable);
 
+    @Query(
+            value = """
+            SELECT ul FROM UserList ul JOIN FETCH ul.user
+            WHERE LOWER(ul.name) LIKE LOWER(CONCAT('%', :escapedName, '%')) ESCAPE '\\'
+            AND (
+                ul.user.id = :viewerId
+                OR ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
+                OR (
+                    ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
+                    AND EXISTS (
+                        SELECT 1 FROM Follower f
+                        WHERE f.follower.id = :viewerId
+                        AND f.followed.id = ul.user.id
+                        AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                    )
+                )
+            )
+            ORDER BY LOWER(ul.name) ASC, ul.id ASC
+            """,
+            countQuery = """
+            SELECT COUNT(ul) FROM UserList ul
+            WHERE LOWER(ul.name) LIKE LOWER(CONCAT('%', :escapedName, '%')) ESCAPE '\\'
+            AND (
+                ul.user.id = :viewerId
+                OR ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
+                OR (
+                    ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
+                    AND EXISTS (
+                        SELECT 1 FROM Follower f
+                        WHERE f.follower.id = :viewerId
+                        AND f.followed.id = ul.user.id
+                        AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                    )
+                )
+            )
+            """
+    )
+    Page<UserList> findVisibleByNameContainingIgnoreCase(
+            @Param("viewerId") UUID viewerId, @Param("escapedName") String escapedName, Pageable pageable);
+
     @Modifying
     @Query("UPDATE UserList u SET u.likesCount = u.likesCount + 1 WHERE u.id = :id")
     void incrementLikesCount(@Param("id") UUID id);

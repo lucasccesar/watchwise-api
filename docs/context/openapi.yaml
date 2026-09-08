@@ -2240,19 +2240,29 @@ paths:
         - name: q
           in: query
           required: true
-          schema: { type: string }
+          schema: { type: string, minLength: 3 }
         - name: type
           in: query
           schema:
             type: string
             enum: [MOVIE, SERIES, PERSON, LIST, USER]
+        - name: page
+          in: query
+          description: Página 1-based. Assume 1 se omitida.
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: size
+          in: query
+          description: Itens por página (máximo 20). Assume 20 se omitido.
+          schema: { type: integer, minimum: 1, maximum: 20, default: 20 }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SearchResult" }
+        "400": { description: "q ausente/com menos de 3 caracteres, type inválido, ou página/tamanho inválido" }
         "401": { description: Não autenticado }
+        "502": { description: TMDB indisponível durante uma busca externa }
 
   # ---------- FEED ----------
   /feed:
@@ -3776,27 +3786,45 @@ components:
       properties:
         contents:
           type: array
-          description: Resultado ao vivo do TMDB (filmes/séries)
-          items:
-            type: object
-            properties:
-              tmdbId: { type: string }
-              type: { type: string, enum: [MOVIE, SERIES] }
-              title: { type: string }
-              posterUrl: { type: string, format: uri }
-              year: { type: integer }
+          description: Resultado ao vivo do TMDB, com filmes e séries misturados.
+          items: { $ref: "#/components/schemas/SearchContentDTO" }
         people:
           type: array
           description: Resultado ao vivo do TMDB
-          items:
-            type: object
-            properties:
-              tmdbId: { type: string }
-              name: { type: string }
-              photo: { type: string, format: uri }
+          items: { $ref: "#/components/schemas/SearchPersonDTO" }
         lists:
           type: array
-          items: { $ref: "#/components/schemas/UserList" }
+          items: { $ref: "#/components/schemas/SearchUserListDTO" }
         users:
           type: array
-          items: { $ref: "#/components/schemas/PublicUserDTO" }
+          items: { $ref: "#/components/schemas/UserPreviewDTO" }
+
+    SearchContentDTO:
+      type: object
+      properties:
+        tmdbId: { type: string }
+        type: { type: string, enum: [MOVIE, SERIES] }
+        title: { type: string }
+        posterUrl: { type: string, format: uri, nullable: true }
+        year: { type: integer, nullable: true }
+
+    SearchPersonDTO:
+      type: object
+      properties:
+        tmdbId: { type: string }
+        name: { type: string }
+        photo: { type: string, format: uri, nullable: true }
+
+    SearchUserListDTO:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user: { $ref: "#/components/schemas/UserPreviewDTO" }
+        name: { type: string }
+        previewItems:
+          type: array
+          maxItems: 5
+          items: { $ref: "#/components/schemas/ContentRef" }
+        nestedListsCount:
+          type: integer
+          description: Quantidade de listas aninhadas; quando for maior que zero, previewItems vem vazio.
