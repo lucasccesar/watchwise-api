@@ -3892,3 +3892,24 @@ Cobertura focada adicionada em `SearchResultDTOTest` e `UserListRepositoryTest`:
 dos DTOs de busca, o filtro de visibilidade da busca local de listas e o uso de termo escapado para tratar `%`
 como caractere literal em vez de wildcard do SQL. Suite completa Maven validada contra Postgres real via
 Testcontainers: 2214 testes, 0 falhas, 0 erros.
+
+## 2026-09-08 — Proxy de busca TMDB com cache
+
+`TmdbClient` ganhou `searchMovies`, `searchTv`, `searchPeople` e `searchMulti`, com paginas tipadas
+e chamadas a `/search/movie`, `/search/tv`, `/search/person` e `/search/multi`. As buscas enviam o
+texto sem espacos nas pontas, idioma, pagina e `include_adult=false`; a busca multi preserva a ordem
+dos filmes, pessoas e series recebida do TMDB. O texto e passado como valor de uma variavel de URI,
+preservando `+`, chaves e espacos por meio de uma unica codificacao, sem interpreta-los como parte
+do modelo da URL.
+
+`TmdbCacheConfig` passou a fornecer quatro caches de busca separados, com expiracao de 10 minutos
+e limite de 10000 entradas por cache, configuraveis em `application-dev.properties` e no modelo de
+producao. A chave tipada combina texto normalizado, tipo, idioma e pagina. O cliente reutiliza a
+mesma carga atomica por chave dos detalhes: chamadas simultaneas compartilham uma consulta externa,
+e uma falha transitoria nao fica armazenada. `cachedLookup` foi generalizado para aceitar a chave
+de busca sem alterar as chaves existentes dos detalhes. Nenhum endpoint publico foi adicionado.
+
+Testes cobrem parametros enviados, desserializacao dos quatro tipos, ordem da busca multi, separacao
+por idioma/pagina/tipo, normalizacao do texto, oito chamadas simultaneas e recuperacao apos duas
+falhas externas. Validacao focada de modelos, cliente, caches e `ContentDetailsServiceImpl`:
+78 testes, 0 falhas, 0 erros.

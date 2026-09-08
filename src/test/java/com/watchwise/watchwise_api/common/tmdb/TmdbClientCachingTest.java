@@ -29,6 +29,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.startsWith;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -42,7 +44,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  */
 @SpringJUnitConfig
 @ContextConfiguration(classes = {TmdbCacheConfig.class, TmdbClientCachingTest.Config.class})
-@TestPropertySource(properties = "app.tmdb.details-cache-ttl-hours=24")
+@TestPropertySource(properties = {
+        "app.tmdb.details-cache-ttl-hours=24",
+        "app.tmdb.search-cache-ttl-minutes=10",
+        "app.tmdb.search-cache-max-size=10000"
+})
 @Import(TmdbCacheConfig.class)
 class TmdbClientCachingTest {
 
@@ -69,9 +75,14 @@ class TmdbClientCachingTest {
                 Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache,
-                Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache) {
+                Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache,
+                Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache,
+                Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache,
+                Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache,
+                Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
-                    tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache);
+                    tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
+                    tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache);
         }
     }
 
@@ -93,6 +104,18 @@ class TmdbClientCachingTest {
     @Autowired
     private Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
 
+    @Autowired
+    private Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache;
+
+    @Autowired
+    private Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache;
+
+    @Autowired
+    private Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache;
+
+    @Autowired
+    private Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache;
+
     @BeforeEach
     void resetExpectationsAndCache() {
         mockServer.reset();
@@ -100,6 +123,152 @@ class TmdbClientCachingTest {
         tmdbTvFullDetailsCache.invalidateAll();
         tmdbSeasonFullDetailsCache.invalidateAll();
         tmdbEpisodeFullDetailsCache.invalidateAll();
+        tmdbMovieSearchCache.invalidateAll();
+        tmdbTvSearchCache.invalidateAll();
+        tmdbPersonSearchCache.invalidateAll();
+        tmdbMultiSearchCache.invalidateAll();
+    }
+
+    @Test
+    @DisplayName("[searchMovies] Should Share Cached Page - When Query Case And Surrounding Spaces Differ")
+    void shouldShareCachedPageWhenQueryCaseAndSurroundingSpacesDiffer() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("query", "Matrix"))
+                .andRespond(movieSearchSuccess(1, "The Matrix"));
+
+        var first = tmdbClient.searchMovies(" Matrix ", "en-US", 1).toOptional().orElseThrow();
+        var second = tmdbClient.searchMovies("matrix", "en-US", 1).toOptional().orElseThrow();
+
+        assertThat(first.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        assertThat(second.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchMovies] Should Fetch Separate Pages - When Language Changes")
+    void shouldFetchSeparatePagesWhenSearchLanguageChanges() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("language", "en-US"))
+                .andRespond(movieSearchSuccess(1, "The Matrix"));
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("language", "pt-BR"))
+                .andRespond(movieSearchSuccess(1, "Matrix"));
+
+        var english = tmdbClient.searchMovies("Matrix", "en-US", 1).toOptional().orElseThrow();
+        var portuguese = tmdbClient.searchMovies("Matrix", "pt-BR", 1).toOptional().orElseThrow();
+
+        assertThat(english.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        assertThat(portuguese.results()).extracting(TmdbMovieSearchResult::title).containsExactly("Matrix");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchMovies] Should Fetch Separate Pages - When Page Changes")
+    void shouldFetchSeparatePagesWhenSearchPageChanges() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("page", "1"))
+                .andRespond(movieSearchSuccess(1, "The Matrix"));
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("page", "2"))
+                .andRespond(movieSearchSuccess(2, "The Matrix Reloaded"));
+
+        var first = tmdbClient.searchMovies("Matrix", "en-US", 1).toOptional().orElseThrow();
+        var second = tmdbClient.searchMovies("Matrix", "en-US", 2).toOptional().orElseThrow();
+
+        assertThat(first.page()).isEqualTo(1);
+        assertThat(first.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        assertThat(second.page()).isEqualTo(2);
+        assertThat(second.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix Reloaded");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchMulti] Should Keep Separate Cached Pages - When Movie Search Uses The Same Query")
+    void shouldKeepSeparateCachedPagesWhenMovieAndMultiSearchUseTheSameQuery() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andRespond(movieSearchSuccess(1, "The Matrix"));
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/multi?")))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":1,"total_results":1,"results":[
+                          {"id":6384,"media_type":"person","name":"Keanu Reeves","profile_path":"/keanu.jpg"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var movie = tmdbClient.searchMovies("Matrix", "en-US", 1).toOptional().orElseThrow();
+        var multi = tmdbClient.searchMulti("Matrix", "en-US", 1).toOptional().orElseThrow();
+        var repeated = tmdbClient.searchMulti("Matrix", "en-US", 1).toOptional().orElseThrow();
+
+        assertThat(movie.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        assertThat(multi.results()).extracting(TmdbMultiSearchResult::mediaType).containsExactly("person");
+        assertThat(repeated.results()).extracting(TmdbMultiSearchResult::name).containsExactly("Keanu Reeves");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchMovies] Should Make One TMDB Call - When Eight Concurrent Searches Use The Same Key")
+    void shouldMakeOneTmdbCallWhenEightConcurrentSearchesUseTheSameKey() throws Exception {
+        CountDownLatch ready = new CountDownLatch(8);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch requestStarted = new CountDownLatch(1);
+        CountDownLatch releaseResponse = new CountDownLatch(1);
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andRespond(request -> {
+                    requestStarted.countDown();
+                    try {
+                        assertThat(releaseResponse.await(5, TimeUnit.SECONDS)).isTrue();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(e);
+                    }
+                    return movieSearchSuccess(1, "The Matrix").createResponse(request);
+                });
+
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        List<Future<TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < 8; i++) {
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return tmdbClient.searchMovies("Matrix", "en-US", 1);
+                }));
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            assertThat(requestStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            releaseResponse.countDown();
+            for (var future : futures) {
+                assertThat(future.get(5, TimeUnit.SECONDS).toOptional().orElseThrow().results())
+                        .extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+            }
+        } finally {
+            releaseResponse.countDown();
+            executor.shutdownNow();
+        }
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchMovies] Should Retry On Next Search - When Previous Search Was Unavailable")
+    void shouldRetryOnNextSearchWhenPreviousSearchWasUnavailable() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andRespond(movieSearchSuccess(1, "The Matrix"));
+
+        assertThat(tmdbClient.searchMovies("Matrix", "en-US", 1).isUnavailable()).isTrue();
+        var recovered = tmdbClient.searchMovies("Matrix", "en-US", 1).toOptional().orElseThrow();
+
+        assertThat(recovered.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        mockServer.verify();
+    }
+
+    private ResponseCreator movieSearchSuccess(int page, String title) {
+        return withSuccess("""
+                {"page":%d,"total_pages":2,"total_results":21,"results":[
+                  {"id":603,"title":"%s","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+                """.formatted(page, title), MediaType.APPLICATION_JSON);
     }
 
     @Test

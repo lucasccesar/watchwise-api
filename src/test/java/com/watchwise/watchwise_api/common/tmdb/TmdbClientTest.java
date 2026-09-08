@@ -4,6 +4,8 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -12,6 +14,8 @@ import org.springframework.web.client.RestClient;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.startsWith;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
@@ -27,7 +31,146 @@ class TmdbClientTest {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.themoviedb.org/3");
         mockServer = MockRestServiceServer.bindTo(builder).build();
         tmdbClient = new TmdbClient(builder.build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
+    }
+
+    @Test
+    @DisplayName("[searchMovies] Should Parse Movie Page - When TMDB Responds")
+    void shouldParseMoviePageWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("query", "The%20Matrix"))
+                .andExpect(queryParam("language", "pt-BR"))
+                .andExpect(queryParam("page", "2"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":2,"total_pages":3,"total_results":42,"results":[
+                          {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.searchMovies(" The Matrix ", "pt-BR", 2).toOptional().orElseThrow();
+
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThat(result.totalResults()).isEqualTo(42);
+        assertThat(result.results()).containsExactly(
+                new TmdbMovieSearchResult("603", "The Matrix", "/matrix.jpg", "1999-03-31"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchTv] Should Parse Series Page - When TMDB Responds")
+    void shouldParseSeriesPageWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/tv?")))
+                .andExpect(queryParam("query", "Dark"))
+                .andExpect(queryParam("language", "de-DE"))
+                .andExpect(queryParam("page", "3"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":3,"total_pages":4,"total_results":61,"results":[
+                          {"id":70523,"name":"Dark","poster_path":"/dark.jpg","first_air_date":"2017-12-01"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.searchTv(" Dark ", "de-DE", 3).toOptional().orElseThrow();
+
+        assertThat(result.page()).isEqualTo(3);
+        assertThat(result.totalPages()).isEqualTo(4);
+        assertThat(result.totalResults()).isEqualTo(61);
+        assertThat(result.results()).containsExactly(
+                new TmdbTvSearchResult("70523", "Dark", "/dark.jpg", "2017-12-01"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchPeople] Should Parse Person Page - When TMDB Responds")
+    void shouldParsePersonPageWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/person?")))
+                .andExpect(queryParam("query", "Keanu"))
+                .andExpect(queryParam("language", "en-US"))
+                .andExpect(queryParam("page", "1"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":1,"total_results":1,"results":[
+                          {"id":6384,"name":"Keanu Reeves","profile_path":"/keanu.jpg"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.searchPeople(" Keanu ", "en-US", 1).toOptional().orElseThrow();
+
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.totalPages()).isEqualTo(1);
+        assertThat(result.totalResults()).isEqualTo(1);
+        assertThat(result.results()).containsExactly(new TmdbPersonSearchResult("6384", "Keanu Reeves", "/keanu.jpg"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchMulti] Should Preserve Mixed Result Order - When TMDB Responds")
+    void shouldPreserveMixedResultOrderWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/multi?")))
+                .andExpect(queryParam("query", "Matrix"))
+                .andExpect(queryParam("language", "pt-BR"))
+                .andExpect(queryParam("page", "2"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":2,"total_pages":2,"total_results":23,"results":[
+                          {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"},
+                          {"id":6384,"media_type":"person","name":"Keanu Reeves","profile_path":"/keanu.jpg"},
+                          {"id":70523,"media_type":"tv","name":"Dark","poster_path":"/dark.jpg","first_air_date":"2017-12-01"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.searchMulti(" Matrix ", "pt-BR", 2).toOptional().orElseThrow();
+
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.totalPages()).isEqualTo(2);
+        assertThat(result.totalResults()).isEqualTo(23);
+        assertThat(result.results()).containsExactly(
+                new TmdbMultiSearchResult("603", "movie", "The Matrix", null, "/matrix.jpg", null, "1999-03-31", null),
+                new TmdbMultiSearchResult("6384", "person", null, "Keanu Reeves", null, "/keanu.jpg", null, null),
+                new TmdbMultiSearchResult("70523", "tv", null, "Dark", "/dark.jpg", null, null, "2017-12-01"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[searchMovies] Should Return Unavailable - When TMDB Fails Twice")
+    void shouldReturnUnavailableWhenMovieSearchFailsTwice() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andRespond(withServerError());
+
+        assertThat(tmdbClient.searchMovies("Matrix", "pt-BR", 1).isUnavailable()).isTrue();
+        mockServer.verify();
+    }
+
+    @ParameterizedTest
+    @EnumSource(TmdbSearchType.class)
+    @DisplayName("[search] Should Encode Literal Query Once - When Query Contains Braces Plus And Spaces")
+    void shouldEncodeLiteralQueryOnceWhenQueryContainsBracesPlusAndSpaces(TmdbSearchType type) {
+        String path = switch (type) {
+            case MOVIE -> "/search/movie";
+            case TV -> "/search/tv";
+            case PERSON -> "/search/person";
+            case MULTI -> "/search/multi";
+        };
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3" + path + "?")))
+                .andExpect(queryParam("query", "C%2B%2B%20%7BMatrix%7D"))
+                .andExpect(queryParam("language", "en-US"))
+                .andExpect(queryParam("page", "1"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":0,"total_results":0,"results":[]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = switch (type) {
+            case MOVIE -> tmdbClient.searchMovies(" C++ {Matrix} ", "en-US", 1);
+            case TV -> tmdbClient.searchTv(" C++ {Matrix} ", "en-US", 1);
+            case PERSON -> tmdbClient.searchPeople(" C++ {Matrix} ", "en-US", 1);
+            case MULTI -> tmdbClient.searchMulti(" C++ {Matrix} ", "en-US", 1);
+        };
+
+        assertThat(result.toOptional().orElseThrow().results()).isEmpty();
+        mockServer.verify();
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.common.tmdb;
 import com.github.benmanes.caffeine.cache.Cache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -23,6 +24,74 @@ public class TmdbClient {
     private final Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
+    private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache;
+    private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache;
+    private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache;
+    private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache;
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> searchMovies(
+            String query, String language, int page) {
+        String trimmedQuery = query.trim();
+        TmdbSearchCacheKey key = TmdbSearchCacheKey.of(trimmedQuery, TmdbSearchType.MOVIE, language, page);
+        return cachedLookup(tmdbMovieSearchCache, key, () -> callWithRetry(() -> tmdbRestClient.get()
+                        .uri(uriBuilder -> uriBuilder.path("/search/movie")
+                                .queryParam("query", "{query}")
+                                .queryParam("language", language)
+                                .queryParam("page", page)
+                                .queryParam("include_adult", false)
+                                .build(trimmedQuery))
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbMovieSearchResult>>() {}),
+                "movie search"));
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>> searchTv(
+            String query, String language, int page) {
+        String trimmedQuery = query.trim();
+        TmdbSearchCacheKey key = TmdbSearchCacheKey.of(trimmedQuery, TmdbSearchType.TV, language, page);
+        return cachedLookup(tmdbTvSearchCache, key, () -> callWithRetry(() -> tmdbRestClient.get()
+                        .uri(uriBuilder -> uriBuilder.path("/search/tv")
+                                .queryParam("query", "{query}")
+                                .queryParam("language", language)
+                                .queryParam("page", page)
+                                .queryParam("include_adult", false)
+                                .build(trimmedQuery))
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbTvSearchResult>>() {}),
+                "tv search"));
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>> searchPeople(
+            String query, String language, int page) {
+        String trimmedQuery = query.trim();
+        TmdbSearchCacheKey key = TmdbSearchCacheKey.of(trimmedQuery, TmdbSearchType.PERSON, language, page);
+        return cachedLookup(tmdbPersonSearchCache, key, () -> callWithRetry(() -> tmdbRestClient.get()
+                        .uri(uriBuilder -> uriBuilder.path("/search/person")
+                                .queryParam("query", "{query}")
+                                .queryParam("language", language)
+                                .queryParam("page", page)
+                                .queryParam("include_adult", false)
+                                .build(trimmedQuery))
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbPersonSearchResult>>() {}),
+                "person search"));
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>> searchMulti(
+            String query, String language, int page) {
+        String trimmedQuery = query.trim();
+        TmdbSearchCacheKey key = TmdbSearchCacheKey.of(trimmedQuery, TmdbSearchType.MULTI, language, page);
+        return cachedLookup(tmdbMultiSearchCache, key, () -> callWithRetry(() -> tmdbRestClient.get()
+                        .uri(uriBuilder -> uriBuilder.path("/search/multi")
+                                .queryParam("query", "{query}")
+                                .queryParam("language", language)
+                                .queryParam("page", page)
+                                .queryParam("include_adult", false)
+                                .build(trimmedQuery))
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbMultiSearchResult>>() {}),
+                "multi search"));
+    }
 
     public Optional<TmdbMovieDetails> getMovieDetails(String tmdbId) {
         return callWithRetry(() -> tmdbRestClient.get()
@@ -107,8 +176,8 @@ public class TmdbClient {
                         "episode full details " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber));
     }
 
-    private <T> TmdbLookupResult<T> cachedLookup(
-            Cache<String, TmdbLookupResult<T>> cache, String key, Supplier<TmdbLookupResult<T>> loader) {
+    private <K, T> TmdbLookupResult<T> cachedLookup(
+            Cache<K, TmdbLookupResult<T>> cache, K key, Supplier<TmdbLookupResult<T>> loader) {
         TmdbLookupResult<T> cached = cache.get(key, ignoredKey -> {
             TmdbLookupResult<T> result = loader.get();
             return result.isUnavailable() ? null : result;

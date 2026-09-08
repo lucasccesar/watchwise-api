@@ -39,6 +39,41 @@ public class TmdbCacheConfig {
         return newCache(ttlHours);
     }
 
+    @Bean
+    public Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache(
+            @Value("${app.tmdb.search-cache-ttl-minutes}") long ttlMinutes,
+            @Value("${app.tmdb.search-cache-max-size}") long maximumSize) {
+        return newSearchCache(ttlMinutes, maximumSize);
+    }
+
+    @Bean
+    public Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache(
+            @Value("${app.tmdb.search-cache-ttl-minutes}") long ttlMinutes,
+            @Value("${app.tmdb.search-cache-max-size}") long maximumSize) {
+        return newSearchCache(ttlMinutes, maximumSize);
+    }
+
+    @Bean
+    public Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache(
+            @Value("${app.tmdb.search-cache-ttl-minutes}") long ttlMinutes,
+            @Value("${app.tmdb.search-cache-max-size}") long maximumSize) {
+        return newSearchCache(ttlMinutes, maximumSize);
+    }
+
+    @Bean
+    public Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache(
+            @Value("${app.tmdb.search-cache-ttl-minutes}") long ttlMinutes,
+            @Value("${app.tmdb.search-cache-max-size}") long maximumSize) {
+        return newSearchCache(ttlMinutes, maximumSize);
+    }
+
+    private <T> Cache<TmdbSearchCacheKey, TmdbLookupResult<T>> newSearchCache(long ttlMinutes, long maximumSize) {
+        return Caffeine.newBuilder()
+                .expireAfterWrite(Duration.ofMinutes(ttlMinutes))
+                .maximumSize(maximumSize)
+                .build();
+    }
+
     private <T> Cache<String, T> newCache(long ttlHours) {
         return Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(ttlHours)).build();
     }
