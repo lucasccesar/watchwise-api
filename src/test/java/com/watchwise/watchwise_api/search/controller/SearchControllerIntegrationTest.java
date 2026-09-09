@@ -146,13 +146,18 @@ class SearchControllerIntegrationTest {
         SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
         when(searchService.search(user.id(), "Alien", SearchType.USER, null, null)).thenReturn(expected);
         when(searchService.search(user.id(), "Alien", SearchType.MOVIE, null, null)).thenReturn(expected);
+        when(searchService.search(user.id(), "Alien", null, null, null)).thenReturn(expected);
 
         for (int i = 0; i < 30; i++) {
-            SearchType searchType = i % 2 == 0 ? SearchType.USER : SearchType.MOVIE;
-            mockMvc.perform(get("/search")
-                            .param("q", "Alien")
-                            .param("type", searchType.name())
-                            .cookie(user.accessToken()))
+            MockHttpServletRequestBuilder request = get("/search")
+                    .param("q", "Alien")
+                    .cookie(user.accessToken());
+            if (i < 29) {
+                SearchType searchType = i % 2 == 0 ? SearchType.USER : SearchType.MOVIE;
+                request.param("type", searchType.name());
+            }
+
+            mockMvc.perform(request)
                     .andExpect(status().isOk());
         }
 

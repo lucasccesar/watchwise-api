@@ -62,6 +62,7 @@ class SearchControllerTest {
     }
 
     private void setRateLimitConfigurationIfPresent() {
+        // Task 2 has not added these fields yet; this keeps the RED phase focused on the missing throttler call.
         if (ReflectionUtils.findField(SearchController.class, "searchMaxRequests") != null) {
             ReflectionTestUtils.setField(searchController, "searchMaxRequests", 30);
         }
