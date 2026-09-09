@@ -40,6 +40,7 @@ import static org.mockito.Mockito.isNull;
 import static org.mockito.Mockito.nullable;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -308,5 +309,65 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.path").value("/search"))
                 .andExpect(jsonPath("$.detail").doesNotExist())
                 .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When External Page Exceeds TMDB Limit")
+    void shouldReturnBadRequestApiErrorWhenExternalPageExceedsTmdbLimit() throws Exception {
+        RegisteredUser user = registerUser("searchexternalpage");
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("type", "MOVIE")
+                        .param("page", "501")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("page must be less than or equal to 500 for external searches"))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(searchService);
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Omitted-Type External Page Exceeds TMDB Limit")
+    void shouldReturnBadRequestApiErrorWhenOmittedTypeExternalPageExceedsTmdbLimit() throws Exception {
+        RegisteredUser user = registerUser("searchomittedexternalpage");
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("page", "501")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("page must be less than or equal to 500 for external searches"))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(searchService);
+    }
+
+    @Test
+    @DisplayName("[search] Should Allow Page Above TMDB Limit - When Searching Local Lists")
+    void shouldAllowPageAboveTmdbLimitWhenSearchingLocalLists() throws Exception {
+        RegisteredUser user = registerUser("searchlocalpage");
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
+        when(searchService.search(user.id(), "Alien", SearchType.LIST, 501, null)).thenReturn(expected);
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("type", "LIST")
+                        .param("page", "501")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contents").isArray())
+                .andExpect(jsonPath("$.lists").isArray());
+
+        verify(searchService).search(user.id(), "Alien", SearchType.LIST, 501, null);
     }
 }

@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.search.dto.SearchRequestDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
 import com.watchwise.watchwise_api.search.service.SearchService;
+import com.watchwise.watchwise_api.search.service.SearchType;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +21,8 @@ import java.util.UUID;
 @RestController
 @RequiredArgsConstructor
 public class SearchController {
+
+    private static final int MAX_EXTERNAL_PAGE = 500;
 
     private final SearchService searchService;
     private final RequestThrottler requestThrottler;
@@ -38,6 +41,7 @@ public class SearchController {
         if (trimmedQuery.length() < 3) {
             throw new BadRequestException("q must contain at least 3 characters after trimming");
         }
+        validateExternalPage(request.type(), request.page());
 
         UUID currentUserId = getCurrentUserId();
         requestThrottler.checkAllowed(
@@ -48,6 +52,19 @@ public class SearchController {
         SearchResultDTO result = searchService.search(
                 currentUserId, trimmedQuery, request.type(), request.page(), request.size());
         return ResponseEntity.ok(result);
+    }
+
+    private void validateExternalPage(SearchType type, Integer page) {
+        if (page != null && page > MAX_EXTERNAL_PAGE && isExternalSearch(type)) {
+            throw new BadRequestException("page must be less than or equal to 500 for external searches");
+        }
+    }
+
+    private boolean isExternalSearch(SearchType type) {
+        return type == null
+                || type == SearchType.MOVIE
+                || type == SearchType.SERIES
+                || type == SearchType.PERSON;
     }
 
     private UUID getCurrentUserId() {
