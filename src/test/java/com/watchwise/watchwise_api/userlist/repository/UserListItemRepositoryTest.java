@@ -320,6 +320,28 @@ class UserListItemRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findContentItemsByUserListIdInOrderByPosition] Should Return Only Five Content Items Per List - When A List Has More Items")
+    void shouldReturnOnlyFiveContentItemsPerListWhenAListHasMoreItems() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        for (int position = 1; position <= 6; position++) {
+            Content content = contentRepository.save(buildContent(String.valueOf(1000 + position), ContentType.MOVIE));
+            userListItemRepository.save(buildContentItem(scifi, content, position));
+            userListItemRepository.save(buildContentItem(horror, content, position));
+        }
+        userListItemRepository.flush();
+        entityManager.clear();
+
+        List<UserListItem> result = userListItemRepository.findContentItemsByUserListIdInOrderByPosition(
+                List.of(scifi.getId(), horror.getId()));
+
+        assertThat(result).hasSize(10);
+        assertThat(result).filteredOn(item -> item.getUserList().getId().equals(scifi.getId()))
+                .extracting(UserListItem::getPosition).containsExactly(1, 2, 3, 4, 5);
+        assertThat(result).filteredOn(item -> item.getUserList().getId().equals(horror.getId()))
+                .extracting(UserListItem::getPosition).containsExactly(1, 2, 3, 4, 5);
+    }
+
+    @Test
     @DisplayName("[findContentItemsByUserListIdInOrderByPosition] Should Not Include Nested List Items")
     void shouldNotIncludeNestedListItemsWhenFindingContentItemsByListIds() {
         userListItemRepository.saveAndFlush(buildChildListItem(nestedList, scifi, 1));

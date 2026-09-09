@@ -60,6 +60,13 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
             SELECT uli FROM UserListItem uli
             JOIN FETCH uli.content
             WHERE uli.userList.id IN :userListIds
+            AND (
+                SELECT COUNT(previousItem)
+                FROM UserListItem previousItem
+                WHERE previousItem.userList.id = uli.userList.id
+                AND previousItem.content.id IS NOT NULL
+                AND previousItem.position <= uli.position
+            ) <= 5
             ORDER BY uli.userList.id ASC, uli.position ASC
             """)
     List<UserListItem> findContentItemsByUserListIdInOrderByPosition(@Param("userListIds") Collection<UUID> userListIds);
