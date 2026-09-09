@@ -219,7 +219,7 @@ class SearchServiceImplTest {
         when(userListItemService.getPreviewItemsByListIds(List.of(listId))).thenReturn(Map.of(listId, List.of(preview)));
         when(userListItemService.countNestedListsByListIds(List.of(listId))).thenReturn(Map.of(listId, 2L));
 
-        SearchResultDTO result = service.search(viewerId, " sci-fi 100%_\\ ", SearchType.LIST, 1, 99);
+        SearchResultDTO result = service.search(viewerId, " sci-fi 100%_\\ ", SearchType.LIST, 1, 10);
 
         assertThat(result.lists()).containsExactly(new SearchUserListDTO(
                 listId, new UserPreviewDTO(owner.getId(), "marina", "marina.png", false), "Sci-fi 100%_\\", List.of(preview), 2L));
@@ -239,7 +239,7 @@ class SearchServiceImplTest {
         when(userRepository.findByUsernameStartingWithIgnoreCase(eq("marina_100%"), eq("marina\\_100\\%"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(matchedUser)));
 
-        SearchResultDTO result = service.search(viewerId, " marina_100% ", SearchType.USER, 1, 99);
+        SearchResultDTO result = service.search(viewerId, " marina_100% ", SearchType.USER, 1, 10);
 
         assertThat(result.users()).containsExactly(new UserPreviewDTO(
                 matchedUser.getId(), "marina_100%", "marina.png", false));
@@ -370,6 +370,23 @@ class SearchServiceImplTest {
         assertThatThrownBy(() -> service.search(viewerId, "Alien", null, 1, 20))
                 .isInstanceOf(TmdbUnavailableException.class)
                 .hasMessage("TMDB is currently unavailable");
+    }
+
+    @Test
+    @DisplayName("[search] Should Return Entire TMDB Page - When Requested Size Is Below Twenty")
+    void shouldReturnEntireTmdbPageWhenRequestedSizeIsBelowTwenty() {
+        stubViewer();
+        List<TmdbMovieSearchResult> movies = java.util.stream.IntStream.range(0, 20)
+                .mapToObj(index -> new TmdbMovieSearchResult(String.valueOf(index), "Movie " + index, null, "2000-01-01"))
+                .toList();
+        when(tmdbClient.searchMovies("Movie", "pt-BR", 2))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(2, movies, 2, 40)));
+
+        SearchResultDTO result = service.search(viewerId, "Movie", SearchType.MOVIE, 2, 10);
+
+        assertThat(result.contents()).hasSize(20).extracting(SearchContentDTO::tmdbId)
+                .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 20).mapToObj(String::valueOf).toList());
+        verify(tmdbClient).searchMovies("Movie", "pt-BR", 2);
     }
 
     @Test
