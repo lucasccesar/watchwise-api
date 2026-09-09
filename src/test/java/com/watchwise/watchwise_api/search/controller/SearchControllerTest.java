@@ -28,6 +28,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -136,6 +139,7 @@ class SearchControllerTest {
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("q must contain at least 3 characters after trimming");
 
+        verify(requestThrottler, never()).checkAllowed(anyString(), anyInt(), any(Duration.class));
         verify(searchService, never()).search(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }

@@ -146,14 +146,26 @@ class SearchControllerIntegrationTest {
         SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
         when(searchService.search(user.id(), "Alien", SearchType.USER, null, null)).thenReturn(expected);
         when(searchService.search(user.id(), "Alien", SearchType.MOVIE, null, null)).thenReturn(expected);
+        when(searchService.search(user.id(), "Alien", SearchType.SERIES, null, null)).thenReturn(expected);
+        when(searchService.search(user.id(), "Alien", SearchType.LIST, null, null)).thenReturn(expected);
+        when(searchService.search(user.id(), "Alien", SearchType.PERSON, null, null)).thenReturn(expected);
         when(searchService.search(user.id(), "Alien", null, null, null)).thenReturn(expected);
+
+        SearchType[] searchTypes = {
+                SearchType.USER,
+                SearchType.MOVIE,
+                SearchType.SERIES,
+                SearchType.LIST,
+                SearchType.PERSON,
+                null
+        };
 
         for (int i = 0; i < 30; i++) {
             MockHttpServletRequestBuilder request = get("/search")
                     .param("q", "Alien")
                     .cookie(user.accessToken());
-            if (i < 29) {
-                SearchType searchType = i % 2 == 0 ? SearchType.USER : SearchType.MOVIE;
+            SearchType searchType = searchTypes[i % searchTypes.length];
+            if (searchType != null) {
                 request.param("type", searchType.name());
             }
 
@@ -172,6 +184,16 @@ class SearchControllerIntegrationTest {
 
         verify(searchService, times(30)).search(
                 eq(user.id()), eq("Alien"), nullable(SearchType.class), isNull(), isNull());
+
+        for (SearchType searchType : searchTypes) {
+            if (searchType == null) {
+                verify(searchService, times(5)).search(
+                        eq(user.id()), eq("Alien"), isNull(), isNull(), isNull());
+            } else {
+                verify(searchService, times(5)).search(
+                        eq(user.id()), eq("Alien"), eq(searchType), isNull(), isNull());
+            }
+        }
     }
 
     @Test
