@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.search.controller;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
 import com.watchwise.watchwise_api.search.dto.SearchRequestDTO;
 import com.watchwise.watchwise_api.search.service.SearchService;
@@ -17,13 +19,17 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.util.ReflectionUtils;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,6 +38,9 @@ class SearchControllerTest {
 
     @Mock
     private SearchService searchService;
+
+    @Mock
+    private RequestThrottler requestThrottler;
 
     @InjectMocks
     private SearchController searchController;
@@ -44,11 +53,53 @@ class SearchControllerTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(viewerId, null, List.of())
         );
+        setRateLimitConfigurationIfPresent();
     }
 
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+    }
+
+    private void setRateLimitConfigurationIfPresent() {
+        if (ReflectionUtils.findField(SearchController.class, "searchMaxRequests") != null) {
+            ReflectionTestUtils.setField(searchController, "searchMaxRequests", 30);
+        }
+        if (ReflectionUtils.findField(SearchController.class, "searchWindowMinutes") != null) {
+            ReflectionTestUtils.setField(searchController, "searchWindowMinutes", 5);
+        }
+    }
+
+    @Test
+    @DisplayName("[search] Should Check Per-User Rate Limit - When Request Is Valid")
+    void shouldCheckPerUserRateLimitWhenRequestIsValid() {
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
+        when(searchService.search(viewerId, "Alien", SearchType.MOVIE, 1, 20)).thenReturn(expected);
+
+        searchController.search(new SearchRequestDTO("Alien", SearchType.MOVIE, 1, 20));
+
+        verify(requestThrottler).checkAllowed("search|" + viewerId, 30, Duration.ofMinutes(5));
+        verify(searchService).search(viewerId, "Alien", SearchType.MOVIE, 1, 20);
+    }
+
+    @Test
+    @DisplayName("[search] Should Reject Request And Not Search - When Rate Limit Is Exceeded")
+    void shouldRejectRequestAndNotSearchWhenRateLimitIsExceeded() {
+        doThrow(new TooManyRequestsException("Too many requests. Try again later."))
+                .when(requestThrottler)
+                .checkAllowed("search|" + viewerId, 30, Duration.ofMinutes(5));
+
+        assertThatThrownBy(() -> searchController.search(
+                new SearchRequestDTO("Alien", SearchType.MOVIE, 1, 20)))
+                .isInstanceOf(TooManyRequestsException.class)
+                .hasMessage("Too many requests. Try again later.");
+
+        verify(searchService, never()).search(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test

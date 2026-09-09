@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.search.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
@@ -33,6 +35,10 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -65,6 +71,9 @@ class SearchControllerIntegrationTest {
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
+    @Autowired
+    private RequestThrottler requestThrottler;
+
     @MockitoBean
     private SearchService searchService;
 
@@ -73,6 +82,7 @@ class SearchControllerIntegrationTest {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         reset(searchService);
+        RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken) {
@@ -127,6 +137,36 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.users").isArray());
 
         verify(searchService).search(user.id(), "Alien", SearchType.MOVIE, 2, 10);
+    }
+
+    @Test
+    @DisplayName("[search] Should Share Rate Limit Across Search Types")
+    void shouldShareRateLimitAcrossSearchTypes() throws Exception {
+        RegisteredUser user = registerUser("searchratelimit");
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
+        when(searchService.search(user.id(), "Alien", SearchType.USER, null, null)).thenReturn(expected);
+        when(searchService.search(user.id(), "Alien", SearchType.MOVIE, null, null)).thenReturn(expected);
+
+        for (int i = 0; i < 30; i++) {
+            SearchType searchType = i % 2 == 0 ? SearchType.USER : SearchType.MOVIE;
+            mockMvc.perform(get("/search")
+                            .param("q", "Alien")
+                            .param("type", searchType.name())
+                            .cookie(user.accessToken()))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("type", SearchType.PERSON.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verify(searchService, times(30)).search(
+                eq(user.id()), eq("Alien"), any(SearchType.class), isNull(), isNull());
     }
 
     @Test
