@@ -1,17 +1,20 @@
 package com.watchwise.watchwise_api.search.controller;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.search.dto.SearchRequestDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
 import com.watchwise.watchwise_api.search.service.SearchService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Duration;
 import java.util.UUID;
 
 @RestController
@@ -19,6 +22,13 @@ import java.util.UUID;
 public class SearchController {
 
     private final SearchService searchService;
+    private final RequestThrottler requestThrottler;
+
+    @Value("${app.rate-limit.search.max-requests}")
+    private int searchMaxRequests;
+
+    @Value("${app.rate-limit.search.window-minutes}")
+    private long searchWindowMinutes;
 
     @GetMapping("/search")
     public ResponseEntity<SearchResultDTO> search(
@@ -29,8 +39,14 @@ public class SearchController {
             throw new BadRequestException("q must contain at least 3 characters after trimming");
         }
 
+        UUID currentUserId = getCurrentUserId();
+        requestThrottler.checkAllowed(
+                "search|" + currentUserId,
+                searchMaxRequests,
+                Duration.ofMinutes(searchWindowMinutes));
+
         SearchResultDTO result = searchService.search(
-                getCurrentUserId(), trimmedQuery, request.type(), request.page(), request.size());
+                currentUserId, trimmedQuery, request.type(), request.page(), request.size());
         return ResponseEntity.ok(result);
     }
 
