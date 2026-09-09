@@ -35,9 +35,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.nullable;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -171,7 +171,7 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.instance").doesNotExist());
 
         verify(searchService, times(30)).search(
-                eq(user.id()), eq("Alien"), any(SearchType.class), isNull(), isNull());
+                eq(user.id()), eq("Alien"), nullable(SearchType.class), isNull(), isNull());
     }
 
     @Test
