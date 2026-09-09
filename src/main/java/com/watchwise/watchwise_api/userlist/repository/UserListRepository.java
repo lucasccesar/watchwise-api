@@ -31,7 +31,7 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
     @Query(
             value = """
             SELECT ul FROM UserList ul JOIN FETCH ul.user
-            WHERE LOWER(ul.name) LIKE LOWER(CONCAT('%', :escapedName, '%')) ESCAPE '\\'
+            WHERE LOWER(ul.name) LIKE CONCAT('%', LOWER(:escapedName), '%') ESCAPE '\\'
             AND (
                 ul.user.id = :viewerId
                 OR ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
@@ -49,7 +49,7 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
             """,
             countQuery = """
             SELECT COUNT(ul) FROM UserList ul
-            WHERE LOWER(ul.name) LIKE LOWER(CONCAT('%', :escapedName, '%')) ESCAPE '\\'
+            WHERE LOWER(ul.name) LIKE CONCAT('%', LOWER(:escapedName), '%') ESCAPE '\\'
             AND (
                 ul.user.id = :viewerId
                 OR ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC

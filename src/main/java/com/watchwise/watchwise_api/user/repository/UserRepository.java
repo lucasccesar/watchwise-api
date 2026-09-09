@@ -34,14 +34,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query(
             value = """
         SELECT u FROM User u
-        WHERE LOWER(u.username) LIKE LOWER(CONCAT(:escapedUsername, '%')) ESCAPE '\\'
+        WHERE LOWER(u.username) LIKE CONCAT(LOWER(:escapedUsername), '%') ESCAPE '\\'
         ORDER BY
             CASE WHEN LOWER(u.username) = LOWER(:username) THEN 0 ELSE 1 END,
             u.username ASC
         """,
             countQuery = """
         SELECT COUNT(u) FROM User u
-        WHERE LOWER(u.username) LIKE LOWER(CONCAT(:escapedUsername, '%')) ESCAPE '\\'
+        WHERE LOWER(u.username) LIKE CONCAT(LOWER(:escapedUsername), '%') ESCAPE '\\'
         """
     )
     Page<User> findByUsernameStartingWithIgnoreCase(
