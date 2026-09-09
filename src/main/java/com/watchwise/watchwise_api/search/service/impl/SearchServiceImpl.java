@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMultiSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
@@ -75,7 +76,8 @@ public class SearchServiceImpl implements SearchService {
     private SearchResultDTO searchMovies(String query, String language, int page, int resultLimit) {
         List<SearchContentDTO> contents = requireResults(tmdbClient.searchMovies(query, language, page)).stream()
                 .map(movie -> new SearchContentDTO(
-                        movie.id(), MovieOrSeriesType.MOVIE, movie.title(), movie.posterPath(), releaseYear(movie.releaseDate())))
+                        movie.id(), MovieOrSeriesType.MOVIE, movie.title(),
+                        TmdbImageUrlBuilder.posterUrl(movie.posterPath()), releaseYear(movie.releaseDate())))
                 .limit(resultLimit)
                 .toList();
         return new SearchResultDTO(contents, List.of(), List.of(), List.of());
@@ -84,7 +86,8 @@ public class SearchServiceImpl implements SearchService {
     private SearchResultDTO searchSeries(String query, String language, int page, int resultLimit) {
         List<SearchContentDTO> contents = requireResults(tmdbClient.searchTv(query, language, page)).stream()
                 .map(series -> new SearchContentDTO(
-                        series.id(), MovieOrSeriesType.SERIES, series.name(), series.posterPath(), releaseYear(series.firstAirDate())))
+                        series.id(), MovieOrSeriesType.SERIES, series.name(),
+                        TmdbImageUrlBuilder.posterUrl(series.posterPath()), releaseYear(series.firstAirDate())))
                 .limit(resultLimit)
                 .toList();
         return new SearchResultDTO(contents, List.of(), List.of(), List.of());
@@ -92,7 +95,8 @@ public class SearchServiceImpl implements SearchService {
 
     private SearchResultDTO searchPeople(String query, String language, int page, int resultLimit) {
         List<SearchPersonDTO> people = requireResults(tmdbClient.searchPeople(query, language, page)).stream()
-                .map(person -> new SearchPersonDTO(person.id(), person.name(), person.profilePath()))
+                .map(person -> new SearchPersonDTO(person.id(), person.name(),
+                        TmdbImageUrlBuilder.profileUrl(person.profilePath())))
                 .limit(resultLimit)
                 .toList();
         return new SearchResultDTO(List.of(), people, List.of(), List.of());
@@ -107,7 +111,8 @@ public class SearchServiceImpl implements SearchService {
                 .toList();
         List<SearchPersonDTO> people = results.stream()
                 .filter(result -> "person".equals(result.mediaType()))
-                .map(result -> new SearchPersonDTO(result.id(), result.name(), result.profilePath()))
+                .map(result -> new SearchPersonDTO(result.id(), result.name(),
+                        TmdbImageUrlBuilder.profileUrl(result.profilePath())))
                 .limit(resultLimit)
                 .toList();
         return new SearchResultDTO(contents, people, List.of(), List.of());
@@ -116,10 +121,12 @@ public class SearchServiceImpl implements SearchService {
     private SearchContentDTO toSearchContentDto(TmdbMultiSearchResult result) {
         if ("movie".equals(result.mediaType())) {
             return new SearchContentDTO(
-                    result.id(), MovieOrSeriesType.MOVIE, result.title(), result.posterPath(), releaseYear(result.releaseDate()));
+                    result.id(), MovieOrSeriesType.MOVIE, result.title(),
+                    TmdbImageUrlBuilder.posterUrl(result.posterPath()), releaseYear(result.releaseDate()));
         }
         return new SearchContentDTO(
-                result.id(), MovieOrSeriesType.SERIES, result.name(), result.posterPath(), releaseYear(result.firstAirDate()));
+                result.id(), MovieOrSeriesType.SERIES, result.name(),
+                TmdbImageUrlBuilder.posterUrl(result.posterPath()), releaseYear(result.firstAirDate()));
     }
 
     private List<SearchUserListDTO> searchLists(UUID viewerId, String query, PageRequest pageRequest) {

@@ -90,7 +90,8 @@ class SearchServiceImplTest {
         SearchResultDTO result = service.search(viewerId, " Alien ", SearchType.MOVIE, 2, 20);
 
         assertThat(result.contents()).containsExactly(
-                new SearchContentDTO("348", MovieOrSeriesType.MOVIE, "Alien", "/alien.jpg", 1979));
+                new SearchContentDTO("348", MovieOrSeriesType.MOVIE, "Alien",
+                        "https://image.tmdb.org/t/p/w500/alien.jpg", 1979));
         assertThat(result.people()).isEmpty();
         assertThat(result.lists()).isEmpty();
         assertThat(result.users()).isEmpty();
@@ -108,7 +109,8 @@ class SearchServiceImplTest {
         SearchResultDTO result = service.search(viewerId, "Breaking Bad", SearchType.SERIES, 1, 20);
 
         assertThat(result.contents()).containsExactly(
-                new SearchContentDTO("1396", MovieOrSeriesType.SERIES, "Breaking Bad", "/breaking-bad.jpg", null));
+                new SearchContentDTO("1396", MovieOrSeriesType.SERIES, "Breaking Bad",
+                        "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", null));
         assertThat(result.people()).isEmpty();
     }
 
@@ -125,6 +127,31 @@ class SearchServiceImplTest {
 
         assertThat(result.people()).containsExactly(new SearchPersonDTO("287", "Sigourney Weaver", null));
         assertThat(result.contents()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[search] Should Preserve Null Image Fields - When TMDB Has No Image Paths")
+    void shouldPreserveNullImageFieldsWhenTmdbHasNoImagePaths() {
+        stubViewer();
+        when(tmdbClient.searchMulti("Unknown", "pt-BR", 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, List.of(
+                        new TmdbMultiSearchResult("1", "movie", "Unknown", null, null, null, null, null),
+                        new TmdbMultiSearchResult("2", "person", null, "Unknown", null, null, null, null),
+                        new TmdbMultiSearchResult("3", "tv", null, "Unknown Series", null, null, null, null)),
+                        1, 3)));
+        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("Unknown"), eq("Unknown"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+        when(userListRepository.findVisibleByNameContainingIgnoreCase(eq(viewerId), eq("Unknown"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+        when(userListItemService.getPreviewItemsByListIds(List.of())).thenReturn(Map.of());
+        when(userListItemService.countNestedListsByListIds(List.of())).thenReturn(Map.of());
+
+        SearchResultDTO result = service.search(viewerId, "Unknown", null, 1, 20);
+
+        assertThat(result.contents()).extracting(SearchContentDTO::posterUrl)
+                .containsExactly(null, null);
+        assertThat(result.people()).extracting(SearchPersonDTO::photo)
+                .containsExactly((String) null);
     }
 
     @Test
@@ -199,11 +226,15 @@ class SearchServiceImplTest {
         SearchResultDTO result = service.search(viewerId, " Alien ", null, 2, 20);
 
         assertThat(result.contents()).containsExactly(
-                new SearchContentDTO("1", MovieOrSeriesType.SERIES, "Alien Nation", "/tv.jpg", 1989),
-                new SearchContentDTO("3", MovieOrSeriesType.MOVIE, "Alien", "/alien.jpg", 1979));
+                new SearchContentDTO("1", MovieOrSeriesType.SERIES, "Alien Nation",
+                        "https://image.tmdb.org/t/p/w500/tv.jpg", 1989),
+                new SearchContentDTO("3", MovieOrSeriesType.MOVIE, "Alien",
+                        "https://image.tmdb.org/t/p/w500/alien.jpg", 1979));
         assertThat(result.people()).containsExactly(
-                new SearchPersonDTO("2", "Sigourney Weaver", "/sigourney.jpg"),
-                new SearchPersonDTO("5", "Ridley Scott", "/ridley.jpg"));
+                new SearchPersonDTO("2", "Sigourney Weaver",
+                        "https://image.tmdb.org/t/p/w185/sigourney.jpg"),
+                new SearchPersonDTO("5", "Ridley Scott",
+                        "https://image.tmdb.org/t/p/w185/ridley.jpg"));
     }
 
     @Test
@@ -268,7 +299,9 @@ class SearchServiceImplTest {
 
         SearchResultDTO result = service.search(viewerId, "Alien", null, 1, 20);
 
-        assertThat(result.contents()).containsExactly(new SearchContentDTO("348", MovieOrSeriesType.MOVIE, "Alien", "/alien.jpg", 1979));
+        assertThat(result.contents()).containsExactly(new SearchContentDTO(
+                "348", MovieOrSeriesType.MOVIE, "Alien",
+                "https://image.tmdb.org/t/p/w500/alien.jpg", 1979));
         assertThat(result.users()).containsExactly(new UserPreviewDTO(matchedUser.getId(), "alienfan", "alien.png", true));
         assertThat(result.lists()).containsExactly(new SearchUserListDTO(
                 listId, new UserPreviewDTO(matchedUser.getId(), "alienfan", "alien.png", true), "Alien favorites", List.of(), 0L));
