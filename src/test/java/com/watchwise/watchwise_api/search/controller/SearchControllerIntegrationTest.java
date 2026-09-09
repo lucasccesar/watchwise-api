@@ -1,0 +1,245 @@
+package com.watchwise.watchwise_api.search.controller;
+
+import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
+import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
+import com.watchwise.watchwise_api.search.service.SearchService;
+import com.watchwise.watchwise_api.search.service.SearchType;
+import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
+import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
+import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import java.util.List;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@Testcontainers
+class SearchControllerIntegrationTest {
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.docker.compose.enabled", () -> "false");
+    }
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @MockitoBean
+    private SearchService searchService;
+
+    @BeforeEach
+    void setUp() {
+        refreshTokenRepository.deleteAll();
+        userRepository.deleteAll();
+        reset(searchService);
+    }
+
+    private record RegisteredUser(UUID id, Cookie accessToken) {
+    }
+
+    private RegisteredUser registerUser(String username) throws Exception {
+        MvcResult result = mockMvc.perform(registerRequest(username))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        assertThat(accessToken).isNotNull();
+
+        User user = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(username, username).orElseThrow();
+        return new RegisteredUser(user.getId(), accessToken);
+    }
+
+    private MockHttpServletRequestBuilder registerRequest(String username) {
+        String body = """
+                {
+                    "username": "%s",
+                    "email": "%s@email.com",
+                    "password": "Password123"
+                }
+                """.formatted(username, username);
+
+        return post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+
+    @Test
+    @DisplayName("[search] Should Return Search Result And Trim Query - When Request Is Valid")
+    void shouldReturnSearchResultAndTrimQueryWhenRequestIsValid() throws Exception {
+        RegisteredUser user = registerUser("searchvalid");
+        SearchResultDTO expected = new SearchResultDTO(
+                List.of(new SearchContentDTO("603", MovieOrSeriesType.MOVIE, "Alien", "/alien.jpg", 1979)),
+                List.of(), List.of(), List.of());
+        when(searchService.search(user.id(), "Alien", SearchType.MOVIE, 2, 10)).thenReturn(expected);
+
+        mockMvc.perform(get("/search")
+                        .param("q", " Alien ")
+                        .param("type", "MOVIE")
+                        .param("page", "2")
+                        .param("size", "10")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contents.length()").value(1))
+                .andExpect(jsonPath("$.contents[0].tmdbId").value("603"))
+                .andExpect(jsonPath("$.people").isArray())
+                .andExpect(jsonPath("$.lists").isArray())
+                .andExpect(jsonPath("$.users").isArray());
+
+        verify(searchService).search(user.id(), "Alien", SearchType.MOVIE, 2, 10);
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Query Is Missing")
+    void shouldReturnBadRequestApiErrorWhenQueryIsMissing() throws Exception {
+        RegisteredUser user = registerUser("searchmissingquery");
+
+        mockMvc.perform(get("/search").cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Query Has Fewer Than Three Characters")
+    void shouldReturnBadRequestApiErrorWhenQueryHasFewerThanThreeCharacters() throws Exception {
+        RegisteredUser user = registerUser("searchshortquery");
+
+        mockMvc.perform(get("/search").param("q", "ab").cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Trimmed Query Has Fewer Than Three Characters")
+    void shouldReturnBadRequestApiErrorWhenTrimmedQueryHasFewerThanThreeCharacters() throws Exception {
+        RegisteredUser user = registerUser("searchtrimquery");
+
+        mockMvc.perform(get("/search").param("q", "  ab  ").cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("q must contain at least 3 characters after trimming"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Type Is Invalid")
+    void shouldReturnBadRequestApiErrorWhenTypeIsInvalid() throws Exception {
+        RegisteredUser user = registerUser("searchinvalidtype");
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("type", "UNKNOWN")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Page Is Zero")
+    void shouldReturnBadRequestApiErrorWhenPageIsZero() throws Exception {
+        RegisteredUser user = registerUser("searchzeropage");
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("page", "0")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Size Exceeds Twenty")
+    void shouldReturnBadRequestApiErrorWhenSizeExceedsTwenty() throws Exception {
+        RegisteredUser user = registerUser("searchoversize");
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("size", "21")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return Unauthorized - When Access Token Is Missing")
+    void shouldReturnUnauthorizedWhenAccessTokenIsMissing() throws Exception {
+        mockMvc.perform(get("/search").param("q", "Alien"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadGateway ApiError - When TMDB Is Unavailable")
+    void shouldReturnBadGatewayApiErrorWhenTmdbIsUnavailable() throws Exception {
+        RegisteredUser user = registerUser("searchtmdbdown");
+        when(searchService.search(user.id(), "Alien", SearchType.MOVIE, null, null))
+                .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Alien")
+                        .param("type", "MOVIE")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.status").value(502))
+                .andExpect(jsonPath("$.error").value("Bad Gateway"))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+}
