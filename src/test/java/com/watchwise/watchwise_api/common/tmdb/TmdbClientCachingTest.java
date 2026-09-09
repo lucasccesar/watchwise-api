@@ -206,8 +206,10 @@ class TmdbClientCachingTest {
     @Test
     @DisplayName("[searchMovies] Should Make One TMDB Call - When Eight Concurrent Searches Use The Same Key")
     void shouldMakeOneTmdbCallWhenEightConcurrentSearchesUseTheSameKey() throws Exception {
-        CountDownLatch ready = new CountDownLatch(8);
+        int concurrentCallers = 8;
+        CountDownLatch ready = new CountDownLatch(concurrentCallers);
         CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch callersReadyToSearch = new CountDownLatch(concurrentCallers);
         CountDownLatch requestStarted = new CountDownLatch(1);
         CountDownLatch releaseResponse = new CountDownLatch(1);
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
@@ -222,18 +224,20 @@ class TmdbClientCachingTest {
                     return movieSearchSuccess(1, "The Matrix").createResponse(request);
                 });
 
-        ExecutorService executor = Executors.newFixedThreadPool(8);
+        ExecutorService executor = Executors.newFixedThreadPool(concurrentCallers);
         List<Future<TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>>> futures = new ArrayList<>();
         try {
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < concurrentCallers; i++) {
                 futures.add(executor.submit(() -> {
                     ready.countDown();
                     start.await();
+                    callersReadyToSearch.countDown();
                     return tmdbClient.searchMovies("Matrix", "en-US", 1);
                 }));
             }
             assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
             start.countDown();
+            assertThat(callersReadyToSearch.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(requestStarted.await(5, TimeUnit.SECONDS)).isTrue();
             releaseResponse.countDown();
             for (var future : futures) {
@@ -243,6 +247,7 @@ class TmdbClientCachingTest {
         } finally {
             releaseResponse.countDown();
             executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
         }
         mockServer.verify();
     }
