@@ -42,7 +42,7 @@ deve seguir esta ordem:
    segue o dono com status aceito; `PRIVATE` não aparece para terceiros. Reaproveitar
    `UserListItemService.getPreviewItemsByListIds(...)` para buscar em lote os cinco previews, sem
    consulta por lista.
-4. **Estender o proxy TMDB.** Adicionar os modelos de resposta e métodos de busca de filme, série,
+4. **[implementado em 2026-09-08] Estender o proxy TMDB.** Adicionar os modelos de resposta e métodos de busca de filme, série,
    pessoa e busca múltipla. Sem `type`, usar a busca múltipla e separar pessoas de `contents`,
    preservando filmes e séries misturados e a ordenação do TMDB. Com `type`, chamar somente o
    endpoint TMDB necessário; `LIST` e `USER` não fazem chamada externa. Enviar idioma preferido do

@@ -3893,7 +3893,7 @@ dos DTOs de busca, o filtro de visibilidade da busca local de listas e o uso de 
 como caractere literal em vez de wildcard do SQL. Suite completa Maven validada contra Postgres real via
 Testcontainers: 2214 testes, 0 falhas, 0 erros.
 
-## 2026-09-08 — Proxy de busca TMDB com cache
+## 2026-09-08 — Proxy TMDB de busca
 
 `TmdbClient` ganhou `searchMovies`, `searchTv`, `searchPeople` e `searchMulti`, com paginas tipadas
 e chamadas a `/search/movie`, `/search/tv`, `/search/person` e `/search/multi`. As buscas enviam o
@@ -3906,8 +3906,10 @@ do modelo da URL.
 e limite de 10000 entradas por cache, configuraveis em `application-dev.properties` e no modelo de
 producao. A chave tipada combina texto normalizado, tipo, idioma e pagina. O cliente reutiliza a
 mesma carga atomica por chave dos detalhes: chamadas simultaneas compartilham uma consulta externa,
-e uma falha transitoria nao fica armazenada. `cachedLookup` foi generalizado para aceitar a chave
-de busca sem alterar as chaves existentes dos detalhes. Nenhum endpoint publico foi adicionado.
+e uma falha transitoria nao fica armazenada. Cada chamada reutiliza o retry unico do cliente antes de
+retornar indisponibilidade. `cachedLookup` foi generalizado para aceitar a chave de busca sem alterar
+as chaves existentes dos detalhes. Os resultados ficam somente nesses caches em memoria, sem
+persistencia no banco; nenhum endpoint publico foi adicionado.
 
 Testes cobrem parametros enviados, desserializacao dos quatro tipos, ordem da busca multi, separacao
 por idioma/pagina/tipo, normalizacao do texto, oito chamadas simultaneas e recuperacao apos duas
