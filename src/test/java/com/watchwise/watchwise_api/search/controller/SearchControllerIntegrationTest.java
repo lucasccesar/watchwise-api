@@ -238,6 +238,43 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[search] Should Accept Query At Maximum Length - When Query Has 100 Characters")
+    void shouldAcceptQueryAtMaximumLengthWhenQueryHas100Characters() throws Exception {
+        RegisteredUser user = registerUser("searchmaxquery");
+        String query = "a".repeat(100);
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
+        when(searchService.search(user.id(), query, null, null, null)).thenReturn(expected);
+
+        mockMvc.perform(get("/search")
+                        .param("q", query)
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk());
+
+        verify(searchService).search(user.id(), query, null, null, null);
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Query Exceeds 100 Characters")
+    void shouldReturnBadRequestApiErrorWhenQueryExceeds100Characters() throws Exception {
+        RegisteredUser user = registerUser("searchlongquery");
+        String query = "a".repeat(101);
+
+        mockMvc.perform(get("/search")
+                        .param("q", query)
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Validation Failed"))
+                .andExpect(jsonPath("$.errors[0].field").value("q"))
+                .andExpect(jsonPath("$.errors[0].message").value("q must contain at most 100 characters"))
+                .andExpect(jsonPath("$.path").value("/search"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(searchService);
+    }
+
+    @Test
     @DisplayName("[search] Should Return BadRequest ApiError - When Type Is Invalid")
     void shouldReturnBadRequestApiErrorWhenTypeIsInvalid() throws Exception {
         RegisteredUser user = registerUser("searchinvalidtype");

@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
 public record SearchRequestDTO(
         @NotBlank(message = "q must not be blank")
         @Size(min = 3, message = "q must contain at least 3 characters")
+        @Size(max = 100, message = "q must contain at most 100 characters")
         String q,
         SearchType type,
         @Min(value = 1, message = "page must be greater than or equal to 1")
