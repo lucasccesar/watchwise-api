@@ -87,7 +87,7 @@ class SummaryControllerTest {
     @DisplayName("[getHomeSummary] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenGettingHomeSummary() {
         UUID targetUserId = UUID.randomUUID();
-        HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
+        HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
         when(summaryService.getHomeSummary(currentUserId, targetUserId)).thenReturn(dto);
 
         ResponseEntity<HomeSummaryResponseDTO> result = summaryController.getHomeSummary(targetUserId);
@@ -100,7 +100,7 @@ class SummaryControllerTest {
     @DisplayName("[getHomeSummary] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingHomeSummary() {
         UUID targetUserId = UUID.randomUUID();
-        HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
+        HomeSummaryResponseDTO dto = new HomeSummaryResponseDTO(0, 0, 0, 0, List.of(), List.of(), List.of(), List.of(), List.of());
         when(summaryService.getHomeSummary(currentUserId, targetUserId)).thenReturn(dto);
 
         summaryController.getHomeSummary(targetUserId);
@@ -195,6 +195,6 @@ class SummaryControllerTest {
     }
 
     private AllTimeStatsResponseDTO buildAllTimeStatsResponseDto() {
-        return new AllTimeStatsResponseDTO(0L, 0L, 0L, 0L, 0.0, 0.0, 0.0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        return new AllTimeStatsResponseDTO(0L, 0L, 0L, 0L, 0L, 0.0, 0.0, 0.0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 }

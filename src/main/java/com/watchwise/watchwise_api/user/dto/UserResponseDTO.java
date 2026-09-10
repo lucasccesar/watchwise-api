@@ -15,8 +15,10 @@ public record UserResponseDTO(
         Boolean isProfilePublic,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        long totalMinutesWatched,
-        long minutesWatchedLast30Days,
+        long totalMinutesWatchedMovies,
+        long totalMinutesWatchedEpisodes,
+        long minutesWatchedMoviesLast30Days,
+        long minutesWatchedEpisodesLast30Days,
         long totalTheaterVisits,
         List<GenreCountDTO> genreCountsMovies,
         List<GenreCountDTO> genreCountsSeries,
@@ -29,6 +31,6 @@ public record UserResponseDTO(
     public UserResponseDTO(UUID id, String username, String email, String description, String profilePicture,
             Boolean isProfilePublic, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this(id, username, email, description, profilePicture, isProfilePublic, createdAt, updatedAt,
-                0L, 0L, 0L, List.of(), List.of(), null, 0L, 0L, null, null);
+                0L, 0L, 0L, 0L, 0L, List.of(), List.of(), null, 0L, 0L, null, null);
     }
 }

@@ -24,17 +24,19 @@ public interface UserMapper {
     @Mapping(target = "preferredRegion", ignore = true)
     User postUserDtoToUser(PostUserDTO postUserDTO);
 
-    UserResponseDTO userToUserResponseDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsSeries,
-            long followersCount, long followingCount);
+    UserResponseDTO userToUserResponseDto(User user, long totalMinutesWatchedMovies, long totalMinutesWatchedEpisodes,
+            long minutesWatchedMoviesLast30Days, long minutesWatchedEpisodesLast30Days, long totalTheaterVisits,
+            List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsSeries, long followersCount,
+            long followingCount);
 
     UserPreviewDTO userToUserPreviewDto(User user);
 
     PublicUserDTO userToPublicUserDto(User user);
 
-    PublicUserProfileDTO userToPublicUserProfileDto(User user, long totalMinutesWatched, long minutesWatchedLast30Days,
-            long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsSeries,
-            long followersCount, long followingCount);
+    PublicUserProfileDTO userToPublicUserProfileDto(User user, long totalMinutesWatchedMovies,
+            long totalMinutesWatchedEpisodes, long minutesWatchedMoviesLast30Days,
+            long minutesWatchedEpisodesLast30Days, long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies,
+            List<GenreCountDTO> genreCountsSeries, long followersCount, long followingCount);
 
     @AfterMapping
     default void applyDefaults(@MappingTarget User.UserBuilder builder, PostUserDTO dto) {

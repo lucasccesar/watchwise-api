@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.auth.service.RefreshTokenService;
 import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -248,9 +249,10 @@ public class UserServiceImpl implements UserService {
         }
 
         ProfileStats stats = computeProfileStats(id);
-        return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.totalTheaterVisits(), stats.genreCountsMovies(), stats.genreCountsSeries(), stats.followersCount(),
-                stats.followingCount());
+        return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatchedMovies(),
+                stats.totalMinutesWatchedEpisodes(), stats.minutesWatchedMoviesLast30Days(),
+                stats.minutesWatchedEpisodesLast30Days(), stats.totalTheaterVisits(), stats.genreCountsMovies(),
+                stats.genreCountsSeries(), stats.followersCount(), stats.followingCount());
     }
 
     @Override
@@ -327,18 +329,25 @@ public class UserServiceImpl implements UserService {
     }
 
     private UserResponseDTO toUserResponseDto(User user, ProfileStats stats) {
-        return userMapper.userToUserResponseDto(user, stats.totalMinutesWatched(), stats.minutesWatchedLast30Days(),
-                stats.totalTheaterVisits(), stats.genreCountsMovies(), stats.genreCountsSeries(),
-                stats.followersCount(), stats.followingCount());
+        return userMapper.userToUserResponseDto(user, stats.totalMinutesWatchedMovies(), stats.totalMinutesWatchedEpisodes(),
+                stats.minutesWatchedMoviesLast30Days(), stats.minutesWatchedEpisodesLast30Days(), stats.totalTheaterVisits(),
+                stats.genreCountsMovies(), stats.genreCountsSeries(), stats.followersCount(), stats.followingCount());
     }
 
     private ProfileStats computeProfileStats(UUID userId) {
         LocalDate windowStart = LocalDate.now().minusDays(WATCH_TIME_WINDOW_DAYS);
         LocalDate windowEnd = LocalDate.now();
 
-        long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
-        long minutesWatchedLast30Days = diaryEntryRepository
-                .sumRuntimeMinutesByUserIdAndWatchedDateBetween(userId, windowStart, windowEnd);
+        long totalMinutesWatchedMovies = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.MOVIE);
+        long totalMinutesWatchedEpisodes = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.EPISODE);
+        long minutesWatchedMoviesLast30Days = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
+                        userId, ContentType.MOVIE, windowStart, windowEnd);
+        long minutesWatchedEpisodesLast30Days = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
+                        userId, ContentType.EPISODE, windowStart, windowEnd);
         long totalTheaterVisits = diaryEntryRepository.countByUserIdAndWatchedInTheaterTrue(userId);
         List<GenreCountDTO> genreCountsMovies = toGenreCountDtos(
                 diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(userId));
@@ -347,8 +356,9 @@ public class UserServiceImpl implements UserService {
         long followersCount = followerRepository.countByFollowedIdAndStatus(userId, FollowStatus.ACCEPTED);
         long followingCount = followerRepository.countByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
 
-        return new ProfileStats(totalMinutesWatched, minutesWatchedLast30Days, totalTheaterVisits, genreCountsMovies,
-                genreCountsSeries, followersCount, followingCount);
+        return new ProfileStats(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, minutesWatchedMoviesLast30Days,
+                minutesWatchedEpisodesLast30Days, totalTheaterVisits, genreCountsMovies, genreCountsSeries,
+                followersCount, followingCount);
     }
 
     private List<GenreCountDTO> toGenreCountDtos(List<DiaryEntryRepository.GenreCount> rows) {
@@ -357,9 +367,10 @@ public class UserServiceImpl implements UserService {
                 .toList();
     }
 
-    private record ProfileStats(long totalMinutesWatched, long minutesWatchedLast30Days, long totalTheaterVisits,
+    private record ProfileStats(long totalMinutesWatchedMovies, long totalMinutesWatchedEpisodes,
+            long minutesWatchedMoviesLast30Days, long minutesWatchedEpisodesLast30Days, long totalTheaterVisits,
             List<GenreCountDTO> genreCountsMovies, List<GenreCountDTO> genreCountsSeries, long followersCount,
             long followingCount) {
-        static final ProfileStats EMPTY = new ProfileStats(0L, 0L, 0L, List.of(), List.of(), 0L, 0L);
+        static final ProfileStats EMPTY = new ProfileStats(0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L);
     }
 }

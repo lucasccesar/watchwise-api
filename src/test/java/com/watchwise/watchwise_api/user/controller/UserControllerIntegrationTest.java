@@ -129,8 +129,10 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalMinutesWatched").value(139))
-                .andExpect(jsonPath("$.minutesWatchedLast30Days").value(139))
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").value(139))
+                .andExpect(jsonPath("$.totalMinutesWatchedEpisodes").value(0))
+                .andExpect(jsonPath("$.minutesWatchedMoviesLast30Days").value(139))
+                .andExpect(jsonPath("$.minutesWatchedEpisodesLast30Days").value(0))
                 .andExpect(jsonPath("$.genreCountsMovies[0].genre").value("Drama"))
                 .andExpect(jsonPath("$.genreCountsMovies[0].count").value(1))
                 .andExpect(jsonPath("$.genreCountsSeries").isEmpty());
@@ -739,7 +741,8 @@ class UserControllerIntegrationTest {
                 .andExpect(jsonPath("$.username").value("targetpublic"))
                 .andExpect(jsonPath("$.isProfilePublic").value(true))
                 .andExpect(jsonPath("$.email").doesNotExist())
-                .andExpect(jsonPath("$.totalMinutesWatched").value(0))
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").value(0))
+                .andExpect(jsonPath("$.totalMinutesWatchedEpisodes").value(0))
                 .andExpect(jsonPath("$.genreCountsMovies").isEmpty())
                 .andExpect(jsonPath("$.genreCountsSeries").isEmpty());
     }
@@ -768,7 +771,8 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users/" + targetUser.getId()).cookie(viewerAccessToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalMinutesWatched").value(55))
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").value(0))
+                .andExpect(jsonPath("$.totalMinutesWatchedEpisodes").value(55))
                 .andExpect(jsonPath("$.genreCountsMovies").isEmpty())
                 .andExpect(jsonPath("$.genreCountsSeries[*].genre", org.hamcrest.Matchers.containsInAnyOrder("Drama", "Action")))
                 .andExpect(jsonPath("$.genreCountsSeries[*].count", org.hamcrest.Matchers.containsInAnyOrder(1, 1)));

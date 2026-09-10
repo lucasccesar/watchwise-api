@@ -8,7 +8,8 @@ import java.util.List;
 public record AllTimeStatsResponseDTO(
         long totalMoviesWatched,
         long totalEpisodesWatched,
-        long totalMinutesWatched,
+        long totalMinutesWatchedMovies,
+        long totalMinutesWatchedEpisodes,
         long totalTheaterVisits,
         double averageMinutesPerMonth,
         double averageMinutesPerWeek,

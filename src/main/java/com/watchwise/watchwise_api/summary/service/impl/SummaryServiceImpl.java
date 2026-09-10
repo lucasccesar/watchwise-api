@@ -128,7 +128,10 @@ public class SummaryServiceImpl implements SummaryService {
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanViewSummary(viewerId, userId, target);
 
-        long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
+        long totalMinutesWatchedMovies = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.MOVIE);
+        long totalMinutesWatchedEpisodes = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.EPISODE);
         long totalMoviesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.MOVIE);
         long totalEpisodesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.EPISODE);
 
@@ -157,8 +160,9 @@ public class SummaryServiceImpl implements SummaryService {
 
         List<DiaryEntryResponseDTO> recentlyWatched = computeRecentlyWatched(userId);
 
-        return new HomeSummaryResponseDTO(totalMinutesWatched, totalMoviesWatched, totalEpisodesWatched, nextEpisodes,
-                watchCountByDayLast30Days, genreCountsMoviesLast30Days, genreCountsSeriesLast30Days, recentlyWatched);
+        return new HomeSummaryResponseDTO(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched,
+                totalEpisodesWatched, nextEpisodes, watchCountByDayLast30Days, genreCountsMoviesLast30Days,
+                genreCountsSeriesLast30Days, recentlyWatched);
     }
 
     private List<DiaryEntryResponseDTO> computeRecentlyWatched(UUID userId) {
@@ -322,7 +326,11 @@ public class SummaryServiceImpl implements SummaryService {
 
         long totalMoviesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.MOVIE);
         long totalEpisodesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.EPISODE);
-        long totalMinutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserId(userId);
+        long totalMinutesWatchedMovies = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.MOVIE);
+        long totalMinutesWatchedEpisodes = diaryEntryRepository
+                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.EPISODE);
+        long totalMinutesWatched = totalMinutesWatchedMovies + totalMinutesWatchedEpisodes;
         long totalTheaterVisits = diaryEntryRepository.countByUserIdAndWatchedInTheaterTrue(userId);
 
         LocalDate firstWatched = diaryEntryRepository.findMinWatchedDateByUserId(userId).orElse(LocalDate.now());
@@ -364,8 +372,9 @@ public class SummaryServiceImpl implements SummaryService {
 
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanionsAllTime(userId);
 
-        return new AllTimeStatsResponseDTO(totalMoviesWatched, totalEpisodesWatched, totalMinutesWatched, totalTheaterVisits,
-                averageMinutesPerMonth, averageMinutesPerWeek, averageMinutesPerDay,
+        return new AllTimeStatsResponseDTO(totalMoviesWatched, totalEpisodesWatched, totalMinutesWatchedMovies,
+                totalMinutesWatchedEpisodes, totalTheaterVisits, averageMinutesPerMonth, averageMinutesPerWeek,
+                averageMinutesPerDay,
                 watchCountByYearMovies, watchCountByYearEpisodes, watchCountByDecade, watchCountByCountry,
                 mostLoggedContent, genreCountsMovies, genreCountsSeries, topRated, bottomRated, topWatchCompanions);
     }

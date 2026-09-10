@@ -31,6 +31,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -147,11 +148,25 @@ class SummaryControllerIntegrationTest {
                 .build());
     }
 
+    private Content persistEpisode(String seriesTmdbId, int seasonNumber, int episodeNumber, int runtimeMinutes) {
+        LocalDateTime now = LocalDateTime.now();
+        return contentRepository.save(Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .type(ContentType.EPISODE)
+                .runtimeMinutes(runtimeMinutes)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
     private void persistEntry(User user, Content content) {
         LocalDateTime now = LocalDateTime.now();
         diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
                 .content(content)
+                .watchedDate(LocalDate.now())
                 .watchNumber(1)
                 .createdAt(now)
                 .updatedAt(now)
@@ -238,12 +253,32 @@ class SummaryControllerIntegrationTest {
         RegisteredUser user = registerUser("homesummaryok");
         User entity = userRepository.findById(user.id()).orElseThrow();
         Content movie = persistContent("550", ContentType.MOVIE, 139);
+        Content episode = persistEpisode("1399", 1, 1, 55);
         persistEntry(entity, movie);
+        persistEntry(entity, episode);
 
         mockMvc.perform(get("/users/" + user.id() + "/summary/home").cookie(user.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalMinutesWatched").value(139))
-                .andExpect(jsonPath("$.totalMoviesWatched").value(1));
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").value(139))
+                .andExpect(jsonPath("$.totalMinutesWatchedEpisodes").value(55))
+                .andExpect(jsonPath("$.totalMoviesWatched").value(1))
+                .andExpect(jsonPath("$.totalEpisodesWatched").value(1));
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Return Movie And Episode Watch Time Separately - When Called")
+    void shouldReturnMovieAndEpisodeWatchTimeSeparatelyWhenGettingAllTimeStats() throws Exception {
+        RegisteredUser user = registerUser("alltimesummaryok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("550", ContentType.MOVIE, 139);
+        Content episode = persistEpisode("1399", 1, 1, 55);
+        persistEntry(entity, movie);
+        persistEntry(entity, episode);
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/all-time").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").value(139))
+                .andExpect(jsonPath("$.totalMinutesWatchedEpisodes").value(55));
     }
 
     @Test

@@ -7,7 +7,8 @@ import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import java.util.List;
 
 public record HomeSummaryResponseDTO(
-        long totalMinutesWatched,
+        long totalMinutesWatchedMovies,
+        long totalMinutesWatchedEpisodes,
         long totalMoviesWatched,
         long totalEpisodesWatched,
         List<SeriesInProgressResponseDTO> nextEpisodes,

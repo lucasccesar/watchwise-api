@@ -373,7 +373,8 @@ class SummaryServiceImplTest {
     @DisplayName("[getHomeSummary] Should Return Totals, Next Episodes, Rolling 30-Day Stats And Genre Counts From The Repository")
     void shouldReturnTotalsNextEpisodesRollingStatsAndGenreCountsForHomeSummary() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.sumRuntimeMinutesByUserId(lucasId)).thenReturn(9000L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(6000L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(3000L);
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(42L);
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(128L);
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 8, 6, LocalDate.of(2024, 5, 1));
@@ -390,7 +391,8 @@ class SummaryServiceImplTest {
 
         HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
 
-        assertThat(result.totalMinutesWatched()).isEqualTo(9000L);
+        assertThat(result.totalMinutesWatchedMovies()).isEqualTo(6000L);
+        assertThat(result.totalMinutesWatchedEpisodes()).isEqualTo(3000L);
         assertThat(result.totalMoviesWatched()).isEqualTo(42L);
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
         assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1)));
@@ -694,13 +696,15 @@ class SummaryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(42L);
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(128L);
-        when(diaryEntryRepository.sumRuntimeMinutesByUserId(lucasId)).thenReturn(9000L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(6000L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(3000L);
 
         AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
 
         assertThat(result.totalMoviesWatched()).isEqualTo(42L);
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
-        assertThat(result.totalMinutesWatched()).isEqualTo(9000L);
+        assertThat(result.totalMinutesWatchedMovies()).isEqualTo(6000L);
+        assertThat(result.totalMinutesWatchedEpisodes()).isEqualTo(3000L);
     }
 
     @Test
