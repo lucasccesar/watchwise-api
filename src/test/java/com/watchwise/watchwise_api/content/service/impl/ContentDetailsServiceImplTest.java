@@ -117,6 +117,27 @@ class ContentDetailsServiceImplTest {
         assertThat(result.title()).isEqualTo("The Matrix");
         assertThat(result.releaseDate()).isEqualTo(LocalDate.of(1999, 3, 31));
         assertThat(result.runtimeMinutes()).isEqualTo(136);
+        ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
+        verify(contentRepository).save(captor.capture());
+        assertThat(captor.getValue().getRuntimeMinutes()).isEqualTo(136);
+        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Preserve Existing Movie Runtime - When TMDB Returns A Different Runtime")
+    void shouldPreserveExistingMovieRuntimeWhenTmdbReturnsADifferentRuntime() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603")
+                .runtimeMinutes(120).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, null, null, "1999-03-31", 136,
+                List.of(), List.of(), null, null, null, null, null, null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.runtimeMinutes()).isEqualTo(136);
+        verify(contentRepository, never()).save(any());
     }
 
     @Test
@@ -369,7 +390,7 @@ class ContentDetailsServiceImplTest {
     void shouldSkipFetchingAllSeasonsAndUseStoredRuntimeWhenSeriesIsEndedAndABaselineAlreadyExists() {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396")
-                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).build();
+                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(5).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
@@ -396,6 +417,62 @@ class ContentDetailsServiceImplTest {
         verify(tmdbClient).getSeasonFullDetails(eq("1396"), eq(3), eq("en-US"));
         verify(contentRepository, never()).save(any());
         verify(contentTrackingService, never()).reactivateAfterRevival(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Recalculate And Persist Runtime - When Terminal Series Gains An Episode")
+    void shouldRecalculateAndPersistRuntimeWhenTerminalSeriesGainsAnEpisode() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396")
+                .totalRuntimeMinutes(50).runtimeMinutesEpisodeCount(1).runtimeReportedEpisodeCount(1).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null)),
+                null, null, null, null, 1, 2, null, null, "Ended")));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
+                101, "Season 1", null, null, "2008-01-20", 1, List.of(
+                        new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 50, null, null),
+                        new TmdbEpisodeSummary(2, "New Episode", null, "2008-01-27", 60, null, null)),
+                null, null)));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.totalRuntimeMinutes()).isEqualTo(110);
+        ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
+        verify(contentRepository).save(captor.capture());
+        assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(110);
+        assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(2);
+        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isEqualTo(2);
+        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Preserve Stored Runtime - When A Series Season Lookup Fails")
+    void shouldPreserveStoredRuntimeWhenASeriesSeasonLookupFails() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396")
+                .totalRuntimeMinutes(90).runtimeMinutesEpisodeCount(2).runtimeReportedEpisodeCount(2).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null),
+                        new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 1, null)),
+                null, null, null, null, 2, 2, null, null, "Ended")));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(101, "Season 1", null, null, "2008-01-20", 1,
+                        List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 45, null, null)),
+                        null, null)));
+        when(tmdbClient.getSeasonFullDetails("1396", 2, "en-US"))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.totalRuntimeMinutes()).isEqualTo(90);
+        assertThat(result.runtimeMinutes()).isEqualTo(45);
+        verify(contentRepository, never()).save(any());
     }
 
     @Test
@@ -426,6 +503,7 @@ class ContentDetailsServiceImplTest {
         verify(contentRepository).save(captor.capture());
         assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(105);
         assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(2);
+        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isEqualTo(2);
         verify(contentTrackingService).reactivateAfterRevival(series, "Ended");
     }
 
@@ -548,6 +626,9 @@ class ContentDetailsServiceImplTest {
 
         assertThat(result.type()).isEqualTo(ContentType.EPISODE);
         assertThat(result.title()).isEqualTo("Pilot");
+        ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
+        verify(contentRepository).save(captor.capture());
+        assertThat(captor.getValue().getRuntimeMinutes()).isEqualTo(58);
         assertThat(result.guestStars()).extracting("name").containsExactly("John Doe");
         assertThat(result.watchProviders()).isEmpty();
     }

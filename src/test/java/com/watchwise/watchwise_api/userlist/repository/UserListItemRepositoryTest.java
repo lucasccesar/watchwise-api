@@ -438,13 +438,22 @@ class UserListItemRepositoryTest {
     }
 
     @Test
-    @DisplayName("[sumRuntimeMinutesByUserListIdIn] Should Sum Only Content Items With RuntimeMinutes - When Several Lists Are Requested")
-    void shouldSumOnlyContentItemsWithRuntimeMinutesWhenSeveralListsAreRequested() {
+    @DisplayName("[sumRuntimeMinutesByUserListIdIn] Should Sum Content Runtime Or Series Total - When Several Lists Are Requested")
+    void shouldSumContentRuntimeOrSeriesTotalWhenSeveralListsAreRequested() {
         Content withRuntime = contentRepository.save(buildContent("770", ContentType.MOVIE, 90));
         Content withoutRuntime = contentRepository.save(buildContent("880", ContentType.MOVIE, null));
+        Content seriesWithTotal = contentRepository.save(Content.builder()
+                .tmdbId("990")
+                .type(ContentType.SERIES)
+                .totalRuntimeMinutes(180)
+                .runtimeMinutesEpisodeCount(4)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
         UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
         userListItemRepository.save(buildContentItem(scifi, withRuntime, 1));
         userListItemRepository.save(buildContentItem(scifi, withoutRuntime, 2));
+        userListItemRepository.save(buildContentItem(scifi, seriesWithTotal, 3));
         userListItemRepository.saveAndFlush(buildChildListItem(nestedList, horror, 1));
         entityManager.clear();
 
@@ -453,7 +462,7 @@ class UserListItemRepositoryTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getUserListId()).isEqualTo(scifi.getId());
-        assertThat(result.get(0).getTotal()).isEqualTo(90L);
+        assertThat(result.get(0).getTotal()).isEqualTo(270L);
     }
 
     @Test

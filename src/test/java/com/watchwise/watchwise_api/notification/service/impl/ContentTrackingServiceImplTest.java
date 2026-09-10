@@ -340,6 +340,8 @@ class ContentTrackingServiceImplTest {
         verify(contentRepository).save(captor.capture());
         assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(545);
         assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(11);
+        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isNull();
+        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
     }
 
     @Test
@@ -392,6 +394,33 @@ class ContentTrackingServiceImplTest {
         verify(contentRepository).save(captor.capture());
         assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(82);
         assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(2);
+        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isEqualTo(2);
+        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Preserve Stored Runtime - When Terminal Reconciliation Finds No Runtime")
+    void shouldPreserveStoredRuntimeWhenTerminalReconciliationFindsNoRuntime() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(300).runtimeMinutesEpisodeCount(6).runtimeReportedEpisodeCount(6)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
+        TrackedContentState previous = TrackedContentState.builder().content(series).lastKnownStatus("Returning Series").build();
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.of(previous));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Ended", null,
+                List.of(new TmdbSeasonSummary(1, null, null, "2020-01-01", 1, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
+        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
+                        1, null, null, null, "2020-01-01", 1,
+                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", null, null, null)),
+                        null, null)));
+
+        contentTrackingService.trackContentChanges();
+
+        verify(contentRepository, never()).save(any());
     }
 
     @Test

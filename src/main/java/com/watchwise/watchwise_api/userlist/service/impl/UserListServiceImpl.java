@@ -384,10 +384,7 @@ public class UserListServiceImpl implements UserListService {
         List<UserListItemResponseDTO> items = userListItemService.addItems(
                 userId, savedList.getId(), new UserListItemBulkCreationDTO(userListBulkCreationDTO.items()));
         double watchedPercentage = userListItemService.getWatchedPercentage(savedList.getId(), userId);
-        long totalRuntimeMinutes = items.stream()
-                .filter(item -> item.content() != null && item.content().runtimeMinutes() != null)
-                .mapToLong(item -> item.content().runtimeMinutes())
-                .sum();
+        long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(savedList.getId());
         UserListItemScope itemScope = resolveItemScopeFromLoadedItems(items);
 
         return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage, false,

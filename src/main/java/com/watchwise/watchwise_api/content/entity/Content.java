@@ -77,6 +77,10 @@ public class Content {
     @Setter
     private Integer runtimeMinutesEpisodeCount;
 
+    @Column(name = "runtime_reported_episode_count")
+    @Setter
+    private Integer runtimeReportedEpisodeCount;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;

@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -167,16 +168,22 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
                     content.setTotalRuntimeMinutes(content.getTotalRuntimeMinutes() + runtime);
                     content.setRuntimeMinutesEpisodeCount(
                             (content.getRuntimeMinutesEpisodeCount() == null ? 0 : content.getRuntimeMinutesEpisodeCount()) + 1);
+                    content.setUpdatedAt(LocalDateTime.now());
                     contentRepository.save(content);
                 });
     }
 
     private void reconcileRuntimeBeforeFreezing(Content content, TmdbTvDetails fresh) {
-        if (fresh.seasons() == null) {
+        if (!hasCompleteSeasonSummaries(fresh.seasons())) {
             return;
         }
         int total = 0;
         int count = 0;
+        int fetchedEpisodeCount = 0;
+        Map<Integer, Integer> expectedEpisodeCounts = fresh.seasons().stream()
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() != 0)
+                .collect(Collectors.toMap(TmdbSeasonSummary::seasonNumber, TmdbSeasonSummary::episodeCount));
+        Map<Integer, Integer> fetchedEpisodeCounts = new LinkedHashMap<>();
         for (TmdbSeasonSummary season : fresh.seasons()) {
             if (season.seasonNumber() == null || season.seasonNumber() == 0) {
                 continue;
@@ -187,6 +194,8 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             if (seasonDetails == null || seasonDetails.episodes() == null) {
                 continue;
             }
+            fetchedEpisodeCounts.merge(season.seasonNumber(), seasonDetails.episodes().size(), Math::max);
+            fetchedEpisodeCount += seasonDetails.episodes().size();
             for (TmdbEpisodeSummary episode : seasonDetails.episodes()) {
                 if (episode.runtime() != null) {
                     total += episode.runtime();
@@ -194,9 +203,42 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
                 }
             }
         }
+        if (!expectedEpisodeCounts.entrySet().stream()
+                .allMatch(entry -> fetchedEpisodeCounts.getOrDefault(entry.getKey(), -1) >= entry.getValue())) {
+            return;
+        }
+        if (count == 0) {
+            return;
+        }
         content.setTotalRuntimeMinutes(count > 0 ? total : null);
         content.setRuntimeMinutesEpisodeCount(count > 0 ? count : null);
+        Integer reportedEpisodeCount = reportedEpisodeCount(fresh.seasons());
+        content.setRuntimeReportedEpisodeCount(
+                count > 0 && reportedEpisodeCount != null && fetchedEpisodeCount >= reportedEpisodeCount
+                        ? reportedEpisodeCount
+                        : null);
+        content.setUpdatedAt(LocalDateTime.now());
         contentRepository.save(content);
+    }
+
+    private Integer reportedEpisodeCount(List<TmdbSeasonSummary> seasons) {
+        if (seasons == null || seasons.isEmpty()) {
+            return null;
+        }
+        List<TmdbSeasonSummary> regularSeasons = seasons.stream()
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() != 0)
+                .toList();
+        if (regularSeasons.isEmpty() || regularSeasons.stream().anyMatch(season -> season.episodeCount() == null)) {
+            return null;
+        }
+        return regularSeasons.stream()
+                .map(TmdbSeasonSummary::episodeCount)
+                .mapToInt(Integer::intValue)
+                .sum();
+    }
+
+    private boolean hasCompleteSeasonSummaries(List<TmdbSeasonSummary> seasons) {
+        return reportedEpisodeCount(seasons) != null;
     }
 
     @Override

@@ -1054,6 +1054,7 @@ class UserListServiceImplTest {
 
         when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
                 .thenReturn(List.of(movieItem, seriesItem));
+        when(userListItemService.getTotalRuntimeMinutes(any(UUID.class))).thenReturn(270L);
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
@@ -1068,6 +1069,8 @@ class UserListServiceImplTest {
 
         verify(userListItemService).addItems(eq(lucasId), any(UUID.class), itemsCaptor.capture());
         assertThat(itemsCaptor.getValue().items()).containsExactly(movieRef, seriesRef);
+        verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(),
+                eq(2L), eq(0L), eq(270L), any());
     }
 
     @Test
