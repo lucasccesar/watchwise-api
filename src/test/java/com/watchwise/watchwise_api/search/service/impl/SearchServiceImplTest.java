@@ -139,7 +139,7 @@ class SearchServiceImplTest {
                         new TmdbMultiSearchResult("2", "person", null, "Unknown", null, null, null, null),
                         new TmdbMultiSearchResult("3", "tv", null, "Unknown Series", null, null, null, null)),
                         1, 3)));
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("Unknown"), eq("Unknown"), any(Pageable.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCaseForSearch(eq("Unknown"), eq("Unknown"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
         when(userListRepository.findVisibleByNameContainingIgnoreCase(eq(viewerId), eq("Unknown"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
@@ -216,7 +216,7 @@ class SearchServiceImplTest {
                         new TmdbMultiSearchResult("3", "movie", "Alien", null, "/alien.jpg", null, "1979-05-25", null),
                         new TmdbMultiSearchResult("4", "collection", "Alien Collection", null, null, null, null, null),
                         new TmdbMultiSearchResult("5", "person", null, "Ridley Scott", null, "/ridley.jpg", null, null)), 3, 5)));
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("Alien"), eq("Alien"), any(Pageable.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCaseForSearch(eq("Alien"), eq("Alien"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
         when(userListRepository.findVisibleByNameContainingIgnoreCase(eq(viewerId), eq("Alien"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of()));
@@ -267,7 +267,7 @@ class SearchServiceImplTest {
     void shouldSearchUsersWithEscapedPrefixAndSafePreviewMappingWhenTypeIsUser() {
         stubViewer();
         User matchedUser = User.builder().id(UUID.randomUUID()).username("marina_100%").profilePicture("marina.png").isProfilePublic(false).build();
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("marina_100%"), eq("marina\\_100\\%"), any(Pageable.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCaseForSearch(eq("marina_100%"), eq("marina\\_100\\%"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(matchedUser)));
 
         SearchResultDTO result = service.search(viewerId, " marina_100% ", SearchType.USER, 1, 10);
@@ -275,7 +275,7 @@ class SearchServiceImplTest {
         assertThat(result.users()).containsExactly(new UserPreviewDTO(
                 matchedUser.getId(), "marina_100%", "marina.png", false));
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
-        verify(userRepository).findByUsernameStartingWithIgnoreCase(eq("marina_100%"), eq("marina\\_100\\%"), pageableCaptor.capture());
+        verify(userRepository).findByUsernameStartingWithIgnoreCaseForSearch(eq("marina_100%"), eq("marina\\_100\\%"), pageableCaptor.capture());
         assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(20);
         verifyNoInteractions(tmdbClient);
         verifyNoInteractions(userListRepository, userListItemService);
@@ -290,7 +290,7 @@ class SearchServiceImplTest {
         UserList list = UserList.builder().id(listId).user(matchedUser).name("Alien favorites").build();
         when(tmdbClient.searchMulti("Alien", "pt-BR", 1)).thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1,
                 List.of(new TmdbMultiSearchResult("348", "movie", "Alien", null, "/alien.jpg", null, "1979-05-25", null)), 1, 1)));
-        when(userRepository.findByUsernameStartingWithIgnoreCase(eq("Alien"), eq("Alien"), any(Pageable.class)))
+        when(userRepository.findByUsernameStartingWithIgnoreCaseForSearch(eq("Alien"), eq("Alien"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(matchedUser)));
         when(userListRepository.findVisibleByNameContainingIgnoreCase(eq(viewerId), eq("Alien"), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(list)));

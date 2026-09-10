@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -46,26 +47,9 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
                 )
             )
             ORDER BY LOWER(ul.name) ASC, ul.id ASC
-            """,
-            countQuery = """
-            SELECT COUNT(ul) FROM UserList ul
-            WHERE LOWER(ul.name) LIKE CONCAT('%', LOWER(:escapedName), '%') ESCAPE '\\'
-            AND (
-                ul.user.id = :viewerId
-                OR ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
-                OR (
-                    ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
-                    AND EXISTS (
-                        SELECT 1 FROM Follower f
-                        WHERE f.follower.id = :viewerId
-                        AND f.followed.id = ul.user.id
-                        AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
-                    )
-                )
-            )
             """
     )
-    Page<UserList> findVisibleByNameContainingIgnoreCase(
+    Slice<UserList> findVisibleByNameContainingIgnoreCase(
             @Param("viewerId") UUID viewerId, @Param("escapedName") String escapedName, Pageable pageable);
 
     @Modifying

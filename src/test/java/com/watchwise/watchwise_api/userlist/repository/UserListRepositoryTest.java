@@ -22,6 +22,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -171,12 +172,11 @@ class UserListRepositoryTest {
                 .build());
         entityManager.clear();
 
-        Page<UserList> result = userListRepository.findVisibleByNameContainingIgnoreCase(
+        Slice<UserList> result = userListRepository.findVisibleByNameContainingIgnoreCase(
                 lucas.getId(), "space", PageRequest.of(0, 20));
 
         assertThat(result.getContent()).extracting(UserList::getName)
                 .containsExactlyInAnyOrder("My private space list", "Public space list", "Followers space list");
-        assertThat(result.getTotalElements()).isEqualTo(3);
     }
 
     @Test
@@ -186,7 +186,7 @@ class UserListRepositoryTest {
         userListRepository.saveAndFlush(buildListWithVisibility(lucas, "1000 space", UserListVisibility.PUBLIC));
         entityManager.clear();
 
-        Page<UserList> result = userListRepository.findVisibleByNameContainingIgnoreCase(
+        Slice<UserList> result = userListRepository.findVisibleByNameContainingIgnoreCase(
                 lucas.getId(), "100\\%", PageRequest.of(0, 20));
 
         assertThat(result.getContent()).extracting(UserList::getName).containsExactly("100% space");

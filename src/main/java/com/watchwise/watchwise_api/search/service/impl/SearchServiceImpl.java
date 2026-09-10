@@ -23,8 +23,8 @@ import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -130,7 +130,7 @@ public class SearchServiceImpl implements SearchService {
     }
 
     private List<SearchUserListDTO> searchLists(UUID viewerId, String query, PageRequest pageRequest) {
-        Page<UserList> lists = userListRepository.findVisibleByNameContainingIgnoreCase(
+        Slice<UserList> lists = userListRepository.findVisibleByNameContainingIgnoreCase(
                 viewerId, escapeLikeWildcards(query), pageRequest);
         List<UUID> listIds = lists.stream().map(UserList::getId).toList();
         Map<UUID, List<ContentRefDTO>> previewsByListId = userListItemService.getPreviewItemsByListIds(listIds);
@@ -146,7 +146,7 @@ public class SearchServiceImpl implements SearchService {
     }
 
     private List<UserPreviewDTO> searchUsers(String query, PageRequest pageRequest) {
-        return userRepository.findByUsernameStartingWithIgnoreCase(query, escapeLikeWildcards(query), pageRequest)
+        return userRepository.findByUsernameStartingWithIgnoreCaseForSearch(query, escapeLikeWildcards(query), pageRequest)
                 .stream()
                 .map(this::toUserPreviewDto)
                 .toList();

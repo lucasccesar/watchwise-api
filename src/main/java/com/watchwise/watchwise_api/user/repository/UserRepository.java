@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.user.repository;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -45,6 +46,19 @@ public interface UserRepository extends JpaRepository<User, UUID> {
         """
     )
     Page<User> findByUsernameStartingWithIgnoreCase(
+            @Param("username") String username,
+            @Param("escapedUsername") String escapedUsername,
+            Pageable pageable
+    );
+
+    @Query("""
+        SELECT u FROM User u
+        WHERE LOWER(u.username) LIKE CONCAT(LOWER(:escapedUsername), '%') ESCAPE '\\'
+        ORDER BY
+            CASE WHEN LOWER(u.username) = LOWER(:username) THEN 0 ELSE 1 END,
+            u.username ASC
+        """)
+    Slice<User> findByUsernameStartingWithIgnoreCaseForSearch(
             @Param("username") String username,
             @Param("escapedUsername") String escapedUsername,
             Pageable pageable
