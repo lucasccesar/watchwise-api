@@ -402,6 +402,60 @@ class ContentTrackingServiceImplTest {
     }
 
     @Test
+    @DisplayName("[trackContentChanges] Should Reconcile Stale Runtime - When A Failed Increment Is Followed By A Run Without An Event")
+    void shouldReconcileStaleRuntimeWhenAFailedIncrementIsFollowedByARunWithoutAnEvent() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(10)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series), List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId()))
+                .thenReturn(Optional.of("Returning Series"), Optional.of("Returning Series"));
+        TrackedContentState previous = TrackedContentState.builder()
+                .content(series).lastKnownStatus("Returning Series").build();
+        when(trackedContentStateRepository.findByContentId(series.getId()))
+                .thenReturn(Optional.of(previous), Optional.of(previous));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(6, null, null, null, 11, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh), Optional.of(fresh));
+        ContentChangeEvent event = new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), 6, 3);
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(event), List.of());
+        doThrow(new IllegalStateException("runtime unavailable"))
+                .when(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
+
+        contentTrackingService.trackContentChanges();
+        contentTrackingService.trackContentChanges();
+
+        verify(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Retry Runtime Initialization - When An Incomplete Baseline Remains After A Failed Attempt")
+    void shouldRetryRuntimeInitializationWhenAnIncompleteBaselineRemainsAfterAFailedAttempt() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(10)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series), List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId()))
+                .thenReturn(Optional.of("Returning Series"), Optional.of("Returning Series"));
+        TrackedContentState previous = TrackedContentState.builder()
+                .content(series).lastKnownStatus("Returning Series").build();
+        when(trackedContentStateRepository.findByContentId(series.getId()))
+                .thenReturn(Optional.of(previous), Optional.of(previous));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null, null);
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh), Optional.of(fresh));
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(), List.of());
+        doThrow(new IllegalStateException("runtime unavailable"))
+                .doNothing().when(seriesRuntimeAggregateService).initializeIfMissing(series, fresh);
+
+        contentTrackingService.trackContentChanges();
+        contentTrackingService.trackContentChanges();
+
+        verify(seriesRuntimeAggregateService, times(2)).initializeIfMissing(series, fresh);
+    }
+
+    @Test
     @DisplayName("[trackContentChanges] Should Initialize Runtime - When NEW_EPISODE Event Occurs But No Baseline Exists Yet")
     void shouldInitializeRuntimeWhenNewEpisodeEventOccursButNoBaselineExistsYet() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)

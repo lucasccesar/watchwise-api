@@ -157,9 +157,6 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         List<ContentChangeEvent> newEpisodeEvents = events.stream()
                 .filter(event -> event.type() == NotificationType.NEW_EPISODE)
                 .toList();
-        if (newEpisodeEvents.isEmpty()) {
-            return;
-        }
 
         if (!hasRuntimeBaseline(content)) {
             seriesRuntimeAggregateService.initializeIfMissing(content, fresh);
@@ -167,6 +164,14 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         }
 
         Integer reportedEpisodeCount = reportedEpisodeCount(fresh.seasons());
+        if (newEpisodeEvents.isEmpty()) {
+            if (reportedEpisodeCount != null
+                    && !Objects.equals(reportedEpisodeCount, content.getRuntimeReportedEpisodeCount())) {
+                seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh);
+            }
+            return;
+        }
+
         boolean requiresFullReconciliation = reportedEpisodeCount == null
                 || newEpisodeEvents.stream().anyMatch(event -> event.seasonNumber() == null || event.episodeNumber() == null);
         if (requiresFullReconciliation) {
