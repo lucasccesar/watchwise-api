@@ -12,6 +12,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -97,6 +98,19 @@ class ContentRepositoryTest {
         Content reloaded = contentRepository.findById(series.getId()).orElseThrow();
 
         assertThat(reloaded.getRuntimeAggregateVerifiedAt()).isEqualTo(verifiedAt);
+    }
+
+    @Test
+    @Transactional
+    @DisplayName("[findByIdForUpdate] Should Return The Same Series Row While Holding A Pessimistic Write Lock")
+    void shouldReturnSameSeriesRowWhileHoldingPessimisticWriteLock() {
+        Content series = contentRepository.saveAndFlush(buildSeries("1399"));
+        entityManager.clear();
+
+        Optional<Content> locked = contentRepository.findByIdForUpdate(series.getId());
+
+        assertThat(locked).isPresent();
+        assertThat(locked.orElseThrow().getId()).isEqualTo(series.getId());
     }
 
     @Test
@@ -297,6 +311,16 @@ class ContentRepositoryTest {
         return Content.builder()
                 .tmdbId(tmdbId)
                 .type(ContentType.MOVIE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildSeries(String tmdbId) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .tmdbId(tmdbId)
+                .type(ContentType.SERIES)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
