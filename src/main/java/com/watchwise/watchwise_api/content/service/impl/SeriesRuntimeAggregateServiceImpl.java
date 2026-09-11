@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -38,31 +39,40 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
 
     @Override
     public SeriesRuntimeResolution resolve(Content content, TmdbTvFullDetails freshDetails, String language) {
+        UUID contentId = requirePersistedContentId(content);
         SeriesRuntimeAggregate reusable = reusableBaseline(content, freshDetails.seasons());
         if (reusable != null) {
             return new SeriesRuntimeResolution(reusable, List.of());
         }
-        Object lock = resolutionLocks.computeIfAbsent(content.getId(), ignored -> new Object());
+        Object lock = resolutionLocks.computeIfAbsent(contentId, ignored -> new Object());
         synchronized (lock) {
             try {
-                Content current = content.getId() == null ? content : contentRepository.findById(content.getId()).orElse(content);
+                Content current = contentRepository.findById(contentId).orElse(content);
                 SeriesRuntimeAggregate afterWait = reusableBaseline(current, freshDetails.seasons());
                 if (afterWait != null) {
                     return new SeriesRuntimeResolution(afterWait, List.of());
                 }
                 return reconcile(current, freshDetails.seasons(), language);
             } finally {
-                resolutionLocks.remove(content.getId(), lock);
+                resolutionLocks.remove(contentId, lock);
             }
         }
     }
 
     @Override
     public void initializeIfMissing(Content content, TmdbTvDetails freshDetails) {
-        if (hasBaseline(content)) {
-            return;
+        UUID contentId = requirePersistedContentId(content);
+        Object lock = resolutionLocks.computeIfAbsent(contentId, ignored -> new Object());
+        synchronized (lock) {
+            try {
+                Content current = contentRepository.findById(contentId).orElse(content);
+                if (!hasBaseline(current)) {
+                    reconcile(current, freshDetails.seasons(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+                }
+            } finally {
+                resolutionLocks.remove(contentId, lock);
+            }
         }
-        reconcile(content, freshDetails.seasons(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
     }
 
     @Override
@@ -70,12 +80,15 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
             Integer reportedEpisodeCount) {
         Optional<TmdbEpisodeFullDetails> episode = tmdbClient.getEpisodeFullDetails(
                 content.getTmdbId(), seasonNumber, episodeNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional();
-        if (episode.isEmpty() || episode.get().runtime() == null || content.getId() == null) {
+        if (episode.isEmpty() || episode.get().runtime() == null || content.getId() == null || reportedEpisodeCount == null) {
             return;
         }
         newTransactionExecutor.runInNewTransaction(() -> {
             contentRepository.findByIdForUpdate(content.getId()).ifPresent(locked -> {
                 if (!hasBaseline(locked)) {
+                    return;
+                }
+                if (locked.getRuntimeReportedEpisodeCount() >= reportedEpisodeCount) {
                     return;
                 }
                 int total = locked.getTotalRuntimeMinutes() + episode.get().runtime();
@@ -108,19 +121,13 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
                 .flatMap(Optional::stream)
                 .toList();
         if (fetched.size() != regular.size()) {
-            return new SeriesRuntimeResolution(storedAggregate(content), fetched);
+            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched);
         }
         SeriesRuntimeAggregate aggregate = calculator.calculate(fetched, summaries);
         if (aggregate.totalRuntimeMinutes() == null) {
-            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : aggregate, fetched);
+            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched);
         }
-        content.setTotalRuntimeMinutes(aggregate.totalRuntimeMinutes());
-        content.setRuntimeMinutes(aggregate.averageRuntimeMinutes());
-        content.setRuntimeMinutesEpisodeCount(aggregate.knownEpisodeCount());
-        content.setRuntimeReportedEpisodeCount(aggregate.reportedEpisodeCount());
-        content.setRuntimeAggregateVerifiedAt(LocalDateTime.now());
-        content.setUpdatedAt(LocalDateTime.now());
-        contentRepository.save(content);
+        publishReconciledAggregate(content, aggregate);
         return new SeriesRuntimeResolution(aggregate, fetched);
     }
 
@@ -150,5 +157,31 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
     private List<TmdbSeasonSummary> regularSeasons(List<TmdbSeasonSummary> summaries) {
         return summaries == null ? List.of() : summaries.stream()
                 .filter(Objects::nonNull).filter(summary -> summary.seasonNumber() != null && summary.seasonNumber() != 0).toList();
+    }
+
+    private void publishReconciledAggregate(Content content, SeriesRuntimeAggregate aggregate) {
+        UUID contentId = requirePersistedContentId(content);
+        newTransactionExecutor.runInNewTransaction(() -> {
+            Content locked = contentRepository.findByIdForUpdate(contentId).orElse(content);
+            locked.setTotalRuntimeMinutes(aggregate.totalRuntimeMinutes());
+            locked.setRuntimeMinutes(aggregate.averageRuntimeMinutes());
+            locked.setRuntimeMinutesEpisodeCount(aggregate.knownEpisodeCount());
+            locked.setRuntimeReportedEpisodeCount(aggregate.reportedEpisodeCount());
+            locked.setRuntimeAggregateVerifiedAt(LocalDateTime.now());
+            locked.setUpdatedAt(LocalDateTime.now());
+            contentRepository.save(locked);
+            return null;
+        });
+    }
+
+    private SeriesRuntimeAggregate nullAggregate(List<TmdbSeasonSummary> summaries) {
+        return new SeriesRuntimeAggregate(null, null, null, calculator.calculate(List.of(), summaries).reportedEpisodeCount());
+    }
+
+    private UUID requirePersistedContentId(Content content) {
+        if (content == null || content.getId() == null) {
+            throw new IllegalArgumentException("Series runtime aggregate requires persisted content");
+        }
+        return content.getId();
     }
 }

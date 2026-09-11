@@ -96,7 +96,7 @@ class SeriesRuntimeAggregateServiceImplTest {
     @Test
     @DisplayName("[resolve] Preserves The Existing Baseline When A Season Cannot Be Loaded")
     void shouldPreserveExistingBaselineWhenASeasonCannotBeLoaded() {
-        Content content = baselineContent(null);
+        Content content = baselineContent(LocalDateTime.now().minusHours(169));
         when(tmdbClient.getSeasonFullDetails("1399", 1, "pt-BR")).thenReturn(found(season(1, 48)));
         when(tmdbClient.getSeasonFullDetails("1399", 2, "pt-BR")).thenReturn(new TmdbLookupResult.Unavailable<>());
 
@@ -135,6 +135,22 @@ class SeriesRuntimeAggregateServiceImplTest {
         assertThat(content.getRuntimeReportedEpisodeCount()).isEqualTo(101);
         assertThat(content.getRuntimeAggregateVerifiedAt()).isEqualTo(verifiedAt);
         verify(contentRepository).save(content);
+    }
+
+    @Test
+    @DisplayName("[incrementForNewEpisode] Ignores A Duplicate Or Stale Reported Episode Counter")
+    void shouldIgnoreDuplicateOrStaleReportedEpisodeCounter() {
+        Content content = baselineContent(LocalDateTime.now().minusHours(1));
+        when(tmdbClient.getEpisodeFullDetails("1399", 3, 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(null, null, null, null, 1, 3, 50, null, null)));
+        when(contentRepository.findByIdForUpdate(content.getId())).thenReturn(java.util.Optional.of(content));
+
+        service.incrementForNewEpisode(content, 3, 1, 100);
+        service.incrementForNewEpisode(content, 3, 1, 99);
+
+        assertThat(content.getTotalRuntimeMinutes()).isEqualTo(4_800);
+        assertThat(content.getRuntimeMinutesEpisodeCount()).isEqualTo(100);
+        verify(contentRepository, never()).save(content);
     }
 
     @Test
