@@ -43,6 +43,7 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -354,11 +355,50 @@ class ContentTrackingServiceImplTest {
                 List.of(new TmdbSeasonSummary(6, null, null, null, 11, null)));
         when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
         ContentChangeEvent event = new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), 6, 3);
-        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(event, event));
+        ContentChangeEvent announcedDate = new ContentChangeEvent(
+                NotificationType.ANNOUNCED_DATE, LocalDate.now().plusDays(1), 7, null);
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(event, event, announcedDate));
+        when(diaryEntryRepository.findUserIdsWatchingSeries("1399")).thenReturn(List.of(watchingUserId));
+        when(watchlistEntryRepository.findUserIdsByContentId(series.getId())).thenReturn(List.of(watchingUserId));
 
         contentTrackingService.trackContentChanges();
 
         verify(seriesRuntimeAggregateService, times(1)).incrementForNewEpisode(series, 6, 3, 11);
+        verify(notificationRepository, times(2)).saveAll(notificationsCaptor.capture());
+        List<List<Notification>> notifications = notificationsCaptor.getAllValues();
+        assertThat(notifications).allSatisfy(batch -> assertThat(batch).hasSize(1));
+        assertThat(notifications.get(0).get(0).getType()).isEqualTo(NotificationType.NEW_EPISODE);
+        assertThat(notifications.get(1).get(0).getType()).isEqualTo(NotificationType.ANNOUNCED_DATE);
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Persist Tracking State - When Non-Terminal Runtime Synchronization Fails")
+    void shouldPersistTrackingStateWhenNonTerminalRuntimeSynchronizationFails() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(10)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId()))
+                .thenReturn(Optional.of("Returning Series"));
+        TrackedContentState previous = TrackedContentState.builder()
+                .content(series).lastKnownStatus("Returning Series").build();
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.of(previous));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(6, null, null, null, 11, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
+        ContentChangeEvent event = new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), 6, 3);
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(event));
+        when(diaryEntryRepository.findUserIdsWatchingSeries("1399")).thenReturn(List.of(watchingUserId));
+        doThrow(new IllegalStateException("runtime unavailable"))
+                .when(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
+
+        contentTrackingService.trackContentChanges();
+
+        verify(notificationRepository).saveAll(any());
+        ArgumentCaptor<TrackedContentState> stateCaptor = ArgumentCaptor.forClass(TrackedContentState.class);
+        verify(trackedContentStateRepository).save(stateCaptor.capture());
+        assertThat(stateCaptor.getValue().getLastKnownStatus()).isEqualTo("Returning Series");
     }
 
     @Test
@@ -401,6 +441,33 @@ class ContentTrackingServiceImplTest {
 
         verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
         verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Persist Tracking State - When Terminal Runtime Reconciliation Fails")
+    void shouldPersistTrackingStateWhenTerminalRuntimeReconciliationFails() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(300).runtimeMinutesEpisodeCount(6).runtimeReportedEpisodeCount(6)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId()))
+                .thenReturn(Optional.of("Returning Series"));
+        TrackedContentState previous = TrackedContentState.builder()
+                .content(series).lastKnownStatus("Returning Series").build();
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.of(previous));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Ended", null,
+                List.of(new TmdbSeasonSummary(1, null, null, "2020-01-01", 1, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
+        doThrow(new IllegalStateException("runtime unavailable"))
+                .when(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
+
+        contentTrackingService.trackContentChanges();
+
+        ArgumentCaptor<TrackedContentState> stateCaptor = ArgumentCaptor.forClass(TrackedContentState.class);
+        verify(trackedContentStateRepository).save(stateCaptor.capture());
+        assertThat(stateCaptor.getValue().getLastKnownStatus()).isEqualTo("Ended");
     }
 
     @Test

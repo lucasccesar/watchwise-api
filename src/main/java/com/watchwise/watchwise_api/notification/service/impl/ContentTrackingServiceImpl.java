@@ -130,21 +130,21 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             return;
         }
 
-        String previousStatus = newTransactionExecutor.runInNewTransaction(() -> {
+        SeriesTrackingResult trackingResult = newTransactionExecutor.runInNewTransaction(() -> {
             TrackedContentState state = trackedContentStateRepository.findByContentId(content.getId()).orElse(null);
             String status = state != null ? state.getLastKnownStatus() : null;
-            List<ContentChangeEvent> events = contentChangeDetector.detectTvChange(state, fresh.get(), LocalDate.now());
+            List<ContentChangeEvent> events = deduplicateEpisodeEvents(
+                    contentChangeDetector.detectTvChange(state, fresh.get(), LocalDate.now()));
 
             events.forEach(e -> notifyWatchers(content, e));
-            if (!isTransitioningToTerminal(status, fresh.get().status())) {
-                synchronizeRuntimeForNewEpisodes(content, fresh.get(), events);
-            }
             saveSeriesState(content, state, fresh.get());
-            return status;
+            return new SeriesTrackingResult(status, events);
         });
 
-        if (isTransitioningToTerminal(previousStatus, fresh.get().status())) {
+        if (isTransitioningToTerminal(trackingResult.previousStatus(), fresh.get().status())) {
             seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh.get());
+        } else {
+            synchronizeRuntimeForNewEpisodes(content, fresh.get(), trackingResult.events());
         }
     }
 
@@ -174,14 +174,16 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             return;
         }
 
-        Set<String> coordinates = new HashSet<>();
-        newEpisodeEvents.forEach(event -> {
-            String coordinate = event.seasonNumber() + ":" + event.episodeNumber();
-            if (coordinates.add(coordinate)) {
-                seriesRuntimeAggregateService.incrementForNewEpisode(
-                        content, event.seasonNumber(), event.episodeNumber(), reportedEpisodeCount);
-            }
-        });
+        newEpisodeEvents.forEach(event -> seriesRuntimeAggregateService.incrementForNewEpisode(
+                content, event.seasonNumber(), event.episodeNumber(), reportedEpisodeCount));
+    }
+
+    private List<ContentChangeEvent> deduplicateEpisodeEvents(List<ContentChangeEvent> events) {
+        Set<String> episodeCoordinates = new HashSet<>();
+        return events.stream()
+                .filter(event -> event.type() != NotificationType.NEW_EPISODE
+                        || episodeCoordinates.add(event.seasonNumber() + ":" + event.episodeNumber()))
+                .toList();
     }
 
     private Integer reportedEpisodeCount(List<TmdbSeasonSummary> seasons) {
@@ -206,6 +208,9 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
                 && content.getRuntimeMinutesEpisodeCount() != null
                 && content.getRuntimeReportedEpisodeCount() != null
                 && content.getRuntimeAggregateVerifiedAt() != null;
+    }
+
+    private record SeriesTrackingResult(String previousStatus, List<ContentChangeEvent> events) {
     }
 
     @Override
