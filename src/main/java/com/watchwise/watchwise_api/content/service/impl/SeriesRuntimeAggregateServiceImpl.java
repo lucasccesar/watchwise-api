@@ -74,16 +74,18 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
     @Override
     public void incrementForNewEpisode(Content content, Integer seasonNumber, Integer episodeNumber,
             Integer reportedEpisodeCount) {
-        Optional<TmdbEpisodeFullDetails> episode = tmdbClient.getEpisodeFullDetails(
-                content.getTmdbId(), seasonNumber, episodeNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional();
-        if (episode.isEmpty() || episode.get().runtime() == null || content.getId() == null || reportedEpisodeCount == null) {
+        if (content.getId() == null || reportedEpisodeCount == null) {
             return;
         }
+        Optional<TmdbEpisodeFullDetails> episode = tmdbClient.getEpisodeFullDetails(
+                content.getTmdbId(), seasonNumber, episodeNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional();
+        Integer episodeRuntime = episode.map(TmdbEpisodeFullDetails::runtime).orElse(null);
         boolean reconciliationNeeded = newTransactionExecutor.runInNewTransaction(() -> {
             Content locked = contentRepository.findByIdForUpdate(content.getId()).orElse(null);
             if (locked == null || !hasBaseline(locked) || locked.getRuntimeReportedEpisodeCount() >= reportedEpisodeCount) return false;
             if (reportedEpisodeCount != locked.getRuntimeReportedEpisodeCount() + 1) return true;
-            int total = locked.getTotalRuntimeMinutes() + episode.get().runtime();
+            if (episodeRuntime == null) return false;
+            int total = locked.getTotalRuntimeMinutes() + episodeRuntime;
             int count = locked.getRuntimeMinutesEpisodeCount() + 1;
             locked.setTotalRuntimeMinutes(total);
             locked.setRuntimeMinutesEpisodeCount(count);
