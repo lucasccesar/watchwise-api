@@ -43,6 +43,7 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -569,8 +570,8 @@ class ContentTrackingServiceImplTest {
     }
 
     @Test
-    @DisplayName("[trackContentChanges] Should Not Recalculate Runtime - When Series Stays Returning Series")
-    void shouldNotRecalculateRuntimeWhenSeriesStaysReturningSeries() {
+    @DisplayName("[trackContentChanges] Should Initialize Runtime - When Series Stays Returning Series With An Incomplete Baseline")
+    void shouldInitializeRuntimeWhenSeriesStaysReturningSeriesWithAnIncompleteBaseline() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
                 .totalRuntimeMinutes(300).runtimeMinutesEpisodeCount(6)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
@@ -583,7 +584,36 @@ class ContentTrackingServiceImplTest {
 
         contentTrackingService.trackContentChanges();
 
+        verify(seriesRuntimeAggregateService).initializeIfMissing(eq(series), any());
+        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any());
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
         verify(tmdbClient, never()).getSeasonFullDetails(any(), any(), any());
+        verify(contentRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Skip Runtime Work - When Healthy Baseline And Reported Count Are Unchanged")
+    void shouldSkipRuntimeWorkWhenHealthyBaselineAndReportedCountAreUnchanged() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(300).runtimeMinutesEpisodeCount(6).runtimeReportedEpisodeCount(6)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId()))
+                .thenReturn(Optional.of("Returning Series"));
+        TrackedContentState previous = TrackedContentState.builder()
+                .content(series).lastKnownStatus("Returning Series").build();
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.of(previous));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(1, null, null, null, 6, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
+
+        contentTrackingService.trackContentChanges();
+
+        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any());
+        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any());
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
         verify(contentRepository, never()).save(any());
     }
 
