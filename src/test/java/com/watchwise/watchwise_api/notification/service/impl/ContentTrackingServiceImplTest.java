@@ -1,12 +1,8 @@
 package com.watchwise.watchwise_api.notification.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbNextEpisode;
-import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -15,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
@@ -62,6 +59,7 @@ class ContentTrackingServiceImplTest {
     @Mock private UserRepository userRepository;
     @Mock private ContentService contentService;
     @Mock private ContentRepository contentRepository;
+    @Mock private SeriesRuntimeAggregateService seriesRuntimeAggregateService;
     @Mock private TmdbClient tmdbClient;
     @Mock private ContentChangeDetector contentChangeDetector;
     @Mock private NewTransactionExecutor newTransactionExecutor;
@@ -323,50 +321,71 @@ class ContentTrackingServiceImplTest {
     @DisplayName("[trackContentChanges] Should Increment Stored Runtime - When NEW_EPISODE Event Occurs And Baseline Exists")
     void shouldIncrementStoredRuntimeWhenNewEpisodeEventOccursAndBaselineExists() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
-                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10)
+                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(10)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
         when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
         when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
-        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null, null)));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(6, null, null, null, 11, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
         when(contentChangeDetector.detectTvChange(any(), any(), any()))
                 .thenReturn(List.of(new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), 6, 3)));
-        when(tmdbClient.getEpisodeFullDetails("1399", 6, 3, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(1, "Ep", null, "2026-09-01", 6, 3, 45, null, null)));
 
         contentTrackingService.trackContentChanges();
 
-        ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
-        verify(contentRepository).save(captor.capture());
-        assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(545);
-        assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(11);
-        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isNull();
-        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+        verify(seriesRuntimeAggregateService).incrementForNewEpisode(series, 6, 3, 11);
+        verify(seriesRuntimeAggregateService, never()).reconcileBeforeFreezing(any(), any());
+        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any());
     }
 
     @Test
-    @DisplayName("[trackContentChanges] Should Not Touch Stored Runtime - When NEW_EPISODE Event Occurs But No Baseline Exists Yet")
-    void shouldNotTouchStoredRuntimeWhenNewEpisodeEventOccursButNoBaselineExistsYet() {
+    @DisplayName("[trackContentChanges] Should Increment Runtime Once - When The Detector Returns Duplicate NEW_EPISODE Events")
+    void shouldIncrementRuntimeOnceWhenTheDetectorReturnsDuplicateNewEpisodeEvents() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(10)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(6, null, null, null, 11, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
+        ContentChangeEvent event = new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), 6, 3);
+        when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of(event, event));
+
+        contentTrackingService.trackContentChanges();
+
+        verify(seriesRuntimeAggregateService, times(1)).incrementForNewEpisode(series, 6, 3, 11);
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Initialize Runtime - When NEW_EPISODE Event Occurs But No Baseline Exists Yet")
+    void shouldInitializeRuntimeWhenNewEpisodeEventOccursButNoBaselineExistsYet() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
         when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
         when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
-        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(new TmdbTvDetails("1399", "Returning Series", null, null)));
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null, null);
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
         when(contentChangeDetector.detectTvChange(any(), any(), any()))
                 .thenReturn(List.of(new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), 6, 3)));
 
         contentTrackingService.trackContentChanges();
 
-        verify(tmdbClient, never()).getEpisodeFullDetails(any(), any(), any(), any());
-        verify(contentRepository, never()).save(any());
+        verify(seriesRuntimeAggregateService).initializeIfMissing(series, fresh);
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("[trackContentChanges] Should Recalculate Runtime From Scratch Before Freezing - When Series Transitions To Ended")
     void shouldRecalculateRuntimeFromScratchBeforeFreezingWhenSeriesTransitionsToEnded() {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
-                .totalRuntimeMinutes(300).runtimeMinutesEpisodeCount(6)
+                .totalRuntimeMinutes(300).runtimeMinutesEpisodeCount(6).runtimeReportedEpisodeCount(6)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
         when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
@@ -377,25 +396,34 @@ class ContentTrackingServiceImplTest {
                         new TmdbSeasonSummary(2, null, null, "2021-01-01", 1, null)));
         when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
-        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
-                        1, null, null, null, "2020-01-01", 1,
-                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", 40, null, null)),
-                        null, null)));
-        when(tmdbClient.getSeasonFullDetails("1399", 2, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
-                        2, null, null, null, "2021-01-01", 2,
-                        List.of(new TmdbEpisodeSummary(1, null, null, "2021-01-01", 42, null, null)),
-                        null, null)));
 
         contentTrackingService.trackContentChanges();
 
-        ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
-        verify(contentRepository).save(captor.capture());
-        assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(82);
-        assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(2);
-        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isEqualTo(2);
-        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[trackContentChanges] Should Reconcile Runtime - When NEW_EPISODE Event Has Incomplete Coordinates")
+    void shouldReconcileRuntimeWhenNewEpisodeEventHasIncompleteCoordinates() {
+        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(300).runtimeMinutesEpisodeCount(6).runtimeReportedEpisodeCount(6)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now().minusHours(1))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
+        when(trackedContentStateRepository.findLastKnownStatusByContentId(series.getId())).thenReturn(Optional.of("Returning Series"));
+        when(trackedContentStateRepository.findByContentId(series.getId())).thenReturn(Optional.empty());
+        TmdbTvDetails fresh = new TmdbTvDetails("1399", "Returning Series", null,
+                List.of(new TmdbSeasonSummary(1, null, null, null, 6, null)));
+        when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
+        when(contentChangeDetector.detectTvChange(any(), any(), any()))
+                .thenReturn(List.of(new ContentChangeEvent(NotificationType.NEW_EPISODE, LocalDate.now(), null, 3)));
+
+        contentTrackingService.trackContentChanges();
+
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
+        verify(seriesRuntimeAggregateService, never()).incrementForNewEpisode(any(), any(), any(), any());
+        verify(seriesRuntimeAggregateService, never()).initializeIfMissing(any(), any());
     }
 
     @Test
@@ -412,14 +440,10 @@ class ContentTrackingServiceImplTest {
                 List.of(new TmdbSeasonSummary(1, null, null, "2020-01-01", 1, null)));
         when(tmdbClient.getTvDetails("1399")).thenReturn(Optional.of(fresh));
         when(contentChangeDetector.detectTvChange(any(), any(), any())).thenReturn(List.of());
-        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
-                        1, null, null, null, "2020-01-01", 1,
-                        List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-01", null, null, null)),
-                        null, null)));
 
         contentTrackingService.trackContentChanges();
 
+        verify(seriesRuntimeAggregateService).reconcileBeforeFreezing(series, fresh);
         verify(contentRepository, never()).save(any());
     }
 

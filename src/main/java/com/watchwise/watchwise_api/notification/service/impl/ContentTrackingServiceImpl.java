@@ -1,10 +1,7 @@
 package com.watchwise.watchwise_api.notification.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -14,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
@@ -32,13 +30,14 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -54,6 +53,7 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
     private final ContentRepository contentRepository;
     private final TmdbClient tmdbClient;
     private final ContentChangeDetector contentChangeDetector;
+    private final SeriesRuntimeAggregateService seriesRuntimeAggregateService;
     private final NewTransactionExecutor newTransactionExecutor;
 
     @Override
@@ -136,13 +136,15 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             List<ContentChangeEvent> events = contentChangeDetector.detectTvChange(state, fresh.get(), LocalDate.now());
 
             events.forEach(e -> notifyWatchers(content, e));
-            incrementRuntimeForNewEpisodes(content, events);
+            if (!isTransitioningToTerminal(status, fresh.get().status())) {
+                synchronizeRuntimeForNewEpisodes(content, fresh.get(), events);
+            }
             saveSeriesState(content, state, fresh.get());
             return status;
         });
 
         if (isTransitioningToTerminal(previousStatus, fresh.get().status())) {
-            reconcileRuntimeBeforeFreezing(content, fresh.get());
+            seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh.get());
         }
     }
 
@@ -150,75 +152,36 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         return !isTerminal(ContentType.SERIES, previousStatus) && isTerminal(ContentType.SERIES, freshStatus);
     }
 
-    private void incrementRuntimeForNewEpisodes(Content content, List<ContentChangeEvent> events) {
-        if (content.getTotalRuntimeMinutes() == null) {
-            return;
-        }
-        events.stream()
+    private void synchronizeRuntimeForNewEpisodes(Content content, TmdbTvDetails fresh,
+            List<ContentChangeEvent> events) {
+        List<ContentChangeEvent> newEpisodeEvents = events.stream()
                 .filter(event -> event.type() == NotificationType.NEW_EPISODE)
-                .forEach(event -> incrementRuntimeForEpisode(content, event.seasonNumber(), event.episodeNumber()));
-    }
+                .toList();
+        if (newEpisodeEvents.isEmpty()) {
+            return;
+        }
 
-    private void incrementRuntimeForEpisode(Content content, Integer seasonNumber, Integer episodeNumber) {
-        tmdbClient.getEpisodeFullDetails(content.getTmdbId(), seasonNumber, episodeNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
-                .toOptional()
-                .map(TmdbEpisodeFullDetails::runtime)
-                .filter(Objects::nonNull)
-                .ifPresent(runtime -> {
-                    content.setTotalRuntimeMinutes(content.getTotalRuntimeMinutes() + runtime);
-                    content.setRuntimeMinutesEpisodeCount(
-                            (content.getRuntimeMinutesEpisodeCount() == null ? 0 : content.getRuntimeMinutesEpisodeCount()) + 1);
-                    content.setUpdatedAt(LocalDateTime.now());
-                    contentRepository.save(content);
-                });
-    }
+        if (!hasRuntimeBaseline(content)) {
+            seriesRuntimeAggregateService.initializeIfMissing(content, fresh);
+            return;
+        }
 
-    private void reconcileRuntimeBeforeFreezing(Content content, TmdbTvDetails fresh) {
-        if (!hasCompleteSeasonSummaries(fresh.seasons())) {
-            return;
-        }
-        int total = 0;
-        int count = 0;
-        int fetchedEpisodeCount = 0;
-        Map<Integer, Integer> expectedEpisodeCounts = fresh.seasons().stream()
-                .filter(season -> season.seasonNumber() != null && season.seasonNumber() != 0)
-                .collect(Collectors.toMap(TmdbSeasonSummary::seasonNumber, TmdbSeasonSummary::episodeCount));
-        Map<Integer, Integer> fetchedEpisodeCounts = new LinkedHashMap<>();
-        for (TmdbSeasonSummary season : fresh.seasons()) {
-            if (season.seasonNumber() == null || season.seasonNumber() == 0) {
-                continue;
-            }
-            TmdbSeasonFullDetails seasonDetails = tmdbClient.getSeasonFullDetails(
-                            content.getTmdbId(), season.seasonNumber(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
-                    .toOptional().orElse(null);
-            if (seasonDetails == null || seasonDetails.episodes() == null) {
-                continue;
-            }
-            fetchedEpisodeCounts.merge(season.seasonNumber(), seasonDetails.episodes().size(), Math::max);
-            fetchedEpisodeCount += seasonDetails.episodes().size();
-            for (TmdbEpisodeSummary episode : seasonDetails.episodes()) {
-                if (episode.runtime() != null) {
-                    total += episode.runtime();
-                    count++;
-                }
-            }
-        }
-        if (!expectedEpisodeCounts.entrySet().stream()
-                .allMatch(entry -> fetchedEpisodeCounts.getOrDefault(entry.getKey(), -1) >= entry.getValue())) {
-            return;
-        }
-        if (count == 0) {
-            return;
-        }
-        content.setTotalRuntimeMinutes(count > 0 ? total : null);
-        content.setRuntimeMinutesEpisodeCount(count > 0 ? count : null);
         Integer reportedEpisodeCount = reportedEpisodeCount(fresh.seasons());
-        content.setRuntimeReportedEpisodeCount(
-                count > 0 && reportedEpisodeCount != null && fetchedEpisodeCount >= reportedEpisodeCount
-                        ? reportedEpisodeCount
-                        : null);
-        content.setUpdatedAt(LocalDateTime.now());
-        contentRepository.save(content);
+        boolean requiresFullReconciliation = reportedEpisodeCount == null
+                || newEpisodeEvents.stream().anyMatch(event -> event.seasonNumber() == null || event.episodeNumber() == null);
+        if (requiresFullReconciliation) {
+            seriesRuntimeAggregateService.reconcileBeforeFreezing(content, fresh);
+            return;
+        }
+
+        Set<String> coordinates = new HashSet<>();
+        newEpisodeEvents.forEach(event -> {
+            String coordinate = event.seasonNumber() + ":" + event.episodeNumber();
+            if (coordinates.add(coordinate)) {
+                seriesRuntimeAggregateService.incrementForNewEpisode(
+                        content, event.seasonNumber(), event.episodeNumber(), reportedEpisodeCount);
+            }
+        });
     }
 
     private Integer reportedEpisodeCount(List<TmdbSeasonSummary> seasons) {
@@ -226,6 +189,7 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             return null;
         }
         List<TmdbSeasonSummary> regularSeasons = seasons.stream()
+                .filter(Objects::nonNull)
                 .filter(season -> season.seasonNumber() != null && season.seasonNumber() != 0)
                 .toList();
         if (regularSeasons.isEmpty() || regularSeasons.stream().anyMatch(season -> season.episodeCount() == null)) {
@@ -237,8 +201,11 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
                 .sum();
     }
 
-    private boolean hasCompleteSeasonSummaries(List<TmdbSeasonSummary> seasons) {
-        return reportedEpisodeCount(seasons) != null;
+    private boolean hasRuntimeBaseline(Content content) {
+        return content.getTotalRuntimeMinutes() != null
+                && content.getRuntimeMinutesEpisodeCount() != null
+                && content.getRuntimeReportedEpisodeCount() != null
+                && content.getRuntimeAggregateVerifiedAt() != null;
     }
 
     @Override
