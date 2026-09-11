@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.content.repository;
 
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,9 @@ class ContentRepositoryTest {
 
     @Autowired
     private ContentRepository contentRepository;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @BeforeEach
     void setUp() {
@@ -89,6 +93,7 @@ class ContentRepositoryTest {
                 .updatedAt(LocalDateTime.now())
                 .build());
 
+        entityManager.clear();
         Content reloaded = contentRepository.findById(series.getId()).orElseThrow();
 
         assertThat(reloaded.getRuntimeAggregateVerifiedAt()).isEqualTo(verifiedAt);
