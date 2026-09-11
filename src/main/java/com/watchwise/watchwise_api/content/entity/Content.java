@@ -81,6 +81,10 @@ public class Content {
     @Setter
     private Integer runtimeReportedEpisodeCount;
 
+    @Column(name = "runtime_aggregate_verified_at")
+    @Setter
+    private LocalDateTime runtimeAggregateVerifiedAt;
+
     @Column(name = "created_at", nullable = false)
     @Setter
     private LocalDateTime createdAt;

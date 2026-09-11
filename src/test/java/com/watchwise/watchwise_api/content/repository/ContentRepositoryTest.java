@@ -74,6 +74,27 @@ class ContentRepositoryTest {
     }
 
     @Test
+    @DisplayName("[save] Should Persist Runtime Aggregate Verification Timestamp - When Series Has Runtime Aggregate Data")
+    void shouldPersistRuntimeAggregateVerificationTimestampWhenSeriesHasRuntimeAggregateData() {
+        LocalDateTime verifiedAt = LocalDateTime.of(2026, 9, 11, 10, 0);
+        Content series = contentRepository.saveAndFlush(Content.builder()
+                .tmdbId("1399")
+                .type(ContentType.SERIES)
+                .totalRuntimeMinutes(4_800)
+                .runtimeMinutes(48)
+                .runtimeMinutesEpisodeCount(100)
+                .runtimeReportedEpisodeCount(100)
+                .runtimeAggregateVerifiedAt(verifiedAt)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+
+        Content reloaded = contentRepository.findById(series.getId()).orElseThrow();
+
+        assertThat(reloaded.getRuntimeAggregateVerifiedAt()).isEqualTo(verifiedAt);
+    }
+
+    @Test
     @DisplayName("[findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType] Should Return Content - When Season With Null EpisodeNumber Matches")
     void shouldReturnContentWhenSeasonWithNullEpisodeNumberMatches() {
         contentRepository.save(buildSeason("1399", 1));

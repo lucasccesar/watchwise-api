@@ -16,6 +16,7 @@ public interface ContentMapper {
     @Mapping(target = "totalRuntimeMinutes", ignore = true)
     @Mapping(target = "runtimeMinutesEpisodeCount", ignore = true)
     @Mapping(target = "runtimeReportedEpisodeCount", ignore = true)
+    @Mapping(target = "runtimeAggregateVerifiedAt", ignore = true)
     Content contentRefCreationDtoToContent(ContentRefCreationDTO contentRefCreationDTO);
 
     ContentRefDTO contentToContentRefDto(Content content);

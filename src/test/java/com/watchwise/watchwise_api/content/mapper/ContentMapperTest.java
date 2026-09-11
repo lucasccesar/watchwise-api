@@ -61,6 +61,10 @@ class ContentMapperTest {
         assertThat(result.getId()).isNull();
         assertThat(result.getCreatedAt()).isNull();
         assertThat(result.getUpdatedAt()).isNull();
+        assertThat(result.getTotalRuntimeMinutes()).isNull();
+        assertThat(result.getRuntimeMinutesEpisodeCount()).isNull();
+        assertThat(result.getRuntimeReportedEpisodeCount()).isNull();
+        assertThat(result.getRuntimeAggregateVerifiedAt()).isNull();
     }
 
     @Test
