@@ -98,6 +98,24 @@ class ContentMapperTest {
     }
 
     @Test
+    @DisplayName("[contentToContentRefDto] Should Map TotalRuntimeMinutes - When Mapping A Series")
+    void shouldMapTotalRuntimeMinutesWhenMappingSeriesToContentRefDto() {
+        Content series = Content.builder()
+                .id(UUID.randomUUID())
+                .tmdbId("1399")
+                .type(ContentType.SERIES)
+                .runtimeMinutes(48)
+                .totalRuntimeMinutes(4_800)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        ContentRefDTO result = contentMapper.contentToContentRefDto(series);
+
+        assertThat(result.totalRuntimeMinutes()).isEqualTo(4_800);
+    }
+
+    @Test
     @DisplayName("[contentRefCreationDtoToContent] Should Map IsSeasonFinale And IsSeriesFinale - When Present")
     void shouldMapIsSeasonFinaleAndIsSeriesFinaleWhenPresent() {
         ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 3, true, false);

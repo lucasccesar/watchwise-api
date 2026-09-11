@@ -138,6 +138,23 @@ class ContentControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getOrCreateReference] Should Expose Persisted Total Runtime - When Existing Series Has Aggregate")
+    void shouldExposePersistedTotalRuntimeWhenExistingSeriesHasAggregate() throws Exception {
+        contentRepository.save(Content.builder()
+                .tmdbId("1397").type(ContentType.SERIES)
+                .runtimeMinutes(48).totalRuntimeMinutes(4_800)
+                .runtimeMinutesEpisodeCount(100).runtimeReportedEpisodeCount(100)
+                .runtimeAggregateVerifiedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+
+        mockMvc.perform(referenceRequest("{ \"tmdbId\": \"1397\", \"type\": \"SERIES\" }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("SERIES"))
+                .andExpect(jsonPath("$.runtimeMinutes").value(48))
+                .andExpect(jsonPath("$.totalRuntimeMinutes").value(4_800));
+    }
+
+    @Test
     @DisplayName("[getOrCreateReference] Should Create And Return New Reference - When Type Is Season")
     void shouldCreateAndReturnNewReferenceWhenTypeIsSeason() throws Exception {
         mockMvc.perform(referenceRequest("{ \"seriesTmdbId\": \"1399\", \"type\": \"SEASON\", \"seasonNumber\": 1 }"))

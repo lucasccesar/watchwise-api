@@ -18,6 +18,7 @@ public record ContentRefDTO(
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         Integer runtimeMinutes,
+        Integer totalRuntimeMinutes,
         List<String> genres,
         Integer releaseYear,
         List<String> countries
@@ -26,13 +27,21 @@ public record ContentRefDTO(
             Integer episodeNumber, Boolean isSeasonFinale, Boolean isSeriesFinale, LocalDateTime createdAt,
             LocalDateTime updatedAt) {
         this(id, tmdbId, type, seriesTmdbId, seasonNumber, episodeNumber, isSeasonFinale, isSeriesFinale,
-                createdAt, updatedAt, null, null, null, null);
+                createdAt, updatedAt, null, null, null, null, null);
     }
 
     public ContentRefDTO(UUID id, String tmdbId, ContentType type, String seriesTmdbId, Integer seasonNumber,
             Integer episodeNumber, Boolean isSeasonFinale, Boolean isSeriesFinale, LocalDateTime createdAt,
             LocalDateTime updatedAt, Integer runtimeMinutes, List<String> genres) {
         this(id, tmdbId, type, seriesTmdbId, seasonNumber, episodeNumber, isSeasonFinale, isSeriesFinale,
-                createdAt, updatedAt, runtimeMinutes, genres, null, null);
+                createdAt, updatedAt, runtimeMinutes, null, genres, null, null);
+    }
+
+    public ContentRefDTO(UUID id, String tmdbId, ContentType type, String seriesTmdbId, Integer seasonNumber,
+            Integer episodeNumber, Boolean isSeasonFinale, Boolean isSeriesFinale, LocalDateTime createdAt,
+            LocalDateTime updatedAt, Integer runtimeMinutes, List<String> genres, Integer releaseYear,
+            List<String> countries) {
+        this(id, tmdbId, type, seriesTmdbId, seasonNumber, episodeNumber, isSeasonFinale, isSeriesFinale,
+                createdAt, updatedAt, runtimeMinutes, null, genres, releaseYear, countries);
     }
 }
