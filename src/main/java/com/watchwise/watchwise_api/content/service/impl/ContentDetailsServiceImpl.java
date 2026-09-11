@@ -57,6 +57,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,13 +111,20 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         String language = user.getPreferredLanguage();
         String region = user.getPreferredRegion();
 
-        Map<UUID, Content> contentById = new HashMap<>();
-        for (Content content : contentRepository.findAllById(contentIds)) {
-            if (content != null && content.getId() != null) {
-                contentById.putIfAbsent(content.getId(), content);
-            }
+        List<Content> loadedContents = contentRepository.findAllById(contentIds);
+        if (loadedContents == null) {
+            throw new NotFoundException("Content not found");
         }
-        if (contentIds.stream().anyMatch(contentId -> !contentById.containsKey(contentId))) {
+
+        Set<UUID> requestedContentIds = new HashSet<>(contentIds);
+        Map<UUID, Content> contentById = new HashMap<>();
+        for (Content content : loadedContents) {
+            if (content == null || content.getId() == null || !requestedContentIds.contains(content.getId())) {
+                throw new NotFoundException("Content not found");
+            }
+            contentById.putIfAbsent(content.getId(), content);
+        }
+        if (!contentById.keySet().equals(requestedContentIds)) {
             throw new NotFoundException("Content not found");
         }
 

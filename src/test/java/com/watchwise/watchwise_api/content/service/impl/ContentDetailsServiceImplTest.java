@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvAlternativeTitles;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbVideo;
 import com.watchwise.watchwise_api.common.tmdb.TmdbVideos;
@@ -976,8 +977,9 @@ class ContentDetailsServiceImplTest {
     void shouldThrowNotFoundExceptionWithoutCallingTmdbWhenRepositoryReturnsAnUnexpectedEntity() {
         UUID requested = UUID.randomUUID();
         UUID unexpected = UUID.randomUUID();
+        Content requestedContent = Content.builder().id(requested).type(ContentType.MOVIE).tmdbId("603").build();
         Content unexpectedContent = Content.builder().id(unexpected).type(ContentType.MOVIE).tmdbId("603").build();
-        when(contentRepository.findAllById(List.of(requested))).thenReturn(List.of(unexpectedContent));
+        when(contentRepository.findAllById(List.of(requested))).thenReturn(List.of(requestedContent, unexpectedContent));
 
         assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(List.of(requested), requestingUserId))
                 .isInstanceOf(NotFoundException.class)
@@ -985,6 +987,34 @@ class ContentDetailsServiceImplTest {
 
         verify(contentRepository).findAllById(List.of(requested));
         verify(contentRepository, never()).findById(any());
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Throw NotFoundException Without Calling TMDB - When Repository Returns A Null Collection")
+    void shouldThrowNotFoundExceptionWithoutCallingTmdbWhenRepositoryReturnsANullCollection() {
+        UUID requested = UUID.randomUUID();
+        when(contentRepository.findAllById(List.of(requested))).thenReturn((List<Content>) null);
+
+        assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(List.of(requested), requestingUserId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Content not found");
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Throw NotFoundException Without Calling TMDB - When Repository Returns A Null Entity")
+    void shouldThrowNotFoundExceptionWithoutCallingTmdbWhenRepositoryReturnsANullEntity() {
+        UUID requested = UUID.randomUUID();
+        Content requestedContent = Content.builder().id(requested).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findAllById(List.of(requested)))
+                .thenReturn(java.util.Arrays.asList(requestedContent, null));
+
+        assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(List.of(requested), requestingUserId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Content not found");
+
         verifyNoInteractions(tmdbClient);
     }
 
@@ -1011,6 +1041,49 @@ class ContentDetailsServiceImplTest {
                 .hasMessage("ids must not be empty");
 
         verifyNoInteractions(userRepository, contentRepository, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Reuse Aggregate Seasons And Propagate User Locale - When Content Is A Series")
+    void shouldReuseAggregateSeasonsAndPropagateUserLocaleWhenContentIsASeries() {
+        UUID seriesId = UUID.randomUUID();
+        Content series = Content.builder().id(seriesId).type(ContentType.SERIES).tmdbId("1396").build();
+        User localizedUser = User.builder().id(requestingUserId)
+                .preferredLanguage("pt-BR").preferredRegion("BR").build();
+        TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(
+                101, "Temporada 1", null, null, "2020-01-01", 1,
+                List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2020-01-01", 49, null, null)), null, null);
+        TmdbTvFullDetails seriesDetails = new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Temporada 1", null, "2020-01-01", 1, null)),
+                null, null,
+                new TmdbWatchProviders(Map.of(
+                        "BR", new TmdbRegionProviders(List.of(new TmdbProvider("Globoplay", "/globoplay.png")), null, null))),
+                new TmdbTvAlternativeTitles(List.of()),
+                1, 1, null, null, "Ended");
+        when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(localizedUser));
+        when(contentRepository.findAllById(List.of(seriesId))).thenReturn(List.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetails));
+        doReturn(new SeriesRuntimeResolution(new SeriesRuntimeAggregate(49, 49, 1, 1), List.of(season)))
+                .when(seriesRuntimeAggregateService).resolve(eq(series), eq(seriesDetails), eq("pt-BR"));
+
+        List<ContentDetailsDTO> result = contentDetailsService.getDetailsBatch(List.of(seriesId), requestingUserId);
+
+        assertThat(result).extracting(ContentDetailsDTO::contentId).containsExactly(seriesId);
+        assertThat(result.get(0).runtimeMinutes()).isEqualTo(49);
+        assertThat(result.get(0).totalRuntimeMinutes()).isEqualTo(49);
+        assertThat(result.get(0).watchProviders()).extracting("providerName").containsExactly("Globoplay");
+        assertThat(result.get(0).seasons()).extracting("seasonNumber", "airedEpisodeCount")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, 1));
+        assertThat(result.get(0).recentEpisodes()).extracting("seasonNumber", "episodeNumber")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, 1));
+        verify(userRepository).findById(requestingUserId);
+        verify(contentRepository).findAllById(List.of(seriesId));
+        verify(contentRepository, never()).findById(any());
+        verify(seriesRuntimeAggregateService).resolve(eq(series), eq(seriesDetails), eq("pt-BR"));
+        verify(tmdbClient, never()).getSeasonFullDetails(eq("1396"), eq(1), eq("pt-BR"));
     }
 
     @Test
