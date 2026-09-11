@@ -91,7 +91,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
     @Override
     public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId) {
-        return getDetailsBatch(List.of(contentId), requestingUserId).get(0);
+        User user = userRepository.findById(requestingUserId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        return buildDetails(contentId, user.getPreferredLanguage(), user.getPreferredRegion());
     }
 
     @Override
@@ -108,15 +110,28 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         String language = user.getPreferredLanguage();
         String region = user.getPreferredRegion();
 
+        Map<UUID, Content> contentById = new HashMap<>();
+        for (Content content : contentRepository.findAllById(contentIds)) {
+            if (content != null && content.getId() != null) {
+                contentById.putIfAbsent(content.getId(), content);
+            }
+        }
+        if (contentIds.stream().anyMatch(contentId -> !contentById.containsKey(contentId))) {
+            throw new NotFoundException("Content not found");
+        }
+
         return contentIds.stream()
-                .map(contentId -> buildDetails(contentId, language, region))
+                .map(contentId -> buildDetails(contentById.get(contentId), language, region))
                 .toList();
     }
 
     private ContentDetailsDTO buildDetails(UUID contentId, String language, String region) {
         Content content = contentRepository.findById(contentId)
                 .orElseThrow(() -> new NotFoundException("Content not found"));
+        return buildDetails(content, language, region);
+    }
 
+    private ContentDetailsDTO buildDetails(Content content, String language, String region) {
         return switch (content.getType()) {
             case MOVIE -> buildMovieDetails(content, language, region);
             case SERIES -> buildSeriesDetails(content, language, region);

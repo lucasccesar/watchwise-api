@@ -64,6 +64,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -946,14 +947,14 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getDetailsBatch] Should Return One Entry Per Id In The Same Order - When Called With Multiple Ids")
+    @DisplayName("[getDetailsBatch] Should Return One Entry Per Id In The Same Order And Preserve Duplicates - When Called With Multiple Ids")
     void shouldReturnOneEntryPerIdInTheSameOrderWhenCalledWithMultipleIds() {
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
         Content firstContent = Content.builder().id(first).type(ContentType.MOVIE).tmdbId("603").build();
         Content secondContent = Content.builder().id(second).type(ContentType.MOVIE).tmdbId("604").build();
-        when(contentRepository.findById(first)).thenReturn(Optional.of(firstContent));
-        when(contentRepository.findById(second)).thenReturn(Optional.of(secondContent));
+        when(contentRepository.findAllById(List.of(first, second, first)))
+                .thenReturn(List.of(firstContent, secondContent));
         when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                 "603", "First", "First", null, null, null, null, null, List.of(), List.of(), null, null, null,
                 null, null, null, null)));
@@ -961,10 +962,55 @@ class ContentDetailsServiceImplTest {
                 "604", "Second", "Second", null, null, null, null, null, List.of(), List.of(), null, null, null,
                 null, null, null, null)));
 
-        List<ContentDetailsDTO> result = contentDetailsService.getDetailsBatch(List.of(first, second), requestingUserId);
+        List<ContentDetailsDTO> result = contentDetailsService.getDetailsBatch(List.of(first, second, first), requestingUserId);
 
-        assertThat(result).extracting(ContentDetailsDTO::contentId).containsExactly(first, second);
-        assertThat(result).extracting(ContentDetailsDTO::title).containsExactly("First", "Second");
+        assertThat(result).extracting(ContentDetailsDTO::contentId).containsExactly(first, second, first);
+        assertThat(result).extracting(ContentDetailsDTO::title).containsExactly("First", "Second", "First");
+        verify(contentRepository).findAllById(List.of(first, second, first));
+        verify(contentRepository, never()).findById(any());
+        verify(userRepository).findById(requestingUserId);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Throw NotFoundException Without Calling TMDB - When Repository Returns An Unexpected Entity")
+    void shouldThrowNotFoundExceptionWithoutCallingTmdbWhenRepositoryReturnsAnUnexpectedEntity() {
+        UUID requested = UUID.randomUUID();
+        UUID unexpected = UUID.randomUUID();
+        Content unexpectedContent = Content.builder().id(unexpected).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findAllById(List.of(requested))).thenReturn(List.of(unexpectedContent));
+
+        assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(List.of(requested), requestingUserId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Content not found");
+
+        verify(contentRepository).findAllById(List.of(requested));
+        verify(contentRepository, never()).findById(any());
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Throw NotFoundException Without Calling TMDB - When Any Requested Id Is Missing")
+    void shouldThrowNotFoundExceptionWithoutCallingTmdbWhenAnyRequestedIdIsMissing() {
+        UUID existing = UUID.randomUUID();
+        UUID missing = UUID.randomUUID();
+        Content existingContent = Content.builder().id(existing).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findAllById(List.of(existing, missing))).thenReturn(List.of(existingContent));
+
+        assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(List.of(existing, missing), requestingUserId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Content not found");
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Throw BadRequestException - When Ids Is Null")
+    void shouldThrowBadRequestExceptionWhenIdsIsNull() {
+        assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(null, requestingUserId))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("ids must not be empty");
+
+        verifyNoInteractions(userRepository, contentRepository, tmdbClient);
     }
 
     @Test
