@@ -32,6 +32,9 @@ import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
 import com.watchwise.watchwise_api.notification.service.ContentTrackingService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -59,6 +62,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,6 +81,9 @@ class ContentDetailsServiceImplTest {
     @Mock
     private ContentTrackingService contentTrackingService;
 
+    @Mock
+    private SeriesRuntimeAggregateService seriesRuntimeAggregateService;
+
     private ContentDetailsServiceImpl contentDetailsService;
     private ExecutorService seasonFetchExecutor;
 
@@ -87,10 +94,41 @@ class ContentDetailsServiceImplTest {
     void setUp() {
         seasonFetchExecutor = Executors.newSingleThreadExecutor();
         contentDetailsService = new ContentDetailsServiceImpl(
-                contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService);
+                contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService,
+                seriesRuntimeAggregateService);
         requestingUserId = UUID.randomUUID();
         requestingUser = User.builder().id(requestingUserId).preferredLanguage("en-US").preferredRegion("US").build();
         lenient().when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(requestingUser));
+        lenient().when(seriesRuntimeAggregateService.resolve(any(), any(), any())).thenAnswer(invocation -> {
+            Content content = invocation.getArgument(0);
+            TmdbTvFullDetails details = invocation.getArgument(1);
+            String language = invocation.getArgument(2);
+            if (content.getRuntimeAggregateVerifiedAt() != null && content.getTotalRuntimeMinutes() != null
+                    && content.getRuntimeMinutesEpisodeCount() != null && content.getRuntimeReportedEpisodeCount() != null) {
+                Integer average = content.getRuntimeMinutes() != null ? content.getRuntimeMinutes()
+                        : (int) Math.round(content.getTotalRuntimeMinutes() / (double) content.getRuntimeMinutesEpisodeCount());
+                return new SeriesRuntimeResolution(new SeriesRuntimeAggregate(content.getTotalRuntimeMinutes(), average,
+                        content.getRuntimeMinutesEpisodeCount(), content.getRuntimeReportedEpisodeCount()), List.of());
+            }
+            List<TmdbSeasonSummary> regularSeasons = details.seasons().stream()
+                    .filter(summary -> summary.seasonNumber() != null && summary.seasonNumber() != 0)
+                    .toList();
+            List<TmdbSeasonFullDetails> seasons = regularSeasons.stream()
+                    .map(summary -> tmdbClient.getSeasonFullDetails(content.getTmdbId(), summary.seasonNumber(), language))
+                    .filter(java.util.Objects::nonNull).map(TmdbLookupResult::toOptional).flatMap(Optional::stream).toList();
+            if (seasons.size() != regularSeasons.size() && content.getTotalRuntimeMinutes() != null
+                    && content.getRuntimeMinutesEpisodeCount() != null) {
+                Integer average = content.getRuntimeMinutes() != null ? content.getRuntimeMinutes()
+                        : (int) Math.round(content.getTotalRuntimeMinutes() / (double) content.getRuntimeMinutesEpisodeCount());
+                return new SeriesRuntimeResolution(new SeriesRuntimeAggregate(content.getTotalRuntimeMinutes(), average,
+                        content.getRuntimeMinutesEpisodeCount(), content.getRuntimeReportedEpisodeCount()), seasons);
+            }
+            List<Integer> runtimes = seasons.stream().flatMap(season -> season.episodes().stream())
+                    .map(TmdbEpisodeSummary::runtime).filter(java.util.Objects::nonNull).toList();
+            Integer total = runtimes.isEmpty() ? null : runtimes.stream().mapToInt(Integer::intValue).sum();
+            Integer average = total == null ? null : (int) Math.round(total / (double) runtimes.size());
+            return new SeriesRuntimeResolution(new SeriesRuntimeAggregate(total, average, runtimes.size(), null), seasons);
+        });
     }
 
     @AfterEach
@@ -255,6 +293,34 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDetails] Should Return The Persisted Aggregate And Reuse Its Seasons - When Content Is A Series")
+    void shouldReturnThePersistedAggregateAndReuseItsSeasonsWhenContentIsASeries() {
+        UUID contentId = UUID.randomUUID();
+        Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(101, "Season 1", null, null, "2008-01-20", 1,
+                List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 49, null, null)), null, null);
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)),
+                null, null, null, null, 1, 1, null, null, "Ended")));
+        doReturn(new SeriesRuntimeResolution(new SeriesRuntimeAggregate(147, 49, 3, 3), List.of(season)))
+                .when(seriesRuntimeAggregateService).resolve(eq(series), any(), eq("en-US"));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.totalRuntimeMinutes()).isEqualTo(147);
+        assertThat(result.runtimeMinutes()).isEqualTo(49);
+        assertThat(result.seasons()).extracting("seasonNumber", "airedEpisodeCount")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, 1));
+        assertThat(result.recentEpisodes()).extracting("seasonNumber", "episodeNumber")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, 1));
+        verify(seriesRuntimeAggregateService).resolve(eq(series), any(), eq("en-US"));
+        verify(tmdbClient, never()).getSeasonFullDetails(eq("1396"), eq(1), eq("en-US"));
+    }
+
+    @Test
     @DisplayName("[getDetails] Should Return Null Aired Episode Count - When That Season's Full Details Failed To Fetch")
     void shouldReturnNullAiredEpisodeCountWhenThatSeasonsFullDetailsFailedToFetch() {
         UUID contentId = UUID.randomUUID();
@@ -390,7 +456,8 @@ class ContentDetailsServiceImplTest {
     void shouldSkipFetchingAllSeasonsAndUseStoredRuntimeWhenSeriesIsEndedAndABaselineAlreadyExists() {
         UUID contentId = UUID.randomUUID();
         Content series = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396")
-                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(5).build();
+                .totalRuntimeMinutes(500).runtimeMinutesEpisodeCount(10).runtimeReportedEpisodeCount(5)
+                .runtimeAggregateVerifiedAt(java.time.LocalDateTime.now()).build();
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(series));
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
@@ -440,12 +507,7 @@ class ContentDetailsServiceImplTest {
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
         assertThat(result.totalRuntimeMinutes()).isEqualTo(110);
-        ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
-        verify(contentRepository).save(captor.capture());
-        assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(110);
-        assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(2);
-        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isEqualTo(2);
-        assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+        verify(contentRepository, never()).save(any());
     }
 
     @Test
@@ -499,12 +561,8 @@ class ContentDetailsServiceImplTest {
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
         assertThat(result.totalRuntimeMinutes()).isEqualTo(105);
-        ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
-        verify(contentRepository).save(captor.capture());
-        assertThat(captor.getValue().getTotalRuntimeMinutes()).isEqualTo(105);
-        assertThat(captor.getValue().getRuntimeMinutesEpisodeCount()).isEqualTo(2);
-        assertThat(captor.getValue().getRuntimeReportedEpisodeCount()).isEqualTo(2);
-        verify(contentTrackingService).reactivateAfterRevival(series, "Ended");
+        verify(contentRepository, never()).save(any());
+        verify(contentTrackingService, never()).reactivateAfterRevival(any(), any());
     }
 
     @Test

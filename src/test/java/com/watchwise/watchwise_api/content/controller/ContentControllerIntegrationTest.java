@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -104,6 +105,8 @@ class ContentControllerIntegrationTest {
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
+        lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
         lenient().when(tmdbClient.getEpisodeFullDetails(any(), any(), any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                         null, null, null, null, null, null, null, null, null)));
@@ -473,6 +476,27 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.title").value("The Matrix"))
                 .andExpect(jsonPath("$.releaseDate").value("1999-03-31"))
                 .andExpect(jsonPath("$.runtimeMinutes").value(136));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Return Persisted Series Runtime Aggregate - When Baseline Is Recent")
+    void shouldReturnPersistedSeriesRuntimeAggregateWhenBaselineIsRecent() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("1396").type(ContentType.SERIES)
+                .totalRuntimeMinutes(4_800).runtimeMinutes(48).runtimeMinutesEpisodeCount(100)
+                .runtimeReportedEpisodeCount(100).runtimeAggregateVerifiedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 100, null)),
+                null, null, null, null, 1, 100, null, null, "Ended")));
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("SERIES"))
+                .andExpect(jsonPath("$.runtimeMinutes").value(48))
+                .andExpect(jsonPath("$.totalRuntimeMinutes").value(4_800));
     }
 
     @Test

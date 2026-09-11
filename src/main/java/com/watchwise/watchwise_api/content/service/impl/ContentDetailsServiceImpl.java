@@ -40,6 +40,9 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
+import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
 import com.watchwise.watchwise_api.notification.service.ContentTrackingService;
 import com.watchwise.watchwise_api.notification.tracking.ContentChangeDetector;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -84,6 +87,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private final TmdbClient tmdbClient;
     private final ExecutorService tmdbSeasonFetchExecutor;
     private final ContentTrackingService contentTrackingService;
+    private final SeriesRuntimeAggregateService seriesRuntimeAggregateService;
 
     @Override
     public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId) {
@@ -158,37 +162,16 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         TmdbTvFullDetails details = tmdbClient.getTvFullDetails(content.getTmdbId(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
 
-        List<TmdbSeasonFullDetails> allSeasons;
-        Integer averageRuntimeMinutes;
-        Integer totalRuntimeMinutes;
-
-        if (isTerminalSeriesStatus(details.status())
-                && content.getTotalRuntimeMinutes() != null
-                && !runtimeAggregateNeedsRefresh(details, content)) {
-            allSeasons = fetchAllSeasonsInParallel(
-                    content.getTmdbId(), latestSeasons(details.seasons(), RECENT_SEASONS_LIMIT_WHEN_FROZEN), language);
-            totalRuntimeMinutes = content.getTotalRuntimeMinutes();
-            averageRuntimeMinutes = averageFromStored(content.getTotalRuntimeMinutes(), content.getRuntimeMinutesEpisodeCount());
-        } else {
-            allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), details.seasons(), language);
-            if (allRegularSeasonsFetched(details.seasons(), allSeasons)) {
-                List<Integer> episodeRuntimes = episodeRuntimes(allSeasons);
-                Integer recalculatedTotalRuntimeMinutes = totalRuntimeMinutes(episodeRuntimes);
-                if (recalculatedTotalRuntimeMinutes != null) {
-                    totalRuntimeMinutes = recalculatedTotalRuntimeMinutes;
-                    averageRuntimeMinutes = averageRuntime(episodeRuntimes);
-                    persistRuntimeAggregate(content, totalRuntimeMinutes, episodeRuntimes.size(),
-                            reportedEpisodeCount(details.seasons()));
-                } else {
-                    totalRuntimeMinutes = content.getTotalRuntimeMinutes();
-                    averageRuntimeMinutes = averageFromStored(
-                            content.getTotalRuntimeMinutes(), content.getRuntimeMinutesEpisodeCount());
-                }
-            } else {
-                totalRuntimeMinutes = content.getTotalRuntimeMinutes();
-                averageRuntimeMinutes = averageFromStored(
-                        content.getTotalRuntimeMinutes(), content.getRuntimeMinutesEpisodeCount());
-            }
+        SeriesRuntimeResolution runtimeResolution = seriesRuntimeAggregateService.resolve(content, details, language);
+        SeriesRuntimeAggregate runtime = runtimeResolution.aggregate();
+        List<TmdbSeasonFullDetails> allSeasons = runtimeResolution.seasonsFetchedForAggregate();
+        if (allSeasons.isEmpty()) {
+            List<TmdbSeasonSummary> seasonsForDetails = isTerminalSeriesStatus(details.status())
+                    ? latestSeasons(details.seasons(), RECENT_SEASONS_LIMIT_WHEN_FROZEN)
+                    : details.seasons();
+            allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), seasonsForDetails, language);
+        }
+        if (!isTerminalSeriesStatus(details.status())) {
             contentTrackingService.reactivateAfterRevival(content, details.status());
         }
 
@@ -200,8 +183,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 details.posterPath(),
                 details.backdropPath(),
                 parseDate(details.firstAirDate()),
-                averageRuntimeMinutes,
-                totalRuntimeMinutes,
+                runtime.averageRuntimeMinutes(),
+                runtime.totalRuntimeMinutes(),
                 details.numberOfSeasons(),
                 details.numberOfEpisodes(),
                 genreNames(details.genres()),
@@ -527,13 +510,6 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .toList();
     }
 
-    private List<Integer> episodeRuntimes(List<TmdbSeasonFullDetails> seasons) {
-        return seasons.stream()
-                .filter(Objects::nonNull)
-                .flatMap(season -> runtimesOf(season.episodes()).stream())
-                .toList();
-    }
-
     private List<Integer> runtimesOf(List<TmdbEpisodeSummary> episodes) {
         if (episodes == null) {
             return List.of();
@@ -559,14 +535,6 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         return ContentChangeDetector.ENDED_STATUS.equals(status) || ContentChangeDetector.CANCELED_STATUS.equals(status);
     }
 
-    private boolean runtimeAggregateNeedsRefresh(TmdbTvFullDetails details, Content content) {
-        Integer reportedEpisodeCount = reportedEpisodeCount(details.seasons());
-        Integer storedEpisodeCount = content.getRuntimeReportedEpisodeCount();
-        return reportedEpisodeCount == null
-                ? storedEpisodeCount == null
-                : !reportedEpisodeCount.equals(storedEpisodeCount);
-    }
-
     private List<TmdbSeasonSummary> latestSeasons(List<TmdbSeasonSummary> seasons, int limit) {
         if (seasons == null) {
             return List.of();
@@ -576,63 +544,6 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 .sorted(Comparator.comparing(TmdbSeasonSummary::seasonNumber).reversed())
                 .limit(limit)
                 .toList();
-    }
-
-    private Integer averageFromStored(Integer total, Integer episodeCount) {
-        if (total == null || episodeCount == null || episodeCount == 0) {
-            return null;
-        }
-        return (int) Math.round(total / (double) episodeCount);
-    }
-
-    private Integer reportedEpisodeCount(List<TmdbSeasonSummary> seasons) {
-        if (seasons == null || seasons.isEmpty()) {
-            return null;
-        }
-        List<TmdbSeasonSummary> regularSeasons = seasons.stream()
-                .filter(season -> season.seasonNumber() != null && season.seasonNumber() != 0)
-                .toList();
-        if (regularSeasons.isEmpty() || regularSeasons.stream().anyMatch(season -> season.episodeCount() == null)) {
-            return null;
-        }
-        return regularSeasons.stream()
-                .map(TmdbSeasonSummary::episodeCount)
-                .mapToInt(Integer::intValue)
-                .sum();
-    }
-
-    private boolean allRegularSeasonsFetched(
-            List<TmdbSeasonSummary> seasonSummaries, List<TmdbSeasonFullDetails> fetchedSeasons) {
-        if (reportedEpisodeCount(seasonSummaries) == null) {
-            return false;
-        }
-        Map<Integer, Integer> expectedEpisodeCounts = seasonSummaries.stream()
-                .filter(season -> season.seasonNumber() != null && season.seasonNumber() != 0)
-                .collect(Collectors.toMap(TmdbSeasonSummary::seasonNumber, TmdbSeasonSummary::episodeCount));
-        Map<Integer, Integer> fetchedEpisodeCounts = fetchedSeasons.stream()
-                .filter(Objects::nonNull)
-                .filter(season -> season.seasonNumber() != null)
-                .collect(Collectors.toMap(
-                        TmdbSeasonFullDetails::seasonNumber,
-                        season -> season.episodes() == null ? 0 : season.episodes().size(),
-                        Math::max));
-        return !expectedEpisodeCounts.isEmpty()
-                && expectedEpisodeCounts.entrySet().stream()
-                        .allMatch(entry -> fetchedEpisodeCounts.getOrDefault(entry.getKey(), -1) >= entry.getValue());
-    }
-
-    private void persistRuntimeAggregate(Content content, Integer total, int episodeCount, Integer reportedEpisodeCount) {
-        if (total == null
-                || (total.equals(content.getTotalRuntimeMinutes())
-                        && Integer.valueOf(episodeCount).equals(content.getRuntimeMinutesEpisodeCount())
-                        && Objects.equals(reportedEpisodeCount, content.getRuntimeReportedEpisodeCount()))) {
-            return;
-        }
-        content.setTotalRuntimeMinutes(total);
-        content.setRuntimeMinutesEpisodeCount(episodeCount);
-        content.setRuntimeReportedEpisodeCount(reportedEpisodeCount);
-        content.setUpdatedAt(LocalDateTime.now());
-        contentRepository.save(content);
     }
 
     private void persistUnitRuntime(Content content, Integer runtime) {
