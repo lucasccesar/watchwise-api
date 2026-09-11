@@ -85,6 +85,7 @@ class SeriesRuntimeAggregateServiceImplTest {
 
         assertThat(result.aggregate()).isEqualTo(new SeriesRuntimeAggregate(4_800, 48, 100, 100));
         assertThat(result.seasonsFetchedForAggregate()).isEmpty();
+        assertThat(result.seasonFetchAttempted()).isFalse();
         verify(tmdbClient, never()).getSeasonFullDetails(anyString(), anyInt(), anyString());
     }
 
@@ -117,6 +118,7 @@ class SeriesRuntimeAggregateServiceImplTest {
         SeriesRuntimeResolution result = service.resolve(content, details(summary(1, 1), summary(2, 1)), "pt-BR");
 
         assertThat(result.aggregate()).isEqualTo(new SeriesRuntimeAggregate(4_800, 48, 100, 100));
+        assertThat(result.seasonFetchAttempted()).isTrue();
         verify(contentRepository, never()).save(content);
     }
 

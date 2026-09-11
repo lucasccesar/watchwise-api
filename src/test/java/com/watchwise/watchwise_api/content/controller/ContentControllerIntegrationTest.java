@@ -40,6 +40,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -497,6 +499,28 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.type").value("SERIES"))
                 .andExpect(jsonPath("$.runtimeMinutes").value(48))
                 .andExpect(jsonPath("$.totalRuntimeMinutes").value(4_800));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Preserve The Aggregate Without Retrying Seasons - When Reconciliation Cannot Load Them")
+    void shouldPreserveTheAggregateWithoutRetryingSeasonsWhenReconciliationCannotLoadThem() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("1396").type(ContentType.SERIES)
+                .totalRuntimeMinutes(4_800).runtimeMinutes(48).runtimeMinutesEpisodeCount(100)
+                .runtimeReportedEpisodeCount(100).runtimeAggregateVerifiedAt(LocalDateTime.now().minusDays(8))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 100, null)),
+                null, null, null, null, 1, 100, null, null, "Ended")));
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runtimeMinutes").value(48))
+                .andExpect(jsonPath("$.totalRuntimeMinutes").value(4_800));
+
+        verify(tmdbClient, times(1)).getSeasonFullDetails("1396", 1, "en-US");
     }
 
     @Test

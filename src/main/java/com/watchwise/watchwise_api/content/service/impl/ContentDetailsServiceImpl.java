@@ -165,7 +165,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         SeriesRuntimeResolution runtimeResolution = seriesRuntimeAggregateService.resolve(content, details, language);
         SeriesRuntimeAggregate runtime = runtimeResolution.aggregate();
         List<TmdbSeasonFullDetails> allSeasons = runtimeResolution.seasonsFetchedForAggregate();
-        if (allSeasons.isEmpty()) {
+        if (allSeasons.isEmpty() && !runtimeResolution.seasonFetchAttempted()) {
             List<TmdbSeasonSummary> seasonsForDetails = isTerminalSeriesStatus(details.status())
                     ? latestSeasons(details.seasons(), RECENT_SEASONS_LIMIT_WHEN_FROZEN)
                     : details.seasons();

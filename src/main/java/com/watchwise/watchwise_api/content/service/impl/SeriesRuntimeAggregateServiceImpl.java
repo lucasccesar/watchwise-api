@@ -114,14 +114,14 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
                 .flatMap(Optional::stream)
                 .toList();
         if (fetched.size() != regular.size()) {
-            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched);
+            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched, true);
         }
         SeriesRuntimeAggregate aggregate = calculator.calculate(fetched, summaries);
         if (aggregate.totalRuntimeMinutes() == null) {
-            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched);
+            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched, true);
         }
         SeriesRuntimeAggregate published = publishReconciledAggregate(content, aggregate);
-        return new SeriesRuntimeResolution(published, fetched);
+        return new SeriesRuntimeResolution(published, fetched, true);
     }
 
     private SeriesRuntimeAggregate reusableBaseline(Content content, List<TmdbSeasonSummary> summaries) {

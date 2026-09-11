@@ -6,5 +6,10 @@ import java.util.List;
 
 public record SeriesRuntimeResolution(
         SeriesRuntimeAggregate aggregate,
-        List<TmdbSeasonFullDetails> seasonsFetchedForAggregate) {
+        List<TmdbSeasonFullDetails> seasonsFetchedForAggregate,
+        boolean seasonFetchAttempted) {
+
+    public SeriesRuntimeResolution(SeriesRuntimeAggregate aggregate, List<TmdbSeasonFullDetails> seasonsFetchedForAggregate) {
+        this(aggregate, seasonsFetchedForAggregate, false);
+    }
 }
