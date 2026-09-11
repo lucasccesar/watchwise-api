@@ -257,8 +257,7 @@ public class UserListServiceImpl implements UserListService {
 
         Comparator<UserListItemResponseDTO> comparator = switch (sortBy) {
             case "dateAdded" -> Comparator.comparing(UserListItemResponseDTO::createdAt);
-            case "duration" -> Comparator.comparing(item -> item.content() != null && item.content().runtimeMinutes() != null
-                    ? item.content().runtimeMinutes() : 0);
+            case "duration" -> Comparator.comparing(item -> durationMinutes(item.content()));
             default -> Comparator.comparing(UserListItemResponseDTO::position, Comparator.nullsLast(Comparator.naturalOrder()));
         };
 
@@ -267,6 +266,10 @@ public class UserListServiceImpl implements UserListService {
         }
 
         return filtered.stream().sorted(comparator).toList();
+    }
+
+    private int durationMinutes(ContentRefDTO content) {
+        return content == null || content.runtimeMinutes() == null ? 0 : content.runtimeMinutes();
     }
 
     private Map<UUID, Double> computeEpisodeAverageRatings(UUID ownerId, List<UserListItemResponseDTO> items) {

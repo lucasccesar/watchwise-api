@@ -123,7 +123,7 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     List<UserListCount> countAllItemsByUserListIdIn(@Param("userListIds") Collection<UUID> userListIds);
 
     @Query("""
-            SELECT uli.userList.id AS userListId, COALESCE(SUM(CASE WHEN uli.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES THEN COALESCE(uli.content.totalRuntimeMinutes, uli.content.runtimeMinutes) ELSE uli.content.runtimeMinutes END), 0) AS total FROM UserListItem uli
+            SELECT uli.userList.id AS userListId, COALESCE(SUM(CASE WHEN uli.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES THEN uli.content.totalRuntimeMinutes ELSE uli.content.runtimeMinutes END), 0) AS total FROM UserListItem uli
             WHERE uli.userList.id IN :userListIds
             AND uli.content.id IS NOT NULL
             GROUP BY uli.userList.id

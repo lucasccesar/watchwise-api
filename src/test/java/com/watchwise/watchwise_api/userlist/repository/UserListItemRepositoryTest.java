@@ -466,6 +466,39 @@ class UserListItemRepositoryTest {
     }
 
     @Test
+    @DisplayName("[sumRuntimeMinutesByUserListIdIn] Should Not Use Series Average As Total - When Series Total Is Missing")
+    void shouldNotUseSeriesAverageAsTotalWhenSeriesTotalIsMissing() {
+        Content seriesWithTotal = contentRepository.save(Content.builder()
+                .tmdbId("990")
+                .type(ContentType.SERIES)
+                .runtimeMinutes(48)
+                .totalRuntimeMinutes(4_800)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        Content seriesWithoutTotal = contentRepository.save(Content.builder()
+                .tmdbId("991")
+                .type(ContentType.SERIES)
+                .runtimeMinutes(45)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        Content movie = contentRepository.save(buildContent("992", ContentType.MOVIE, 120));
+
+        userListItemRepository.save(buildContentItem(scifi, seriesWithTotal, 1));
+        userListItemRepository.save(buildContentItem(scifi, seriesWithoutTotal, 2));
+        userListItemRepository.saveAndFlush(buildContentItem(scifi, movie, 3));
+        entityManager.clear();
+
+        List<UserListItemRepository.UserListSum> result = userListItemRepository
+                .sumRuntimeMinutesByUserListIdIn(List.of(scifi.getId()));
+
+        assertThat(result).singleElement()
+                .extracting(UserListItemRepository.UserListSum::getTotal)
+                .isEqualTo(4_920L);
+    }
+
+    @Test
     @DisplayName("[sumRuntimeMinutesByUserListIdIn] Should Return Empty List - When No List Has Content Items")
     void shouldReturnEmptyListWhenNoListHasContentItems() {
         UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));

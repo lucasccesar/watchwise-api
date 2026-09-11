@@ -745,6 +745,42 @@ class UserListServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUserListById] Should Sort Series By Persisted Average Runtime - When Total Runtime Is Larger")
+    void shouldSortSeriesByPersistedAverageRuntimeWhenTotalRuntimeIsLarger() {
+        UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
+        UserListItemResponseDTO seriesItem = buildItemResponseDtoWithContent(ContentType.SERIES, 48, null, 1);
+        UserListItemResponseDTO movieItem = buildItemResponseDtoWithContent(ContentType.MOVIE, 120, null, 2);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(seriesItem, movieItem));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+
+        UserListDetailedResponseDTO result = userListService.getUserListById(
+                lucasId, list.getId(), null, null, "duration", "asc");
+
+        assertThat(result.items()).containsExactly(seriesItem, movieItem);
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Treat Null Series Average As Zero - When Sorting By Duration")
+    void shouldTreatNullSeriesAverageAsZeroWhenSortingByDuration() {
+        UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
+        UserListItemResponseDTO seriesWithoutAverage = buildItemResponseDtoWithContent(ContentType.SERIES, null, null, 1);
+        UserListItemResponseDTO shortMovie = buildItemResponseDtoWithContent(ContentType.MOVIE, 1, null, 2);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(shortMovie, seriesWithoutAverage));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+
+        UserListDetailedResponseDTO result = userListService.getUserListById(
+                lucasId, list.getId(), null, null, "duration", "asc");
+
+        assertThat(result.items()).containsExactly(seriesWithoutAverage, shortMovie);
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Throw BadRequestException - When Item SortBy Is Invalid")
     void shouldThrowBadRequestExceptionWhenItemSortByIsInvalid() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);

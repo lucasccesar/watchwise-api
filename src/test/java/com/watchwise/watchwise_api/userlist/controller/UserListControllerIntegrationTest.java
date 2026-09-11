@@ -50,7 +50,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -302,14 +304,21 @@ class UserListControllerIntegrationTest {
     }
 
     private UserListItem persistContentItem(UserList list, String tmdbId, int position) {
-        return persistContentItem(list, tmdbId, ContentType.MOVIE, position);
+        return persistContentItem(list, tmdbId, ContentType.MOVIE, position, null, null);
     }
 
     private UserListItem persistContentItem(UserList list, String tmdbId, ContentType type, int position) {
+        return persistContentItem(list, tmdbId, type, position, null, null);
+    }
+
+    private UserListItem persistContentItem(
+            UserList list, String tmdbId, ContentType type, int position, Integer runtimeMinutes, Integer totalRuntimeMinutes) {
         LocalDateTime now = LocalDateTime.now();
         Content content = contentRepository.save(Content.builder()
                 .tmdbId(tmdbId)
                 .type(type)
+                .runtimeMinutes(runtimeMinutes)
+                .totalRuntimeMinutes(totalRuntimeMinutes)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -650,6 +659,27 @@ class UserListControllerIntegrationTest {
                 .andExpect(jsonPath("$.name").value("My list"))
                 .andExpect(jsonPath("$.visibility").value("PRIVATE"))
                 .andExpect(jsonPath("$.items.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Sort By Series Average Runtime And Avoid TMDB - When Runtime Aggregate Is Persisted")
+    void shouldSortBySeriesAverageRuntimeAndAvoidTmdbWhenRuntimeAggregateIsPersisted() throws Exception {
+        RegisteredUser user = registerUser("getbyiddurationruntime");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Runtime list", UserListVisibility.PRIVATE);
+
+        persistContentItem(list, "999", ContentType.SERIES, 1, null, null);
+        persistContentItem(list, "1399", ContentType.SERIES, 2, 48, 4_800);
+        persistContentItem(list, "550", ContentType.MOVIE, 3, 120, null);
+        clearInvocations(tmdbClient);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId(), "duration", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].content.tmdbId").value("999"))
+                .andExpect(jsonPath("$.items[1].content.tmdbId").value("1399"))
+                .andExpect(jsonPath("$.items[2].content.tmdbId").value("550"));
+
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test
