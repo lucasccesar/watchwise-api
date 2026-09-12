@@ -73,6 +73,14 @@ public class CalendarScheduleSnapshotStore {
     }
 
     public boolean reconcileSeason(CalendarSeasonSchedule schedule) {
+        try {
+            return reconcileSeasonInNewTransaction(schedule);
+        } catch (DataIntegrityViolationException firstConflict) {
+            return reconcileSeasonInNewTransaction(schedule);
+        }
+    }
+
+    private boolean reconcileSeasonInNewTransaction(CalendarSeasonSchedule schedule) {
         return newTransactionExecutor.runInNewTransaction(() -> reconcileSeasonInTransaction(schedule));
     }
 

@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -160,7 +161,28 @@ class CalendarScheduleSynchronizerImplTest {
 
         store.reconcileSeason(seasonSchedule(LocalDate.of(2026, 9, 20), CHECKED_AT));
 
-        verify(repository).delete(removed);
+        verify(repository).deleteAll(List.of(removed));
+    }
+
+    @Test
+    @DisplayName("[reconcileSeason] Should Retry The Full Season - When A Concurrent First Insert Wins")
+    void shouldRetryTheFullSeasonWhenAConcurrentFirstInsertWins() {
+        CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
+        CalendarScheduleSnapshot winner = episodeSnapshot(1, LocalDate.of(2026, 9, 20));
+        when(repository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR"))
+                .thenReturn(List.of());
+        when(repository.findByEpisodeIdentity("1396", 2, 1, "BR", "pt-BR"))
+                .thenReturn(Optional.empty(), Optional.of(winner));
+        when(repository.saveAndFlush(any()))
+                .thenThrow(new DataIntegrityViolationException("duplicate episode identity"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        CalendarScheduleSnapshotStore store = store(repository);
+
+        boolean changed = store.reconcileSeason(seasonSchedule(LocalDate.of(2026, 9, 20), CHECKED_AT));
+
+        assertThat(changed).isTrue();
+        verify(repository, times(2)).saveAndFlush(any());
     }
 
     @Test
