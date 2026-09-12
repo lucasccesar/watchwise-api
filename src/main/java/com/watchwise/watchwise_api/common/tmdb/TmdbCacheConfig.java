@@ -40,6 +40,20 @@ public class TmdbCacheConfig {
     }
 
     @Bean
+    public Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache(
+            @Value("${app.tmdb.calendar-schedule-cache-ttl-hours}") long ttlHours,
+            @Value("${app.tmdb.calendar-schedule-cache-maximum-size}") long maximumSize) {
+        return newScheduleCache(ttlHours, maximumSize);
+    }
+
+    @Bean
+    public Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbCalendarSeasonDetailsCache(
+            @Value("${app.tmdb.calendar-schedule-cache-ttl-hours}") long ttlHours,
+            @Value("${app.tmdb.calendar-schedule-cache-maximum-size}") long maximumSize) {
+        return newScheduleCache(ttlHours, maximumSize);
+    }
+
+    @Bean
     public Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache(
             @Value("${app.tmdb.search-cache-ttl-minutes}") long ttlMinutes,
             @Value("${app.tmdb.search-cache-max-size}") long maximumSize) {
@@ -76,6 +90,13 @@ public class TmdbCacheConfig {
 
     private <T> Cache<String, T> newCache(long ttlHours) {
         return Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(ttlHours)).build();
+    }
+
+    private <T> Cache<String, T> newScheduleCache(long ttlHours, long maximumSize) {
+        return Caffeine.newBuilder()
+                .expireAfterWrite(Duration.ofHours(ttlHours))
+                .maximumSize(maximumSize)
+                .build();
     }
 
     @Bean

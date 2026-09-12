@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -24,6 +25,8 @@ public class TmdbClient {
     private final Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
+    private final Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache;
+    private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbCalendarSeasonDetailsCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache;
@@ -162,6 +165,29 @@ public class TmdbClient {
                         "season full details " + seriesTmdbId + "/" + seasonNumber));
     }
 
+    public TmdbLookupResult<TmdbMovieReleaseDates> getMovieReleaseDates(String tmdbId, String language) {
+        return cachedLookup(tmdbMovieReleaseDatesCache, tmdbId + "|" + language,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri(uriBuilder -> uriBuilder.path("/movie/{id}/release_dates")
+                                        .queryParam("language", language)
+                                        .build(tmdbId))
+                                .retrieve()
+                                .body(TmdbMovieReleaseDates.class),
+                        "movie release dates " + tmdbId));
+    }
+
+    public TmdbLookupResult<TmdbSeasonFullDetails> getCalendarSeasonDetails(
+            String seriesTmdbId, Integer seasonNumber, String language) {
+        return cachedLookup(tmdbCalendarSeasonDetailsCache, seriesTmdbId + "|" + seasonNumber + "|" + language,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri(uriBuilder -> uriBuilder.path("/tv/{seriesId}/season/{seasonNumber}")
+                                        .queryParam("language", language)
+                                        .build(seriesTmdbId, seasonNumber))
+                                .retrieve()
+                                .body(TmdbSeasonFullDetails.class),
+                        "calendar season details " + seriesTmdbId + "/" + seasonNumber));
+    }
+
     public TmdbLookupResult<TmdbEpisodeFullDetails> getEpisodeFullDetails(
             String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, String language) {
         return cachedLookup(tmdbEpisodeFullDetailsCache,
@@ -178,11 +204,20 @@ public class TmdbClient {
 
     private <K, T> TmdbLookupResult<T> cachedLookup(
             Cache<K, TmdbLookupResult<T>> cache, K key, Supplier<TmdbLookupResult<T>> loader) {
+        AtomicBoolean loadedFromRemote = new AtomicBoolean(false);
         TmdbLookupResult<T> cached = cache.get(key, ignoredKey -> {
+            loadedFromRemote.set(true);
             TmdbLookupResult<T> result = loader.get();
             return result.isUnavailable() ? null : result;
         });
-        return cached != null ? cached : new TmdbLookupResult.Unavailable<>();
+        if (cached == null) {
+            return new TmdbLookupResult.Unavailable<>();
+        }
+        if (cached instanceof TmdbLookupResult.Found<T> found) {
+            TmdbLookupOrigin origin = loadedFromRemote.get() ? TmdbLookupOrigin.REMOTE : TmdbLookupOrigin.CACHE;
+            return new TmdbLookupResult.Found<>(found.value(), origin);
+        }
+        return cached;
     }
 
     private <T> TmdbLookupResult<T> callWithRetry(Supplier<T> call, String description) {

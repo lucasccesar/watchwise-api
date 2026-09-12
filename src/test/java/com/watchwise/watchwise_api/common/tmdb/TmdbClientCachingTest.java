@@ -46,6 +46,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 @ContextConfiguration(classes = {TmdbCacheConfig.class, TmdbClientCachingTest.Config.class})
 @TestPropertySource(properties = {
         "app.tmdb.details-cache-ttl-hours=24",
+        "app.tmdb.calendar-schedule-cache-ttl-hours=24",
+        "app.tmdb.calendar-schedule-cache-maximum-size=10000",
         "app.tmdb.search-cache-ttl-minutes=10",
         "app.tmdb.search-cache-max-size=10000"
 })
@@ -76,12 +78,15 @@ class TmdbClientCachingTest {
                 Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache,
+                Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache,
+                Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbCalendarSeasonDetailsCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
                     tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
+                    tmdbMovieReleaseDatesCache, tmdbCalendarSeasonDetailsCache,
                     tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache);
         }
     }
@@ -105,6 +110,12 @@ class TmdbClientCachingTest {
     private Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
 
     @Autowired
+    private Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbCalendarSeasonDetailsCache;
+
+    @Autowired
     private Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache;
 
     @Autowired
@@ -123,10 +134,72 @@ class TmdbClientCachingTest {
         tmdbTvFullDetailsCache.invalidateAll();
         tmdbSeasonFullDetailsCache.invalidateAll();
         tmdbEpisodeFullDetailsCache.invalidateAll();
+        tmdbMovieReleaseDatesCache.invalidateAll();
+        tmdbCalendarSeasonDetailsCache.invalidateAll();
         tmdbMovieSearchCache.invalidateAll();
         tmdbTvSearchCache.invalidateAll();
         tmdbPersonSearchCache.invalidateAll();
         tmdbMultiSearchCache.invalidateAll();
+    }
+
+    @Test
+    @DisplayName("[getMovieReleaseDates] Should Mark Remote Then Cached - When The Same Lookup Repeats")
+    void shouldMarkRemoteThenCachedWhenTheSameMovieReleaseDateLookupRepeats() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/movie/603/release_dates?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":603,"results":[{"iso_3166_1":"US","release_dates":[]}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var first = tmdbClient.getMovieReleaseDates("603", "en-US");
+        var second = tmdbClient.getMovieReleaseDates("603", "en-US");
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getCalendarSeasonDetails] Should Evict Unavailable Result - When A Later Lookup Succeeds")
+    void shouldEvictUnavailableResultWhenALaterCalendarSeasonLookupSucceeds() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":3572,"name":"Season 1","season_number":1,"episodes":[]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var unavailable = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US");
+        var recovered = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US");
+
+        assertThat(unavailable.isUnavailable()).isTrue();
+        assertThat(tmdbCalendarSeasonDetailsCache.getIfPresent("1396|1|en-US")).isNull();
+        assertThat(recovered).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getCalendarSeasonDetails] Should Keep Languages Separate - When Schedule Lookups Share A Season")
+    void shouldKeepLanguagesSeparateWhenCalendarSeasonLookupsShareASeason() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":3572,"name":"Season 1","season_number":1,"episodes":[]}
+                        """, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=pt-BR"))
+                .andRespond(withSuccess("""
+                        {"id":3572,"name":"Temporada 1","season_number":1,"episodes":[]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var english = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US").toOptional().orElseThrow();
+        var portuguese = tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR").toOptional().orElseThrow();
+
+        assertThat(english.name()).isEqualTo("Season 1");
+        assertThat(portuguese.name()).isEqualTo("Temporada 1");
+        mockServer.verify();
     }
 
     @Test

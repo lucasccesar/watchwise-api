@@ -33,6 +33,7 @@ class TmdbClientTest {
         tmdbClient = new TmdbClient(builder.build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
     }
 
@@ -337,6 +338,105 @@ class TmdbClientTest {
         assertThat(result).isPresent();
         assertThat(result.get().name()).isEqualTo("Pilot");
         assertThat(result.get().guestStars()).extracting(TmdbGuestStar::name).containsExactly("John Doe");
+    }
+
+    @Test
+    @DisplayName("[getMovieReleaseDates] Should Parse All Regions - When TMDB Responds")
+    void shouldParseAllRegionsWhenTmdbRespondsWithMovieReleaseDates() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603/release_dates?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":603,"results":[
+                          {"iso_3166_1":"US","release_dates":[
+                            {"certification":"R","iso_639_1":"en","release_date":"1999-03-31T00:00:00.000Z","note":"wide","type":3}]},
+                          {"iso_3166_1":"BR","release_dates":[
+                            {"certification":"18","iso_639_1":"pt","release_date":"1999-04-02T00:00:00.000Z","note":null,"type":3}]}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getMovieReleaseDates("603", "en-US").toOptional().orElseThrow();
+
+        assertThat(result.id()).isEqualTo("603");
+        assertThat(result.results()).extracting(TmdbRegionReleaseDates::isoCode)
+                .containsExactly("US", "BR");
+        assertThat(result.results().get(0).releaseDates().get(0))
+                .isEqualTo(new TmdbMovieReleaseDate("R", "en", "1999-03-31T00:00:00.000Z", "wide", 3));
+        assertThat(result.results().get(1).releaseDates().get(0).note()).isNull();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getMovieReleaseDates] Should Preserve Empty Regions - When TMDB Has No Regional Data")
+    void shouldPreserveEmptyRegionsWhenTmdbHasNoRegionalReleaseData() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603/release_dates?language=en-US"))
+                .andRespond(withSuccess("{\"id\":603,\"results\":[]}", MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getMovieReleaseDates("603", "en-US").toOptional().orElseThrow();
+
+        assertThat(result.results()).isEmpty();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getCalendarSeasonDetails] Should Parse Schedule Fields - When TMDB Responds")
+    void shouldParseScheduleFieldsWhenTmdbRespondsWithSeasonDetails() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":3572,"name":"Season 1","overview":"First season",
+                         "poster_path":"/season.jpg","air_date":"2008-01-20","season_number":1,
+                         "episodes":[{"episode_number":1,"name":"Pilot","air_date":"2008-01-20",
+                         "still_path":"/pilot.jpg"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US").toOptional().orElseThrow();
+
+        assertThat(result.id()).isEqualTo(3572);
+        assertThat(result.name()).isEqualTo("Season 1");
+        assertThat(result.airDate()).isEqualTo("2008-01-20");
+        assertThat(result.episodes()).extracting(TmdbEpisodeSummary::name).containsExactly("Pilot");
+        assertThat(result.episodes().get(0).stillPath()).isEqualTo("/pilot.jpg");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getMovieReleaseDates] Should Return NotFound - When TMDB Responds With 404")
+    void shouldReturnNotFoundWhenMovieReleaseDatesRespondsWith404() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/999999999/release_dates?language=en-US"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"status_message\":\"The resource you requested could not be found.\"}"));
+
+        var result = tmdbClient.getMovieReleaseDates("999999999", "en-US");
+
+        assertThat(result.isNotFound()).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getCalendarSeasonDetails] Should Return Unavailable - When TMDB Fails Twice")
+    void shouldReturnUnavailableWhenCalendarSeasonDetailsFailsTwice() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withServerError());
+
+        var result = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US");
+
+        assertThat(result.isUnavailable()).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[Found] Should Default Origin To Remote - When Using The Existing Constructor")
+    void shouldDefaultOriginToRemoteWhenUsingExistingFoundConstructor() {
+        var result = new TmdbLookupResult.Found<>("value");
+
+        assertThat(result.value()).isEqualTo("value");
+        assertThat(result.origin()).isEqualTo(TmdbLookupOrigin.REMOTE);
+        assertThat(result.toOptional()).contains("value");
     }
 
     @Test

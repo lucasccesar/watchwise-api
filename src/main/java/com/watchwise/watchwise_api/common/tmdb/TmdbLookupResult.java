@@ -4,7 +4,10 @@ import java.util.Optional;
 
 public sealed interface TmdbLookupResult<T> {
 
-    record Found<T>(T value) implements TmdbLookupResult<T> {
+    record Found<T>(T value, TmdbLookupOrigin origin) implements TmdbLookupResult<T> {
+        public Found(T value) {
+            this(value, TmdbLookupOrigin.REMOTE);
+        }
     }
 
     record NotFound<T>() implements TmdbLookupResult<T> {
