@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,8 +25,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -56,6 +60,7 @@ class CalendarScheduleSynchronizerImplTest {
         Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> seasonCache = Caffeine.newBuilder().build();
         movieCache.put("550|pt-BR", new TmdbLookupResult.NotFound<>());
         seasonCache.put("1396|2|pt-BR", new TmdbLookupResult.NotFound<>());
+        when(store.upsertMovie(any())).thenReturn(true);
         CalendarScheduleSynchronizerImpl synchronizer = new CalendarScheduleSynchronizerImpl(store, movieCache, seasonCache);
 
         synchronizer.synchronize(movieBatch(TmdbLookupOrigin.REMOTE, LocalDate.of(2026, 9, 20)), CHECKED_AT);
@@ -63,7 +68,7 @@ class CalendarScheduleSynchronizerImplTest {
         ArgumentCaptor<CalendarMovieSchedule> schedule = ArgumentCaptor.forClass(CalendarMovieSchedule.class);
         verify(store).upsertMovie(schedule.capture());
         assertThat(schedule.getValue().lastCheckedAt()).isEqualTo(CHECKED_AT);
-        assertThat(schedule.getValue().nextCheckAt()).isEqualTo(Instant.parse("2026-09-13T10:00:00Z"));
+        assertThat(schedule.getValue().nextCheckAt()).isEqualTo(Instant.parse("2026-09-19T10:00:00Z"));
         assertThat(movieCache.getIfPresent("550|pt-BR")).isNull();
         assertThat(seasonCache.getIfPresent("1396|2|pt-BR")).isNotNull();
     }
@@ -82,12 +87,26 @@ class CalendarScheduleSynchronizerImplTest {
     }
 
     @Test
+    @DisplayName("[synchronize] Should Keep The Schedule Cache Entry - When A Remote Snapshot Is Unchanged")
+    void shouldKeepTheScheduleCacheEntryWhenARemoteSnapshotIsUnchanged() {
+        CalendarScheduleSnapshotStore store = mock(CalendarScheduleSnapshotStore.class);
+        Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> movieCache = Caffeine.newBuilder().build();
+        Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> seasonCache = Caffeine.newBuilder().build();
+        movieCache.put("550|pt-BR", new TmdbLookupResult.NotFound<>());
+        CalendarScheduleSynchronizerImpl synchronizer = new CalendarScheduleSynchronizerImpl(store, movieCache, seasonCache);
+
+        synchronizer.synchronize(movieBatch(TmdbLookupOrigin.REMOTE, LocalDate.of(2026, 9, 20)), CHECKED_AT);
+
+        assertThat(movieCache.getIfPresent("550|pt-BR")).isNotNull();
+    }
+
+    @Test
     @DisplayName("[upsertMovie] Should Avoid A Write - When A Remote Snapshot Is Unchanged")
     void shouldAvoidAWriteWhenARemoteSnapshotIsUnchanged() {
         CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
         CalendarScheduleSnapshot existing = movieSnapshot(LocalDate.of(2026, 9, 20));
         when(repository.findByMovieIdentity("550", "BR", "pt-BR")).thenReturn(Optional.of(existing));
-        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository);
+        CalendarScheduleSnapshotStore store = store(repository);
 
         store.upsertMovie(movieSchedule(LocalDate.of(2026, 9, 20), CHECKED_AT));
 
@@ -103,7 +122,7 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
         when(repository.findByMovieIdentity("550", "BR", "pt-BR"))
                 .thenReturn(Optional.of(movieSnapshot(LocalDate.of(2026, 9, 20))));
-        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository);
+        CalendarScheduleSnapshotStore store = store(repository);
 
         store.upsertMovie(movieSchedule(LocalDate.of(2026, 10, 3), CHECKED_AT));
 
@@ -118,7 +137,7 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
         when(repository.findByMovieIdentity("550", "BR", "pt-BR"))
                 .thenReturn(Optional.of(movieSnapshot(LocalDate.of(2026, 9, 20))));
-        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository);
+        CalendarScheduleSnapshotStore store = store(repository);
 
         store.upsertMovie(movieSchedule(null, CHECKED_AT));
 
@@ -133,9 +152,11 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
         CalendarScheduleSnapshot retained = episodeSnapshot(1, LocalDate.of(2026, 9, 20));
         CalendarScheduleSnapshot removed = episodeSnapshot(2, LocalDate.of(2026, 9, 21));
-        when(repository.findAll()).thenReturn(List.of(retained, removed));
+        when(repository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR"))
+                .thenReturn(List.of(retained, removed));
         when(repository.findByEpisodeIdentity("1396", 2, 1, "BR", "pt-BR")).thenReturn(Optional.of(retained));
-        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository);
+        CalendarScheduleSnapshotStore store = store(repository);
 
         store.reconcileSeason(seasonSchedule(LocalDate.of(2026, 9, 20), CHECKED_AT));
 
@@ -148,7 +169,7 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
         CalendarScheduleSnapshot existing = movieSnapshot(LocalDate.of(2026, 9, 20));
         when(repository.findByMovieIdentity("550", "BR", "pt-BR")).thenReturn(Optional.of(existing));
-        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository);
+        CalendarScheduleSnapshotStore store = store(repository);
 
         store.upsertMovie(movieSchedule(LocalDate.of(2026, 9, 20), CHECKED_AT));
         store.upsertMovie(movieSchedule(LocalDate.of(2026, 9, 20), CHECKED_AT));
@@ -158,7 +179,14 @@ class CalendarScheduleSynchronizerImplTest {
         assertThat(saved.getAllValues()).extracting(CalendarScheduleSnapshot::getReleaseDate)
                 .containsOnly(LocalDate.of(2026, 9, 20));
         assertThat(saved.getAllValues()).extracting(CalendarScheduleSnapshot::getNextCheckAt)
-                .containsOnly(LocalDateTime.of(2026, 9, 13, 10, 0));
+                .containsOnly(LocalDateTime.of(2026, 9, 19, 10, 0));
+    }
+
+    private static CalendarScheduleSnapshotStore store(CalendarScheduleSnapshotRepository repository) {
+        NewTransactionExecutor transactionExecutor = mock(NewTransactionExecutor.class);
+        doAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get())
+                .when(transactionExecutor).runInNewTransaction(any());
+        return new CalendarScheduleSnapshotStore(repository, transactionExecutor);
     }
 
     private static CalendarScheduleSynchronizerImpl synchronizer(CalendarScheduleSnapshotStore store) {

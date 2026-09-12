@@ -1,0 +1,27 @@
+package com.watchwise.watchwise_api.calendar.service;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+
+public final class CalendarScheduleCadence {
+
+    private static final int NEAR_FUTURE_DAYS = 7;
+    private static final long DAY_SECONDS = 24 * 60 * 60;
+
+    private CalendarScheduleCadence() {
+    }
+
+    public static Instant nextCheckAt(LocalDate releaseDate, Instant checkedAt) {
+        if (releaseDate == null) {
+            return checkedAt.plusSeconds(7 * DAY_SECONDS);
+        }
+        LocalDate today = checkedAt.atZone(ZoneOffset.UTC).toLocalDate();
+        if (!releaseDate.isAfter(today)) {
+            return Instant.MAX;
+        }
+        return releaseDate.isAfter(today.plusDays(NEAR_FUTURE_DAYS))
+                ? checkedAt.plusSeconds(7 * DAY_SECONDS)
+                : checkedAt.plusSeconds(DAY_SECONDS);
+    }
+}

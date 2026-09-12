@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarInterest;
 import com.watchwise.watchwise_api.calendar.service.CalendarMovieSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -11,7 +12,6 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -27,17 +27,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CalendarScheduleSnapshotStore {
 
-    private static final int NEAR_FUTURE_DAYS = 7;
-
     private final CalendarScheduleSnapshotRepository snapshotRepository;
     private final NewTransactionExecutor newTransactionExecutor;
 
-    public CalendarScheduleSnapshotStore(CalendarScheduleSnapshotRepository snapshotRepository) {
-        this.snapshotRepository = snapshotRepository;
-        this.newTransactionExecutor = null;
-    }
-
-    @Transactional(readOnly = true)
     public List<CalendarScheduleSnapshot> findForInterestAndMonth(
             CalendarInterest interest, java.time.YearMonth month, String region, String language) {
         return snapshotRepository.findByReleaseMonth(month, region, language).stream()
@@ -46,7 +38,6 @@ public class CalendarScheduleSnapshotStore {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
     public List<CalendarScheduleSnapshot> findDue(
             Collection<CalendarScheduleKey> activeKeys, LocalDateTime now) {
         Set<CalendarScheduleKey> keys = Set.copyOf(activeKeys);
@@ -55,31 +46,46 @@ public class CalendarScheduleSnapshotStore {
                 .toList();
     }
 
-    @Transactional
-    public void upsertMovie(CalendarMovieSchedule schedule) {
+    public boolean upsertMovie(CalendarMovieSchedule schedule) {
         Optional<CalendarScheduleSnapshot> existing = snapshotRepository.findByMovieIdentity(
                 schedule.tmdbId(), schedule.region(), schedule.language());
         if (existing.isPresent()) {
-            snapshotRepository.saveAndFlush(mergeMovie(existing.get(), schedule));
-            return;
+            return newTransactionExecutor.runInNewTransaction(() -> {
+                CalendarScheduleSnapshot merged = mergeMovie(existing.get(), schedule);
+                snapshotRepository.saveAndFlush(merged);
+                return movieFactsChanged(existing.get(), merged);
+            });
         }
         try {
-            saveInIsolatedTransaction(newMovie(schedule));
+            return newTransactionExecutor.runInNewTransaction(() -> {
+                snapshotRepository.saveAndFlush(newMovie(schedule));
+                return true;
+            });
         } catch (DataIntegrityViolationException exception) {
             CalendarScheduleSnapshot winner = snapshotRepository.findByMovieIdentity(
                     schedule.tmdbId(), schedule.region(), schedule.language()).orElseThrow(() -> exception);
-            snapshotRepository.saveAndFlush(mergeMovie(winner, schedule));
+            return newTransactionExecutor.runInNewTransaction(() -> {
+                CalendarScheduleSnapshot merged = mergeMovie(winner, schedule);
+                snapshotRepository.saveAndFlush(merged);
+                return movieFactsChanged(winner, merged);
+            });
         }
     }
 
-    @Transactional
-    public void reconcileSeason(CalendarSeasonSchedule schedule) {
+    public boolean reconcileSeason(CalendarSeasonSchedule schedule) {
+        return newTransactionExecutor.runInNewTransaction(() -> reconcileSeasonInTransaction(schedule));
+    }
+
+    private boolean reconcileSeasonInTransaction(CalendarSeasonSchedule schedule) {
+        boolean changed = false;
         boolean hasUsableDate = schedule.episodes().stream().anyMatch(episode -> episode.releaseDate() != null);
         if (hasUsableDate) {
             Set<Integer> coordinates = Set.copyOf(schedule.episodeCoordinates());
-            snapshotsForSeason(schedule).stream()
+            List<CalendarScheduleSnapshot> removed = snapshotsForSeason(schedule).stream()
                     .filter(snapshot -> !coordinates.contains(snapshot.getEpisodeNumber()))
-                    .forEach(snapshotRepository::delete);
+                    .toList();
+            snapshotRepository.deleteAll(removed);
+            changed = !removed.isEmpty();
         }
 
         for (CalendarEpisodeSchedule episode : schedule.episodes()) {
@@ -90,36 +96,24 @@ public class CalendarScheduleSnapshotStore {
                     schedule.seriesTmdbId(), schedule.seasonNumber(), episode.episodeNumber(),
                     schedule.region(), schedule.language());
             if (existing.isPresent()) {
-                snapshotRepository.saveAndFlush(mergeEpisode(existing.get(), schedule, episode));
+                CalendarScheduleSnapshot merged = mergeEpisode(existing.get(), schedule, episode);
+                snapshotRepository.saveAndFlush(merged);
+                changed |= episodeFactsChanged(existing.get(), merged);
                 continue;
             }
-            try {
-                saveInIsolatedTransaction(newEpisode(schedule, episode));
-            } catch (DataIntegrityViolationException exception) {
-                CalendarScheduleSnapshot winner = snapshotRepository.findByEpisodeIdentity(
-                        schedule.seriesTmdbId(), schedule.seasonNumber(), episode.episodeNumber(),
-                        schedule.region(), schedule.language()).orElseThrow(() -> exception);
-                snapshotRepository.saveAndFlush(mergeEpisode(winner, schedule, episode));
-            }
+            snapshotRepository.saveAndFlush(newEpisode(schedule, episode));
+            changed = true;
         }
-    }
-
-    private void saveInIsolatedTransaction(CalendarScheduleSnapshot snapshot) {
-        if (newTransactionExecutor == null) {
-            snapshotRepository.saveAndFlush(snapshot);
-            return;
-        }
-        newTransactionExecutor.runInNewTransaction(() -> snapshotRepository.saveAndFlush(snapshot));
+        return changed;
     }
 
     private List<CalendarScheduleSnapshot> snapshotsForSeason(CalendarSeasonSchedule schedule) {
-        return snapshotRepository.findAll().stream()
-                .filter(snapshot -> snapshot.getEventType() == CalendarScheduleSnapshot.EventType.EPISODE)
-                .filter(snapshot -> Objects.equals(snapshot.getSeriesTmdbId(), schedule.seriesTmdbId()))
-                .filter(snapshot -> Objects.equals(snapshot.getSeasonNumber(), schedule.seasonNumber()))
-                .filter(snapshot -> Objects.equals(snapshot.getRegion(), schedule.region()))
-                .filter(snapshot -> Objects.equals(snapshot.getLanguage(), schedule.language()))
-                .toList();
+        return snapshotRepository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE,
+                schedule.seriesTmdbId(),
+                schedule.seasonNumber(),
+                schedule.region(),
+                schedule.language());
     }
 
     private CalendarScheduleSnapshot mergeMovie(CalendarScheduleSnapshot existing, CalendarMovieSchedule schedule) {
@@ -190,19 +184,30 @@ public class CalendarScheduleSnapshotStore {
         return keys.contains(new CalendarScheduleKey(type, tmdbId, snapshot.getLanguage(), snapshot.getRegion()));
     }
 
+    private boolean movieFactsChanged(CalendarScheduleSnapshot existing, CalendarScheduleSnapshot merged) {
+        return !Objects.equals(existing.getReleaseDate(), merged.getReleaseDate())
+                || !Objects.equals(existing.getTitle(), merged.getTitle())
+                || !Objects.equals(existing.getPosterPath(), merged.getPosterPath())
+                || !Objects.equals(existing.getPresentInLastTmdbSnapshot(), merged.getPresentInLastTmdbSnapshot());
+    }
+
+    private boolean episodeFactsChanged(CalendarScheduleSnapshot existing, CalendarScheduleSnapshot merged) {
+        return !Objects.equals(existing.getReleaseDate(), merged.getReleaseDate())
+                || !Objects.equals(existing.getTitle(), merged.getTitle())
+                || !Objects.equals(existing.getSeriesTitle(), merged.getSeriesTitle())
+                || !Objects.equals(existing.getPosterPath(), merged.getPosterPath())
+                || !Objects.equals(existing.getStillPath(), merged.getStillPath())
+                || !Objects.equals(existing.getPresentInLastTmdbSnapshot(), merged.getPresentInLastTmdbSnapshot());
+    }
+
     private LocalDateTime nextCheckAt(LocalDate releaseDate, Instant checkedAt) {
-        LocalDateTime checked = toLocalDateTime(checkedAt);
-        if (releaseDate == null) {
-            return checked.plusDays(7);
-        }
-        LocalDate today = checkedAt.atZone(ZoneOffset.UTC).toLocalDate();
-        if (!releaseDate.isAfter(today)) {
-            return LocalDateTime.MAX;
-        }
-        return releaseDate.isAfter(today.plusDays(NEAR_FUTURE_DAYS)) ? checked.plusDays(7) : checked.plusDays(1);
+        return toLocalDateTime(CalendarScheduleCadence.nextCheckAt(releaseDate, checkedAt));
     }
 
     private LocalDateTime toLocalDateTime(Instant instant) {
+        if (Instant.MAX.equals(instant)) {
+            return LocalDateTime.MAX;
+        }
         return instant.atOffset(ZoneOffset.UTC).toLocalDateTime();
     }
 }
