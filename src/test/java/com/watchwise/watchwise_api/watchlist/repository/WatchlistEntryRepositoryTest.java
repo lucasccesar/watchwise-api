@@ -292,6 +292,20 @@ class WatchlistEntryRepositoryTest {
                 new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR"));
     }
 
+    @Test
+    @DisplayName("[findActiveCalendarScheduleKeys] Should Exclude In-Progress Series - When The User Completed The Series")
+    void shouldExcludeInProgressSeriesWhenTheUserCompletedTheSeries() {
+        Content episode = contentRepository.save(buildEpisode("1400", 1, 1));
+        Content completedSeries = contentRepository.save(buildContent("1400", ContentType.SERIES));
+        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, episode));
+        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, completedSeries));
+
+        List<CalendarScheduleKey> result = watchlistEntryRepository.findActiveCalendarScheduleKeys();
+
+        assertThat(result).doesNotContain(
+                new CalendarScheduleKey(ContentType.SERIES, "1400", "en-US", "US"));
+    }
+
     private WatchlistEntry buildEntry(User user, Content content, ContentType type, Integer position) {
         LocalDateTime now = LocalDateTime.now();
         return WatchlistEntry.builder()
