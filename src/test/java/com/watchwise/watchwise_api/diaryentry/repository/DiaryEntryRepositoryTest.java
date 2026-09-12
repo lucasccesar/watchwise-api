@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.repository;
 
+import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -29,6 +30,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -381,6 +383,55 @@ class DiaryEntryRepositoryTest {
         assertThat(row.getSeriesTmdbId()).isEqualTo("1399");
         assertThat(row.getMaxSeasonNumber()).isEqualTo(1);
         assertThat(row.getMaxEpisodeNumber()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("[findDistinctInProgressSeriesTmdbIdsByUserId] Should Return Only The User's Uncompleted Episode Series")
+    void shouldReturnOnlyUsersUncompletedEpisodeSeries() {
+        Content lucasEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content marinaEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        Content completedEpisode = contentRepository.save(buildEpisode("1400", 1, 1));
+        Content completedSeries = contentRepository.save(buildContent("1400", ContentType.SERIES));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, lucasEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(marina, marinaEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedSeries));
+
+        List<String> result = diaryEntryRepository.findDistinctInProgressSeriesTmdbIdsByUserId(lucas.getId());
+
+        assertThat(result).containsExactly("1399");
+    }
+
+    @Test
+    @DisplayName("[findWatchedCalendarKeys] Should Return Distinct Requested Movie And Episode Keys In One Batch")
+    void shouldReturnDistinctRequestedMovieAndEpisodeKeysInOneBatch() {
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, 2));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode, 2));
+
+        WatchedCalendarKey movieKey = WatchedCalendarKey.movie("550");
+        WatchedCalendarKey episodeKey = WatchedCalendarKey.episode("1399", 1, 1);
+        Set<WatchedCalendarKey> result = diaryEntryRepository.findWatchedCalendarKeys(
+                lucas.getId(), Set.of(movieKey, episodeKey, WatchedCalendarKey.movie("680")));
+
+        assertThat(result).containsExactlyInAnyOrder(movieKey, episodeKey);
+    }
+
+    @Test
+    @DisplayName("[findWatchedCalendarKeys] Should Return Empty Without Querying For Events - When Requested Set Is Empty")
+    void shouldReturnEmptyWhenRequestedSetIsEmpty() {
+        assertThat(diaryEntryRepository.findWatchedCalendarKeys(lucas.getId(), Set.of())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findWatchedCalendarKeys] Should Return Empty - When No Requested Key Matches")
+    void shouldReturnEmptyWhenNoRequestedKeyMatches() {
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+
+        assertThat(diaryEntryRepository.findWatchedCalendarKeys(
+                lucas.getId(), Set.of(WatchedCalendarKey.movie("680")))).isEmpty();
     }
 
     @Test

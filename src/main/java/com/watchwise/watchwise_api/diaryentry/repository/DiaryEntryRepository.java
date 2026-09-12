@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.repository;
 
+import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
@@ -15,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
@@ -796,6 +798,78 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     }
 
     // --- Content tracking job (daily TMDB change detection) ---
+
+    @Query("""
+            SELECT DISTINCT d.content.seriesTmdbId FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND NOT EXISTS (
+                SELECT 1 FROM DiaryEntry completion
+                WHERE completion.user.id = d.user.id
+                AND completion.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                AND completion.content.tmdbId = d.content.seriesTmdbId
+            )
+            """)
+    List<String> findDistinctInProgressSeriesTmdbIdsByUserId(@Param("userId") UUID userId);
+
+    default Set<WatchedCalendarKey> findWatchedCalendarKeys(
+            UUID userId, Collection<WatchedCalendarKey> requestedKeys) {
+        if (requestedKeys.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<String> movieTmdbIds = requestedKeys.stream()
+                .filter(key -> key.type() == ContentType.MOVIE)
+                .map(WatchedCalendarKey::tmdbId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> seriesTmdbIds = requestedKeys.stream()
+                .filter(key -> key.type() == ContentType.EPISODE)
+                .map(WatchedCalendarKey::seriesTmdbId)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<Integer> seasonNumbers = requestedKeys.stream()
+                .filter(key -> key.type() == ContentType.EPISODE)
+                .map(WatchedCalendarKey::seasonNumber)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<Integer> episodeNumbers = requestedKeys.stream()
+                .filter(key -> key.type() == ContentType.EPISODE)
+                .map(WatchedCalendarKey::episodeNumber)
+                .collect(java.util.stream.Collectors.toSet());
+
+        return findWatchedCalendarKeyCandidates(
+                userId,
+                movieTmdbIds.isEmpty() ? Set.of("") : movieTmdbIds,
+                seriesTmdbIds.isEmpty() ? Set.of("") : seriesTmdbIds,
+                seasonNumbers.isEmpty() ? Set.of(-1) : seasonNumbers,
+                episodeNumbers.isEmpty() ? Set.of(-1) : episodeNumbers).stream()
+                .filter(requestedKeys::contains)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    @Query("""
+            SELECT DISTINCT new com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey(
+                d.content.type,
+                d.content.tmdbId,
+                d.content.seriesTmdbId,
+                d.content.seasonNumber,
+                d.content.episodeNumber)
+            FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND (
+                (d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
+                 AND d.content.tmdbId IN :movieTmdbIds)
+                OR
+                (d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+                 AND d.content.seriesTmdbId IN :seriesTmdbIds
+                 AND d.content.seasonNumber IN :seasonNumbers
+                 AND d.content.episodeNumber IN :episodeNumbers)
+            )
+            """)
+    Set<WatchedCalendarKey> findWatchedCalendarKeyCandidates(
+            @Param("userId") UUID userId,
+            @Param("movieTmdbIds") Collection<String> movieTmdbIds,
+            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds,
+            @Param("seasonNumbers") Collection<Integer> seasonNumbers,
+            @Param("episodeNumbers") Collection<Integer> episodeNumbers);
 
     @Query(value = """
             SELECT DISTINCT c.series_tmdb_id

@@ -1,8 +1,11 @@
 package com.watchwise.watchwise_api.watchlist.repository;
 
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
@@ -55,6 +58,9 @@ class WatchlistEntryRepositoryTest {
     @Autowired
     private ContentRepository contentRepository;
 
+    @Autowired
+    private DiaryEntryRepository diaryEntryRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -67,6 +73,7 @@ class WatchlistEntryRepositoryTest {
     @BeforeEach
     void setUp() {
         watchlistEntryRepository.deleteAll();
+        diaryEntryRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
 
@@ -259,6 +266,32 @@ class WatchlistEntryRepositoryTest {
         assertThat(watchlistEntryRepository.findById(saved.getId())).isEmpty();
     }
 
+    @Test
+    @DisplayName("[findActiveCalendarScheduleKeys] Should Combine Watchlist And In-Progress Series With Each User Locale")
+    void shouldCombineWatchlistAndInProgressSeriesWithEachUserLocale() {
+        lucas.setPreferredLanguage("en-US");
+        lucas.setPreferredRegion("US");
+        marina.setPreferredLanguage("pt-BR");
+        marina.setPreferredRegion("BR");
+        userRepository.flush();
+
+        Content watchlistedEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        Content inProgressOnlyEpisode = contentRepository.save(buildEpisode("119051", 1, 1));
+        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
+        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 1));
+        watchlistEntryRepository.saveAndFlush(buildEntry(marina, breakingBad, ContentType.SERIES, 1));
+        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, watchlistedEpisode));
+        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, inProgressOnlyEpisode));
+
+        List<CalendarScheduleKey> result = watchlistEntryRepository.findActiveCalendarScheduleKeys();
+
+        assertThat(result).containsExactlyInAnyOrder(
+                new CalendarScheduleKey(ContentType.MOVIE, "550", "en-US", "US"),
+                new CalendarScheduleKey(ContentType.SERIES, "1396", "en-US", "US"),
+                new CalendarScheduleKey(ContentType.SERIES, "119051", "en-US", "US"),
+                new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR"));
+    }
+
     private WatchlistEntry buildEntry(User user, Content content, ContentType type, Integer position) {
         LocalDateTime now = LocalDateTime.now();
         return WatchlistEntry.builder()
@@ -271,11 +304,34 @@ class WatchlistEntryRepositoryTest {
                 .build();
     }
 
+    private DiaryEntry buildDiaryEntry(User user, Content content) {
+        LocalDateTime now = LocalDateTime.now();
+        return DiaryEntry.builder()
+                .user(user)
+                .content(content)
+                .watchNumber(1)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
     private Content buildContent(String tmdbId, ContentType type) {
         LocalDateTime now = LocalDateTime.now();
         return Content.builder()
                 .tmdbId(tmdbId)
                 .type(type)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildEpisode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .type(ContentType.EPISODE)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

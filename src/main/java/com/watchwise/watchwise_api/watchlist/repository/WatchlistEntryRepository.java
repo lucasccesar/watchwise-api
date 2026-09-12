@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.watchlist.repository;
 
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
@@ -57,5 +58,52 @@ public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, 
 
     @Query("SELECT DISTINCT w.user.id FROM WatchlistEntry w WHERE w.content.id = :contentId")
     List<UUID> findUserIdsByContentId(@Param("contentId") UUID contentId);
+
+    default List<CalendarScheduleKey> findActiveCalendarScheduleKeys() {
+        return findActiveCalendarScheduleKeyRows().stream()
+                .map(row -> new CalendarScheduleKey(
+                        ContentType.valueOf(row.getType()),
+                        row.getTmdbId(),
+                        row.getPreferredLanguage(),
+                        row.getPreferredRegion()))
+                .toList();
+    }
+
+    @Query(value = """
+            SELECT DISTINCT w.type AS type,
+                            c.tmdb_id AS "tmdbId",
+                            u.preferred_language AS "preferredLanguage",
+                            u.preferred_region AS "preferredRegion"
+            FROM watchlist_entries w
+            JOIN contents c ON c.id = w.content_id
+            JOIN users u ON u.id = w.user_id
+            WHERE w.type IN ('MOVIE', 'SERIES')
+            AND c.type = w.type
+            UNION
+            SELECT DISTINCT 'SERIES' AS type,
+                            episode.series_tmdb_id AS "tmdbId",
+                            u.preferred_language AS "preferredLanguage",
+                            u.preferred_region AS "preferredRegion"
+            FROM diary_entries d
+            JOIN contents episode ON episode.id = d.content_id
+            JOIN users u ON u.id = d.user_id
+            WHERE episode.type = 'EPISODE'
+            AND NOT EXISTS (
+                SELECT 1
+                FROM diary_entries completion
+                JOIN contents completed_series ON completed_series.id = completion.content_id
+                WHERE completion.user_id = d.user_id
+                AND completed_series.type = 'SERIES'
+                AND completed_series.tmdb_id = episode.series_tmdb_id
+            )
+            """, nativeQuery = true)
+    List<CalendarScheduleKeyRow> findActiveCalendarScheduleKeyRows();
+
+    interface CalendarScheduleKeyRow {
+        String getType();
+        String getTmdbId();
+        String getPreferredLanguage();
+        String getPreferredRegion();
+    }
 
 }
