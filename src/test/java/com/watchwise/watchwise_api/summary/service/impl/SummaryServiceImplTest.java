@@ -51,6 +51,7 @@ import org.springframework.data.domain.PageRequest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -562,6 +563,129 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getMonthInReview] Should Keep BottomRated Ordered By Score Ascending - Even When A Top5 Entry Exists")
+    void shouldKeepBottomRatedOrderedByScoreAscendingEvenWhenATop5EntryExists() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content lowRatedContent = buildContent("low", ContentType.MOVIE);
+        Content highRatedContent = buildContent("high", ContentType.MOVIE);
+        DiaryEntry lowRatedEntry = buildDiaryEntry(lowRatedContent, LocalDateTime.now());
+        DiaryEntry highRatedEntry = buildDiaryEntry(highRatedContent, LocalDateTime.now());
+        lowRatedEntry.setScore(2);
+        highRatedEntry.setScore(9);
+        when(diaryEntryRepository.findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any()))
+                .thenReturn(List.of(lowRatedEntry, highRatedEntry));
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of(buildTop5Entry(highRatedContent)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean()))
+                .thenAnswer(invocation -> {
+                    DiaryEntry entry = invocation.getArgument(0);
+                    return new DiaryEntryResponseDTO(entry.getId(), lucasId, null, null, entry.getScore(),
+                            entry.getWatchedDate(), 1, null, null, false, false, entry.getCreatedAt(),
+                            entry.getUpdatedAt(), 0, false);
+                });
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.bottomRated()).extracting(DiaryEntryResponseDTO::score)
+                .containsExactly(2, 9);
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Return Recent Watched Titles Without Episodes - When Type Is SERIES")
+    void shouldReturnRecentWatchedTitlesWithoutEpisodesWhenTypeIsSeries() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content seriesContent = buildContent("1399", ContentType.SERIES);
+        DiaryEntry seriesEntry = buildDiaryEntry(seriesContent, LocalDateTime.now());
+        DiaryEntryResponseDTO seriesResponse = new DiaryEntryResponseDTO(
+                seriesEntry.getId(), lucasId, null, null, null, LocalDate.of(2026, 8, 10), 1,
+                null, null, false, false, seriesEntry.getCreatedAt(), seriesEntry.getUpdatedAt(), 0, false);
+        when(diaryEntryRepository.findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                eq(lucasId), eq(ContentType.SERIES), any(), any(), any()))
+                .thenReturn(List.of(seriesEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(seriesEntry, false)).thenReturn(seriesResponse);
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.SERIES, YearMonth.of(2026, 8));
+
+        assertThat(result.recentWatched()).containsExactly(seriesResponse);
+        verify(diaryEntryRepository).findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                lucasId, ContentType.SERIES, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31), PageRequest.of(0, 6));
+        verify(diaryEntryRepository, never()).findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                eq(lucasId), eq(ContentType.EPISODE), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[summary responses] Should Expose First And Last Watched As Diary Entries")
+    void shouldExposeFirstAndLastWatchedAsDiaryEntries() {
+        assertThat(recordComponentType(MonthInReviewResponseDTO.class, "firstWatched"))
+                .isEqualTo(DiaryEntryResponseDTO.class);
+        assertThat(recordComponentType(MonthInReviewResponseDTO.class, "lastWatched"))
+                .isEqualTo(DiaryEntryResponseDTO.class);
+        assertThat(recordComponentType(YearInReviewResponseDTO.class, "firstWatched"))
+                .isEqualTo(DiaryEntryResponseDTO.class);
+        assertThat(recordComponentType(YearInReviewResponseDTO.class, "lastWatched"))
+                .isEqualTo(DiaryEntryResponseDTO.class);
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Return The First And Last Watched Entries With Their Dates")
+    void shouldReturnFirstAndLastWatchedEntriesWithTheirDatesForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        DiaryEntry firstEntry = buildDiaryEntry(buildContent("first", ContentType.MOVIE), LocalDateTime.now().minusDays(3));
+        DiaryEntry lastEntry = buildDiaryEntry(buildContent("last", ContentType.MOVIE), LocalDateTime.now());
+        firstEntry.setWatchedDate(LocalDate.of(2026, 8, 2));
+        lastEntry.setWatchedDate(LocalDate.of(2026, 8, 28));
+        when(diaryEntryRepository.findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), eq(PageRequest.of(0, 1))))
+                .thenReturn(List.of(firstEntry));
+        when(diaryEntryRepository.findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), eq(PageRequest.of(0, 1))))
+                .thenReturn(List.of(lastEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(firstEntry, false))
+                .thenReturn(buildDiaryEntryResponseDto(firstEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(lastEntry, false))
+                .thenReturn(buildDiaryEntryResponseDto(lastEntry));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.firstWatched().content().tmdbId()).isEqualTo("first");
+        assertThat(result.firstWatched().watchedDate()).isEqualTo(LocalDate.of(2026, 8, 2));
+        assertThat(result.lastWatched().content().tmdbId()).isEqualTo("last");
+        assertThat(result.lastWatched().watchedDate()).isEqualTo(LocalDate.of(2026, 8, 28));
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Return The First And Last Watched Entries With Their Dates")
+    void shouldReturnFirstAndLastWatchedEntriesWithTheirDatesForYearInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        DiaryEntry firstEntry = buildDiaryEntry(buildContent("1399", ContentType.EPISODE), LocalDateTime.now().minusDays(3));
+        DiaryEntry lastEntry = buildDiaryEntry(buildContent("2468", ContentType.EPISODE), LocalDateTime.now());
+        firstEntry.setWatchedDate(LocalDate.of(2026, 1, 10));
+        lastEntry.setWatchedDate(LocalDate.of(2026, 12, 20));
+        when(diaryEntryRepository.findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.EPISODE), any(), any(), eq(PageRequest.of(0, 1))))
+                .thenReturn(List.of(firstEntry));
+        when(diaryEntryRepository.findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.EPISODE), any(), any(), eq(PageRequest.of(0, 1))))
+                .thenReturn(List.of(lastEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(firstEntry, false))
+                .thenReturn(buildDiaryEntryResponseDto(firstEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(lastEntry, false))
+                .thenReturn(buildDiaryEntryResponseDto(lastEntry));
+
+        YearInReviewResponseDTO result = summaryService.getYearInReview(
+                lucasId, lucasId, ContentType.SERIES, 2026);
+
+        assertThat(result.firstWatched().content().tmdbId()).isEqualTo("1399");
+        assertThat(result.firstWatched().watchedDate()).isEqualTo(LocalDate.of(2026, 1, 10));
+        assertThat(result.lastWatched().content().tmdbId()).isEqualTo("2468");
+        assertThat(result.lastWatched().watchedDate()).isEqualTo(LocalDate.of(2026, 12, 20));
+    }
+
+    @Test
     @DisplayName("[getMonthInReview] Should Return Top Watch Companions Scoped By Type And Month")
     void shouldReturnTopWatchCompanionsForMonthInReview() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
@@ -935,5 +1059,24 @@ class SummaryServiceImplTest {
         LocalDateTime now = LocalDateTime.now();
         ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), null, ContentType.EPISODE, "1399", 1, 1, null, null, now, now);
         return new DiaryEntryResponseDTO(UUID.randomUUID(), lucasId, content, null, null, null, 1, null, null, false, false, now, now, 0, false);
+    }
+
+    private DiaryEntryResponseDTO buildDiaryEntryResponseDto(DiaryEntry entry) {
+        Content content = entry.getContent();
+        LocalDateTime now = entry.getUpdatedAt();
+        ContentRefDTO contentRef = new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(),
+                content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(),
+                content.getIsSeasonFinale(), content.getIsSeriesFinale(), content.getCreatedAt(), content.getUpdatedAt());
+        return new DiaryEntryResponseDTO(entry.getId(), lucasId, contentRef, entry.getComment(), entry.getScore(),
+                entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(), entry.getCustomPosterUrl(),
+                entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), now, entry.getLikesCount(), false);
+    }
+
+    private Class<?> recordComponentType(Class<?> recordType, String componentName) {
+        return Arrays.stream(recordType.getRecordComponents())
+                .filter(component -> component.getName().equals(componentName))
+                .map(java.lang.reflect.RecordComponent::getType)
+                .findFirst()
+                .orElse(null);
     }
 }

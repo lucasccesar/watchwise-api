@@ -4,7 +4,6 @@ import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 
-import java.time.LocalDate;
 import java.util.List;
 
 public record MonthInReviewResponseDTO(
@@ -14,8 +13,8 @@ public record MonthInReviewResponseDTO(
         List<RatingCountDTO> ratingsDistribution,
         long watchCount,
         long minutesWatched,
-        LocalDate firstWatchedDate,
-        LocalDate lastWatchedDate,
+        DiaryEntryResponseDTO firstWatched,
+        DiaryEntryResponseDTO lastWatched,
         List<DailyMinutesDTO> minutesPerDay,
         List<DayOfWeekCountDTO> watchCountByDayOfWeek,
         List<GenreCountDTO> genreCounts,

@@ -351,6 +351,28 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
 
     @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            ORDER BY d.watchedDate ASC, d.createdAt ASC
+            """)
+    List<DiaryEntry> findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type = :contentType
+            AND d.watchedDate BETWEEN :start AND :end
+            ORDER BY d.watchedDate DESC, d.createdAt DESC
+            """)
+    List<DiaryEntry> findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("contentType") ContentType contentType,
+            @Param("start") LocalDate start, @Param("end") LocalDate end, Pageable pageable);
+
+    @Query("""
             SELECT COUNT(d) FROM DiaryEntry d
             WHERE d.user.id = :userId
             AND d.content.type = :contentType

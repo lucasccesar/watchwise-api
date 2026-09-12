@@ -80,6 +80,7 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int TOP_LONGEST_MOVIES_LIMIT = 3;
     private static final int TOP_COMPANIONS_LIMIT = 3;
     private static final int YEAR_LONGEST_LIMIT = 10;
+    private static final int SINGLE_WATCHED_ENTRY_LIMIT = 1;
     private static final double AVERAGE_DAYS_PER_MONTH = 30.44;
     private static final Set<ContentType> ALLOWED_SUMMARY_TYPES = Set.of(ContentType.MOVIE, ContentType.SERIES);
 
@@ -199,7 +200,7 @@ public class SummaryServiceImpl implements SummaryService {
         PageRequest topN = PageRequest.of(0, MONTH_TOP_LIMIT);
 
         List<DiaryEntryResponseDTO> recentWatched = diaryEntryRepository
-                .findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(userId, watchedContentType, start, end, topN)
+                .findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(userId, type, start, end, topN)
                 .stream().map(this::toDiaryEntryResponseDto).toList();
 
         List<DiaryEntry> topRatedRaw = diaryEntryRepository
@@ -207,7 +208,7 @@ public class SummaryServiceImpl implements SummaryService {
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository
                 .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
         List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type));
-        List<DiaryEntryResponseDTO> bottomRated = promoteTop5First(bottomRatedRaw, userId, List.of(type));
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw);
 
         List<RatingCountDTO> ratingsDistribution = diaryEntryRepository
                 .countByUserIdAndContentTypeAndWatchedDateBetweenGroupByScore(userId, watchedContentType, start, end)
@@ -215,10 +216,17 @@ public class SummaryServiceImpl implements SummaryService {
 
         long watchCount = diaryEntryRepository.countByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end);
         long minutesWatched = diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end);
-        LocalDate firstWatchedDate = diaryEntryRepository
-                .findMinWatchedDateByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end).orElse(null);
-        LocalDate lastWatchedDate = diaryEntryRepository
-                .findMaxWatchedDateByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end).orElse(null);
+        PageRequest singleEntry = PageRequest.of(0, SINGLE_WATCHED_ENTRY_LIMIT);
+        DiaryEntry firstWatchedEntry = diaryEntryRepository
+                .findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                        userId, watchedContentType, start, end, singleEntry)
+                .stream().findFirst().orElse(null);
+        DiaryEntry lastWatchedEntry = diaryEntryRepository
+                .findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                        userId, watchedContentType, start, end, singleEntry)
+                .stream().findFirst().orElse(null);
+        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null ? null : toDiaryEntryResponseDto(firstWatchedEntry);
+        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null ? null : toDiaryEntryResponseDto(lastWatchedEntry);
 
         List<DailyMinutesDTO> minutesPerDay = diaryEntryRepository
                 .sumRuntimeMinutesByUserIdAndContentTypeGroupByWatchedDateBetween(userId, watchedContentType, start, end)
@@ -249,7 +257,7 @@ public class SummaryServiceImpl implements SummaryService {
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanions(userId, watchedContentType, start, end);
 
         return new MonthInReviewResponseDTO(recentWatched, topRated, bottomRated, ratingsDistribution, watchCount,
-                minutesWatched, firstWatchedDate, lastWatchedDate, minutesPerDay, watchCountByDayOfWeek, genreCounts,
+                minutesWatched, firstWatched, lastWatched, minutesPerDay, watchCountByDayOfWeek, genreCounts,
                 topSeriesByWatchTime, topLongestMovies, topWatchCompanions);
     }
 
@@ -276,7 +284,7 @@ public class SummaryServiceImpl implements SummaryService {
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository
                 .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
         List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type));
-        List<DiaryEntryResponseDTO> bottomRated = promoteTop5First(bottomRatedRaw, userId, List.of(type));
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw);
 
         List<RatingCountDTO> ratingsDistribution = diaryEntryRepository
                 .countByUserIdAndContentTypeAndWatchedDateBetweenGroupByScore(userId, watchedContentType, start, end)
@@ -299,10 +307,17 @@ public class SummaryServiceImpl implements SummaryService {
                 : diaryEntryRepository.countByUserIdAndWatchedDateBetweenGroupByDayOfWeekForEpisodes(userId, start, end))
                 .stream().map(row -> new DayOfWeekCountDTO(row.getDayOfWeek(), row.getCount())).toList();
 
-        LocalDate firstWatchedDate = diaryEntryRepository
-                .findMinWatchedDateByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end).orElse(null);
-        LocalDate lastWatchedDate = diaryEntryRepository
-                .findMaxWatchedDateByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end).orElse(null);
+        PageRequest singleEntry = PageRequest.of(0, SINGLE_WATCHED_ENTRY_LIMIT);
+        DiaryEntry firstWatchedEntry = diaryEntryRepository
+                .findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                        userId, watchedContentType, start, end, singleEntry)
+                .stream().findFirst().orElse(null);
+        DiaryEntry lastWatchedEntry = diaryEntryRepository
+                .findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                        userId, watchedContentType, start, end, singleEntry)
+                .stream().findFirst().orElse(null);
+        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null ? null : toDiaryEntryResponseDto(firstWatchedEntry);
+        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null ? null : toDiaryEntryResponseDto(lastWatchedEntry);
 
         List<LongestWatchedItemDTO> longestWatched = computeLongestWatched(userId, type, start, end);
 
@@ -315,7 +330,7 @@ public class SummaryServiceImpl implements SummaryService {
 
         return new YearInReviewResponseDTO(ratingsDistribution, watchCount, minutesWatched, averageMinutesPerMonth,
                 averageMinutesPerWeek, averageMinutesPerDay, watchCountByMonth, watchCountByDayOfWeek,
-                firstWatchedDate, lastWatchedDate, longestWatched, genreCounts, topRated, bottomRated, topWatchCompanions);
+                firstWatched, lastWatched, longestWatched, genreCounts, topRated, bottomRated, topWatchCompanions);
     }
 
     @Override
@@ -368,7 +383,7 @@ public class SummaryServiceImpl implements SummaryService {
         List<DiaryEntry> topRatedRaw = diaryEntryRepository.findTopRatedByUserId(userId, PageRequest.of(0, ALL_TIME_TOP_LIMIT));
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository.findBottomRatedByUserId(userId, PageRequest.of(0, ALL_TIME_TOP_LIMIT));
         List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(ContentType.MOVIE, ContentType.SERIES));
-        List<DiaryEntryResponseDTO> bottomRated = promoteTop5First(bottomRatedRaw, userId, List.of(ContentType.MOVIE, ContentType.SERIES));
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw);
 
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanionsAllTime(userId);
 
@@ -428,6 +443,13 @@ public class SummaryServiceImpl implements SummaryService {
 
         return entries.stream()
                 .sorted(Comparator.comparing((DiaryEntry d) -> !top5ContentIds.contains(d.getContent().getId())))
+                .map(this::toDiaryEntryResponseDto)
+                .toList();
+    }
+
+    private List<DiaryEntryResponseDTO> sortBottomRated(List<DiaryEntry> entries) {
+        return entries.stream()
+                .sorted(Comparator.comparing(DiaryEntry::getScore))
                 .map(this::toDiaryEntryResponseDto)
                 .toList();
     }
