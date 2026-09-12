@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.calendar.dto.SeriesCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.WatchStatus;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
+import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput.CompleteSeasonKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -43,6 +44,7 @@ public class CalendarEventAssembler {
 
         List<CalendarScheduleSnapshot> validSnapshots = input.snapshots().stream()
                 .filter(this::hasValidCoordinates)
+                .filter(snapshot -> hasInputLocale(snapshot, input))
                 .toList();
         List<AssembledEvent> events = new ArrayList<>();
 
@@ -71,7 +73,7 @@ public class CalendarEventAssembler {
                             CalendarEventType.MOVIE,
                             releaseStatus(snapshot.getReleaseDate(), input),
                             watched ? WatchStatus.WATCHED : WatchStatus.UNWATCHED,
-                            sourcesForMovie(tmdbId, input.sourcesByKey()),
+                            sourcesForMovie(tmdbId, input),
                             new MovieCalendarContentDTO(tmdbId, snapshot.getTitle(), snapshot.getPosterPath()),
                             tmdbId,
                             0,
@@ -94,14 +96,14 @@ public class CalendarEventAssembler {
             List<CalendarScheduleSnapshot> seriesEpisodes,
             CalendarAssemblyInput input,
             List<AssembledEvent> events) {
-        if (isCompleteSeriesWithOneDate(seriesEpisodes)) {
+        if (isCompleteSeriesWithOneDate(seriesEpisodes, input)) {
             CalendarScheduleSnapshot representative = representative(seriesEpisodes);
             events.add(event(
                     representative.getReleaseDate(),
                     CalendarEventType.SERIES,
                     releaseStatus(representative.getReleaseDate(), input),
                     groupedWatchStatus(seriesEpisodes, input.watchedKeys()),
-                    sourcesForSeries(representative.getSeriesTmdbId(), input.sourcesByKey()),
+                    sourcesForSeries(representative.getSeriesTmdbId(), input),
                     new SeriesCalendarContentDTO(
                             representative.getSeriesTmdbId(),
                             seriesEpisodes.size(),
@@ -122,14 +124,14 @@ public class CalendarEventAssembler {
             List<CalendarScheduleSnapshot> seasonEpisodes,
             CalendarAssemblyInput input,
             List<AssembledEvent> events) {
-        if (isCompleteGroupWithOneDate(seasonEpisodes)) {
+        if (isCompleteSeasonWithOneDate(seasonEpisodes, input)) {
             CalendarScheduleSnapshot representative = representative(seasonEpisodes);
             events.add(event(
                     representative.getReleaseDate(),
                     CalendarEventType.SEASON,
                     releaseStatus(representative.getReleaseDate(), input),
                     groupedWatchStatus(seasonEpisodes, input.watchedKeys()),
-                    sourcesForSeries(representative.getSeriesTmdbId(), input.sourcesByKey()),
+                    sourcesForSeries(representative.getSeriesTmdbId(), input),
                     new SeasonCalendarContentDTO(
                             representative.getSeriesTmdbId(),
                             representative.getSeasonNumber(),
@@ -155,7 +157,7 @@ public class CalendarEventAssembler {
                 CalendarEventType.EPISODE,
                 releaseStatus(snapshot.getReleaseDate(), input),
                 watched ? WatchStatus.WATCHED : WatchStatus.UNWATCHED,
-                sourcesForSeries(snapshot.getSeriesTmdbId(), input.sourcesByKey()),
+                sourcesForSeries(snapshot.getSeriesTmdbId(), input),
                 new EpisodeCalendarContentDTO(
                         snapshot.getSeriesTmdbId(),
                         snapshot.getSeasonNumber(),
@@ -185,12 +187,28 @@ public class CalendarEventAssembler {
                 && snapshot.getEpisodeNumber() > 0;
     }
 
-    private boolean isCompleteGroupWithOneDate(List<CalendarScheduleSnapshot> episodes) {
-        return hasOneReleaseDate(episodes) && hasCompleteCoordinatesBySeason(episodes);
+    private boolean hasInputLocale(CalendarScheduleSnapshot snapshot, CalendarAssemblyInput input) {
+        return input.region().equals(snapshot.getRegion())
+                && input.preferredLanguage().equals(snapshot.getLanguage());
     }
 
-    private boolean isCompleteSeriesWithOneDate(List<CalendarScheduleSnapshot> episodes) {
-        return isCompleteGroupWithOneDate(episodes) && hasCompleteSeasonCoordinates(episodes);
+    private boolean isCompleteSeasonWithOneDate(
+            List<CalendarScheduleSnapshot> episodes, CalendarAssemblyInput input) {
+        CalendarScheduleSnapshot representative = representative(episodes);
+        return input.completeness().completeSeasonKeys().contains(
+                new CompleteSeasonKey(representative.getSeriesTmdbId(), representative.getSeasonNumber()))
+                && hasOneReleaseDate(episodes);
+    }
+
+    private boolean isCompleteSeriesWithOneDate(
+            List<CalendarScheduleSnapshot> episodes, CalendarAssemblyInput input) {
+        CalendarScheduleSnapshot representative = representative(episodes);
+        return input.completeness().completeSeriesKeys().contains(new CalendarScheduleKey(
+                ContentType.SERIES,
+                representative.getSeriesTmdbId(),
+                input.preferredLanguage(),
+                input.region()))
+                && hasOneReleaseDate(episodes);
     }
 
     private boolean hasOneReleaseDate(List<CalendarScheduleSnapshot> episodes) {
@@ -201,31 +219,6 @@ public class CalendarEventAssembler {
                         .distinct()
                         .limit(2)
                         .count() == 1;
-    }
-
-    private boolean hasCompleteCoordinatesBySeason(List<CalendarScheduleSnapshot> episodes) {
-        return episodes.stream()
-                .collect(Collectors.groupingBy(CalendarScheduleSnapshot::getSeasonNumber))
-                .values()
-                .stream()
-                .allMatch(this::hasCompleteEpisodeCoordinates);
-    }
-
-    private boolean hasCompleteEpisodeCoordinates(List<CalendarScheduleSnapshot> episodes) {
-        Set<Integer> episodeNumbers = episodes.stream()
-                .map(CalendarScheduleSnapshot::getEpisodeNumber)
-                .collect(Collectors.toSet());
-        int maximumEpisodeNumber = episodeNumbers.stream().mapToInt(Integer::intValue).max().orElse(0);
-        int minimumEpisodeNumber = episodeNumbers.stream().mapToInt(Integer::intValue).min().orElse(0);
-        return episodeNumbers.size() == maximumEpisodeNumber - minimumEpisodeNumber + 1;
-    }
-
-    private boolean hasCompleteSeasonCoordinates(List<CalendarScheduleSnapshot> episodes) {
-        Set<Integer> seasonNumbers = episodes.stream()
-                .map(CalendarScheduleSnapshot::getSeasonNumber)
-                .collect(Collectors.toSet());
-        int maximumSeasonNumber = seasonNumbers.stream().mapToInt(Integer::intValue).max().orElse(0);
-        return seasonNumbers.size() == maximumSeasonNumber;
     }
 
     private CalendarScheduleSnapshot representative(List<CalendarScheduleSnapshot> snapshots) {
@@ -251,14 +244,19 @@ public class CalendarEventAssembler {
         return releaseDate.isAfter(LocalDate.now(input.clock())) ? ReleaseStatus.UPCOMING : ReleaseStatus.RELEASED;
     }
 
-    private Set<CalendarSource> sourcesForMovie(
-            String tmdbId, Map<CalendarScheduleKey, Set<CalendarSource>> sourcesByKey) {
-        return mergeSources(sourcesByKey, key -> key.type() == ContentType.MOVIE && tmdbId.equals(key.tmdbId()));
+    private Set<CalendarSource> sourcesForMovie(String tmdbId, CalendarAssemblyInput input) {
+        return mergeSources(input.sourcesByKey(),
+                key -> key.type() == ContentType.MOVIE && tmdbId.equals(key.tmdbId()) && hasInputLocale(key, input));
     }
 
-    private Set<CalendarSource> sourcesForSeries(
-            String seriesTmdbId, Map<CalendarScheduleKey, Set<CalendarSource>> sourcesByKey) {
-        return mergeSources(sourcesByKey, key -> key.type() == ContentType.SERIES && seriesTmdbId.equals(key.tmdbId()));
+    private Set<CalendarSource> sourcesForSeries(String seriesTmdbId, CalendarAssemblyInput input) {
+        return mergeSources(input.sourcesByKey(),
+                key -> key.type() == ContentType.SERIES && seriesTmdbId.equals(key.tmdbId()) && hasInputLocale(key, input));
+    }
+
+    private boolean hasInputLocale(CalendarScheduleKey key, CalendarAssemblyInput input) {
+        return input.region().equals(key.preferredRegion())
+                && input.preferredLanguage().equals(key.preferredLanguage());
     }
 
     private Set<CalendarSource> mergeSources(

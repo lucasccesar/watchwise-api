@@ -78,6 +78,14 @@ class CalendarEventAssemblerTest {
     }
 
     @Test
+    void shouldTreatAReleaseOnTheCurrentDateAsReleased() {
+        List<CalendarEventDTO> events = assemble(List.of(movie("550", LocalDate.of(2026, 9, 15))));
+
+        assertThat(events).singleElement().extracting(CalendarEventDTO::releaseStatus)
+                .isEqualTo(ReleaseStatus.RELEASED);
+    }
+
+    @Test
     void shouldComputeWatchedAndUnwatchedMovieAndEpisodeEvents() {
         CalendarScheduleSnapshot watchedMovie = movie("550", RELEASE_DATE);
         CalendarScheduleSnapshot watchedEpisode = episode("1396", 1, 1, RELEASE_DATE);
@@ -132,16 +140,17 @@ class CalendarEventAssemblerTest {
                 Set.of());
 
         assertThat(events.get(0).sources())
-                .containsExactlyInAnyOrder(CalendarSource.IN_PROGRESS, CalendarSource.WATCHLIST);
+                .containsExactly(CalendarSource.IN_PROGRESS);
         assertThat(events.get(1).sources())
-                .containsExactlyInAnyOrder(CalendarSource.IN_PROGRESS, CalendarSource.WATCHLIST);
+                .containsExactly(CalendarSource.IN_PROGRESS);
     }
 
     @Test
     void shouldGroupCompleteSeasonIntoOneEvent() {
         List<CalendarEventDTO> events = assemble(List.of(
                 episode("1396", 2, 2, RELEASE_DATE),
-                episode("1396", 2, 1, RELEASE_DATE)));
+                episode("1396", 2, 1, RELEASE_DATE)),
+                Map.of(), Set.of(), completeness(Set.of(season("1396", 2)), Set.of()));
 
         assertThat(events).singleElement().satisfies(event -> {
             assertThat(event.eventType()).isEqualTo(CalendarEventType.SEASON);
@@ -156,7 +165,8 @@ class CalendarEventAssemblerTest {
         List<CalendarEventDTO> events = assemble(List.of(
                 episode("1396", 2, 1, RELEASE_DATE),
                 episode("1396", 1, 2, RELEASE_DATE),
-                episode("1396", 1, 1, RELEASE_DATE)));
+                episode("1396", 1, 1, RELEASE_DATE)),
+                Map.of(), Set.of(), completeness(Set.of(), Set.of(seriesKey("1396"))));
 
         assertThat(events).singleElement().satisfies(event -> {
             assertThat(event.eventType()).isEqualTo(CalendarEventType.SERIES);
@@ -172,7 +182,8 @@ class CalendarEventAssemblerTest {
                         episode("1396", 1, 1, RELEASE_DATE),
                         episode("1396", 1, 2, RELEASE_DATE)),
                 Map.of(seriesKey("1396"), Set.of(CalendarSource.IN_PROGRESS)),
-                Set.of(WatchedCalendarKey.episode("1396", 1, 1)));
+                Set.of(WatchedCalendarKey.episode("1396", 1, 1)),
+                completeness(Set.of(), Set.of(seriesKey("1396"))));
 
         assertThat(events).singleElement().satisfies(event -> {
             assertThat(event.eventType()).isEqualTo(CalendarEventType.SERIES);
@@ -189,7 +200,8 @@ class CalendarEventAssemblerTest {
                 Map.of(seriesKey("1396"), Set.of(CalendarSource.WATCHLIST)),
                 Set.of(
                         WatchedCalendarKey.episode("1396", 1, 1),
-                        WatchedCalendarKey.episode("1396", 1, 2)));
+                        WatchedCalendarKey.episode("1396", 1, 2)),
+                completeness(Set.of(), Set.of(seriesKey("1396"))));
 
         assertThat(events).singleElement().extracting(CalendarEventDTO::watchStatus)
                 .isEqualTo(WatchStatus.WATCHED);
@@ -223,7 +235,8 @@ class CalendarEventAssemblerTest {
     void shouldNotGroupEpisodesFromDifferentSeries() {
         List<CalendarEventDTO> events = assemble(List.of(
                 episode("1396", 1, 1, RELEASE_DATE),
-                episode("9999", 1, 1, RELEASE_DATE)));
+                episode("9999", 1, 1, RELEASE_DATE)),
+                Map.of(), Set.of(), completeness(Set.of(), Set.of(seriesKey("1396"), seriesKey("9999"))));
 
         assertThat(events).hasSize(2);
         assertThat(events).extracting(CalendarEventDTO::eventType)
@@ -244,7 +257,10 @@ class CalendarEventAssemblerTest {
                 episode("300", 2, 2, LocalDate.of(2026, 9, 14)),
                 episode("400", 1, 2, date),
                 movie("100", date),
-                episode("500", 1, 1, date)));
+                episode("500", 1, 1, date)),
+                Map.of(), Set.of(), completeness(
+                        Set.of(season("300", 1), season("300", 2)),
+                        Set.of(seriesKey("400"))));
 
         assertThat(events).extracting(CalendarEventDTO::eventType)
                 .containsExactly(
@@ -275,7 +291,8 @@ class CalendarEventAssemblerTest {
         sources.put(movieKey("550"), movieSources);
         Set<WatchedCalendarKey> watchedKeys = new LinkedHashSet<>();
 
-        CalendarAssemblyInput input = new CalendarAssemblyInput(MONTH, CLOCK, snapshots, sources, watchedKeys, "BR");
+        CalendarAssemblyInput input = new CalendarAssemblyInput(
+                MONTH, CLOCK, snapshots, sources, watchedKeys, "BR", "pt-BR", completeness(Set.of(), Set.of()));
         snapshots.clear();
         movieSources.clear();
         sources.clear();
@@ -289,6 +306,56 @@ class CalendarEventAssemblerTest {
         });
     }
 
+    @Test
+    void shouldKeepMonthOnlyPrefixAsIndividualEpisodesWithoutDeclaredCompleteness() {
+        List<CalendarEventDTO> events = assemble(List.of(
+                episode("1396", 1, 1, RELEASE_DATE),
+                episode("1396", 1, 2, RELEASE_DATE)));
+
+        assertThat(events).extracting(CalendarEventDTO::eventType)
+                .containsExactly(CalendarEventType.EPISODE, CalendarEventType.EPISODE);
+    }
+
+    @Test
+    void shouldKeepMissingEpisodeCoordinateAsIndividualEpisodesWithoutDeclaredCompleteness() {
+        List<CalendarEventDTO> events = assemble(List.of(
+                episode("1396", 1, 1, RELEASE_DATE),
+                episode("1396", 1, 3, RELEASE_DATE)));
+
+        assertThat(events).extracting(CalendarEventDTO::eventType)
+                .containsExactly(CalendarEventType.EPISODE, CalendarEventType.EPISODE);
+    }
+
+    @Test
+    void shouldNotMixSnapshotsOrSourcesFromDifferentLocales() {
+        CalendarScheduleSnapshot brazilianMovie = movie("550", RELEASE_DATE);
+        CalendarScheduleSnapshot americanMovie = movie("550", RELEASE_DATE).toBuilder()
+                .region("US")
+                .language("en-US")
+                .build();
+
+        List<CalendarEventDTO> events = assemble(
+                List.of(brazilianMovie, americanMovie),
+                Map.of(
+                        movieKey("550"), Set.of(CalendarSource.IN_PROGRESS),
+                        new CalendarScheduleKey(ContentType.MOVIE, "550", "en-US", "US"), Set.of(CalendarSource.WATCHLIST)),
+                Set.of());
+
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.content()).isEqualTo(new MovieCalendarContentDTO("550", "Movie 550", "/movie-550.jpg"));
+            assertThat(event.sources()).containsExactly(CalendarSource.IN_PROGRESS);
+        });
+    }
+
+    @Test
+    void shouldExcludeRowsAbsentFromTheLastTmdbSnapshot() {
+        CalendarScheduleSnapshot absentMovie = movie("550", RELEASE_DATE).toBuilder()
+                .presentInLastTmdbSnapshot(false)
+                .build();
+
+        assertThat(assemble(List.of(absentMovie))).isEmpty();
+    }
+
     private List<CalendarEventDTO> assemble(List<CalendarScheduleSnapshot> snapshots) {
         return assemble(snapshots, Map.of(), Set.of());
     }
@@ -297,7 +364,26 @@ class CalendarEventAssemblerTest {
             List<CalendarScheduleSnapshot> snapshots,
             Map<CalendarScheduleKey, Set<CalendarSource>> sources,
             Set<WatchedCalendarKey> watchedKeys) {
-        return assembler.assemble(new CalendarAssemblyInput(MONTH, CLOCK, snapshots, sources, watchedKeys, "BR"));
+        return assemble(snapshots, sources, watchedKeys, completeness(Set.of(), Set.of()));
+    }
+
+    private List<CalendarEventDTO> assemble(
+            List<CalendarScheduleSnapshot> snapshots,
+            Map<CalendarScheduleKey, Set<CalendarSource>> sources,
+            Set<WatchedCalendarKey> watchedKeys,
+            CalendarAssemblyInput.Completeness completeness) {
+        return assembler.assemble(new CalendarAssemblyInput(
+                MONTH, CLOCK, snapshots, sources, watchedKeys, "BR", "pt-BR", completeness));
+    }
+
+    private CalendarAssemblyInput.Completeness completeness(
+            Set<CalendarAssemblyInput.CompleteSeasonKey> completeSeasonKeys,
+            Set<CalendarScheduleKey> completeSeriesKeys) {
+        return new CalendarAssemblyInput.Completeness(completeSeasonKeys, completeSeriesKeys);
+    }
+
+    private CalendarAssemblyInput.CompleteSeasonKey season(String seriesTmdbId, int seasonNumber) {
+        return new CalendarAssemblyInput.CompleteSeasonKey(seriesTmdbId, seasonNumber);
     }
 
     private CalendarScheduleKey movieKey(String tmdbId) {

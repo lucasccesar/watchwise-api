@@ -20,7 +20,9 @@ public record CalendarAssemblyInput(
         List<CalendarScheduleSnapshot> snapshots,
         Map<CalendarScheduleKey, Set<CalendarSource>> sourcesByKey,
         Set<WatchedCalendarKey> watchedKeys,
-        String region) {
+        String region,
+        String preferredLanguage,
+        Completeness completeness) {
 
     public CalendarAssemblyInput {
         Objects.requireNonNull(month, "month is required");
@@ -29,6 +31,8 @@ public record CalendarAssemblyInput(
         Objects.requireNonNull(sourcesByKey, "sourcesByKey is required");
         Objects.requireNonNull(watchedKeys, "watchedKeys are required");
         Objects.requireNonNull(region, "region is required");
+        Objects.requireNonNull(preferredLanguage, "preferredLanguage is required");
+        Objects.requireNonNull(completeness, "completeness is required");
 
         snapshots = List.copyOf(snapshots);
         sourcesByKey = copySources(sourcesByKey);
@@ -42,5 +46,33 @@ public record CalendarAssemblyInput(
                 Objects.requireNonNull(key, "calendar schedule key is required"),
                 Set.copyOf(Objects.requireNonNull(sources, "calendar sources are required"))));
         return Map.copyOf(copiedSources);
+    }
+
+    public record Completeness(
+            Set<CompleteSeasonKey> completeSeasonKeys,
+            Set<CalendarScheduleKey> completeSeriesKeys) {
+
+        public Completeness {
+            Objects.requireNonNull(completeSeasonKeys, "completeSeasonKeys are required");
+            Objects.requireNonNull(completeSeriesKeys, "completeSeriesKeys are required");
+            completeSeasonKeys = Set.copyOf(completeSeasonKeys);
+            completeSeriesKeys = Set.copyOf(completeSeriesKeys);
+        }
+
+        public static Completeness empty() {
+            return new Completeness(Set.of(), Set.of());
+        }
+    }
+
+    public record CompleteSeasonKey(String seriesTmdbId, int seasonNumber) {
+
+        public CompleteSeasonKey {
+            if (seriesTmdbId == null || seriesTmdbId.isBlank()) {
+                throw new IllegalArgumentException("Complete season keys require a series TMDB ID");
+            }
+            if (seasonNumber <= 0) {
+                throw new IllegalArgumentException("Complete season keys require a positive season number");
+            }
+        }
     }
 }
