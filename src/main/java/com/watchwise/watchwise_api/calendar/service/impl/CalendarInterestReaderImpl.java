@@ -13,8 +13,10 @@ import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -31,13 +33,14 @@ public class CalendarInterestReaderImpl implements CalendarInterestReader {
     private final UserRepository userRepository;
 
     @Override
+    @Transactional(readOnly = true)
     public CalendarInterest read(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
         List<String> movieTmdbIds = readWatchlistTmdbIds(userId, ContentType.MOVIE);
         List<String> seriesTmdbIds = readWatchlistTmdbIds(userId, ContentType.SERIES);
-        List<String> inProgressSeriesTmdbIds = distinctInEncounterOrder(
+        List<String> inProgressSeriesTmdbIds = sortedDistinctInProgressSeriesTmdbIds(
                 diaryEntryRepository.findDistinctInProgressSeriesTmdbIdsByUserId(userId));
 
         Map<CalendarScheduleKey, Set<CalendarSource>> sourcesByKey = new LinkedHashMap<>();
@@ -67,8 +70,11 @@ public class CalendarInterestReaderImpl implements CalendarInterestReader {
         return List.copyOf(tmdbIds);
     }
 
-    private List<String> distinctInEncounterOrder(List<String> tmdbIds) {
-        return List.copyOf(new LinkedHashSet<>(tmdbIds));
+    private List<String> sortedDistinctInProgressSeriesTmdbIds(List<String> tmdbIds) {
+        return tmdbIds.stream()
+                .distinct()
+                .sorted(Comparator.naturalOrder())
+                .toList();
     }
 
     private void addSources(
