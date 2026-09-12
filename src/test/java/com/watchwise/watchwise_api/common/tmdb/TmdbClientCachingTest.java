@@ -161,8 +161,8 @@ class TmdbClientCachingTest {
     }
 
     @Test
-    @DisplayName("[getCalendarSeasonDetails] Should Evict Unavailable Result - When A Later Lookup Succeeds")
-    void shouldEvictUnavailableResultWhenALaterCalendarSeasonLookupSucceeds() {
+    @DisplayName("[getCalendarSeasonDetails] Should Never Cache Unavailable Result - When A Later Lookup Succeeds")
+    void shouldNeverCacheUnavailableResultWhenALaterCalendarSeasonLookupSucceeds() {
         mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
@@ -173,10 +173,11 @@ class TmdbClientCachingTest {
                         """, MediaType.APPLICATION_JSON));
 
         var unavailable = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US");
-        var recovered = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US");
-
         assertThat(unavailable.isUnavailable()).isTrue();
         assertThat(tmdbCalendarSeasonDetailsCache.getIfPresent("1396|1|en-US")).isNull();
+
+        var recovered = tmdbClient.getCalendarSeasonDetails("1396", 1, "en-US");
+
         assertThat(recovered).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         mockServer.verify();
