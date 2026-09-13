@@ -11,6 +11,8 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleReadModel;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.calendar.service.CalendarWatchedContentReader;
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
@@ -26,6 +28,7 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.Collection;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -58,13 +61,14 @@ public class CalendarServiceImpl implements CalendarService {
         CalendarScheduleReadModel readModel = snapshotStore.findForInterest(interest, region, language);
         Map<CalendarScheduleKey, CalendarScheduleLookup> requestLookups = new LinkedHashMap<>();
         Set<CalendarScheduleKey> omittedKeys = new LinkedHashSet<>();
+        List<CalendarScheduleSnapshot> responseSnapshots = new ArrayList<>(readModel.snapshots());
         boolean synchronizedRemoteSchedule = refreshSchedules(
-                activeKeys, readModel.snapshots(), region, language, requestLookups, omittedKeys);
+                activeKeys, responseSnapshots, region, language, requestLookups, omittedKeys);
 
         if (synchronizedRemoteSchedule) {
             readModel = snapshotStore.findForInterest(interest, region, language);
         }
-        List<CalendarScheduleSnapshot> snapshots = readModel.snapshots().stream()
+        List<CalendarScheduleSnapshot> snapshots = (synchronizedRemoteSchedule ? readModel.snapshots() : responseSnapshots).stream()
                 .filter(snapshot -> !omittedKeys.contains(snapshotKey(snapshot)))
                 .toList();
         Set<WatchedCalendarKey> requestedWatchedKeys = watchedKeysFor(snapshots);
@@ -117,13 +121,45 @@ public class CalendarServiceImpl implements CalendarService {
                 synchronizedRemoteSchedule = true;
                 continue;
             }
+            if (lookup instanceof CalendarScheduleLookup.Found found && snapshotsForKey.isEmpty()) {
+                snapshots.addAll(inMemorySnapshots(found.batch()));
+                continue;
+            }
             if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries
                     && foundSeries.schedule().hasRemoteResults()) {
                 scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), now);
                 synchronizedRemoteSchedule = true;
+                continue;
+            }
+            if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries && snapshotsForKey.isEmpty()) {
+                foundSeries.schedule().seasons().forEach(season -> snapshots.addAll(inMemorySnapshots(
+                        new CalendarScheduleBatch(foundSeries.schedule().key(), season.origin(), now, null, season.schedule()))));
             }
         }
         return synchronizedRemoteSchedule;
+    }
+
+    private List<CalendarScheduleSnapshot> inMemorySnapshots(CalendarScheduleBatch batch) {
+        if (batch.movie() != null) {
+            var movie = batch.movie();
+            return List.of(CalendarScheduleSnapshot.builder()
+                    .eventType(CalendarScheduleSnapshot.EventType.MOVIE)
+                    .tmdbId(movie.tmdbId()).region(movie.region()).language(movie.language())
+                    .releaseDate(movie.releaseDate()).title(movie.title()).posterPath(movie.posterPath())
+                    .lastCheckedAt(LocalDateTime.ofInstant(batch.loadedAt(), ZoneOffset.UTC))
+                    .nextCheckAt(LocalDateTime.MAX).presentInLastTmdbSnapshot(true).build());
+        }
+        CalendarSeasonSchedule season = batch.season();
+        return season.episodes().stream().filter(episode -> episode.episodeNumber() != null && episode.episodeNumber() > 0)
+                .map(episode -> CalendarScheduleSnapshot.builder()
+                        .eventType(CalendarScheduleSnapshot.EventType.EPISODE)
+                        .seriesTmdbId(season.seriesTmdbId()).seasonNumber(season.seasonNumber())
+                        .episodeNumber(episode.episodeNumber()).region(season.region()).language(season.language())
+                        .releaseDate(episode.releaseDate()).title(episode.title()).seriesTitle(season.seriesTitle())
+                        .posterPath(season.posterPath()).stillPath(episode.stillPath())
+                        .lastCheckedAt(LocalDateTime.ofInstant(batch.loadedAt(), ZoneOffset.UTC))
+                        .nextCheckAt(LocalDateTime.MAX).presentInLastTmdbSnapshot(true).build())
+                .toList();
     }
 
     private CalendarScheduleLookup load(CalendarScheduleKey key, String region, String language) {

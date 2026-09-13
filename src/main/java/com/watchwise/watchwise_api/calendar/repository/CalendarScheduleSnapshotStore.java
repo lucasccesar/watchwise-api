@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Instant;
@@ -32,12 +33,20 @@ import java.util.Optional;
 import java.util.Set;
 
 @Repository
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class CalendarScheduleSnapshotStore {
 
     private final CalendarScheduleSnapshotRepository snapshotRepository;
     private final CalendarScheduleCompletenessRepository completenessRepository;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final CalendarScheduleIdentityLock scheduleLock;
+
+    public CalendarScheduleSnapshotStore(
+            CalendarScheduleSnapshotRepository snapshotRepository,
+            CalendarScheduleCompletenessRepository completenessRepository,
+            NewTransactionExecutor newTransactionExecutor) {
+        this(snapshotRepository, completenessRepository, newTransactionExecutor, identity -> { });
+    }
 
     public CalendarScheduleReadModel findForInterest(
             CalendarInterest interest, String region, String language) {
@@ -91,13 +100,16 @@ public class CalendarScheduleSnapshotStore {
                 schedule.tmdbId(), schedule.region(), schedule.language());
         if (existing.isPresent()) {
             return newTransactionExecutor.runInNewTransaction(() -> {
+                lockMovie(schedule);
+                boolean factsChanged = movieFactsChanged(existing.get(), schedule);
                 CalendarScheduleSnapshot merged = mergeMovie(existing.get(), schedule);
                 snapshotRepository.saveAndFlush(merged);
-                return movieFactsChanged(existing.get(), merged);
+                return factsChanged;
             });
         }
         try {
             return newTransactionExecutor.runInNewTransaction(() -> {
+                lockMovie(schedule);
                 snapshotRepository.saveAndFlush(newMovie(schedule));
                 return true;
             });
@@ -105,9 +117,11 @@ public class CalendarScheduleSnapshotStore {
             CalendarScheduleSnapshot winner = snapshotRepository.findByMovieIdentity(
                     schedule.tmdbId(), schedule.region(), schedule.language()).orElseThrow(() -> exception);
             return newTransactionExecutor.runInNewTransaction(() -> {
+                lockMovie(schedule);
+                boolean factsChanged = movieFactsChanged(winner, schedule);
                 CalendarScheduleSnapshot merged = mergeMovie(winner, schedule);
                 snapshotRepository.saveAndFlush(merged);
-                return movieFactsChanged(winner, merged);
+                return factsChanged;
             });
         }
     }
@@ -132,10 +146,13 @@ public class CalendarScheduleSnapshotStore {
     }
 
     private boolean reconcileSeasonInNewTransaction(CalendarSeasonSchedule schedule) {
-        return newTransactionExecutor.runInNewTransaction(() -> reconcileSeasonInTransaction(schedule));
+        return newTransactionExecutor.runInNewTransaction(() -> {
+            lockSeries(schedule.seriesTmdbId(), schedule.region(), schedule.language());
+            return reconcileSeasonInTransaction(schedule, true);
+        });
     }
 
-    private boolean reconcileSeasonInTransaction(CalendarSeasonSchedule schedule) {
+    private boolean reconcileSeasonInTransaction(CalendarSeasonSchedule schedule, boolean invalidateCompleteness) {
         boolean changed = false;
         boolean hasUsableDate = schedule.episodes().stream().anyMatch(episode -> episode.releaseDate() != null);
         if (hasUsableDate) {
@@ -155,19 +172,27 @@ public class CalendarScheduleSnapshotStore {
                     schedule.seriesTmdbId(), schedule.seasonNumber(), episode.episodeNumber(),
                     schedule.region(), schedule.language());
             if (existing.isPresent()) {
+                boolean factsChanged = episodeFactsChanged(existing.get(), schedule, episode);
                 CalendarScheduleSnapshot merged = mergeEpisode(existing.get(), schedule, episode);
                 snapshotRepository.saveAndFlush(merged);
-                changed |= episodeFactsChanged(existing.get(), merged);
+                changed |= factsChanged;
                 continue;
             }
             snapshotRepository.saveAndFlush(newEpisode(schedule, episode));
             changed = true;
         }
+        if (changed && invalidateCompleteness) {
+            completenessRepository.deleteBySeriesTmdbIdAndRegionAndLanguage(
+                    schedule.seriesTmdbId(), schedule.region(), schedule.language());
+        }
         return changed;
     }
 
     private boolean reconcileSeriesInNewTransaction(CalendarSeriesSchedule schedule, Instant checkedAt) {
-        return newTransactionExecutor.runInNewTransaction(() -> reconcileSeriesInTransaction(schedule, checkedAt));
+        return newTransactionExecutor.runInNewTransaction(() -> {
+            lockSeries(schedule.key().tmdbId(), schedule.key().preferredRegion(), schedule.key().preferredLanguage());
+            return reconcileSeriesInTransaction(schedule, checkedAt);
+        });
     }
 
     private boolean reconcileSeriesInTransaction(CalendarSeriesSchedule schedule, Instant checkedAt) {
@@ -181,7 +206,7 @@ public class CalendarScheduleSnapshotStore {
                     && season.expectedEpisodeCount() == expected.getValue()
                     && season.isFullyRepresented();
             if (season != null && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE && complete) {
-                changed |= reconcileSeasonInTransaction(season.schedule());
+                changed |= reconcileSeasonInTransaction(season.schedule(), false);
             }
             if (season == null || season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE) {
                 changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SEASON, schedule.key().tmdbId(),
@@ -300,7 +325,7 @@ public class CalendarScheduleSnapshotStore {
                 .posterPath(season.posterPath())
                 .stillPath(episode.stillPath())
                 .lastCheckedAt(toLocalDateTime(episode.lastCheckedAt()))
-                .nextCheckAt(nextCheckAt(releaseDate, episode.lastCheckedAt()))
+                .nextCheckAt(nextSeriesCheckAt(releaseDate, episode.lastCheckedAt()))
                 .presentInLastTmdbSnapshot(true)
                 .build();
     }
@@ -319,29 +344,42 @@ public class CalendarScheduleSnapshotStore {
                 .posterPath(season.posterPath())
                 .stillPath(episode.stillPath())
                 .lastCheckedAt(toLocalDateTime(episode.lastCheckedAt()))
-                .nextCheckAt(nextCheckAt(episode.releaseDate(), episode.lastCheckedAt()))
+                .nextCheckAt(nextSeriesCheckAt(episode.releaseDate(), episode.lastCheckedAt()))
                 .presentInLastTmdbSnapshot(true)
                 .build();
     }
 
-    private boolean movieFactsChanged(CalendarScheduleSnapshot existing, CalendarScheduleSnapshot merged) {
-        return !Objects.equals(existing.getReleaseDate(), merged.getReleaseDate())
-                || !Objects.equals(existing.getTitle(), merged.getTitle())
-                || !Objects.equals(existing.getPosterPath(), merged.getPosterPath())
-                || !Objects.equals(existing.getPresentInLastTmdbSnapshot(), merged.getPresentInLastTmdbSnapshot());
+    private boolean movieFactsChanged(CalendarScheduleSnapshot existing, CalendarMovieSchedule schedule) {
+        return !Objects.equals(existing.getReleaseDate(), schedule.releaseDate())
+                || !Objects.equals(existing.getTitle(), schedule.title())
+                || !Objects.equals(existing.getPosterPath(), schedule.posterPath())
+                || !Boolean.TRUE.equals(existing.getPresentInLastTmdbSnapshot());
     }
 
-    private boolean episodeFactsChanged(CalendarScheduleSnapshot existing, CalendarScheduleSnapshot merged) {
-        return !Objects.equals(existing.getReleaseDate(), merged.getReleaseDate())
-                || !Objects.equals(existing.getTitle(), merged.getTitle())
-                || !Objects.equals(existing.getSeriesTitle(), merged.getSeriesTitle())
-                || !Objects.equals(existing.getPosterPath(), merged.getPosterPath())
-                || !Objects.equals(existing.getStillPath(), merged.getStillPath())
-                || !Objects.equals(existing.getPresentInLastTmdbSnapshot(), merged.getPresentInLastTmdbSnapshot());
+    private boolean episodeFactsChanged(
+            CalendarScheduleSnapshot existing, CalendarSeasonSchedule season, CalendarEpisodeSchedule episode) {
+        return !Objects.equals(existing.getReleaseDate(), episode.releaseDate())
+                || !Objects.equals(existing.getTitle(), episode.title())
+                || !Objects.equals(existing.getSeriesTitle(), season.seriesTitle())
+                || !Objects.equals(existing.getPosterPath(), season.posterPath())
+                || !Objects.equals(existing.getStillPath(), episode.stillPath())
+                || !Boolean.TRUE.equals(existing.getPresentInLastTmdbSnapshot());
     }
 
     private LocalDateTime nextCheckAt(LocalDate releaseDate, Instant checkedAt) {
         return toLocalDateTime(CalendarScheduleCadence.nextCheckAt(releaseDate, checkedAt));
+    }
+
+    private void lockMovie(CalendarMovieSchedule schedule) {
+        scheduleLock.lock("movie|" + schedule.tmdbId() + "|" + schedule.region() + "|" + schedule.language());
+    }
+
+    private void lockSeries(String tmdbId, String region, String language) {
+        scheduleLock.lock("series|" + tmdbId + "|" + region + "|" + language);
+    }
+
+    private LocalDateTime nextSeriesCheckAt(LocalDate releaseDate, Instant checkedAt) {
+        return toLocalDateTime(CalendarScheduleCadence.nextSeriesCheckAt(releaseDate, checkedAt));
     }
 
     private LocalDateTime toLocalDateTime(Instant instant) {

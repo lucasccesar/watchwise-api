@@ -117,6 +117,25 @@ class CalendarServiceImplTest {
     }
 
     @Test
+    void usesACachedFoundMovieInTheResponseWhenNoRegionalSnapshotExists() {
+        CalendarScheduleKey key = key(ContentType.MOVIE, "550");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel empty = new CalendarScheduleReadModel(List.of(), CalendarAssemblyInput.Completeness.empty());
+        CalendarScheduleBatch cached = CalendarScheduleBatch.movie(key, TmdbLookupOrigin.CACHE,
+                new CalendarMovieSchedule("550", "BR", "pt-BR", LocalDate.of(2026, 9, 15), "Fight Club", null, null, null));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(empty);
+        when(scheduleProvider.loadMovie("550", "BR", "pt-BR")).thenReturn(new CalendarScheduleLookup.Found(cached));
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        CalendarResponseDTO response = service().getMonth(USER_ID, YearMonth.of(2026, 9));
+
+        assertThat(response.events()).extracting(event -> event.eventType()).containsExactly(CalendarEventType.MOVIE);
+        verify(synchronizer, never()).synchronize(any(), any());
+        verify(snapshotStore).findForInterest(interest, "BR", "pt-BR");
+    }
+
+    @Test
     void refreshesDueSeriesThroughLoadSeriesAndNeverLoadSeason() {
         CalendarScheduleKey key = key(ContentType.SERIES, "1396");
         CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
