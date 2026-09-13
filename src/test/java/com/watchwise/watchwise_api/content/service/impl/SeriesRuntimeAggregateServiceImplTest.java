@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
@@ -132,6 +133,22 @@ class SeriesRuntimeAggregateServiceImplTest {
         service.resolve(content, details(summary(1, 1), summary(2, 1)), "pt-BR");
 
         verify(tmdbClient, times(2)).getSeasonFullDetails(eq("1399"), anyInt(), eq("pt-BR"));
+    }
+
+    @Test
+    @DisplayName("[resolve] Preserves The Lookup Origin For Each Loaded Season")
+    void shouldPreserveTheLookupOriginForEachLoadedSeason() {
+        Content content = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(contentRepository.findById(content.getId())).thenReturn(Optional.of(content));
+        when(tmdbClient.getSeasonFullDetails("1399", 1, "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(season(1, 48), TmdbLookupOrigin.CACHE));
+
+        SeriesRuntimeResolution result = service.resolve(content, details(summary(1, 1)), "pt-BR");
+
+        assertThat(result.seasonsFetchedWithOrigin()).singleElement()
+                .extracting(SeriesRuntimeResolution.LoadedSeason::origin)
+                .isEqualTo(TmdbLookupOrigin.CACHE);
     }
 
     @Test

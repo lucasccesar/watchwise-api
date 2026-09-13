@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -106,22 +107,43 @@ public class SeriesRuntimeAggregateServiceImpl implements SeriesRuntimeAggregate
 
     private SeriesRuntimeResolution reconcile(Content content, List<TmdbSeasonSummary> summaries, String language) {
         List<TmdbSeasonSummary> regular = regularSeasons(summaries);
-        List<TmdbSeasonFullDetails> fetched = regular.stream()
+        List<SeriesRuntimeResolution.LoadedSeason> fetched = regular.stream()
                 .map(summary -> CompletableFuture.supplyAsync(
-                        () -> tmdbClient.getSeasonFullDetails(content.getTmdbId(), summary.seasonNumber(), language).toOptional(),
+                        () -> loadSeason(content.getTmdbId(), summary.seasonNumber(), language),
                         tmdbSeasonFetchExecutor))
                 .map(CompletableFuture::join)
                 .flatMap(Optional::stream)
                 .toList();
+        List<TmdbSeasonFullDetails> fetchedDetails = fetched.stream()
+                .map(SeriesRuntimeResolution.LoadedSeason::details)
+                .toList();
         if (fetched.size() != regular.size()) {
-            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched, true);
+            return new SeriesRuntimeResolution(
+                    hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries),
+                    fetchedDetails,
+                    true,
+                    fetched);
         }
-        SeriesRuntimeAggregate aggregate = calculator.calculate(fetched, summaries);
+        SeriesRuntimeAggregate aggregate = calculator.calculate(fetchedDetails, summaries);
         if (aggregate.totalRuntimeMinutes() == null) {
-            return new SeriesRuntimeResolution(hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries), fetched, true);
+            return new SeriesRuntimeResolution(
+                    hasBaseline(content) ? storedAggregate(content) : nullAggregate(summaries),
+                    fetchedDetails,
+                    true,
+                    fetched);
         }
         SeriesRuntimeAggregate published = publishReconciledAggregate(content, aggregate);
-        return new SeriesRuntimeResolution(published, fetched, true);
+        return new SeriesRuntimeResolution(published, fetchedDetails, true, fetched);
+    }
+
+    private Optional<SeriesRuntimeResolution.LoadedSeason> loadSeason(
+            String seriesTmdbId, Integer seasonNumber, String language) {
+        TmdbLookupResult<TmdbSeasonFullDetails> lookup =
+                tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber, language);
+        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)) {
+            return Optional.empty();
+        }
+        return Optional.of(new SeriesRuntimeResolution.LoadedSeason(found.value(), found.origin()));
     }
 
     private SeriesRuntimeAggregate reusableBaseline(Content content, List<TmdbSeasonSummary> summaries) {

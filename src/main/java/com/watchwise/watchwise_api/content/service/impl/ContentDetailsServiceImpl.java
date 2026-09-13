@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarMovieReleaseDateSelector;
 import com.watchwise.watchwise_api.calendar.service.CalendarMovieSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
@@ -24,6 +25,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
@@ -162,7 +164,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         TmdbLookupResult<TmdbMovieFullDetails> lookup = tmdbClient.getMovieFullDetails(content.getTmdbId(), language);
         TmdbMovieFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
         persistUnitRuntime(content, details.runtime());
-        synchronizeMovieSchedule(content, language, region, lookup, details);
+        TmdbLookupResult<TmdbMovieReleaseDates> releaseDatesLookup = lookup instanceof TmdbLookupResult.Found<TmdbMovieFullDetails> found
+                && found.origin() == TmdbLookupOrigin.REMOTE
+                ? tmdbClient.getMovieReleaseDates(content.getTmdbId(), language)
+                : null;
+        synchronizeMovieSchedule(content, language, region, lookup, releaseDatesLookup, details);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -199,16 +205,20 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         SeriesRuntimeResolution runtimeResolution = seriesRuntimeAggregateService.resolve(content, details, language);
         SeriesRuntimeAggregate runtime = runtimeResolution.aggregate();
         List<TmdbSeasonFullDetails> allSeasons = runtimeResolution.seasonsFetchedForAggregate();
+        Map<Integer, TmdbLookupOrigin> seasonOrigins = originsBySeason(runtimeResolution.seasonsFetchedWithOrigin());
         if (allSeasons.isEmpty() && !runtimeResolution.seasonFetchAttempted()) {
             List<TmdbSeasonSummary> seasonsForDetails = isTerminalSeriesStatus(details.status())
                     ? latestSeasons(details.seasons(), RECENT_SEASONS_LIMIT_WHEN_FROZEN)
                     : details.seasons();
-            allSeasons = fetchAllSeasonsInParallel(content.getTmdbId(), seasonsForDetails, language);
+            List<SeriesRuntimeResolution.LoadedSeason> loadedSeasons =
+                    fetchAllSeasonsInParallel(content.getTmdbId(), seasonsForDetails, language);
+            allSeasons = loadedSeasons.stream().map(SeriesRuntimeResolution.LoadedSeason::details).toList();
+            seasonOrigins = originsBySeason(loadedSeasons);
         }
         if (!isTerminalSeriesStatus(details.status())) {
             contentTrackingService.reactivateAfterRevival(content, details.status());
         }
-        synchronizeSeriesSchedule(content, language, region, lookup, details, allSeasons);
+        synchronizeSeriesSchedule(content, language, region, lookup, details, allSeasons, seasonOrigins);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -529,21 +539,31 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 parseDate(episode.airDate()), episode.runtime(), episode.stillPath());
     }
 
-    private List<TmdbSeasonFullDetails> fetchAllSeasonsInParallel(
+    private List<SeriesRuntimeResolution.LoadedSeason> fetchAllSeasonsInParallel(
             String seriesTmdbId, List<TmdbSeasonSummary> seasons, String language) {
         if (seasons == null || seasons.isEmpty()) {
             return List.of();
         }
-        List<CompletableFuture<Optional<TmdbSeasonFullDetails>>> futures = seasons.stream()
-                .filter(season -> !Integer.valueOf(0).equals(season.seasonNumber()))
+        List<CompletableFuture<Optional<SeriesRuntimeResolution.LoadedSeason>>> futures = seasons.stream()
+                .filter(Objects::nonNull)
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
                 .map(season -> CompletableFuture.supplyAsync(
-                        () -> tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(), language).toOptional(),
+                        () -> loadedSeason(tmdbClient.getSeasonFullDetails(
+                                seriesTmdbId, season.seasonNumber(), language)),
                         tmdbSeasonFetchExecutor))
                 .toList();
         return futures.stream()
                 .map(CompletableFuture::join)
                 .flatMap(Optional::stream)
                 .toList();
+    }
+
+    private Optional<SeriesRuntimeResolution.LoadedSeason> loadedSeason(
+            TmdbLookupResult<TmdbSeasonFullDetails> lookup) {
+        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)) {
+            return Optional.empty();
+        }
+        return Optional.of(new SeriesRuntimeResolution.LoadedSeason(found.value(), found.origin()));
     }
 
     private List<Integer> runtimesOf(List<TmdbEpisodeSummary> episodes) {
@@ -561,16 +581,22 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             String language,
             String region,
             TmdbLookupResult<TmdbMovieFullDetails> lookup,
+            TmdbLookupResult<TmdbMovieReleaseDates> releaseDatesLookup,
             TmdbMovieFullDetails details) {
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbMovieFullDetails> found)
-                || found.origin() != TmdbLookupOrigin.REMOTE) {
+                || found.origin() != TmdbLookupOrigin.REMOTE
+                || !(releaseDatesLookup instanceof TmdbLookupResult.Found<TmdbMovieReleaseDates> releaseDates)) {
+            return;
+        }
+        LocalDate releaseDate = CalendarMovieReleaseDateSelector.select(releaseDates.value(), region).orElse(null);
+        if (releaseDate == null) {
             return;
         }
         CalendarMovieSchedule schedule = new CalendarMovieSchedule(
                 content.getTmdbId(),
                 region,
                 language,
-                parseDate(details.releaseDate()),
+                releaseDate,
                 nonBlankOr(resolveMovieTitle(details, region), content.getTmdbId()),
                 details.posterPath(),
                 null,
@@ -626,7 +652,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             String region,
             TmdbLookupResult<TmdbTvFullDetails> lookup,
             TmdbTvFullDetails details,
-            List<TmdbSeasonFullDetails> loadedSeasons) {
+            List<TmdbSeasonFullDetails> loadedSeasons,
+            Map<Integer, TmdbLookupOrigin> seasonOrigins) {
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> found)
                 || found.origin() != TmdbLookupOrigin.REMOTE
                 || loadedSeasons == null
@@ -656,11 +683,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                         season -> new CalendarSeriesSchedule.Season(
                                 toCalendarSeasonSchedule(content, language, region, details, season),
                                 expectedCounts.get(season.seasonNumber()),
-                                TmdbLookupOrigin.REMOTE),
+                                seasonOrigins.getOrDefault(season.seasonNumber(), TmdbLookupOrigin.CACHE)),
                         (first, ignored) -> first,
                         LinkedHashMap::new))
                 .values().stream().toList();
-        if (seasons.isEmpty()) {
+        if (seasons.isEmpty() || seasons.stream().noneMatch(season -> season.origin() == TmdbLookupOrigin.REMOTE)) {
             return;
         }
 
@@ -670,6 +697,18 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 expectedCounts,
                 expectedCounts.values().stream().mapToInt(Integer::intValue).sum());
         calendarScheduleSynchronizer.synchronizeSeries(schedule, Instant.now());
+    }
+
+    private Map<Integer, TmdbLookupOrigin> originsBySeason(
+            List<SeriesRuntimeResolution.LoadedSeason> loadedSeasons) {
+        return loadedSeasons.stream()
+                .filter(Objects::nonNull)
+                .filter(loaded -> loaded.details().seasonNumber() != null)
+                .collect(Collectors.toMap(
+                        loaded -> loaded.details().seasonNumber(),
+                        SeriesRuntimeResolution.LoadedSeason::origin,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
     }
 
     private CalendarSeasonSchedule toCalendarSeasonSchedule(
@@ -815,4 +854,5 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             this.profilePath = profilePath;
         }
     }
+
 }

@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarMovieReleaseDateSelector;
 import com.watchwise.watchwise_api.calendar.service.CalendarMovieSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
@@ -12,9 +13,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDate;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
-import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -36,9 +35,6 @@ import java.util.concurrent.Executor;
 @RequiredArgsConstructor
 public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
 
-    /* TMDB release types: theatrical wide, limited, premiere, digital, physical, then TV. */
-    private static final List<Integer> RELEASE_TYPE_PRECEDENCE = List.of(3, 2, 1, 4, 5, 6);
-
     private final TmdbClient tmdbClient;
     private final Executor tmdbSeasonFetchExecutor;
 
@@ -58,7 +54,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 tmdbId,
                 region,
                 language,
-                selectRegionalReleaseDate(releases.value(), region).orElse(null),
+                CalendarMovieReleaseDateSelector.select(releases.value(), region).orElse(null),
                 nonBlankOr(details.value().title(), tmdbId),
                 details.value().posterPath(),
                 null,
@@ -172,28 +168,6 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 null);
     }
 
-    private Optional<LocalDate> selectRegionalReleaseDate(TmdbMovieReleaseDates releases, String region) {
-        return Optional.ofNullable(releases.results()).orElseGet(List::of).stream()
-                .filter(candidate -> region.equals(candidate.isoCode()))
-                .findFirst()
-                .flatMap(this::selectReleaseDate);
-    }
-
-    private Optional<LocalDate> selectReleaseDate(TmdbRegionReleaseDates region) {
-        return Optional.ofNullable(region.releaseDates()).orElseGet(List::of).stream()
-                .map(release -> new RankedDate(release, parseDate(release.releaseDate())))
-                .filter(ranked -> ranked.date().isPresent())
-                .sorted(Comparator.comparingInt((RankedDate ranked) -> releaseTypeRank(ranked.release().type()))
-                        .thenComparing(ranked -> ranked.date().orElseThrow()))
-                .map(ranked -> ranked.date().orElseThrow())
-                .findFirst();
-    }
-
-    private int releaseTypeRank(Integer type) {
-        int rank = RELEASE_TYPE_PRECEDENCE.indexOf(type);
-        return rank >= 0 ? rank : RELEASE_TYPE_PRECEDENCE.size();
-    }
-
     private Optional<LocalDate> parseDate(String value) {
         if (value == null || value.isBlank()) {
             return Optional.empty();
@@ -216,6 +190,4 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         return value == null || value.isBlank() ? fallback : value;
     }
 
-    private record RankedDate(TmdbMovieReleaseDate release, Optional<LocalDate> date) {
-    }
 }
