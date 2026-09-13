@@ -1,5 +1,11 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
+import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarMovieSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
@@ -15,6 +21,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieAlternativeTitles;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
@@ -86,6 +93,9 @@ class ContentDetailsServiceImplTest {
     @Mock
     private SeriesRuntimeAggregateService seriesRuntimeAggregateService;
 
+    @Mock
+    private CalendarScheduleSynchronizer calendarScheduleSynchronizer;
+
     private ContentDetailsServiceImpl contentDetailsService;
     private ExecutorService seasonFetchExecutor;
 
@@ -97,7 +107,7 @@ class ContentDetailsServiceImplTest {
         seasonFetchExecutor = Executors.newSingleThreadExecutor();
         contentDetailsService = new ContentDetailsServiceImpl(
                 contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService,
-                seriesRuntimeAggregateService);
+                seriesRuntimeAggregateService, calendarScheduleSynchronizer);
         requestingUserId = UUID.randomUUID();
         requestingUser = User.builder().id(requestingUserId).preferredLanguage("en-US").preferredRegion("US").build();
         lenient().when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(requestingUser));
@@ -1084,6 +1094,159 @@ class ContentDetailsServiceImplTest {
         verify(contentRepository, never()).findById(any());
         verify(seriesRuntimeAggregateService).resolve(eq(series), eq(seriesDetails), eq("pt-BR"));
         verify(tmdbClient, never()).getSeasonFullDetails(eq("1396"), eq(1), eq("pt-BR"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Synchronize A Fresh Movie Schedule With The User Locale")
+    void shouldSynchronizeAFreshMovieScheduleWithTheUserLocale() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        User localizedUser = User.builder().id(requestingUserId)
+                .preferredLanguage("pt-BR").preferredRegion("BR").build();
+        TmdbMovieFullDetails details = new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, "/matrix.jpg", null,
+                "1999-03-31", 136, List.of(), List.of(), null, null, null, null, null, null, null);
+        when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(localizedUser));
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(details, TmdbLookupOrigin.REMOTE));
+
+        contentDetailsService.getDetails(contentId, requestingUserId);
+
+        ArgumentCaptor<CalendarScheduleBatch> batch = ArgumentCaptor.forClass(CalendarScheduleBatch.class);
+        verify(calendarScheduleSynchronizer).synchronize(batch.capture(), any(Instant.class));
+        assertThat(batch.getValue().origin()).isEqualTo(TmdbLookupOrigin.REMOTE);
+        assertThat(batch.getValue().key().tmdbId()).isEqualTo("603");
+        assertThat(batch.getValue().key().preferredLanguage()).isEqualTo("pt-BR");
+        assertThat(batch.getValue().key().preferredRegion()).isEqualTo("BR");
+        assertThat(batch.getValue().movie()).extracting(
+                CalendarMovieSchedule::releaseDate, CalendarMovieSchedule::title, CalendarMovieSchedule::posterPath)
+                .containsExactly(LocalDate.of(1999, 3, 31), "The Matrix", "/matrix.jpg");
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Synchronize A Fresh Regular Season Schedule With Episode Facts")
+    void shouldSynchronizeAFreshRegularSeasonScheduleWithEpisodeFacts() {
+        UUID contentId = UUID.randomUUID();
+        Content seasonContent = Content.builder().id(contentId).type(ContentType.SEASON)
+                .seriesTmdbId("1396").seasonNumber(1).build();
+        TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(
+                101, null, null, null, "2020-01-01", 1,
+                List.of(new TmdbEpisodeSummary(1, null, null, "2020-01-02", 49, "/episode.jpg", null)),
+                null, null);
+        TmdbTvFullDetails series = new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, "/series.jpg", null,
+                "2008-01-20", null, List.of(), List.of(), null, List.of(), null, null,
+                null, null, 1, 1, null, null, "Ended");
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(seasonContent));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(season, TmdbLookupOrigin.REMOTE));
+        when(tmdbClient.getTvFullDetails("1396", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(series, TmdbLookupOrigin.CACHE));
+
+        contentDetailsService.getDetails(contentId, requestingUserId);
+
+        ArgumentCaptor<CalendarScheduleBatch> batch = ArgumentCaptor.forClass(CalendarScheduleBatch.class);
+        verify(calendarScheduleSynchronizer).synchronize(batch.capture(), any(Instant.class));
+        CalendarSeasonSchedule schedule = batch.getValue().season();
+        assertThat(schedule.seriesTmdbId()).isEqualTo("1396");
+        assertThat(schedule.seasonNumber()).isEqualTo(1);
+        assertThat(schedule.seriesTitle()).isEqualTo("Breaking Bad");
+        assertThat(schedule.posterPath()).isEqualTo("/series.jpg");
+        assertThat(schedule.episodes()).extracting(
+                CalendarEpisodeSchedule::episodeNumber, CalendarEpisodeSchedule::title,
+                CalendarEpisodeSchedule::releaseDate, CalendarEpisodeSchedule::stillPath)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        1, "Episode 1", LocalDate.of(2020, 1, 2), "/episode.jpg"));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Not Synchronize A Cached Movie Schedule")
+    void shouldNotSynchronizeACachedMovieSchedule() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbMovieFullDetails("603", "The Matrix", "The Matrix", null, null, null,
+                        "1999-03-31", 136, List.of(), List.of(), null, null, null, null, null, null, null),
+                TmdbLookupOrigin.CACHE));
+
+        contentDetailsService.getDetails(contentId, requestingUserId);
+
+        verifyNoInteractions(calendarScheduleSynchronizer);
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Not Synchronize Cached Season Or Series Schedules")
+    void shouldNotSynchronizeCachedSeasonOrSeriesSchedules() {
+        UUID seasonId = UUID.randomUUID();
+        Content seasonContent = Content.builder().id(seasonId).type(ContentType.SEASON)
+                .seriesTmdbId("1396").seasonNumber(1).build();
+        when(contentRepository.findById(seasonId)).thenReturn(Optional.of(seasonContent));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(101, "Season 1", null, null, "2020-01-01", 1, List.of(), null, null),
+                TmdbLookupOrigin.CACHE));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails("1396", "Breaking Bad", "Breaking Bad", null, null, null,
+                        "2008-01-20", null, List.of(), List.of(), null, List.of(), null, null,
+                        null, null, 1, 0, null, null, "Ended"), TmdbLookupOrigin.CACHE));
+
+        contentDetailsService.getDetails(seasonId, requestingUserId);
+
+        UUID seriesId = UUID.randomUUID();
+        Content seriesContent = Content.builder().id(seriesId).type(ContentType.SERIES).tmdbId("1396").build();
+        when(contentRepository.findById(seriesId)).thenReturn(Optional.of(seriesContent));
+        when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails("1396", "Breaking Bad", "Breaking Bad", null, null, null,
+                        "2008-01-20", null, List.of(), List.of(), null, List.of(), null, null,
+                        null, null, 0, 0, null, null, "Ended"), TmdbLookupOrigin.CACHE));
+        doReturn(new SeriesRuntimeResolution(new SeriesRuntimeAggregate(null, null, null, 0), List.of(), true))
+                .when(seriesRuntimeAggregateService).resolve(eq(seriesContent), any(), eq("en-US"));
+
+        contentDetailsService.getDetails(seriesId, requestingUserId);
+
+        verifyNoInteractions(calendarScheduleSynchronizer);
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Synchronize Only Loaded Regular Seasons From A Fresh Series Lookup")
+    void shouldSynchronizeOnlyLoadedRegularSeasonsFromAFreshSeriesLookup() {
+        UUID contentId = UUID.randomUUID();
+        Content seriesContent = Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1396").build();
+        TmdbSeasonFullDetails specials = new TmdbSeasonFullDetails(
+                100, "Specials", null, null, null, 0,
+                List.of(new TmdbEpisodeSummary(1, "Special", null, "2026-01-01", 50, null, null)), null, null);
+        TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(
+                101, "Season 1", null, null, "2026-09-20", 1,
+                List.of(new TmdbEpisodeSummary(1, null, null, "2099-01-01", 45, "/still.jpg", null),
+                        new TmdbEpisodeSummary(2, "Second", null, null, 45, null, null)), null, null);
+        TmdbTvFullDetails details = new TmdbTvFullDetails(
+                "1396", "Breaking Bad", "Breaking Bad", null, "/poster.jpg", null,
+                "2008-01-20", null, List.of(), List.of(), null,
+                List.of(new TmdbSeasonSummary(0, "Specials", null, null, 1, null),
+                        new TmdbSeasonSummary(1, "Season 1", null, "2026-09-20", 2, null),
+                        new TmdbSeasonSummary(2, "Season 2", null, "2027-01-01", 1, null)),
+                null, null, null, null, 3, 3, null, null, "Returning");
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(seriesContent));
+        when(tmdbClient.getTvFullDetails("1396", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(details, TmdbLookupOrigin.REMOTE));
+        doReturn(new SeriesRuntimeResolution(new SeriesRuntimeAggregate(90, 45, 2, 3),
+                List.of(specials, season), true))
+                .when(seriesRuntimeAggregateService).resolve(eq(seriesContent), eq(details), eq("en-US"));
+
+        contentDetailsService.getDetails(contentId, requestingUserId);
+
+        ArgumentCaptor<CalendarSeriesSchedule> schedule = ArgumentCaptor.forClass(CalendarSeriesSchedule.class);
+        verify(calendarScheduleSynchronizer).synchronizeSeries(schedule.capture(), any(Instant.class));
+        assertThat(schedule.getValue().seasons()).extracting(
+                loadedSeason -> loadedSeason.schedule().seasonNumber()).containsExactly(1);
+        assertThat(schedule.getValue().seasons().get(0).schedule().episodes())
+                .extracting(CalendarEpisodeSchedule::title, CalendarEpisodeSchedule::releaseDate)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("Episode 1", LocalDate.of(2099, 1, 1)),
+                        org.assertj.core.groups.Tuple.tuple("Second", null));
+        verify(tmdbClient, never()).getSeasonFullDetails(any(), any(), any());
+        verify(contentRepository, never()).save(any(Content.class));
     }
 
     @Test
