@@ -2,7 +2,7 @@ package com.watchwise.watchwise_api.calendar.service;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 
 public final class CalendarScheduleCadence {
 
@@ -17,7 +17,7 @@ public final class CalendarScheduleCadence {
         if (releaseDate == null) {
             return checkedAt.plusSeconds(7 * DAY_SECONDS);
         }
-        LocalDate today = checkedAt.atZone(ZoneOffset.UTC).toLocalDate();
+        LocalDate today = checkedAt.atZone(ZoneId.systemDefault()).toLocalDate();
         if (!releaseDate.isAfter(today)) {
             return Instant.MAX;
         }
@@ -28,7 +28,7 @@ public final class CalendarScheduleCadence {
 
     /** A series remains discoverable after release: new seasons have no prior episode row to become due. */
     public static Instant nextSeriesCheckAt(LocalDate releaseDate, Instant checkedAt) {
-        if (releaseDate != null && !releaseDate.isAfter(checkedAt.atZone(ZoneOffset.UTC).toLocalDate())) {
+        if (releaseDate != null && !releaseDate.isAfter(checkedAt.atZone(ZoneId.systemDefault()).toLocalDate())) {
             return checkedAt.plusSeconds(SERIES_DISCOVERY_DAYS * DAY_SECONDS);
         }
         return nextCheckAt(releaseDate, checkedAt);

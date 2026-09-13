@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
@@ -80,8 +81,8 @@ class CalendarScheduleRefreshServiceTest {
     }
 
     @Test
-    @DisplayName("[refreshDueSchedules] Should Deduplicate By Identity, Season And Locale")
-    void shouldDeduplicateByIdentitySeasonAndLocale() {
+    @DisplayName("[refreshDueSchedules] Should Deduplicate A Series By Identity And Locale")
+    void shouldDeduplicateASeriesByIdentityAndLocale() {
         CalendarScheduleKey moviePtBr = key(ContentType.MOVIE, "550", "pt-BR", "BR");
         CalendarScheduleKey movieEnUs = key(ContentType.MOVIE, "550", "en-US", "US");
         CalendarScheduleKey seriesPtBr = key(ContentType.SERIES, "1396", "pt-BR", "BR");
@@ -97,16 +98,16 @@ class CalendarScheduleRefreshServiceTest {
                         episodeSnapshot("1396", 2, 1, "BR", "pt-BR")));
         when(scheduleProvider.loadMovie(any(), any(), any())).thenAnswer(invocation ->
                 remoteMovie(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
-        when(scheduleProvider.loadSeason(any(), any(), any(), any())).thenAnswer(invocation ->
-                remoteSeason(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2),
-                        invocation.getArgument(3)));
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(remoteSeries("1396", "BR", "pt-BR"));
 
         refreshService.refreshDueSchedules();
 
         verify(scheduleProvider).loadMovie("550", "BR", "pt-BR");
         verify(scheduleProvider).loadMovie("550", "US", "en-US");
-        verify(scheduleProvider).loadSeason("1396", 1, "BR", "pt-BR");
-        verify(scheduleProvider).loadSeason("1396", 2, "BR", "pt-BR");
+        verify(scheduleProvider).loadSeries("1396", "BR", "pt-BR");
+        verify(scheduleProvider, never()).loadSeason(any(), any(), any(), any());
+        verify(scheduleSynchronizer).synchronizeSeries(any(CalendarSeriesSchedule.class), eq(NOW));
     }
 
     @Test
@@ -196,8 +197,8 @@ class CalendarScheduleRefreshServiceTest {
         when(watchlistEntryRepository.findActiveCalendarScheduleKeys()).thenReturn(List.of(activeSeries));
         when(snapshotStore.findDue(Set.of(activeSeries), NOW_UTC)).thenReturn(List.of(
                 episodeSnapshot("1396", 2, 1, "BR", "pt-BR")));
-        when(scheduleProvider.loadSeason("1396", 2, "BR", "pt-BR"))
-                .thenReturn(remoteSeasonWithOrigin("1396", 2, "BR", "pt-BR", TmdbLookupOrigin.CACHE));
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(remoteSeriesWithOrigin("1396", "BR", "pt-BR", TmdbLookupOrigin.CACHE));
 
         refreshService.refreshDueSchedules();
 
@@ -283,17 +284,20 @@ class CalendarScheduleRefreshServiceTest {
                 null));
     }
 
-    private static CalendarScheduleLookup.Found remoteSeason(
-            String seriesTmdbId, Integer seasonNumber, String region, String language) {
-        return remoteSeasonWithOrigin(seriesTmdbId, seasonNumber, region, language, TmdbLookupOrigin.REMOTE);
+    private static CalendarScheduleLookup.FoundSeries remoteSeries(String seriesTmdbId, String region, String language) {
+        return remoteSeriesWithOrigin(seriesTmdbId, region, language, TmdbLookupOrigin.REMOTE);
     }
 
-    private static CalendarScheduleLookup.Found remoteSeasonWithOrigin(
-            String seriesTmdbId, Integer seasonNumber, String region, String language, TmdbLookupOrigin origin) {
+    private static CalendarScheduleLookup.FoundSeries remoteSeriesWithOrigin(
+            String seriesTmdbId, String region, String language, TmdbLookupOrigin origin) {
         CalendarScheduleKey key = key(ContentType.SERIES, seriesTmdbId, language, region);
         CalendarSeasonSchedule season = new CalendarSeasonSchedule(
-                seriesTmdbId, seasonNumber, region, language, "Series " + seriesTmdbId, null,
+                seriesTmdbId, 1, region, language, "Series " + seriesTmdbId, null,
                 List.of(new CalendarEpisodeSchedule(1, "Episode 1", LocalDate.of(2026, 9, 20), null, null, null)));
-        return new CalendarScheduleLookup.Found(new CalendarScheduleBatch(key, origin, NOW, null, season));
+        return new CalendarScheduleLookup.FoundSeries(new CalendarSeriesSchedule(
+                key,
+                List.of(new CalendarSeriesSchedule.Season(season, 1, origin)),
+                java.util.Map.of(1, 1),
+                1));
     }
 }

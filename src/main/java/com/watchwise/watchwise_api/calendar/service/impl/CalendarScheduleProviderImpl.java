@@ -116,6 +116,9 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         if (seasonLookups.stream().anyMatch(TmdbLookupResult::isUnavailable)) {
             return new CalendarScheduleLookup.Unavailable();
         }
+        if (seasonLookups.stream().anyMatch(lookup -> lookup instanceof TmdbLookupResult.NotFound<?>)) {
+            return new CalendarScheduleLookup.NotFound();
+        }
         List<CalendarSeriesSchedule.Season> seasons = seasonLookups.stream()
                 .flatMap(lookup -> foundSeason(lookup).stream())
                 .toList();

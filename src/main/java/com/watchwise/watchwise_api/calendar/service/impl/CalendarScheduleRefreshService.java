@@ -18,7 +18,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,7 +63,7 @@ public class CalendarScheduleRefreshService {
         }
 
         List<CalendarScheduleSnapshot> dueSnapshots = snapshotStore.findDue(activeKeys, dueAt);
-        Map<RefreshKey, RefreshKey> uniqueRefreshKeys = new LinkedHashMap<>();
+        Map<CalendarScheduleKey, CalendarScheduleKey> uniqueRefreshKeys = new LinkedHashMap<>();
         for (CalendarScheduleSnapshot snapshot : dueSnapshots) {
             toRefreshKey(snapshot, activeKeys).ifPresent(key -> uniqueRefreshKeys.putIfAbsent(key, key));
         }
@@ -84,24 +83,26 @@ public class CalendarScheduleRefreshService {
         }
     }
 
-    private void refreshOne(RefreshKey refreshKey, Instant checkedAt) {
+    private void refreshOne(CalendarScheduleKey key, Instant checkedAt) {
         try {
-            CalendarScheduleKey key = refreshKey.scheduleKey();
             CalendarScheduleLookup lookup = key.type() == ContentType.MOVIE
                     ? scheduleProvider.loadMovie(key.tmdbId(), key.preferredRegion(), key.preferredLanguage())
-                    : scheduleProvider.loadSeason(
-                            key.tmdbId(), refreshKey.seasonNumber(), key.preferredRegion(), key.preferredLanguage());
+                    : scheduleProvider.loadSeries(key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
             if (lookup instanceof CalendarScheduleLookup.Found found
                     && found.batch().origin() == TmdbLookupOrigin.REMOTE) {
                 scheduleSynchronizer.synchronize(found.batch(), checkedAt);
             }
+            if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries
+                    && foundSeries.schedule().hasRemoteResults()) {
+                scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), checkedAt);
+            }
         } catch (RuntimeException exception) {
-            log.warn("Calendar schedule refresh failed for {}", refreshKey, exception);
+            log.warn("Calendar schedule refresh failed for {}", key, exception);
         }
     }
 
-    private Optional<RefreshKey> toRefreshKey(
-            CalendarScheduleSnapshot snapshot, Collection<CalendarScheduleKey> activeKeys) {
+    private Optional<CalendarScheduleKey> toRefreshKey(
+            CalendarScheduleSnapshot snapshot, Set<CalendarScheduleKey> activeKeys) {
         try {
             if (snapshot.getEventType() == CalendarScheduleSnapshot.EventType.MOVIE) {
                 CalendarScheduleKey key = new CalendarScheduleKey(
@@ -109,18 +110,15 @@ public class CalendarScheduleRefreshService {
                         snapshot.getTmdbId(),
                         snapshot.getLanguage(),
                         snapshot.getRegion());
-                return activeKeys.contains(key) ? Optional.of(new RefreshKey(key, null)) : Optional.empty();
+                return activeKeys.contains(key) ? Optional.of(key) : Optional.empty();
             }
-            if (snapshot.getEventType() == CalendarScheduleSnapshot.EventType.EPISODE
-                    && snapshot.getSeasonNumber() != null && snapshot.getSeasonNumber() > 0) {
+            if (snapshot.getEventType() == CalendarScheduleSnapshot.EventType.EPISODE) {
                 CalendarScheduleKey key = new CalendarScheduleKey(
                         ContentType.SERIES,
                         snapshot.getSeriesTmdbId(),
                         snapshot.getLanguage(),
                         snapshot.getRegion());
-                return activeKeys.contains(key)
-                        ? Optional.of(new RefreshKey(key, snapshot.getSeasonNumber()))
-                        : Optional.empty();
+                return activeKeys.contains(key) ? Optional.of(key) : Optional.empty();
             }
         } catch (IllegalArgumentException exception) {
             log.warn("Ignoring malformed calendar schedule snapshot {}", snapshot.getId(), exception);
@@ -128,15 +126,4 @@ public class CalendarScheduleRefreshService {
         return Optional.empty();
     }
 
-    private record RefreshKey(CalendarScheduleKey scheduleKey, Integer seasonNumber) {
-
-        private RefreshKey {
-            if (scheduleKey.type() == ContentType.MOVIE && seasonNumber != null) {
-                throw new IllegalArgumentException("Movie refresh keys cannot have a season");
-            }
-            if (scheduleKey.type() == ContentType.SERIES && (seasonNumber == null || seasonNumber <= 0)) {
-                throw new IllegalArgumentException("Series refresh keys require a positive season");
-            }
-        }
-    }
 }

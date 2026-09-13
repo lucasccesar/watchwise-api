@@ -182,6 +182,21 @@ class CalendarScheduleProviderTest {
     }
 
     @Test
+    @DisplayName("[loadSeries] Should Return Not Found - When A Required Season Is Not Found")
+    void shouldReturnNotFoundWhenARequiredSeasonIsNotFound() {
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
+                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null),
+                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null)))));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
+
+        assertThat(result).isInstanceOf(CalendarScheduleLookup.NotFound.class);
+    }
+
+    @Test
     @DisplayName("[loadSeries] Should Submit Every Regular Season - Before Waiting For A Season Result")
     void shouldSubmitEveryRegularSeasonBeforeWaitingForASeasonResult() throws Exception {
         BlockingExecutor executor = new BlockingExecutor(2);
