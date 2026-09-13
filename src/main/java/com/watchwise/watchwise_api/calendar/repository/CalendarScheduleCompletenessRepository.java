@@ -11,7 +11,7 @@ import java.util.UUID;
 
 public interface CalendarScheduleCompletenessRepository extends JpaRepository<CalendarScheduleCompleteness, UUID> {
 
-    void deleteBySeriesTmdbIdAndRegionAndLanguage(String seriesTmdbId, String region, String language);
+    long deleteBySeriesTmdbIdAndRegionAndLanguage(String seriesTmdbId, String region, String language);
 
     Optional<CalendarScheduleCompleteness> findByGroupTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
             CalendarScheduleCompleteness.GroupType groupType,

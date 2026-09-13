@@ -215,6 +215,12 @@ public class CalendarScheduleSnapshotStore {
         Map<Integer, CalendarSeriesSchedule.Season> seasonsByNumber = new LinkedHashMap<>();
         schedule.seasons().forEach(season -> seasonsByNumber.putIfAbsent(season.schedule().seasonNumber(), season));
         boolean changed = false;
+        boolean hasCachedSeason = schedule.seasons().stream()
+                .anyMatch(season -> season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.CACHE);
+        if (hasCachedSeason) {
+            changed |= completenessRepository.deleteBySeriesTmdbIdAndRegionAndLanguage(
+                    schedule.key().tmdbId(), schedule.key().preferredRegion(), schedule.key().preferredLanguage()) > 0;
+        }
         boolean allSeasonsComplete = true;
         for (Map.Entry<Integer, Integer> expected : schedule.expectedEpisodeCountsBySeason().entrySet()) {
             CalendarSeriesSchedule.Season season = seasonsByNumber.get(expected.getKey());
@@ -233,8 +239,6 @@ public class CalendarScheduleSnapshotStore {
                     && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE
                     && complete;
         }
-        boolean hasCachedSeason = schedule.seasons().stream()
-                .anyMatch(season -> season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.CACHE);
         if (!hasCachedSeason) {
             changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SERIES, schedule.key().tmdbId(), null,
                     schedule.key().preferredRegion(), schedule.key().preferredLanguage(),
@@ -259,6 +263,11 @@ public class CalendarScheduleSnapshotStore {
         Optional<CalendarScheduleCompleteness> existing = groupType == CalendarScheduleCompleteness.GroupType.SEASON
                 ? completenessRepository.findSeasonIdentity(seriesTmdbId, seasonNumber, region, language)
                 : completenessRepository.findSeriesIdentity(seriesTmdbId, region, language);
+        if (existing.isPresent()
+                && existing.get().getLastCheckedAt() != null
+                && existing.get().getLastCheckedAt().isAfter(toLocalDateTime(checkedAt))) {
+            return false;
+        }
         CalendarScheduleCompleteness marker = existing.map(current -> current.toBuilder()
                 .expectedEpisodeCount(expectedEpisodeCount)
                 .complete(complete)

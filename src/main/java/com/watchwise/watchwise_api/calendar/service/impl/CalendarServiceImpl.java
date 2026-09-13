@@ -128,19 +128,15 @@ public class CalendarServiceImpl implements CalendarService {
                 transientSnapshots.addAll(inMemorySnapshots(found.batch()));
                 continue;
             }
-            if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries
-                    && foundSeries.schedule().hasRemoteResults()) {
-                scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), now);
+            if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries) {
                 foundSeries.schedule().seasons().stream()
                         .filter(season -> season.origin() == TmdbLookupOrigin.CACHE)
                         .forEach(season -> transientSnapshots.addAll(inMemorySnapshots(new CalendarScheduleBatch(
                                 foundSeries.schedule().key(), season.origin(), now, null, season.schedule()))));
-                synchronizedRemoteSchedule = true;
-                continue;
-            }
-            if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries && snapshotsForKey.isEmpty()) {
-                foundSeries.schedule().seasons().forEach(season -> transientSnapshots.addAll(inMemorySnapshots(
-                        new CalendarScheduleBatch(foundSeries.schedule().key(), season.origin(), now, null, season.schedule()))));
+                if (foundSeries.schedule().hasRemoteResults()) {
+                    scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), now);
+                    synchronizedRemoteSchedule = true;
+                }
             }
         }
         return synchronizedRemoteSchedule;

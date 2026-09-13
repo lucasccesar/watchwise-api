@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
+import com.watchwise.watchwise_api.calendar.dto.EpisodeCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarResponseDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
@@ -166,6 +167,36 @@ class CalendarServiceImplTest {
                 .extracting(event -> event.eventType())
                 .containsExactly(CalendarEventType.EPISODE, CalendarEventType.EPISODE);
         verify(synchronizer).synchronizeSeries(schedule, CLOCK.instant());
+    }
+
+    @Test
+    void includesACacheOnlySeasonWhenAnotherSeasonAlreadyHasAPersistedSnapshot() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleSnapshot persistedSeason = episode("1396", 1, 1, LocalDate.of(2026, 9, 15)).toBuilder()
+                .nextCheckAt(LocalDateTime.of(2026, 9, 12, 10, 0))
+                .build();
+        CalendarSeasonSchedule cacheOnlySeason = new CalendarSeasonSchedule(
+                "1396", 2, "BR", "pt-BR", "Series 1396", null,
+                List.of(new CalendarEpisodeSchedule(1, "Cached season episode", LocalDate.of(2026, 9, 16), null, null, null)));
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
+                key,
+                List.of(new CalendarSeriesSchedule.Season(cacheOnlySeason, 1, TmdbLookupOrigin.CACHE)),
+                Map.of(2, 1), 1);
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleReadModel(List.of(persistedSeason), CalendarAssemblyInput.Completeness.empty()));
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.FoundSeries(schedule));
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        CalendarResponseDTO response = service().getMonth(USER_ID, YearMonth.of(2026, 9));
+
+        assertThat(response.events()).extracting(event -> ((EpisodeCalendarContentDTO) event.content()).episodeNumber())
+                .containsExactly(1, 1);
+        assertThat(response.events()).extracting(event -> ((EpisodeCalendarContentDTO) event.content()).seasonNumber())
+                .containsExactly(1, 2);
+        verifyNoInteractions(synchronizer);
     }
 
     @Test
