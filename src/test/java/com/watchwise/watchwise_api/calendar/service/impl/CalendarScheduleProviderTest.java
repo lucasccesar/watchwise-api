@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,7 @@ class CalendarScheduleProviderTest {
 
     @BeforeEach
     void setUp() {
-        provider = new CalendarScheduleProviderImpl(tmdbClient);
+        provider = new CalendarScheduleProviderImpl(tmdbClient, Runnable::run);
     }
 
     @Test
@@ -138,6 +139,28 @@ class CalendarScheduleProviderTest {
         verify(tmdbClient, never()).getTvFullDetails("1396", "pt-BR");
     }
 
+    @Test
+    @DisplayName("[loadSeries] Should Load Every Regular Season And Exclude Specials")
+    void shouldLoadEveryRegularSeasonAndExcludeSpecials() {
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
+                new TmdbSeasonSummary(0, "Specials", null, null, 2, null),
+                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null),
+                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null)))));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                2, "Season 2", null, null, null, 2, List.of(episode(1, "Return", "2026-09-08", null)), null, null)));
+
+        CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.FoundSeries.class, found -> {
+            assertThat(found.schedule().seasons()).extracting(season -> season.schedule().seasonNumber())
+                    .containsExactly(1, 2);
+            assertThat(found.schedule().totalRegularEpisodeCount()).isEqualTo(2);
+        });
+        verify(tmdbClient, never()).getCalendarSeasonDetails("1396", 0, "pt-BR");
+    }
+
     private static <T> TmdbLookupResult.Found<T> found(T value) {
         return new TmdbLookupResult.Found<>(value, TmdbLookupOrigin.REMOTE);
     }
@@ -154,6 +177,11 @@ class CalendarScheduleProviderTest {
     private static TmdbTvFullDetails series(String id, String name) {
         return new TmdbTvFullDetails(id, name, null, null, "/breaking-bad.jpg", null, null,
                 null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    private static TmdbTvFullDetails seriesWithSeasons(String id, List<TmdbSeasonSummary> seasons) {
+        return new TmdbTvFullDetails(id, "Breaking Bad", null, null, "/breaking-bad.jpg", null, null,
+                null, null, null, null, seasons, null, null, null, null, null, null, null, null, null);
     }
 
     private static TmdbEpisodeSummary episode(Integer number, String name, String airDate, String stillPath) {

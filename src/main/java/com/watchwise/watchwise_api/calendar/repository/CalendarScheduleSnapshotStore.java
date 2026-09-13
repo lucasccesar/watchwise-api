@@ -1,12 +1,16 @@
 package com.watchwise.watchwise_api.calendar.repository;
 
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
+import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarInterest;
 import com.watchwise.watchwise_api.calendar.service.CalendarMovieSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleReadModel;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +22,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -28,14 +35,29 @@ import java.util.Set;
 public class CalendarScheduleSnapshotStore {
 
     private final CalendarScheduleSnapshotRepository snapshotRepository;
+    private final CalendarScheduleCompletenessRepository completenessRepository;
     private final NewTransactionExecutor newTransactionExecutor;
 
-    public List<CalendarScheduleSnapshot> findForInterestAndMonth(
-            CalendarInterest interest, java.time.YearMonth month, String region, String language) {
-        return snapshotRepository.findByReleaseMonth(month, region, language).stream()
-                .filter(snapshot -> Boolean.TRUE.equals(snapshot.getPresentInLastTmdbSnapshot()))
-                .filter(snapshot -> isInInterest(snapshot, interest.sourcesByKey().keySet()))
+    public CalendarScheduleReadModel findForInterest(
+            CalendarInterest interest, String region, String language) {
+        Set<CalendarScheduleKey> activeKeys = interest.sourcesByKey().keySet();
+        List<CalendarScheduleSnapshot> snapshots = snapshotRepository
+                .findByRegionAndLanguageAndPresentInLastTmdbSnapshotTrue(region, language).stream()
+                .filter(snapshot -> isInInterest(snapshot, activeKeys))
                 .toList();
+        Set<String> activeSeriesIds = activeKeys.stream()
+                .filter(key -> key.type() == ContentType.SERIES)
+                .map(CalendarScheduleKey::tmdbId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Set<CalendarAssemblyInput.CompleteSeasonKey> completeSeasonKeys = new LinkedHashSet<>();
+        Set<CalendarScheduleKey> completeSeriesKeys = new LinkedHashSet<>();
+        completenessRepository.findByRegionAndLanguage(region, language).stream()
+                .filter(marker -> Boolean.TRUE.equals(marker.getComplete()))
+                .filter(marker -> activeSeriesIds.contains(marker.getSeriesTmdbId()))
+                .forEach(marker -> addCompleteKey(marker, language, region, completeSeasonKeys, completeSeriesKeys));
+        return new CalendarScheduleReadModel(
+                snapshots,
+                new CalendarAssemblyInput.Completeness(completeSeasonKeys, completeSeriesKeys));
     }
 
     public List<CalendarScheduleSnapshot> findDue(
@@ -80,6 +102,17 @@ public class CalendarScheduleSnapshotStore {
         }
     }
 
+    public boolean reconcileSeries(CalendarSeriesSchedule schedule, Instant checkedAt) {
+        if (!schedule.hasRemoteResults()) {
+            return false;
+        }
+        try {
+            return reconcileSeriesInNewTransaction(schedule, checkedAt);
+        } catch (DataIntegrityViolationException firstConflict) {
+            return reconcileSeriesInNewTransaction(schedule, checkedAt);
+        }
+    }
+
     private boolean reconcileSeasonInNewTransaction(CalendarSeasonSchedule schedule) {
         return newTransactionExecutor.runInNewTransaction(() -> reconcileSeasonInTransaction(schedule));
     }
@@ -113,6 +146,95 @@ public class CalendarScheduleSnapshotStore {
             changed = true;
         }
         return changed;
+    }
+
+    private boolean reconcileSeriesInNewTransaction(CalendarSeriesSchedule schedule, Instant checkedAt) {
+        return newTransactionExecutor.runInNewTransaction(() -> reconcileSeriesInTransaction(schedule, checkedAt));
+    }
+
+    private boolean reconcileSeriesInTransaction(CalendarSeriesSchedule schedule, Instant checkedAt) {
+        Map<Integer, CalendarSeriesSchedule.Season> seasonsByNumber = new LinkedHashMap<>();
+        schedule.seasons().forEach(season -> seasonsByNumber.putIfAbsent(season.schedule().seasonNumber(), season));
+        boolean changed = false;
+        boolean allSeasonsComplete = true;
+        for (Map.Entry<Integer, Integer> expected : schedule.expectedEpisodeCountsBySeason().entrySet()) {
+            CalendarSeriesSchedule.Season season = seasonsByNumber.get(expected.getKey());
+            boolean complete = season != null
+                    && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE
+                    && season.expectedEpisodeCount() == expected.getValue()
+                    && season.isFullyRepresented();
+            if (complete) {
+                changed |= reconcileSeasonInTransaction(season.schedule());
+            }
+            changed |= upsertCompleteness(
+                    CalendarScheduleCompleteness.GroupType.SEASON,
+                    schedule.key().tmdbId(),
+                    expected.getKey(),
+                    schedule.key().preferredRegion(),
+                    schedule.key().preferredLanguage(),
+                    expected.getValue(),
+                    complete,
+                    checkedAt);
+            allSeasonsComplete &= complete;
+        }
+        changed |= upsertCompleteness(
+                CalendarScheduleCompleteness.GroupType.SERIES,
+                schedule.key().tmdbId(),
+                null,
+                schedule.key().preferredRegion(),
+                schedule.key().preferredLanguage(),
+                schedule.totalRegularEpisodeCount(),
+                allSeasonsComplete,
+                checkedAt);
+        return changed;
+    }
+
+    private boolean upsertCompleteness(
+            CalendarScheduleCompleteness.GroupType groupType,
+            String seriesTmdbId,
+            Integer seasonNumber,
+            String region,
+            String language,
+            int expectedEpisodeCount,
+            boolean complete,
+            Instant checkedAt) {
+        Optional<CalendarScheduleCompleteness> existing = groupType == CalendarScheduleCompleteness.GroupType.SEASON
+                ? completenessRepository.findSeasonIdentity(seriesTmdbId, seasonNumber, region, language)
+                : completenessRepository.findSeriesIdentity(seriesTmdbId, region, language);
+        CalendarScheduleCompleteness marker = existing.map(current -> current.toBuilder()
+                .expectedEpisodeCount(expectedEpisodeCount)
+                .complete(complete)
+                .lastCheckedAt(toLocalDateTime(checkedAt))
+                .build()).orElseGet(() -> CalendarScheduleCompleteness.builder()
+                .groupType(groupType)
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .region(region)
+                .language(language)
+                .expectedEpisodeCount(expectedEpisodeCount)
+                .complete(complete)
+                .lastCheckedAt(toLocalDateTime(checkedAt))
+                .build());
+        boolean changed = existing.isEmpty()
+                || !Objects.equals(existing.get().getExpectedEpisodeCount(), marker.getExpectedEpisodeCount())
+                || !Objects.equals(existing.get().getComplete(), marker.getComplete());
+        completenessRepository.save(marker);
+        return changed;
+    }
+
+    private void addCompleteKey(
+            CalendarScheduleCompleteness marker,
+            String language,
+            String region,
+            Set<CalendarAssemblyInput.CompleteSeasonKey> completeSeasonKeys,
+            Set<CalendarScheduleKey> completeSeriesKeys) {
+        if (marker.getGroupType() == CalendarScheduleCompleteness.GroupType.SEASON) {
+            completeSeasonKeys.add(new CalendarAssemblyInput.CompleteSeasonKey(
+                    marker.getSeriesTmdbId(), marker.getSeasonNumber()));
+            return;
+        }
+        completeSeriesKeys.add(new CalendarScheduleKey(
+                ContentType.SERIES, marker.getSeriesTmdbId(), language, region));
     }
 
     private List<CalendarScheduleSnapshot> snapshotsForSeason(CalendarSeasonSchedule schedule) {

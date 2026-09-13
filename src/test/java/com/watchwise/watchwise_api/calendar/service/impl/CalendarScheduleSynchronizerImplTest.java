@@ -4,12 +4,17 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotRepository;
+import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotStore;
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarMovieSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
+import com.watchwise.watchwise_api.calendar.service.CalendarInterest;
+import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
@@ -25,6 +30,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -99,6 +106,51 @@ class CalendarScheduleSynchronizerImplTest {
         synchronizer.synchronize(movieBatch(TmdbLookupOrigin.REMOTE, LocalDate.of(2026, 9, 20)), CHECKED_AT);
 
         assertThat(movieCache.getIfPresent("550|pt-BR")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[synchronizeSeries] Should Reconcile All Regular Seasons In One Store Operation")
+    void shouldReconcileAllRegularSeasonsInOneStoreOperation() {
+        CalendarScheduleSnapshotStore store = mock(CalendarScheduleSnapshotStore.class);
+        CalendarScheduleSynchronizerImpl synchronizer = synchronizer(store);
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
+                key,
+                List.of(
+                        new CalendarSeriesSchedule.Season(seasonSchedule(LocalDate.of(2026, 9, 1), null), 1,
+                                TmdbLookupOrigin.REMOTE),
+                        new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", 2, "BR", "pt-BR",
+                                "Breaking Bad", null, List.of(new CalendarEpisodeSchedule(1, "Second",
+                                LocalDate.of(2026, 9, 8), null, null, null))), 1, TmdbLookupOrigin.REMOTE)),
+                Map.of(1, 1, 2, 1),
+                2);
+
+        synchronizer.synchronizeSeries(schedule, CHECKED_AT);
+
+        verify(store).reconcileSeries(any(), org.mockito.ArgumentMatchers.eq(CHECKED_AT));
+        verify(store, never()).reconcileSeason(any());
+    }
+
+    @Test
+    @DisplayName("[findForInterest] Should Return All Present Snapshots For Active Locale Keys")
+    void shouldReturnAllPresentSnapshotsForActiveLocaleKeys() {
+        CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
+        CalendarScheduleCompletenessRepository completenessRepository = mock(CalendarScheduleCompletenessRepository.class);
+        CalendarScheduleSnapshot september = movieSnapshot(LocalDate.of(2026, 9, 20));
+        CalendarScheduleSnapshot october = movieSnapshot(LocalDate.of(2026, 10, 3)).toBuilder().tmdbId("680").build();
+        when(repository.findByRegionAndLanguageAndPresentInLastTmdbSnapshotTrue("BR", "pt-BR"))
+                .thenReturn(List.of(september, october));
+        when(completenessRepository.findByRegionAndLanguage("BR", "pt-BR")).thenReturn(List.of());
+        NewTransactionExecutor executor = mock(NewTransactionExecutor.class);
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository, completenessRepository, executor);
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.MOVIE, "550", "pt-BR", "BR");
+        CalendarInterest interest = new CalendarInterest(List.of("550"), List.of(), List.of(),
+                Map.of(key, Set.of(CalendarSource.WATCHLIST)), "pt-BR", "BR");
+
+        var result = store.findForInterest(interest, "BR", "pt-BR");
+
+        assertThat(result.snapshots()).containsExactly(september);
+        assertThat(result.completeness()).isEqualTo(CalendarAssemblyInput.Completeness.empty());
     }
 
     @Test
@@ -208,7 +260,7 @@ class CalendarScheduleSynchronizerImplTest {
         NewTransactionExecutor transactionExecutor = mock(NewTransactionExecutor.class);
         doAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get())
                 .when(transactionExecutor).runInNewTransaction(any());
-        return new CalendarScheduleSnapshotStore(repository, transactionExecutor);
+        return new CalendarScheduleSnapshotStore(repository, mock(CalendarScheduleCompletenessRepository.class), transactionExecutor);
     }
 
     private static CalendarScheduleSynchronizerImpl synchronizer(CalendarScheduleSnapshotStore store) {

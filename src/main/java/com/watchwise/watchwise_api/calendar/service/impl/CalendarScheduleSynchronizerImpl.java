@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
@@ -47,6 +48,32 @@ public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchro
         if (snapshotStore.reconcileSeason(season)) {
             seasonScheduleCache.invalidate(
                     batch.season().seriesTmdbId() + "|" + batch.season().seasonNumber() + "|" + batch.season().language());
+        }
+    }
+
+    @Override
+    public void synchronizeSeries(CalendarSeriesSchedule schedule, Instant checkedAt) {
+        if (!schedule.hasRemoteResults()) {
+            return;
+        }
+        CalendarSeriesSchedule checkedSchedule = new CalendarSeriesSchedule(
+                schedule.key(),
+                schedule.seasons().stream()
+                        .map(season -> new CalendarSeriesSchedule.Season(
+                                season.schedule().withCheckTimes(
+                                        checkedAt,
+                                        releaseDate -> CalendarScheduleCadence.nextCheckAt(releaseDate, checkedAt)),
+                                season.expectedEpisodeCount(),
+                                season.origin()))
+                        .toList(),
+                schedule.expectedEpisodeCountsBySeason(),
+                schedule.totalRegularEpisodeCount());
+        if (snapshotStore.reconcileSeries(checkedSchedule, checkedAt)) {
+            checkedSchedule.seasons().stream()
+                    .filter(season -> season.origin() == TmdbLookupOrigin.REMOTE)
+                    .forEach(season -> seasonScheduleCache.invalidate(
+                            season.schedule().seriesTmdbId() + "|" + season.schedule().seasonNumber()
+                                    + "|" + season.schedule().language()));
         }
     }
 }
