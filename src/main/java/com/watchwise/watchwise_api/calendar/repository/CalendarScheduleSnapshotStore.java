@@ -41,19 +41,21 @@ public class CalendarScheduleSnapshotStore {
     public CalendarScheduleReadModel findForInterest(
             CalendarInterest interest, String region, String language) {
         Set<CalendarScheduleKey> activeKeys = interest.sourcesByKey().keySet();
-        List<CalendarScheduleSnapshot> snapshots = snapshotRepository
-                .findByRegionAndLanguageAndPresentInLastTmdbSnapshotTrue(region, language).stream()
-                .filter(snapshot -> isInInterest(snapshot, activeKeys))
-                .toList();
+        Set<String> activeMovieIds = activeKeys.stream()
+                .filter(key -> key.type() == ContentType.MOVIE)
+                .map(CalendarScheduleKey::tmdbId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         Set<String> activeSeriesIds = activeKeys.stream()
                 .filter(key -> key.type() == ContentType.SERIES)
                 .map(CalendarScheduleKey::tmdbId)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        List<CalendarScheduleSnapshot> snapshots = activeMovieIds.isEmpty() && activeSeriesIds.isEmpty()
+                ? List.of()
+                : snapshotRepository.findPresentForInterest(region, language, nonEmptyIds(activeMovieIds), nonEmptyIds(activeSeriesIds));
         Set<CalendarAssemblyInput.CompleteSeasonKey> completeSeasonKeys = new LinkedHashSet<>();
         Set<CalendarScheduleKey> completeSeriesKeys = new LinkedHashSet<>();
-        completenessRepository.findByRegionAndLanguage(region, language).stream()
-                .filter(marker -> Boolean.TRUE.equals(marker.getComplete()))
-                .filter(marker -> activeSeriesIds.contains(marker.getSeriesTmdbId()))
+        (activeSeriesIds.isEmpty() ? List.<CalendarScheduleCompleteness>of()
+                : completenessRepository.findCompleteForInterest(region, language, activeSeriesIds)).stream()
                 .forEach(marker -> addCompleteKey(marker, language, region, completeSeasonKeys, completeSeriesKeys));
         return new CalendarScheduleReadModel(
                 snapshots,
@@ -160,33 +162,32 @@ public class CalendarScheduleSnapshotStore {
         for (Map.Entry<Integer, Integer> expected : schedule.expectedEpisodeCountsBySeason().entrySet()) {
             CalendarSeriesSchedule.Season season = seasonsByNumber.get(expected.getKey());
             boolean complete = season != null
-                    && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE
                     && season.expectedEpisodeCount() == expected.getValue()
                     && season.isFullyRepresented();
-            if (complete) {
+            if (season != null && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE && complete) {
                 changed |= reconcileSeasonInTransaction(season.schedule());
             }
-            changed |= upsertCompleteness(
-                    CalendarScheduleCompleteness.GroupType.SEASON,
-                    schedule.key().tmdbId(),
-                    expected.getKey(),
-                    schedule.key().preferredRegion(),
-                    schedule.key().preferredLanguage(),
-                    expected.getValue(),
-                    complete,
-                    checkedAt);
-            allSeasonsComplete &= complete;
+            if (season == null || season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE) {
+                changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SEASON, schedule.key().tmdbId(),
+                        expected.getKey(), schedule.key().preferredRegion(), schedule.key().preferredLanguage(),
+                        expected.getValue(), complete, checkedAt);
+            }
+            allSeasonsComplete &= season != null
+                    && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE
+                    && complete;
         }
-        changed |= upsertCompleteness(
-                CalendarScheduleCompleteness.GroupType.SERIES,
-                schedule.key().tmdbId(),
-                null,
-                schedule.key().preferredRegion(),
-                schedule.key().preferredLanguage(),
-                schedule.totalRegularEpisodeCount(),
-                allSeasonsComplete,
-                checkedAt);
+        boolean hasCachedSeason = schedule.seasons().stream()
+                .anyMatch(season -> season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.CACHE);
+        if (!hasCachedSeason) {
+            changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SERIES, schedule.key().tmdbId(), null,
+                    schedule.key().preferredRegion(), schedule.key().preferredLanguage(),
+                    schedule.totalRegularEpisodeCount(), allSeasonsComplete, checkedAt);
+        }
         return changed;
+    }
+
+    private Collection<String> nonEmptyIds(Set<String> ids) {
+        return ids.isEmpty() ? List.of("__calendar_no_active_identity__") : ids;
     }
 
     private boolean upsertCompleteness(

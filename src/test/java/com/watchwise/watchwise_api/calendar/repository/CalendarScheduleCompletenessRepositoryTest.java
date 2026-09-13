@@ -56,9 +56,9 @@ class CalendarScheduleCompletenessRepositoryTest {
         entityManager.clear();
 
         assertThat(repository.findSeasonIdentity("1396", 2, "BR", "pt-BR"))
-                .extracting(CalendarScheduleCompleteness::getId).contains(season.getId());
+                .map(CalendarScheduleCompleteness::getId).contains(season.getId());
         assertThat(repository.findSeriesIdentity("1396", "BR", "pt-BR"))
-                .extracting(CalendarScheduleCompleteness::getId).contains(series.getId());
+                .map(CalendarScheduleCompleteness::getId).contains(series.getId());
     }
 
     @Test

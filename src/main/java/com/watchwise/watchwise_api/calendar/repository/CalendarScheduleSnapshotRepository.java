@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -48,7 +49,19 @@ public interface CalendarScheduleSnapshotRepository extends JpaRepository<Calend
             String region,
             String language);
 
-    List<CalendarScheduleSnapshot> findByRegionAndLanguageAndPresentInLastTmdbSnapshotTrue(String region, String language);
+    @Query("""
+            SELECT snapshot FROM CalendarScheduleSnapshot snapshot
+            WHERE snapshot.region = :region
+              AND snapshot.language = :language
+              AND snapshot.presentInLastTmdbSnapshot = true
+              AND ((snapshot.eventType = 'MOVIE' AND snapshot.tmdbId IN :movieTmdbIds)
+                   OR (snapshot.eventType = 'EPISODE' AND snapshot.seriesTmdbId IN :seriesTmdbIds))
+            """)
+    List<CalendarScheduleSnapshot> findPresentForInterest(
+            @Param("region") String region,
+            @Param("language") String language,
+            @Param("movieTmdbIds") Collection<String> movieTmdbIds,
+            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
     default List<CalendarScheduleSnapshot> findByReleaseMonth(YearMonth month, String region, String language) {
         return findByReleaseDateAndLocale(month.atDay(1), month.plusMonths(1).atDay(1), region, language);

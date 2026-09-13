@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.calendar.service.impl;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotRepository;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleCompletenessRepository;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotStore;
@@ -138,9 +139,9 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarScheduleCompletenessRepository completenessRepository = mock(CalendarScheduleCompletenessRepository.class);
         CalendarScheduleSnapshot september = movieSnapshot(LocalDate.of(2026, 9, 20));
         CalendarScheduleSnapshot october = movieSnapshot(LocalDate.of(2026, 10, 3)).toBuilder().tmdbId("680").build();
-        when(repository.findByRegionAndLanguageAndPresentInLastTmdbSnapshotTrue("BR", "pt-BR"))
-                .thenReturn(List.of(september, october));
-        when(completenessRepository.findByRegionAndLanguage("BR", "pt-BR")).thenReturn(List.of());
+        when(repository.findPresentForInterest("BR", "pt-BR", Set.of("550"), List.of("__calendar_no_active_identity__")))
+                .thenReturn(List.of(september));
+        when(completenessRepository.findCompleteForInterest(any(), any(), any())).thenReturn(List.of());
         NewTransactionExecutor executor = mock(NewTransactionExecutor.class);
         CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository, completenessRepository, executor);
         CalendarScheduleKey key = new CalendarScheduleKey(ContentType.MOVIE, "550", "pt-BR", "BR");
@@ -151,6 +152,33 @@ class CalendarScheduleSynchronizerImplTest {
 
         assertThat(result.snapshots()).containsExactly(september);
         assertThat(result.completeness()).isEqualTo(CalendarAssemblyInput.Completeness.empty());
+    }
+
+    @Test
+    @DisplayName("[reconcileSeries] Should Preserve Cache-Origin Completeness Markers In A Mixed Lookup")
+    void shouldPreserveCacheOriginCompletenessMarkersInAMixedLookup() {
+        CalendarScheduleSnapshotRepository repository = mock(CalendarScheduleSnapshotRepository.class);
+        CalendarScheduleCompletenessRepository completeness = mock(CalendarScheduleCompletenessRepository.class);
+        NewTransactionExecutor executor = mock(NewTransactionExecutor.class);
+        doAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get())
+                .when(executor).runInNewTransaction(any());
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(repository, completeness, executor);
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(key, List.of(
+                new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
+                        List.of(new CalendarEpisodeSchedule(1, "One", LocalDate.of(2026, 9, 1), null, CHECKED_AT, null))), 1,
+                        TmdbLookupOrigin.REMOTE),
+                new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", 2, "BR", "pt-BR", "Series", null,
+                        List.of(new CalendarEpisodeSchedule(1, "Two", LocalDate.of(2026, 9, 8), null, CHECKED_AT, null))), 1,
+                        TmdbLookupOrigin.CACHE)), Map.of(1, 1, 2, 1), 2);
+
+        store.reconcileSeries(schedule, CHECKED_AT);
+
+        ArgumentCaptor<CalendarScheduleCompleteness> markers = ArgumentCaptor.forClass(CalendarScheduleCompleteness.class);
+        verify(completeness).save(markers.capture());
+        assertThat(markers.getAllValues()).extracting(CalendarScheduleCompleteness::getGroupType)
+                .containsExactly(CalendarScheduleCompleteness.GroupType.SEASON);
+        assertThat(markers.getValue().getSeasonNumber()).isEqualTo(1);
     }
 
     @Test

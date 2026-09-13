@@ -106,6 +106,9 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         }
 
         Map<Integer, Integer> expectedCounts = regularSeasonCounts(series.value());
+        if (expectedCounts.values().stream().anyMatch(count -> count < 0)) {
+            return new CalendarScheduleLookup.Unavailable();
+        }
         List<CalendarSeriesSchedule.Season> seasons = expectedCounts.entrySet().stream()
                 .map(entry -> CompletableFuture.supplyAsync(
                         () -> loadSeriesSeason(seriesTmdbId, region, language, series.value(), entry.getKey(), entry.getValue()),

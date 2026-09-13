@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.calendar.repository;
 
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -28,5 +30,15 @@ public interface CalendarScheduleCompletenessRepository extends JpaRepository<Ca
                 CalendarScheduleCompleteness.GroupType.SERIES, seriesTmdbId, null, region, language);
     }
 
-    List<CalendarScheduleCompleteness> findByRegionAndLanguage(String region, String language);
+    @Query("""
+            SELECT marker FROM CalendarScheduleCompleteness marker
+            WHERE marker.region = :region
+              AND marker.language = :language
+              AND marker.complete = true
+              AND marker.seriesTmdbId IN :seriesTmdbIds
+            """)
+    List<CalendarScheduleCompleteness> findCompleteForInterest(
+            @Param("region") String region,
+            @Param("language") String language,
+            @Param("seriesTmdbIds") java.util.Collection<String> seriesTmdbIds);
 }
