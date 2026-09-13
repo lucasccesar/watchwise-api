@@ -113,7 +113,7 @@ public class CalendarServiceImpl implements CalendarService {
                 continue;
             }
             if (lookup instanceof CalendarScheduleLookup.Unavailable) {
-                if (snapshotsForKey.isEmpty()) {
+                if (key.type() == ContentType.SERIES || snapshotsForKey.isEmpty()) {
                     throw new TmdbUnavailableException("TMDB is currently unavailable");
                 }
                 continue;

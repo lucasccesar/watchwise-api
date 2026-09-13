@@ -217,7 +217,12 @@ public class CalendarScheduleSnapshotStore {
         boolean changed = false;
         boolean hasCachedSeason = schedule.seasons().stream()
                 .anyMatch(season -> season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.CACHE);
-        if (hasCachedSeason) {
+        boolean hasNewerCompleteness = completenessRepository.findBySeriesTmdbIdAndRegionAndLanguage(
+                        schedule.key().tmdbId(), schedule.key().preferredRegion(), schedule.key().preferredLanguage()).stream()
+                .map(CalendarScheduleCompleteness::getLastCheckedAt)
+                .filter(Objects::nonNull)
+                .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(toLocalDateTime(checkedAt)));
+        if (hasCachedSeason && !hasNewerCompleteness) {
             changed |= completenessRepository.deleteBySeriesTmdbIdAndRegionAndLanguage(
                     schedule.key().tmdbId(), schedule.key().preferredRegion(), schedule.key().preferredLanguage()) > 0;
         }

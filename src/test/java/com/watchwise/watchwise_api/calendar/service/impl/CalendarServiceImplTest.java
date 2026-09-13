@@ -237,6 +237,23 @@ class CalendarServiceImplTest {
     }
 
     @Test
+    void failsForUnavailableSeriesEvenWhenAnOlderSnapshotExists() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel read = new CalendarScheduleReadModel(
+                List.of(episode("1396", 1, 1, LocalDate.of(2026, 9, 15)).toBuilder()
+                        .nextCheckAt(LocalDateTime.of(2026, 9, 12, 10, 0)).build()),
+                CalendarAssemblyInput.Completeness.empty());
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.Unavailable());
+
+        assertThatThrownBy(() -> service().getMonth(USER_ID, YearMonth.of(2026, 9)))
+                .isInstanceOf(TmdbUnavailableException.class);
+    }
+
+    @Test
     void groupsSeriesOnlyWhenTheSeriesCompletenessMarkerIsPresent() {
         CalendarScheduleKey key = key(ContentType.SERIES, "1396");
         CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
