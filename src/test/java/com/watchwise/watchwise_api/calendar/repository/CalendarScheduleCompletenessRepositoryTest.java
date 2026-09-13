@@ -5,7 +5,11 @@ import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
 import com.watchwise.watchwise_api.calendar.service.CalendarInterest;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import jakarta.persistence.EntityManager;
@@ -16,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -24,6 +29,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,6 +42,7 @@ import static org.mockito.Mockito.mock;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
+@Import(NewTransactionExecutor.class)
 class CalendarScheduleCompletenessRepositoryTest {
 
     @Container
@@ -55,6 +63,9 @@ class CalendarScheduleCompletenessRepositoryTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private NewTransactionExecutor newTransactionExecutor;
 
     @BeforeEach
     void setUp() {
@@ -126,6 +137,38 @@ class CalendarScheduleCompletenessRepositoryTest {
         assertThat(result.completeness().completeSeasonKeys())
                 .containsExactly(new CalendarAssemblyInput.CompleteSeasonKey("1396", 1));
         assertThat(result.completeness().completeSeriesKeys()).containsExactly(series);
+    }
+
+    @Test
+    @DisplayName("[reconcileSeries] Should Roll Back Both Seasons And Markers When The Second Title Exceeds The Column")
+    void shouldRollBackBothSeasonsAndMarkersWhenTheSecondTitleExceedsTheColumn() {
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
+                snapshotRepository, repository, newTransactionExecutor);
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        LinkedHashMap<Integer, Integer> expectedCounts = new LinkedHashMap<>();
+        expectedCounts.put(1, 1);
+        expectedCounts.put(2, 1);
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(key, List.of(
+                remoteSeason(1, "Valid title"),
+                remoteSeason(2, "x".repeat(501))), expectedCounts, 2);
+
+        assertThatThrownBy(() -> store.reconcileSeries(schedule, Instant.parse("2026-09-12T10:00:00Z")))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        entityManager.clear();
+
+        assertThat(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 1, "BR", "pt-BR")).isEmpty();
+        assertThat(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR")).isEmpty();
+        assertThat(repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")).isEmpty();
+        assertThat(repository.findSeasonIdentity("1396", 2, "BR", "pt-BR")).isEmpty();
+        assertThat(repository.findSeriesIdentity("1396", "BR", "pt-BR")).isEmpty();
+    }
+
+    private CalendarSeriesSchedule.Season remoteSeason(int number, String title) {
+        return new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", number, "BR", "pt-BR",
+                "Series", null, List.of(new CalendarEpisodeSchedule(1, title, LocalDate.of(2026, 9, number), null,
+                Instant.parse("2026-09-12T10:00:00Z"), null))), 1, TmdbLookupOrigin.REMOTE);
     }
 
     private CalendarScheduleSnapshot snapshot(

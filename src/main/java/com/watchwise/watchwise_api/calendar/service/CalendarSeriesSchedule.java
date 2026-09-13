@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 
 import java.util.LinkedHashMap;
 import java.util.HashSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -23,7 +24,7 @@ public record CalendarSeriesSchedule(
             throw new IllegalArgumentException("Series schedules require a series key");
         }
         seasons = List.copyOf(seasons);
-        expectedEpisodeCountsBySeason = Map.copyOf(new LinkedHashMap<>(expectedEpisodeCountsBySeason));
+        expectedEpisodeCountsBySeason = Collections.unmodifiableMap(new LinkedHashMap<>(expectedEpisodeCountsBySeason));
         if (expectedEpisodeCountsBySeason.entrySet().stream().anyMatch(entry -> entry.getKey() == null
                 || entry.getKey() <= 0 || entry.getValue() == null || entry.getValue() < 0)) {
             throw new IllegalArgumentException("Regular seasons require positive numbers and nonnegative expected episode counts");
