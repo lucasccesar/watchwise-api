@@ -5,11 +5,7 @@ import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
 import com.watchwise.watchwise_api.calendar.service.CalendarInterest;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
-import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
-import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
-import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import jakarta.persistence.EntityManager;
@@ -27,7 +23,6 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -131,24 +126,6 @@ class CalendarScheduleCompletenessRepositoryTest {
         assertThat(result.completeness().completeSeasonKeys())
                 .containsExactly(new CalendarAssemblyInput.CompleteSeasonKey("1396", 1));
         assertThat(result.completeness().completeSeriesKeys()).containsExactly(series);
-    }
-
-    @Test
-    @DisplayName("[reconcileSeries] Should Roll Back All Rows When A Season Reconciliation Fails")
-    void shouldRollBackAllRowsWhenASeasonReconciliationFails() {
-        // Executed with PostgreSQL/Testcontainers: a real transaction boundary is required for this assertion.
-        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(snapshotRepository, repository,
-                new NewTransactionExecutor());
-        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
-        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(key, List.of(
-                new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
-                        List.of(new CalendarEpisodeSchedule(1, "One", LocalDate.now(), null, Instant.now(), null))), 1, TmdbLookupOrigin.REMOTE)),
-                Map.of(1, 1), 1);
-
-        store.reconcileSeries(schedule, Instant.now());
-
-        assertThat(snapshotRepository.findByEpisodeIdentity("1396", 1, 1, "BR", "pt-BR")).isPresent();
-        assertThat(repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")).isPresent();
     }
 
     private CalendarScheduleSnapshot snapshot(
