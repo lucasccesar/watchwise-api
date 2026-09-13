@@ -1147,7 +1147,7 @@ class ContentDetailsServiceImplTest {
                         new TmdbRegionReleaseDates("US", List.of(new TmdbMovieReleaseDate(
                                 null, null, "2030-11-30", null, 3))),
                         new TmdbRegionReleaseDates("BR", List.of(new TmdbMovieReleaseDate(
-                                null, null, "2030-10-10", null, 4))))), TmdbLookupOrigin.CACHE));
+                                null, null, "2030-10-10", null, 4))))), TmdbLookupOrigin.REMOTE));
 
         contentDetailsService.getDetails(contentId, requestingUserId);
 

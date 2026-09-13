@@ -10,12 +10,14 @@ import com.watchwise.watchwise_api.calendar.service.CalendarInterest;
 import com.watchwise.watchwise_api.calendar.service.CalendarInterestReader;
 import com.watchwise.watchwise_api.calendar.service.CalendarMovieSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
+import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleReadModel;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.calendar.service.CalendarWatchedContentReader;
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
@@ -133,6 +135,37 @@ class CalendarServiceImplTest {
         assertThat(response.events()).extracting(event -> event.eventType()).containsExactly(CalendarEventType.MOVIE);
         verify(synchronizer, never()).synchronize(any(), any());
         verify(snapshotStore).findForInterest(interest, "BR", "pt-BR");
+    }
+
+    @Test
+    void keepsCachedSeriesSeasonsInTheResponseWhenAnotherSeasonWasSynchronizedRemotely() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel empty = new CalendarScheduleReadModel(List.of(), CalendarAssemblyInput.Completeness.empty());
+        CalendarScheduleReadModel refreshed = new CalendarScheduleReadModel(
+                List.of(episode("1396", 2, 1, LocalDate.of(2026, 9, 16))), CalendarAssemblyInput.Completeness.empty());
+        CalendarSeasonSchedule cachedSeason = new CalendarSeasonSchedule(
+                "1396", 1, "BR", "pt-BR", "Series 1396", null,
+                List.of(new CalendarEpisodeSchedule(1, "Cached episode", LocalDate.of(2026, 9, 15), null, null, null)));
+        CalendarSeasonSchedule remoteSeason = new CalendarSeasonSchedule(
+                "1396", 2, "BR", "pt-BR", "Series 1396", null,
+                List.of(new CalendarEpisodeSchedule(1, "Remote episode", LocalDate.of(2026, 9, 16), null, null, null)));
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
+                key,
+                List.of(
+                        new CalendarSeriesSchedule.Season(cachedSeason, 1, TmdbLookupOrigin.CACHE),
+                        new CalendarSeriesSchedule.Season(remoteSeason, 1, TmdbLookupOrigin.REMOTE)),
+                Map.of(1, 1, 2, 1), 2);
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(empty, refreshed);
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.FoundSeries(schedule));
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events())
+                .extracting(event -> event.eventType())
+                .containsExactly(CalendarEventType.EPISODE, CalendarEventType.EPISODE);
+        verify(synchronizer).synchronizeSeries(schedule, CLOCK.instant());
     }
 
     @Test

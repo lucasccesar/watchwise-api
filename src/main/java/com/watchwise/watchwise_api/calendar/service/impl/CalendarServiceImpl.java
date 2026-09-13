@@ -61,14 +61,14 @@ public class CalendarServiceImpl implements CalendarService {
         CalendarScheduleReadModel readModel = snapshotStore.findForInterest(interest, region, language);
         Map<CalendarScheduleKey, CalendarScheduleLookup> requestLookups = new LinkedHashMap<>();
         Set<CalendarScheduleKey> omittedKeys = new LinkedHashSet<>();
-        List<CalendarScheduleSnapshot> responseSnapshots = new ArrayList<>(readModel.snapshots());
+        List<CalendarScheduleSnapshot> transientSnapshots = new ArrayList<>();
         boolean synchronizedRemoteSchedule = refreshSchedules(
-                activeKeys, responseSnapshots, region, language, requestLookups, omittedKeys);
+                activeKeys, readModel.snapshots(), transientSnapshots, region, language, requestLookups, omittedKeys);
 
         if (synchronizedRemoteSchedule) {
             readModel = snapshotStore.findForInterest(interest, region, language);
         }
-        List<CalendarScheduleSnapshot> snapshots = (synchronizedRemoteSchedule ? readModel.snapshots() : responseSnapshots).stream()
+        List<CalendarScheduleSnapshot> snapshots = mergeSnapshots(readModel.snapshots(), transientSnapshots).stream()
                 .filter(snapshot -> !omittedKeys.contains(snapshotKey(snapshot)))
                 .toList();
         Set<WatchedCalendarKey> requestedWatchedKeys = watchedKeysFor(snapshots);
@@ -79,6 +79,8 @@ public class CalendarServiceImpl implements CalendarService {
                 sources.put(key, value);
             }
         });
+        CalendarAssemblyInput.Completeness completeness = filterUncertainCompleteness(
+                readModel.completeness(), requestLookups);
         return new CalendarResponseDTO(month, region, eventAssembler.assemble(new CalendarAssemblyInput(
                 month,
                 clock,
@@ -87,12 +89,13 @@ public class CalendarServiceImpl implements CalendarService {
                 watchedKeys,
                 region,
                 language,
-                readModel.completeness())));
+                completeness)));
     }
 
     private boolean refreshSchedules(
             Set<CalendarScheduleKey> activeKeys,
             List<CalendarScheduleSnapshot> snapshots,
+            List<CalendarScheduleSnapshot> transientSnapshots,
             String region,
             String language,
             Map<CalendarScheduleKey, CalendarScheduleLookup> requestLookups,
@@ -122,21 +125,64 @@ public class CalendarServiceImpl implements CalendarService {
                 continue;
             }
             if (lookup instanceof CalendarScheduleLookup.Found found && snapshotsForKey.isEmpty()) {
-                snapshots.addAll(inMemorySnapshots(found.batch()));
+                transientSnapshots.addAll(inMemorySnapshots(found.batch()));
                 continue;
             }
             if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries
                     && foundSeries.schedule().hasRemoteResults()) {
                 scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), now);
+                foundSeries.schedule().seasons().stream()
+                        .filter(season -> season.origin() == TmdbLookupOrigin.CACHE)
+                        .forEach(season -> transientSnapshots.addAll(inMemorySnapshots(new CalendarScheduleBatch(
+                                foundSeries.schedule().key(), season.origin(), now, null, season.schedule()))));
                 synchronizedRemoteSchedule = true;
                 continue;
             }
             if (lookup instanceof CalendarScheduleLookup.FoundSeries foundSeries && snapshotsForKey.isEmpty()) {
-                foundSeries.schedule().seasons().forEach(season -> snapshots.addAll(inMemorySnapshots(
+                foundSeries.schedule().seasons().forEach(season -> transientSnapshots.addAll(inMemorySnapshots(
                         new CalendarScheduleBatch(foundSeries.schedule().key(), season.origin(), now, null, season.schedule()))));
             }
         }
         return synchronizedRemoteSchedule;
+    }
+
+    private List<CalendarScheduleSnapshot> mergeSnapshots(
+            Collection<CalendarScheduleSnapshot> refreshed,
+            Collection<CalendarScheduleSnapshot> requestSnapshots) {
+        Map<String, CalendarScheduleSnapshot> snapshotsByIdentity = new LinkedHashMap<>();
+        refreshed.forEach(snapshot -> snapshotsByIdentity.put(snapshotIdentity(snapshot), snapshot));
+        requestSnapshots.forEach(snapshot -> snapshotsByIdentity.putIfAbsent(snapshotIdentity(snapshot), snapshot));
+        return List.copyOf(snapshotsByIdentity.values());
+    }
+
+    private CalendarAssemblyInput.Completeness filterUncertainCompleteness(
+            CalendarAssemblyInput.Completeness completeness,
+            Map<CalendarScheduleKey, CalendarScheduleLookup> requestLookups) {
+        Set<String> uncertainSeriesIds = requestLookups.values().stream()
+                .filter(CalendarScheduleLookup.FoundSeries.class::isInstance)
+                .map(CalendarScheduleLookup.FoundSeries.class::cast)
+                .filter(found -> found.schedule().seasons().stream()
+                        .anyMatch(season -> season.origin() == TmdbLookupOrigin.CACHE))
+                .map(found -> found.schedule().key().tmdbId())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (uncertainSeriesIds.isEmpty()) {
+            return completeness;
+        }
+        return new CalendarAssemblyInput.Completeness(
+                completeness.completeSeasonKeys().stream()
+                        .filter(key -> !uncertainSeriesIds.contains(key.seriesTmdbId()))
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()),
+                completeness.completeSeriesKeys().stream()
+                        .filter(key -> !uncertainSeriesIds.contains(key.tmdbId()))
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+    }
+
+    private String snapshotIdentity(CalendarScheduleSnapshot snapshot) {
+        if (snapshot.getEventType() == CalendarScheduleSnapshot.EventType.MOVIE) {
+            return "MOVIE|" + snapshot.getTmdbId() + "|" + snapshot.getRegion() + "|" + snapshot.getLanguage();
+        }
+        return "EPISODE|" + snapshot.getSeriesTmdbId() + "|" + snapshot.getSeasonNumber() + "|"
+                + snapshot.getEpisodeNumber() + "|" + snapshot.getRegion() + "|" + snapshot.getLanguage();
     }
 
     private List<CalendarScheduleSnapshot> inMemorySnapshots(CalendarScheduleBatch batch) {

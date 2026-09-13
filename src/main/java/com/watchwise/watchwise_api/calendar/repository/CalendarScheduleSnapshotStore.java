@@ -96,28 +96,31 @@ public class CalendarScheduleSnapshotStore {
     }
 
     public boolean upsertMovie(CalendarMovieSchedule schedule) {
-        Optional<CalendarScheduleSnapshot> existing = snapshotRepository.findByMovieIdentity(
-                schedule.tmdbId(), schedule.region(), schedule.language());
-        if (existing.isPresent()) {
-            return newTransactionExecutor.runInNewTransaction(() -> {
-                lockMovie(schedule);
-                boolean factsChanged = movieFactsChanged(existing.get(), schedule);
-                CalendarScheduleSnapshot merged = mergeMovie(existing.get(), schedule);
-                snapshotRepository.saveAndFlush(merged);
-                return factsChanged;
-            });
-        }
         try {
             return newTransactionExecutor.runInNewTransaction(() -> {
                 lockMovie(schedule);
+                Optional<CalendarScheduleSnapshot> existing = snapshotRepository.findByMovieIdentity(
+                        schedule.tmdbId(), schedule.region(), schedule.language());
+                if (existing.isPresent()) {
+                    if (isOlderThanExisting(existing.get().getLastCheckedAt(), schedule.lastCheckedAt())) {
+                        return false;
+                    }
+                    boolean factsChanged = movieFactsChanged(existing.get(), schedule);
+                    CalendarScheduleSnapshot merged = mergeMovie(existing.get(), schedule);
+                    snapshotRepository.saveAndFlush(merged);
+                    return factsChanged;
+                }
                 snapshotRepository.saveAndFlush(newMovie(schedule));
                 return true;
             });
         } catch (DataIntegrityViolationException exception) {
-            CalendarScheduleSnapshot winner = snapshotRepository.findByMovieIdentity(
-                    schedule.tmdbId(), schedule.region(), schedule.language()).orElseThrow(() -> exception);
             return newTransactionExecutor.runInNewTransaction(() -> {
                 lockMovie(schedule);
+                CalendarScheduleSnapshot winner = snapshotRepository.findByMovieIdentity(
+                        schedule.tmdbId(), schedule.region(), schedule.language()).orElseThrow(() -> exception);
+                if (isOlderThanExisting(winner.getLastCheckedAt(), schedule.lastCheckedAt())) {
+                    return false;
+                }
                 boolean factsChanged = movieFactsChanged(winner, schedule);
                 CalendarScheduleSnapshot merged = mergeMovie(winner, schedule);
                 snapshotRepository.saveAndFlush(merged);
@@ -153,11 +156,24 @@ public class CalendarScheduleSnapshotStore {
     }
 
     private boolean reconcileSeasonInTransaction(CalendarSeasonSchedule schedule, boolean invalidateCompleteness) {
+        List<CalendarScheduleSnapshot> existingSnapshots = snapshotsForSeason(schedule);
+        LocalDateTime incomingCheckedAt = schedule.episodes().stream()
+                .map(CalendarEpisodeSchedule::lastCheckedAt)
+                .filter(Objects::nonNull)
+                .map(this::toLocalDateTime)
+                .findFirst()
+                .orElse(null);
+        if (incomingCheckedAt != null && existingSnapshots.stream()
+                .map(CalendarScheduleSnapshot::getLastCheckedAt)
+                .filter(Objects::nonNull)
+                .anyMatch(existingCheckedAt -> existingCheckedAt.isAfter(incomingCheckedAt))) {
+            return false;
+        }
         boolean changed = false;
         boolean hasUsableDate = schedule.episodes().stream().anyMatch(episode -> episode.releaseDate() != null);
         if (hasUsableDate) {
             Set<Integer> coordinates = Set.copyOf(schedule.episodeCoordinates());
-            List<CalendarScheduleSnapshot> removed = snapshotsForSeason(schedule).stream()
+            List<CalendarScheduleSnapshot> removed = existingSnapshots.stream()
                     .filter(snapshot -> !coordinates.contains(snapshot.getEpisodeNumber()))
                     .toList();
             snapshotRepository.deleteAll(removed);
@@ -387,6 +403,11 @@ public class CalendarScheduleSnapshotStore {
             return LocalDateTime.MAX;
         }
         return instant.atOffset(ZoneOffset.UTC).toLocalDateTime();
+    }
+
+    private boolean isOlderThanExisting(LocalDateTime existingCheckedAt, Instant incomingCheckedAt) {
+        return existingCheckedAt != null && incomingCheckedAt != null
+                && existingCheckedAt.isAfter(toLocalDateTime(incomingCheckedAt));
     }
 
     private record LocaleKey(String region, String language) {

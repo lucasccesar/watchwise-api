@@ -585,7 +585,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             TmdbMovieFullDetails details) {
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbMovieFullDetails> found)
                 || found.origin() != TmdbLookupOrigin.REMOTE
-                || !(releaseDatesLookup instanceof TmdbLookupResult.Found<TmdbMovieReleaseDates> releaseDates)) {
+                || !(releaseDatesLookup instanceof TmdbLookupResult.Found<TmdbMovieReleaseDates> releaseDates)
+                || releaseDates.origin() != TmdbLookupOrigin.REMOTE) {
             return;
         }
         LocalDate releaseDate = CalendarMovieReleaseDateSelector.select(releaseDates.value(), region).orElse(null);
@@ -661,9 +662,14 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return;
         }
 
-        Map<Integer, Integer> expectedCounts = Optional.ofNullable(details.seasons()).orElseGet(List::of).stream()
+        List<TmdbSeasonSummary> regularSeasonSummaries = Optional.ofNullable(details.seasons()).orElseGet(List::of).stream()
                 .filter(Objects::nonNull)
                 .filter(summary -> summary.seasonNumber() != null && summary.seasonNumber() > 0)
+                .toList();
+        if (regularSeasonSummaries.stream().anyMatch(summary -> summary.episodeCount() == null || summary.episodeCount() < 0)) {
+            return;
+        }
+        Map<Integer, Integer> expectedCounts = regularSeasonSummaries.stream()
                 .filter(summary -> summary.episodeCount() != null && summary.episodeCount() >= 0)
                 .collect(Collectors.toMap(
                         TmdbSeasonSummary::seasonNumber,
