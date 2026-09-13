@@ -20,6 +20,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -159,6 +164,81 @@ class CalendarScheduleProviderTest {
             assertThat(found.schedule().totalRegularEpisodeCount()).isEqualTo(2);
         });
         verify(tmdbClient, never()).getCalendarSeasonDetails("1396", 0, "pt-BR");
+    }
+
+    @Test
+    @DisplayName("[loadSeries] Should Return Unavailable - When A Required Season Is Unavailable")
+    void shouldReturnUnavailableWhenARequiredSeasonIsUnavailable() {
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
+                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null),
+                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null)))));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
+
+        assertThat(result).isInstanceOf(CalendarScheduleLookup.Unavailable.class);
+    }
+
+    @Test
+    @DisplayName("[loadSeries] Should Submit Every Regular Season - Before Waiting For A Season Result")
+    void shouldSubmitEveryRegularSeasonBeforeWaitingForASeasonResult() throws Exception {
+        BlockingExecutor executor = new BlockingExecutor(2);
+        provider = new CalendarScheduleProviderImpl(tmdbClient, executor);
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
+                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null),
+                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null)))));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                2, "Season 2", null, null, null, 2, List.of(episode(1, "Return", "2026-09-08", null)), null, null)));
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            var result = caller.submit(() -> provider.loadSeries("1396", "BR", "pt-BR"));
+
+            assertThat(executor.awaitAllSubmissions()).isTrue();
+
+            executor.releaseTasks();
+            assertThat(result.get(1, TimeUnit.SECONDS)).isInstanceOf(CalendarScheduleLookup.FoundSeries.class);
+        } finally {
+            executor.releaseTasks();
+            caller.shutdownNow();
+            caller.awaitTermination(1, TimeUnit.SECONDS);
+        }
+    }
+
+    private static final class BlockingExecutor implements Executor {
+
+        private final CountDownLatch submissions;
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        private BlockingExecutor(int expectedSubmissions) {
+            this.submissions = new CountDownLatch(expectedSubmissions);
+        }
+
+        @Override
+        public void execute(Runnable task) {
+            submissions.countDown();
+            Thread worker = new Thread(() -> {
+                try {
+                    release.await();
+                    task.run();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            worker.setDaemon(true);
+            worker.start();
+        }
+
+        private boolean awaitAllSubmissions() throws InterruptedException {
+            return submissions.await(250, TimeUnit.MILLISECONDS);
+        }
+
+        private void releaseTasks() {
+            release.countDown();
+        }
     }
 
     private static <T> TmdbLookupResult.Found<T> found(T value) {

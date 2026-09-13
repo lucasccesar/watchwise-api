@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -241,7 +242,8 @@ public class CalendarEventAssembler {
     }
 
     private ReleaseStatus releaseStatus(LocalDate releaseDate, CalendarAssemblyInput input) {
-        return releaseDate.isAfter(LocalDate.now(input.clock())) ? ReleaseStatus.UPCOMING : ReleaseStatus.RELEASED;
+        LocalDate domainToday = LocalDate.now(input.clock().withZone(ZoneId.systemDefault()));
+        return releaseDate.isAfter(domainToday) ? ReleaseStatus.UPCOMING : ReleaseStatus.RELEASED;
     }
 
     private Set<CalendarSource> sourcesForMovie(String tmdbId, CalendarAssemblyInput input) {

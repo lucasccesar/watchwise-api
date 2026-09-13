@@ -105,12 +105,19 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         if (expectedCounts.values().stream().anyMatch(count -> count < 0)) {
             return new CalendarScheduleLookup.Unavailable();
         }
-        List<CalendarSeriesSchedule.Season> seasons = expectedCounts.entrySet().stream()
+        List<CompletableFuture<TmdbLookupResult<CalendarSeriesSchedule.Season>>> seasonFutures = expectedCounts.entrySet().stream()
                 .map(entry -> CompletableFuture.supplyAsync(
                         () -> loadSeriesSeason(seriesTmdbId, region, language, series.value(), entry.getKey(), entry.getValue()),
                         tmdbSeasonFetchExecutor))
+                .toList();
+        List<TmdbLookupResult<CalendarSeriesSchedule.Season>> seasonLookups = seasonFutures.stream()
                 .map(CompletableFuture::join)
-                .flatMap(Optional::stream)
+                .toList();
+        if (seasonLookups.stream().anyMatch(TmdbLookupResult::isUnavailable)) {
+            return new CalendarScheduleLookup.Unavailable();
+        }
+        List<CalendarSeriesSchedule.Season> seasons = seasonLookups.stream()
+                .flatMap(lookup -> foundSeason(lookup).stream())
                 .toList();
 
         return new CalendarScheduleLookup.FoundSeries(new CalendarSeriesSchedule(
@@ -121,7 +128,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                         .mapToInt(Integer::intValue).sum()));
     }
 
-    private Optional<CalendarSeriesSchedule.Season> loadSeriesSeason(
+    private TmdbLookupResult<CalendarSeriesSchedule.Season> loadSeriesSeason(
             String seriesTmdbId,
             String region,
             String language,
@@ -131,7 +138,9 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         TmdbLookupResult<TmdbSeasonFullDetails> lookup =
                 tmdbClient.getCalendarSeasonDetails(seriesTmdbId, seasonNumber, language);
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)) {
-            return Optional.empty();
+            return lookup instanceof TmdbLookupResult.NotFound<TmdbSeasonFullDetails>
+                    ? new TmdbLookupResult.NotFound<>()
+                    : new TmdbLookupResult.Unavailable<>();
         }
         CalendarSeasonSchedule schedule = new CalendarSeasonSchedule(
                 seriesTmdbId,
@@ -143,7 +152,15 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 Optional.ofNullable(found.value().episodes()).orElseGet(List::of).stream()
                         .map(this::toEpisodeSchedule)
                         .toList());
-        return Optional.of(new CalendarSeriesSchedule.Season(schedule, expectedEpisodeCount, found.origin()));
+        return new TmdbLookupResult.Found<>(
+                new CalendarSeriesSchedule.Season(schedule, expectedEpisodeCount, found.origin()), found.origin());
+    }
+
+    private Optional<CalendarSeriesSchedule.Season> foundSeason(
+            TmdbLookupResult<CalendarSeriesSchedule.Season> lookup) {
+        return lookup instanceof TmdbLookupResult.Found<CalendarSeriesSchedule.Season> found
+                ? Optional.of(found.value())
+                : Optional.empty();
     }
 
     private Map<Integer, Integer> regularSeasonCounts(TmdbTvFullDetails series) {

@@ -12,21 +12,28 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 
 @Service
-@RequiredArgsConstructor
 public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchronizer {
 
     private final CalendarScheduleSnapshotStore snapshotStore;
-    @Qualifier("tmdbMovieReleaseDatesCache")
     private final Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> movieScheduleCache;
-    @Qualifier("tmdbCalendarSeasonDetailsCache")
     private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> seasonScheduleCache;
+
+    public CalendarScheduleSynchronizerImpl(
+            CalendarScheduleSnapshotStore snapshotStore,
+            @Qualifier("tmdbMovieReleaseDatesCache")
+            Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> movieScheduleCache,
+            @Qualifier("tmdbCalendarSeasonDetailsCache")
+            Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> seasonScheduleCache) {
+        this.snapshotStore = snapshotStore;
+        this.movieScheduleCache = movieScheduleCache;
+        this.seasonScheduleCache = seasonScheduleCache;
+    }
 
     @Override
     public void synchronize(CalendarScheduleBatch batch, Instant checkedAt) {

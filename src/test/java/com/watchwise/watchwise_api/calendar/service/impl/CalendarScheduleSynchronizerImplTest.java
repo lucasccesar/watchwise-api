@@ -23,6 +23,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -49,6 +50,22 @@ import static org.mockito.Mockito.when;
 class CalendarScheduleSynchronizerImplTest {
 
     private static final Instant CHECKED_AT = Instant.parse("2026-09-12T10:00:00Z");
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    @DisplayName("[constructor] Should Resolve The Two Schedule Caches By Their Bean Qualifiers")
+    void shouldResolveTheTwoScheduleCachesByTheirBeanQualifiers() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(CalendarScheduleSnapshotStore.class, () -> mock(CalendarScheduleSnapshotStore.class));
+            context.registerBean("tmdbMovieReleaseDatesCache", Cache.class, () -> Caffeine.newBuilder().build());
+            context.registerBean("tmdbCalendarSeasonDetailsCache", Cache.class, () -> Caffeine.newBuilder().build());
+            context.register(CalendarScheduleSynchronizerImpl.class);
+
+            context.refresh();
+
+            assertThat(context.getBean(CalendarScheduleSynchronizerImpl.class)).isNotNull();
+        }
+    }
 
     @Test
     @DisplayName("[synchronize] Should Do Nothing - When The Schedule Came From Cache")

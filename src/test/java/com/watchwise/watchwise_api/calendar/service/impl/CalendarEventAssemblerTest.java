@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.YearMonth;
+import java.util.TimeZone;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -83,6 +84,31 @@ class CalendarEventAssemblerTest {
 
         assertThat(events).singleElement().extracting(CalendarEventDTO::releaseStatus)
                 .isEqualTo(ReleaseStatus.RELEASED);
+    }
+
+    @Test
+    void shouldUseTheDomainCivilDateInsteadOfTheUtcDate() {
+        TimeZone originalTimeZone = TimeZone.getDefault();
+        TimeZone.setDefault(TimeZone.getTimeZone("America/Sao_Paulo"));
+        try {
+            Clock utcClock = Clock.fixed(Instant.parse("2026-09-16T00:30:00Z"), ZoneOffset.UTC);
+            CalendarAssemblyInput input = new CalendarAssemblyInput(
+                    MONTH,
+                    utcClock,
+                    List.of(movie("550", LocalDate.of(2026, 9, 16))),
+                    Map.of(),
+                    Set.of(),
+                    "BR",
+                    "pt-BR",
+                    completeness(Set.of(), Set.of()));
+
+            List<CalendarEventDTO> events = assembler.assemble(input);
+
+            assertThat(events).singleElement().extracting(CalendarEventDTO::releaseStatus)
+                    .isEqualTo(ReleaseStatus.UPCOMING);
+        } finally {
+            TimeZone.setDefault(originalTimeZone);
+        }
     }
 
     @Test
