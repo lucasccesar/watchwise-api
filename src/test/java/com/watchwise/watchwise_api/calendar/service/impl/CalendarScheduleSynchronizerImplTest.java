@@ -118,7 +118,7 @@ class CalendarScheduleSynchronizerImplTest {
         CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
                 key,
                 List.of(
-                        new CalendarSeriesSchedule.Season(seasonSchedule(LocalDate.of(2026, 9, 1), null), 1,
+                        new CalendarSeriesSchedule.Season(seasonSchedule(1, LocalDate.of(2026, 9, 1), null), 1,
                                 TmdbLookupOrigin.REMOTE),
                         new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", 2, "BR", "pt-BR",
                                 "Breaking Bad", null, List.of(new CalendarEpisodeSchedule(1, "Second",
@@ -311,7 +311,12 @@ class CalendarScheduleSynchronizerImplTest {
     }
 
     private static CalendarSeasonSchedule seasonSchedule(LocalDate releaseDate, Instant checkedAt) {
-        return new CalendarSeasonSchedule("1396", 2, "BR", "pt-BR", "Breaking Bad", "/breaking-bad.jpg",
+        return seasonSchedule(2, releaseDate, checkedAt);
+    }
+
+    private static CalendarSeasonSchedule seasonSchedule(
+            Integer seasonNumber, LocalDate releaseDate, Instant checkedAt) {
+        return new CalendarSeasonSchedule("1396", seasonNumber, "BR", "pt-BR", "Breaking Bad", "/breaking-bad.jpg",
                 List.of(new CalendarEpisodeSchedule(1, "Seven Thirty-Seven", releaseDate, "/one.jpg", checkedAt, null)));
     }
 
