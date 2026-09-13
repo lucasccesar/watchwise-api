@@ -22,6 +22,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -64,9 +65,24 @@ public class CalendarScheduleSnapshotStore {
 
     public List<CalendarScheduleSnapshot> findDue(
             Collection<CalendarScheduleKey> activeKeys, LocalDateTime now) {
-        Set<CalendarScheduleKey> keys = Set.copyOf(activeKeys);
-        return snapshotRepository.findDueAtOrBefore(now).stream()
-                .filter(snapshot -> isInInterest(snapshot, keys))
+        Map<LocaleKey, ActiveLocaleIds> keysByLocale = new LinkedHashMap<>();
+        for (CalendarScheduleKey key : activeKeys) {
+            keysByLocale.computeIfAbsent(
+                    new LocaleKey(key.preferredRegion(), key.preferredLanguage()), ignored -> new ActiveLocaleIds())
+                    .add(key);
+        }
+        return keysByLocale.entrySet().stream()
+                .flatMap(entry -> {
+                    LocaleKey locale = entry.getKey();
+                    ActiveLocaleIds ids = entry.getValue();
+                    return snapshotRepository.findDueForInterest(
+                            now,
+                            locale.region(),
+                            locale.language(),
+                            nonEmptyIds(ids.movieTmdbIds()),
+                            nonEmptyIds(ids.seriesTmdbIds())).stream();
+                })
+                .sorted(Comparator.comparing(CalendarScheduleSnapshot::getNextCheckAt))
                 .toList();
     }
 
@@ -186,7 +202,7 @@ public class CalendarScheduleSnapshotStore {
         return changed;
     }
 
-    private Collection<String> nonEmptyIds(Set<String> ids) {
+    private Collection<String> nonEmptyIds(Collection<String> ids) {
         return ids.isEmpty() ? List.of("__calendar_no_active_identity__") : ids;
     }
 
@@ -308,13 +324,6 @@ public class CalendarScheduleSnapshotStore {
                 .build();
     }
 
-    private boolean isInInterest(CalendarScheduleSnapshot snapshot, Collection<CalendarScheduleKey> keys) {
-        ContentType type = snapshot.getEventType() == CalendarScheduleSnapshot.EventType.MOVIE
-                ? ContentType.MOVIE : ContentType.SERIES;
-        String tmdbId = type == ContentType.MOVIE ? snapshot.getTmdbId() : snapshot.getSeriesTmdbId();
-        return keys.contains(new CalendarScheduleKey(type, tmdbId, snapshot.getLanguage(), snapshot.getRegion()));
-    }
-
     private boolean movieFactsChanged(CalendarScheduleSnapshot existing, CalendarScheduleSnapshot merged) {
         return !Objects.equals(existing.getReleaseDate(), merged.getReleaseDate())
                 || !Objects.equals(existing.getTitle(), merged.getTitle())
@@ -340,5 +349,30 @@ public class CalendarScheduleSnapshotStore {
             return LocalDateTime.MAX;
         }
         return instant.atOffset(ZoneOffset.UTC).toLocalDateTime();
+    }
+
+    private record LocaleKey(String region, String language) {
+    }
+
+    private static final class ActiveLocaleIds {
+
+        private final Set<String> movieTmdbIds = new LinkedHashSet<>();
+        private final Set<String> seriesTmdbIds = new LinkedHashSet<>();
+
+        private void add(CalendarScheduleKey key) {
+            if (key.type() == ContentType.MOVIE) {
+                movieTmdbIds.add(key.tmdbId());
+            } else {
+                seriesTmdbIds.add(key.tmdbId());
+            }
+        }
+
+        private Set<String> movieTmdbIds() {
+            return movieTmdbIds;
+        }
+
+        private Set<String> seriesTmdbIds() {
+            return seriesTmdbIds;
+        }
     }
 }

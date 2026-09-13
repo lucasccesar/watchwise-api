@@ -133,8 +133,8 @@ class CalendarScheduleSnapshotRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findDue] Should Return Snapshots Due At The Requested Time")
-    void shouldReturnSnapshotsDueAtTheRequestedTime() {
+    @DisplayName("[findDueForInterest] Should Return Only Active Due Snapshots For The Exact Locale")
+    void shouldReturnOnlyActiveDueSnapshotsForTheExactLocale() {
         LocalDateTime dueAt = LocalDateTime.of(2026, 9, 12, 12, 0);
         CalendarScheduleSnapshot due = snapshotRepository.save(buildMovie(
                 "550", LocalDate.of(2026, 9, 12), "Due", null).toBuilder()
@@ -144,8 +144,19 @@ class CalendarScheduleSnapshotRepositoryTest {
                 "680", LocalDate.of(2026, 9, 12), "Not Due", null).toBuilder()
                 .nextCheckAt(dueAt.plusMinutes(1))
                 .build());
+        snapshotRepository.saveAndFlush(buildMovie(
+                "999", LocalDate.of(2026, 9, 12), "Inactive", null).toBuilder()
+                .nextCheckAt(dueAt.minusMinutes(1))
+                .build());
+        snapshotRepository.saveAndFlush(buildMovie(
+                "550", LocalDate.of(2026, 9, 12), "Other Locale", null).toBuilder()
+                .region("US")
+                .language("en-US")
+                .nextCheckAt(dueAt.minusMinutes(1))
+                .build());
 
-        List<CalendarScheduleSnapshot> result = snapshotRepository.findDueAtOrBefore(dueAt);
+        List<CalendarScheduleSnapshot> result = snapshotRepository.findDueForInterest(
+                dueAt, "BR", "pt-BR", List.of("550"), List.of("__calendar_no_active_identity__"));
 
         assertThat(result).extracting(CalendarScheduleSnapshot::getId).containsExactly(due.getId());
     }

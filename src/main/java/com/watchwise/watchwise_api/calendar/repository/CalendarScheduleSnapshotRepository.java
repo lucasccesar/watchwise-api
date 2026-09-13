@@ -81,9 +81,19 @@ public interface CalendarScheduleSnapshotRepository extends JpaRepository<Calend
             @Param("region") String region,
             @Param("language") String language);
 
-    List<CalendarScheduleSnapshot> findByNextCheckAtLessThanEqualOrderByNextCheckAtAsc(LocalDateTime dueAt);
-
-    default List<CalendarScheduleSnapshot> findDueAtOrBefore(LocalDateTime dueAt) {
-        return findByNextCheckAtLessThanEqualOrderByNextCheckAtAsc(dueAt);
-    }
+    @Query("""
+            SELECT snapshot FROM CalendarScheduleSnapshot snapshot
+            WHERE snapshot.nextCheckAt <= :dueAt
+              AND snapshot.region = :region
+              AND snapshot.language = :language
+              AND ((snapshot.eventType = 'MOVIE' AND snapshot.tmdbId IN :movieTmdbIds)
+                   OR (snapshot.eventType = 'EPISODE' AND snapshot.seriesTmdbId IN :seriesTmdbIds))
+            ORDER BY snapshot.nextCheckAt ASC, snapshot.id ASC
+            """)
+    List<CalendarScheduleSnapshot> findDueForInterest(
+            @Param("dueAt") LocalDateTime dueAt,
+            @Param("region") String region,
+            @Param("language") String language,
+            @Param("movieTmdbIds") Collection<String> movieTmdbIds,
+            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 }
