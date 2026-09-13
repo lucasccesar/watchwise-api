@@ -17,7 +17,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.ContentType;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -32,11 +32,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 @Service
-@RequiredArgsConstructor
 public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
 
     private final TmdbClient tmdbClient;
     private final Executor tmdbSeasonFetchExecutor;
+
+    public CalendarScheduleProviderImpl(
+            TmdbClient tmdbClient,
+            @Qualifier("tmdbSeasonFetchExecutor") Executor tmdbSeasonFetchExecutor) {
+        this.tmdbClient = tmdbClient;
+        this.tmdbSeasonFetchExecutor = tmdbSeasonFetchExecutor;
+    }
 
     @Override
     public CalendarScheduleLookup loadMovie(String tmdbId, String region, String language) {
@@ -80,6 +86,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
             return mapFailure(seriesLookup);
         }
 
+        List<TmdbEpisodeSummary> episodes = Optional.ofNullable(season.value().episodes()).orElseGet(List::of);
         CalendarSeasonSchedule schedule = new CalendarSeasonSchedule(
                 seriesTmdbId,
                 seasonNumber,
@@ -87,7 +94,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 language,
                 nonBlankOr(series.value().name(), seriesTmdbId),
                 series.value().posterPath(),
-                Optional.ofNullable(season.value().episodes()).orElseGet(List::of).stream()
+                episodes.stream()
                         .map(this::toEpisodeSchedule)
                         .toList());
         return new CalendarScheduleLookup.Found(CalendarScheduleBatch.season(
@@ -145,6 +152,10 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                     ? new TmdbLookupResult.NotFound<>()
                     : new TmdbLookupResult.Unavailable<>();
         }
+        List<TmdbEpisodeSummary> episodes = Optional.ofNullable(found.value().episodes()).orElseGet(List::of);
+        if (episodes.size() != expectedEpisodeCount) {
+            return new TmdbLookupResult.Unavailable<>();
+        }
         CalendarSeasonSchedule schedule = new CalendarSeasonSchedule(
                 seriesTmdbId,
                 seasonNumber,
@@ -152,7 +163,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 language,
                 nonBlankOr(series.name(), seriesTmdbId),
                 series.posterPath(),
-                Optional.ofNullable(found.value().episodes()).orElseGet(List::of).stream()
+                episodes.stream()
                         .map(this::toEpisodeSchedule)
                         .toList());
         return new TmdbLookupResult.Found<>(

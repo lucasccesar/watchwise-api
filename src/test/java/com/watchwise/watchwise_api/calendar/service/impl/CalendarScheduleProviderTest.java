@@ -182,6 +182,20 @@ class CalendarScheduleProviderTest {
     }
 
     @Test
+    @DisplayName("[loadSeries] Should Return Unavailable - When A Found Season Has Fewer Episodes Than Expected")
+    void shouldReturnUnavailableWhenAFoundSeasonHasFewerEpisodesThanExpected() {
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
+                new TmdbSeasonSummary(1, "Season 1", null, null, 2, null)))));
+        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                1, "Season 1", null, null, null, 2,
+                List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
+
+        CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
+
+        assertThat(result).isInstanceOf(CalendarScheduleLookup.Unavailable.class);
+    }
+
+    @Test
     @DisplayName("[loadSeries] Should Return Not Found - When A Required Season Is Not Found")
     void shouldReturnNotFoundWhenARequiredSeasonIsNotFound() {
         when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(

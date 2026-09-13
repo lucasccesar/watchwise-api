@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 public class TmdbCacheConfig {
 
     private static final int SEASON_FETCH_THREAD_POOL_SIZE = 8;
+    private static final int CALENDAR_SCHEDULE_REFRESH_THREAD_POOL_SIZE = 4;
 
     @Bean
     public Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache(
@@ -102,5 +103,10 @@ public class TmdbCacheConfig {
     @Bean
     public ExecutorService tmdbSeasonFetchExecutor() {
         return Executors.newFixedThreadPool(SEASON_FETCH_THREAD_POOL_SIZE);
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public ExecutorService calendarScheduleRefreshExecutor() {
+        return Executors.newFixedThreadPool(CALENDAR_SCHEDULE_REFRESH_THREAD_POOL_SIZE);
     }
 }

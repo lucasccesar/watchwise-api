@@ -36,7 +36,7 @@ public class CalendarScheduleRefreshService {
     private final CalendarScheduleSnapshotStore snapshotStore;
     private final CalendarScheduleProvider scheduleProvider;
     private final CalendarScheduleSynchronizer scheduleSynchronizer;
-    private final ExecutorService tmdbSeasonFetchExecutor;
+    private final ExecutorService calendarScheduleRefreshExecutor;
     private final Clock clock;
 
     public CalendarScheduleRefreshService(
@@ -44,13 +44,13 @@ public class CalendarScheduleRefreshService {
             CalendarScheduleSnapshotStore snapshotStore,
             CalendarScheduleProvider scheduleProvider,
             CalendarScheduleSynchronizer scheduleSynchronizer,
-            @Qualifier("tmdbSeasonFetchExecutor") ExecutorService tmdbSeasonFetchExecutor,
+            @Qualifier("calendarScheduleRefreshExecutor") ExecutorService calendarScheduleRefreshExecutor,
             Clock clock) {
         this.watchlistEntryRepository = watchlistEntryRepository;
         this.snapshotStore = snapshotStore;
         this.scheduleProvider = scheduleProvider;
         this.scheduleSynchronizer = scheduleSynchronizer;
-        this.tmdbSeasonFetchExecutor = tmdbSeasonFetchExecutor;
+        this.calendarScheduleRefreshExecutor = calendarScheduleRefreshExecutor;
         this.clock = clock;
     }
 
@@ -72,7 +72,7 @@ public class CalendarScheduleRefreshService {
         }
 
         List<CompletableFuture<Void>> refreshes = uniqueRefreshKeys.keySet().stream()
-                .map(key -> CompletableFuture.runAsync(() -> refreshOne(key, checkedAt), tmdbSeasonFetchExecutor))
+                .map(key -> CompletableFuture.runAsync(() -> refreshOne(key, checkedAt), calendarScheduleRefreshExecutor))
                 .toList();
         for (CompletableFuture<Void> refresh : refreshes) {
             try {
