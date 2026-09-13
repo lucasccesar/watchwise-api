@@ -156,7 +156,7 @@ class CalendarScheduleSnapshotRepositoryTest {
                 .build());
 
         List<CalendarScheduleSnapshot> result = snapshotRepository.findDueForInterest(
-                dueAt, "BR", "pt-BR", List.of("550"), List.of("__calendar_no_active_identity__"));
+                dueAt, "BR", "pt-BR", List.of("550", "680"), List.of("__calendar_no_active_identity__"));
 
         assertThat(result).extracting(CalendarScheduleSnapshot::getId).containsExactly(due.getId());
     }
