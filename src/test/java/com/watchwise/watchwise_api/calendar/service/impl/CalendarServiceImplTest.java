@@ -153,6 +153,25 @@ class CalendarServiceImplTest {
                 .isInstanceOf(TmdbUnavailableException.class);
     }
 
+    @Test
+    void groupsSeriesOnlyWhenTheSeriesCompletenessMarkerIsPresent() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        List<CalendarScheduleSnapshot> episodes = List.of(
+                episode("1396", 1, 1, LocalDate.of(2026, 9, 15)),
+                episode("1396", 1, 2, LocalDate.of(2026, 9, 15)));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(
+                new CalendarScheduleReadModel(episodes, new CalendarAssemblyInput.Completeness(Set.of(), Set.of(key))),
+                new CalendarScheduleReadModel(episodes, CalendarAssemblyInput.Completeness.empty()));
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events())
+                .extracting(event -> event.eventType()).containsExactly(CalendarEventType.SERIES);
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events())
+                .extracting(event -> event.eventType()).containsExactly(CalendarEventType.EPISODE, CalendarEventType.EPISODE);
+    }
+
     private CalendarService service() {
         return new CalendarServiceImpl(interestReader, snapshotStore, scheduleProvider, synchronizer, watchedReader, CLOCK);
     }
