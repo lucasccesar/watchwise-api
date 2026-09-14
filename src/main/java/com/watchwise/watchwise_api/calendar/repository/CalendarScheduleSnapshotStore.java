@@ -17,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -48,6 +50,7 @@ public class CalendarScheduleSnapshotStore {
         this(snapshotRepository, completenessRepository, newTransactionExecutor, identity -> { });
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public CalendarScheduleReadModel findForInterest(
             CalendarInterest interest, String region, String language) {
         Set<CalendarScheduleKey> activeKeys = interest.sourcesByKey().keySet();
@@ -239,6 +242,13 @@ public class CalendarScheduleSnapshotStore {
                 .map(CalendarScheduleCompleteness::getLastCheckedAt)
                 .filter(Objects::nonNull)
                 .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(toLocalDateTime(checkedAt)));
+        if (!schedule.completeSchedule() && !hasNewerCompleteness) {
+            changed |= completenessRepository.deleteByGroupTypeAndSeriesTmdbIdAndRegionAndLanguage(
+                    CalendarScheduleCompleteness.GroupType.SERIES,
+                    schedule.key().tmdbId(),
+                    schedule.key().preferredRegion(),
+                    schedule.key().preferredLanguage()) > 0;
+        }
         if ((hasCachedSeason || schedule.completeSchedule()) && !hasNewerCompleteness) {
             changed |= completenessRepository.deleteBySeriesTmdbIdAndRegionAndLanguage(
                     schedule.key().tmdbId(), schedule.key().preferredRegion(), schedule.key().preferredLanguage()) > 0;

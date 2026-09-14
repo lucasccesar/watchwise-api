@@ -170,6 +170,36 @@ class CalendarServiceImplTest {
     }
 
     @Test
+    void reloadsAnIncompleteSeriesSoCacheOnlySeasonsDoNotDisappearOnTheNextRequest() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel persisted = new CalendarScheduleReadModel(
+                List.of(episode("1396", 1, 1, LocalDate.of(2026, 9, 15))),
+                CalendarAssemblyInput.Completeness.empty());
+        CalendarSeasonSchedule seasonOne = new CalendarSeasonSchedule(
+                "1396", 1, "BR", "pt-BR", "Series 1396", null,
+                List.of(new CalendarEpisodeSchedule(1, "One", LocalDate.of(2026, 9, 15), null, null, null)));
+        CalendarSeasonSchedule seasonTwo = new CalendarSeasonSchedule(
+                "1396", 2, "BR", "pt-BR", "Series 1396", null,
+                List.of(new CalendarEpisodeSchedule(1, "Two", LocalDate.of(2026, 9, 16), null, null, null)));
+        CalendarSeriesSchedule cachedSchedule = new CalendarSeriesSchedule(
+                key,
+                List.of(
+                        new CalendarSeriesSchedule.Season(seasonOne, 1, TmdbLookupOrigin.CACHE),
+                        new CalendarSeriesSchedule.Season(seasonTwo, 1, TmdbLookupOrigin.CACHE)),
+                Map.of(1, 1, 2, 1), 2, true);
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(persisted, persisted);
+        when(scheduleProvider.loadSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.FoundSeries(cachedSchedule));
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).hasSize(2);
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).hasSize(2);
+        verify(scheduleProvider, org.mockito.Mockito.times(2)).loadSeries("1396", "BR", "pt-BR");
+    }
+
+    @Test
     void includesACacheOnlySeasonWhenAnotherSeasonAlreadyHasAPersistedSnapshot() {
         CalendarScheduleKey key = key(ContentType.SERIES, "1396");
         CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));

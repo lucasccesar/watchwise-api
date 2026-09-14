@@ -13,6 +13,12 @@ public interface CalendarScheduleCompletenessRepository extends JpaRepository<Ca
 
     long deleteBySeriesTmdbIdAndRegionAndLanguage(String seriesTmdbId, String region, String language);
 
+    long deleteByGroupTypeAndSeriesTmdbIdAndRegionAndLanguage(
+            CalendarScheduleCompleteness.GroupType groupType,
+            String seriesTmdbId,
+            String region,
+            String language);
+
     List<CalendarScheduleCompleteness> findBySeriesTmdbIdAndRegionAndLanguage(
             String seriesTmdbId, String region, String language);
 

@@ -63,7 +63,14 @@ public class CalendarServiceImpl implements CalendarService {
         Set<CalendarScheduleKey> omittedKeys = new LinkedHashSet<>();
         List<CalendarScheduleSnapshot> transientSnapshots = new ArrayList<>();
         boolean synchronizedRemoteSchedule = refreshSchedules(
-                activeKeys, readModel.snapshots(), transientSnapshots, region, language, requestLookups, omittedKeys);
+                activeKeys,
+                readModel.snapshots(),
+                readModel.completeness(),
+                transientSnapshots,
+                region,
+                language,
+                requestLookups,
+                omittedKeys);
 
         if (synchronizedRemoteSchedule) {
             readModel = snapshotStore.findForInterest(interest, region, language);
@@ -95,6 +102,7 @@ public class CalendarServiceImpl implements CalendarService {
     private boolean refreshSchedules(
             Set<CalendarScheduleKey> activeKeys,
             List<CalendarScheduleSnapshot> snapshots,
+            CalendarAssemblyInput.Completeness completeness,
             List<CalendarScheduleSnapshot> transientSnapshots,
             String region,
             String language,
@@ -104,7 +112,7 @@ public class CalendarServiceImpl implements CalendarService {
         Instant now = clock.instant();
         for (CalendarScheduleKey key : activeKeys) {
             List<CalendarScheduleSnapshot> snapshotsForKey = snapshotsForKey(snapshots, key);
-            if (!isMissingOrDue(snapshotsForKey, now)) {
+            if (!isMissingOrDue(key, snapshotsForKey, completeness, now)) {
                 continue;
             }
             CalendarScheduleLookup lookup = requestLookups.computeIfAbsent(key, ignored -> load(key, region, language));
@@ -210,7 +218,14 @@ public class CalendarServiceImpl implements CalendarService {
                 : scheduleProvider.loadSeries(key.tmdbId(), region, language);
     }
 
-    private boolean isMissingOrDue(List<CalendarScheduleSnapshot> snapshots, Instant now) {
+    private boolean isMissingOrDue(
+            CalendarScheduleKey key,
+            List<CalendarScheduleSnapshot> snapshots,
+            CalendarAssemblyInput.Completeness completeness,
+            Instant now) {
+        if (key.type() == ContentType.SERIES && !completeness.completeSeriesKeys().contains(key)) {
+            return true;
+        }
         return snapshots.isEmpty() || snapshots.stream().anyMatch(snapshot -> snapshot.getNextCheckAt()
                 .isBefore(LocalDateTime.ofInstant(now, ZoneOffset.UTC))
                 || snapshot.getNextCheckAt().isEqual(LocalDateTime.ofInstant(now, ZoneOffset.UTC)));
