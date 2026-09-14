@@ -250,6 +250,36 @@ class CalendarServiceImplTest {
     }
 
     @Test
+    void doesNotReloadARecentlyNegativeSeriesSchedule() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel read = new CalendarScheduleReadModel(
+                List.of(), CalendarAssemblyInput.Completeness.empty(), Set.of(key));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).isEmpty();
+
+        verifyNoInteractions(scheduleProvider, synchronizer);
+    }
+
+    @Test
+    void doesNotReloadACompleteEmptySeriesSchedule() {
+        CalendarScheduleKey key = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel read = new CalendarScheduleReadModel(
+                List.of(), new CalendarAssemblyInput.Completeness(Set.of(), Set.of(key)));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events()).isEmpty();
+
+        verifyNoInteractions(scheduleProvider, synchronizer);
+    }
+
+    @Test
     void omitsNotFoundButFailsForUnavailableWithoutSnapshot() {
         CalendarScheduleKey key = key(ContentType.MOVIE, "550");
         CalendarInterest interest = interest(Map.of(key, Set.of(CalendarSource.WATCHLIST)));

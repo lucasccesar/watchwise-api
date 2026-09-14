@@ -70,7 +70,8 @@ public class CalendarServiceImpl implements CalendarService {
                 region,
                 language,
                 requestLookups,
-                omittedKeys);
+                omittedKeys,
+                readModel.negativeSeriesKeys());
 
         if (synchronizedRemoteSchedule) {
             readModel = snapshotStore.findForInterest(interest, region, language);
@@ -107,12 +108,13 @@ public class CalendarServiceImpl implements CalendarService {
             String region,
             String language,
             Map<CalendarScheduleKey, CalendarScheduleLookup> requestLookups,
-            Set<CalendarScheduleKey> omittedKeys) {
+            Set<CalendarScheduleKey> omittedKeys,
+            Set<CalendarScheduleKey> negativeSeriesKeys) {
         boolean synchronizedRemoteSchedule = false;
         Instant now = clock.instant();
         for (CalendarScheduleKey key : activeKeys) {
             List<CalendarScheduleSnapshot> snapshotsForKey = snapshotsForKey(snapshots, key);
-            if (!isMissingOrDue(key, snapshotsForKey, completeness, now)) {
+            if (!isMissingOrDue(key, snapshotsForKey, completeness, negativeSeriesKeys, now)) {
                 continue;
             }
             CalendarScheduleLookup lookup = requestLookups.computeIfAbsent(key, ignored -> load(key, region, language));
@@ -223,9 +225,18 @@ public class CalendarServiceImpl implements CalendarService {
             CalendarScheduleKey key,
             List<CalendarScheduleSnapshot> snapshots,
             CalendarAssemblyInput.Completeness completeness,
+            Set<CalendarScheduleKey> negativeSeriesKeys,
             Instant now) {
-        if (key.type() == ContentType.SERIES && !completeness.completeSeriesKeys().contains(key)) {
-            return true;
+        if (key.type() == ContentType.SERIES) {
+            if (negativeSeriesKeys.contains(key)) {
+                return false;
+            }
+            if (!completeness.completeSeriesKeys().contains(key)) {
+                return true;
+            }
+            return snapshots.stream().anyMatch(snapshot -> snapshot.getNextCheckAt()
+                    .isBefore(LocalDateTime.ofInstant(now, ZoneOffset.UTC))
+                    || snapshot.getNextCheckAt().isEqual(LocalDateTime.ofInstant(now, ZoneOffset.UTC)));
         }
         return snapshots.isEmpty() || snapshots.stream().anyMatch(snapshot -> snapshot.getNextCheckAt()
                 .isBefore(LocalDateTime.ofInstant(now, ZoneOffset.UTC))

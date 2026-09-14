@@ -39,6 +39,7 @@ import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -108,7 +109,7 @@ class CalendarScheduleSynchronizerImplTest {
         synchronizer.synchronize(seasonBatch(TmdbLookupOrigin.REMOTE, LocalDate.of(2026, 9, 1)), CHECKED_AT);
 
         ArgumentCaptor<CalendarSeasonSchedule> schedule = ArgumentCaptor.forClass(CalendarSeasonSchedule.class);
-        verify(store).reconcileSeason(schedule.capture());
+        verify(store).reconcileSeason(schedule.capture(), eq(CHECKED_AT));
         assertThat(schedule.getValue().episodes().getFirst().nextCheckAt()).isEqualTo(Instant.MAX);
     }
 

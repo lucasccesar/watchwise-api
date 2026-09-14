@@ -52,7 +52,7 @@ public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchro
 
         CalendarSeasonSchedule season = batch.season().withCheckTimes(
                 checkedAt, releaseDate -> CalendarScheduleCadence.nextCheckAt(releaseDate, checkedAt));
-        if (snapshotStore.reconcileSeason(season)) {
+        if (snapshotStore.reconcileSeason(season, checkedAt)) {
             seasonScheduleCache.invalidate(
                     batch.season().seriesTmdbId() + "|" + batch.season().seasonNumber() + "|" + batch.season().language());
         }

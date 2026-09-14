@@ -161,6 +161,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     }
 
     private ContentDetailsDTO buildMovieDetails(Content content, String language, String region) {
+        Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbMovieFullDetails> lookup = tmdbClient.getMovieFullDetails(content.getTmdbId(), language);
         TmdbMovieFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
         persistUnitRuntime(content, details.runtime());
@@ -168,7 +169,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 && found.origin() == TmdbLookupOrigin.REMOTE
                 ? tmdbClient.getMovieReleaseDates(content.getTmdbId(), language)
                 : null;
-        synchronizeMovieSchedule(content, language, region, lookup, releaseDatesLookup, details);
+        synchronizeMovieSchedule(content, language, region, lookup, releaseDatesLookup, details, checkedAt);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -199,6 +200,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     }
 
     private ContentDetailsDTO buildSeriesDetails(Content content, String language, String region) {
+        Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbTvFullDetails> lookup = tmdbClient.getTvFullDetails(content.getTmdbId(), language);
         TmdbTvFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
 
@@ -218,7 +220,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         if (!isTerminalSeriesStatus(details.status())) {
             contentTrackingService.reactivateAfterRevival(content, details.status());
         }
-        synchronizeSeriesSchedule(content, language, region, lookup, details, allSeasons, seasonOrigins);
+        synchronizeSeriesSchedule(content, language, region, lookup, details, allSeasons, seasonOrigins, checkedAt);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -249,13 +251,14 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     }
 
     private ContentDetailsDTO buildSeasonDetails(Content content, String language, String region) {
+        Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup = tmdbClient
                 .getSeasonFullDetails(content.getSeriesTmdbId(), content.getSeasonNumber(), language);
         TmdbSeasonFullDetails season = seasonLookup.toOptional().orElseThrow(this::tmdbUnavailable);
         TmdbTvFullDetails series = tmdbClient.getTvFullDetails(content.getSeriesTmdbId(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
         List<Integer> episodeRuntimes = runtimesOf(season.episodes());
-        synchronizeSeasonSchedule(content, language, region, seasonLookup, season, series);
+        synchronizeSeasonSchedule(content, language, region, seasonLookup, season, series, checkedAt);
 
         return new ContentDetailsDTO(
                 content.getId(),
@@ -582,7 +585,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             String region,
             TmdbLookupResult<TmdbMovieFullDetails> lookup,
             TmdbLookupResult<TmdbMovieReleaseDates> releaseDatesLookup,
-            TmdbMovieFullDetails details) {
+            TmdbMovieFullDetails details,
+            Instant checkedAt) {
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbMovieFullDetails> found)
                 || found.origin() != TmdbLookupOrigin.REMOTE
                 || !(releaseDatesLookup instanceof TmdbLookupResult.Found<TmdbMovieReleaseDates> releaseDates)
@@ -602,7 +606,6 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 details.posterPath(),
                 null,
                 null);
-        Instant checkedAt = Instant.now();
         calendarScheduleSynchronizer.synchronize(
                 new CalendarScheduleBatch(
                         new CalendarScheduleKey(ContentType.MOVIE, content.getTmdbId(), language, region),
@@ -619,7 +622,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             String region,
             TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup,
             TmdbSeasonFullDetails season,
-            TmdbTvFullDetails series) {
+            TmdbTvFullDetails series,
+            Instant checkedAt) {
         if (!(seasonLookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)
                 || found.origin() != TmdbLookupOrigin.REMOTE
                 || content.getSeasonNumber() == null
@@ -636,7 +640,6 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 Optional.ofNullable(season.episodes()).orElseGet(List::of).stream()
                         .map(this::toCalendarEpisodeSchedule)
                         .toList());
-        Instant checkedAt = Instant.now();
         calendarScheduleSynchronizer.synchronize(
                 new CalendarScheduleBatch(
                         new CalendarScheduleKey(ContentType.SERIES, content.getSeriesTmdbId(), language, region),
@@ -654,7 +657,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             TmdbLookupResult<TmdbTvFullDetails> lookup,
             TmdbTvFullDetails details,
             List<TmdbSeasonFullDetails> loadedSeasons,
-            Map<Integer, TmdbLookupOrigin> seasonOrigins) {
+            Map<Integer, TmdbLookupOrigin> seasonOrigins,
+            Instant checkedAt) {
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> found)
                 || found.origin() != TmdbLookupOrigin.REMOTE
                 || loadedSeasons == null
@@ -702,7 +706,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 seasons,
                 expectedCounts,
                 expectedCounts.values().stream().mapToInt(Integer::intValue).sum());
-        calendarScheduleSynchronizer.synchronizeSeries(schedule, Instant.now());
+        calendarScheduleSynchronizer.synchronizeSeries(schedule, checkedAt);
     }
 
     private Map<Integer, TmdbLookupOrigin> originsBySeason(
