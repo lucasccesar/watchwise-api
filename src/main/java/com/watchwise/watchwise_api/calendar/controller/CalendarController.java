@@ -33,7 +33,7 @@ public class CalendarController {
     }
 
     private YearMonth parseMonth(String month) {
-        if (month == null) {
+        if (month == null || !month.matches("\\d{4}-\\d{2}")) {
             throw new BadRequestException("month must be in YYYY-MM format");
         }
 

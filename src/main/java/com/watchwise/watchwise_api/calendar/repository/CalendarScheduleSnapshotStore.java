@@ -122,7 +122,7 @@ public class CalendarScheduleSnapshotStore {
             keys.stream()
                     .filter(key -> CalendarScheduleCadence.isSeriesDiscoveryDue(
                             Optional.ofNullable(markersBySeries.get(key.tmdbId()))
-                                    .map(CalendarScheduleCompleteness::getLastCheckedAt)
+                                    .map(CalendarScheduleCompleteness::getLastDiscoveredAt)
                                     .orElse(null), now))
                     .forEach(due::add);
         });
@@ -182,14 +182,66 @@ public class CalendarScheduleSnapshotStore {
         }
     }
 
-    private boolean reconcileSeasonInNewTransaction(CalendarSeasonSchedule schedule) {
-        return newTransactionExecutor.runInNewTransaction(() -> {
-            lockSeries(schedule.seriesTmdbId(), schedule.region(), schedule.language());
-            return reconcileSeasonInTransaction(schedule, true);
+    /**
+     * Removes a schedule after TMDB has positively reported that the identity no longer exists.
+     * A series marker is retained as a negative result so the monthly discovery cadence still applies.
+     */
+    public void invalidate(CalendarScheduleKey key, Instant checkedAt, boolean discoveryAttempt) {
+        newTransactionExecutor.runInNewTransaction(() -> {
+            if (key.type() == ContentType.MOVIE) {
+                lockMovie(key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
+                snapshotRepository.findByMovieIdentity(key.tmdbId(), key.preferredRegion(), key.preferredLanguage())
+                        .filter(snapshot -> !isOlderThanExisting(snapshot.getLastCheckedAt(), checkedAt))
+                        .ifPresent(snapshotRepository::delete);
+                return null;
+            }
+
+            lockSeries(key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
+            List<CalendarScheduleSnapshot> snapshots = snapshotRepository
+                    .findByEventTypeAndSeriesTmdbIdAndRegionAndLanguage(
+                            CalendarScheduleSnapshot.EventType.EPISODE,
+                            key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
+            if (snapshots.stream().map(CalendarScheduleSnapshot::getLastCheckedAt)
+                    .filter(Objects::nonNull)
+                    .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(toLocalDateTime(checkedAt)))) {
+                return null;
+            }
+            CalendarScheduleCompleteness existingSeriesMarker = completenessRepository.findSeriesIdentity(
+                    key.tmdbId(), key.preferredRegion(), key.preferredLanguage()).orElse(null);
+            if (existingSeriesMarker != null
+                    && existingSeriesMarker.getLastCheckedAt() != null
+                    && existingSeriesMarker.getLastCheckedAt().isAfter(toLocalDateTime(checkedAt))) {
+                return null;
+            }
+            snapshotRepository.deleteAll(snapshots);
+            completenessRepository.deleteBySeriesTmdbIdAndRegionAndLanguage(
+                    key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
+            completenessRepository.flush();
+            completenessRepository.save(CalendarScheduleCompleteness.builder()
+                    .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                    .seriesTmdbId(key.tmdbId())
+                    .region(key.preferredRegion())
+                    .language(key.preferredLanguage())
+                    .expectedEpisodeCount(0)
+                    .complete(false)
+                    .lastCheckedAt(toLocalDateTime(checkedAt))
+                    .lastDiscoveredAt(discoveryAttempt
+                            ? toLocalDateTime(checkedAt)
+                            : existingSeriesMarker == null ? null : existingSeriesMarker.getLastDiscoveredAt())
+                    .build());
+            return null;
         });
     }
 
-    private boolean reconcileSeasonInTransaction(CalendarSeasonSchedule schedule, boolean invalidateCompleteness) {
+    private boolean reconcileSeasonInNewTransaction(CalendarSeasonSchedule schedule) {
+        return newTransactionExecutor.runInNewTransaction(() -> {
+            lockSeries(schedule.seriesTmdbId(), schedule.region(), schedule.language());
+            return reconcileSeasonInTransaction(schedule, true, false);
+        });
+    }
+
+    private boolean reconcileSeasonInTransaction(
+            CalendarSeasonSchedule schedule, boolean invalidateCompleteness, boolean completePayload) {
         List<CalendarScheduleSnapshot> existingSnapshots = snapshotsForSeason(schedule);
         LocalDateTime incomingCheckedAt = schedule.episodes().stream()
                 .map(CalendarEpisodeSchedule::lastCheckedAt)
@@ -212,7 +264,7 @@ public class CalendarScheduleSnapshotStore {
         }
         boolean changed = false;
         boolean hasUsableDate = schedule.episodes().stream().anyMatch(episode -> episode.releaseDate() != null);
-        if (hasUsableDate) {
+        if (completePayload || hasUsableDate) {
             Set<Integer> coordinates = Set.copyOf(schedule.episodeCoordinates());
             List<CalendarScheduleSnapshot> removed = existingSnapshots.stream()
                     .filter(snapshot -> !coordinates.contains(snapshot.getEpisodeNumber()))
@@ -318,7 +370,7 @@ public class CalendarScheduleSnapshotStore {
                     && season.expectedEpisodeCount() == expected.getValue()
                     && season.isFullyRepresented();
             if (season != null && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE && complete) {
-                changed |= reconcileSeasonInTransaction(season.schedule(), false);
+                changed |= reconcileSeasonInTransaction(season.schedule(), false, complete);
             }
             if (season == null || season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE) {
                 changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SEASON, schedule.key().tmdbId(),
@@ -329,10 +381,10 @@ public class CalendarScheduleSnapshotStore {
                     && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE
                     && complete;
         }
-        if (schedule.completeSchedule() && !hasCachedSeason) {
+        if (schedule.completeSchedule()) {
             changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SERIES, schedule.key().tmdbId(), null,
                     schedule.key().preferredRegion(), schedule.key().preferredLanguage(),
-                    schedule.totalRegularEpisodeCount(), allSeasonsComplete, checkedAt);
+                    schedule.totalRegularEpisodeCount(), !hasCachedSeason && allSeasonsComplete, checkedAt);
         }
         return changed;
     }
@@ -381,6 +433,8 @@ public class CalendarScheduleSnapshotStore {
                 .expectedEpisodeCount(expectedEpisodeCount)
                 .complete(complete)
                 .lastCheckedAt(toLocalDateTime(checkedAt))
+                .lastDiscoveredAt(groupType == CalendarScheduleCompleteness.GroupType.SERIES
+                        ? toLocalDateTime(checkedAt) : current.getLastDiscoveredAt())
                 .build()).orElseGet(() -> CalendarScheduleCompleteness.builder()
                 .groupType(groupType)
                 .seriesTmdbId(seriesTmdbId)
@@ -390,6 +444,8 @@ public class CalendarScheduleSnapshotStore {
                 .expectedEpisodeCount(expectedEpisodeCount)
                 .complete(complete)
                 .lastCheckedAt(toLocalDateTime(checkedAt))
+                .lastDiscoveredAt(groupType == CalendarScheduleCompleteness.GroupType.SERIES
+                        ? toLocalDateTime(checkedAt) : null)
                 .build());
         boolean changed = existing.isEmpty()
                 || !Objects.equals(existing.get().getExpectedEpisodeCount(), marker.getExpectedEpisodeCount())
@@ -505,7 +561,11 @@ public class CalendarScheduleSnapshotStore {
     }
 
     private void lockMovie(CalendarMovieSchedule schedule) {
-        scheduleLock.lock("movie|" + schedule.tmdbId() + "|" + schedule.region() + "|" + schedule.language());
+        lockMovie(schedule.tmdbId(), schedule.region(), schedule.language());
+    }
+
+    private void lockMovie(String tmdbId, String region, String language) {
+        scheduleLock.lock("movie|" + tmdbId + "|" + region + "|" + language);
     }
 
     private void lockSeries(String tmdbId, String region, String language) {

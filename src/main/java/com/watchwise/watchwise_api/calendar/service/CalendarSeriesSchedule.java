@@ -65,8 +65,8 @@ public record CalendarSeriesSchedule(
     }
 
     public boolean hasRemoteResults() {
-        return seasons.stream().anyMatch(season -> season.origin() == TmdbLookupOrigin.REMOTE)
-                || (completeSchedule && seasons.isEmpty());
+        return completeSchedule
+                || seasons.stream().anyMatch(season -> season.origin() == TmdbLookupOrigin.REMOTE);
     }
 
     public record Season(CalendarSeasonSchedule schedule, int expectedEpisodeCount, TmdbLookupOrigin origin) {

@@ -159,8 +159,8 @@ class CalendarScheduleRefreshServiceTest {
     }
 
     @Test
-    @DisplayName("[refreshDueSchedules] Should Preserve Snapshots For Not Found Or Unavailable Results")
-    void shouldPreserveSnapshotsForNotFoundOrUnavailableResults() {
+    @DisplayName("[refreshDueSchedules] Should Invalidate Not Found And Preserve Unavailable Results")
+    void shouldInvalidateNotFoundAndPreserveUnavailableResults() {
         CalendarScheduleKey notFoundMovie = key(ContentType.MOVIE, "550", "pt-BR", "BR");
         CalendarScheduleKey unavailableMovie = key(ContentType.MOVIE, "680", "pt-BR", "BR");
         when(watchlistEntryRepository.findActiveCalendarScheduleKeys())
@@ -173,6 +173,7 @@ class CalendarScheduleRefreshServiceTest {
         refreshService.refreshDueSchedules();
 
         verifyNoInteractions(scheduleSynchronizer);
+        verify(snapshotStore).invalidate(notFoundMovie, NOW, false);
     }
 
     @Test

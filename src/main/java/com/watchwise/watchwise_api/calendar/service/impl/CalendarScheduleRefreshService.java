@@ -109,6 +109,9 @@ public class CalendarScheduleRefreshService {
                     && foundSeries.schedule().hasRemoteResults()) {
                 scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), checkedAt);
             }
+            if (lookup instanceof CalendarScheduleLookup.NotFound) {
+                snapshotStore.invalidate(key, checkedAt, refreshKey.discovery());
+            }
         } catch (RuntimeException exception) {
             log.warn("Calendar schedule refresh failed for {}", refreshKey, exception);
         }

@@ -8,8 +8,24 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class CalendarSeriesScheduleTest {
+
+    @Test
+    void shouldTreatACompleteScheduleAsRemoteEvenWhenEverySeasonWasCached() {
+        CalendarSeasonSchedule season = new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
+                List.of(new CalendarEpisodeSchedule(1, "One", null, null, null, null)));
+
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
+                new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR"),
+                List.of(new CalendarSeriesSchedule.Season(season, 1, TmdbLookupOrigin.CACHE)),
+                Map.of(1, 1),
+                1,
+                true);
+
+        assertThat(schedule.hasRemoteResults()).isTrue();
+    }
 
     @Test
     void shouldRejectDuplicateEpisodeCoordinatesBeforeCompletenessCanBeCalculated() {

@@ -117,6 +117,7 @@ public class CalendarServiceImpl implements CalendarService {
             }
             CalendarScheduleLookup lookup = requestLookups.computeIfAbsent(key, ignored -> load(key, region, language));
             if (lookup instanceof CalendarScheduleLookup.NotFound) {
+                snapshotStore.invalidate(key, now, key.type() == ContentType.SERIES);
                 omittedKeys.add(key);
                 continue;
             }

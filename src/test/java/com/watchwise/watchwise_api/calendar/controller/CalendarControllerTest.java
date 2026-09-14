@@ -95,4 +95,14 @@ class CalendarControllerTest {
 
         verifyNoInteractions(calendarService);
     }
+
+    @Test
+    @DisplayName("[getMonth] Should Reject Signed Or Expanded Years")
+    void shouldRejectSignedOrExpandedYears() {
+        assertThatThrownBy(() -> calendarController.getMonth("+10000-09"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("month must be in YYYY-MM format");
+
+        verifyNoInteractions(calendarService);
+    }
 }

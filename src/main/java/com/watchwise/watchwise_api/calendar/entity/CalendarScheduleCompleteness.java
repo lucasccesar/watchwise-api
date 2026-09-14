@@ -56,6 +56,9 @@ public class CalendarScheduleCompleteness {
     @Column(name = "last_checked_at", nullable = false)
     private LocalDateTime lastCheckedAt;
 
+    @Column(name = "last_discovered_at")
+    private LocalDateTime lastDiscoveredAt;
+
     public enum GroupType {
         SEASON,
         SERIES

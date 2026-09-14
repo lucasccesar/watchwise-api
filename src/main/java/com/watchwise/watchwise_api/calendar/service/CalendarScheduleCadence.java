@@ -36,9 +36,9 @@ public final class CalendarScheduleCadence {
         return nextCheckAt(releaseDate, checkedAt);
     }
 
-    public static boolean isSeriesDiscoveryDue(LocalDateTime lastCheckedAt, Instant now) {
-        return lastCheckedAt == null
-                || !lastCheckedAt.plusDays(SERIES_DISCOVERY_DAYS).isAfter(
+    public static boolean isSeriesDiscoveryDue(LocalDateTime lastDiscoveredAt, Instant now) {
+        return lastDiscoveredAt == null
+                || !lastDiscoveredAt.plusDays(SERIES_DISCOVERY_DAYS).isAfter(
                         LocalDateTime.ofInstant(now, ZoneOffset.UTC));
     }
 }
