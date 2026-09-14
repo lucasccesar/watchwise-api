@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
@@ -136,7 +137,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 expectedCounts,
                 expectedCounts.values().stream().filter(Objects::nonNull).filter(count -> count >= 0)
                         .mapToInt(Integer::intValue).sum(),
-                true));
+                series.origin() == TmdbLookupOrigin.REMOTE));
     }
 
     private TmdbLookupResult<CalendarSeriesSchedule.Season> loadSeriesSeason(

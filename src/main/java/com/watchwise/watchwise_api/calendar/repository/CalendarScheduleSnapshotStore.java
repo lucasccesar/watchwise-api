@@ -172,6 +172,13 @@ public class CalendarScheduleSnapshotStore {
                 .anyMatch(existingCheckedAt -> existingCheckedAt.isAfter(incomingCheckedAt))) {
             return false;
         }
+        if (incomingCheckedAt != null && completenessRepository.findBySeriesTmdbIdAndRegionAndLanguage(
+                        schedule.seriesTmdbId(), schedule.region(), schedule.language()).stream()
+                .map(CalendarScheduleCompleteness::getLastCheckedAt)
+                .filter(Objects::nonNull)
+                .anyMatch(existingCheckedAt -> existingCheckedAt.isAfter(incomingCheckedAt))) {
+            return false;
+        }
         boolean changed = false;
         boolean hasUsableDate = schedule.episodes().stream().anyMatch(episode -> episode.releaseDate() != null);
         if (hasUsableDate) {
@@ -271,7 +278,7 @@ public class CalendarScheduleSnapshotStore {
                     && season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.REMOTE
                     && complete;
         }
-        if (!hasCachedSeason) {
+        if (schedule.completeSchedule() && !hasCachedSeason) {
             changed |= upsertCompleteness(CalendarScheduleCompleteness.GroupType.SERIES, schedule.key().tmdbId(), null,
                     schedule.key().preferredRegion(), schedule.key().preferredLanguage(),
                     schedule.totalRegularEpisodeCount(), allSeasonsComplete, checkedAt);
