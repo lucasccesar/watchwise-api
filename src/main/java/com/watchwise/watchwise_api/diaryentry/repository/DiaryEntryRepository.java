@@ -85,6 +85,25 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     Optional<DiaryEntry> findFirstByUserIdAndContentIdAndWatchNumber(UUID userId, UUID contentId, Integer watchNumber);
 
     @Query("""
+            SELECT DISTINCT d.content.id FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.id IN :contentIds
+            """)
+    Set<UUID> findWatchedDirectContentIds(
+            @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);
+
+    @Query("""
+            SELECT DISTINCT new com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate(
+                d.content.seriesTmdbId, d.content.seasonNumber, d.content.episodeNumber)
+            FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND d.content.seriesTmdbId IN :seriesTmdbIds
+            """)
+    Set<WatchedEpisodeCoordinate> findWatchedEpisodeCoordinates(
+            @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    @Query("""
             SELECT de.content.episodeNumber AS episodeNumber, COUNT(de) AS count FROM DiaryEntry de
             WHERE de.user.id = :userId
             AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
