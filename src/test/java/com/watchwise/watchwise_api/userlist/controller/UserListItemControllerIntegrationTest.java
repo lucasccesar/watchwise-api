@@ -329,7 +329,8 @@ class UserListItemControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.type").value("MOVIE"))
                 .andExpect(jsonPath("$.childList").doesNotExist())
                 .andExpect(jsonPath("$.position").value(1))
-                .andExpect(jsonPath("$.description").value("Great movie"));
+                .andExpect(jsonPath("$.description").value("Great movie"))
+                .andExpect(jsonPath("$.contentState.watchStatus").value("UNWATCHED"));
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(1);
     }
@@ -347,7 +348,8 @@ class UserListItemControllerIntegrationTest {
                 .andExpect(jsonPath("$.content").doesNotExist())
                 .andExpect(jsonPath("$.childList.id").value(child.getId().toString()))
                 .andExpect(jsonPath("$.childList.name").value("Nested list"))
-                .andExpect(jsonPath("$.position").value(1));
+                .andExpect(jsonPath("$.position").value(1))
+                .andExpect(jsonPath("$.contentState").doesNotExist());
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId())).hasSize(1);
     }
@@ -649,8 +651,10 @@ class UserListItemControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$[0].content.tmdbId").value("550"))
                 .andExpect(jsonPath("$[0].position").value(1))
+                .andExpect(jsonPath("$[0].contentState.watchStatus").value("UNWATCHED"))
                 .andExpect(jsonPath("$[1].content.tmdbId").value("551"))
-                .andExpect(jsonPath("$[1].position").value(2));
+                .andExpect(jsonPath("$[1].position").value(2))
+                .andExpect(jsonPath("$[1].contentState.watchStatus").value("UNWATCHED"));
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(2);
     }
@@ -793,7 +797,8 @@ class UserListItemControllerIntegrationTest {
         mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, "New description")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.description").value("New description"))
-                .andExpect(jsonPath("$.position").value(1));
+                .andExpect(jsonPath("$.position").value(1))
+                .andExpect(jsonPath("$.contentState.watchStatus").value("UNWATCHED"));
 
         UserListItem updated = userListItemRepository.findById(item.getId()).orElseThrow();
         assertThat(updated.getDescription()).isEqualTo("New description");

@@ -17,6 +17,8 @@ public interface UserListItemService {
 
     List<UserListItemResponseDTO> getItems(UUID viewerId, UUID listId);
 
+    UserListItemsWithState getItemsWithState(UUID viewerId, UUID listId);
+
     List<ContentRefDTO> getPreviewItems(UUID listId);
 
     long countNestedLists(UUID listId);

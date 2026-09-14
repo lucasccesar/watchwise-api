@@ -732,11 +732,15 @@ class UserListControllerIntegrationTest {
 
         mockMvc.perform(getUserListByIdRequest(owner, list.getId()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.watchedPercentage").value(100.0));
+                .andExpect(jsonPath("$.watchedPercentage").value(100.0))
+                .andExpect(jsonPath("$.items[0].contentState.watchStatus").value("WATCHED"))
+                .andExpect(jsonPath("$.items[1].contentState.watchStatus").value("WATCHED"));
 
         mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.watchedPercentage").value(0.0));
+                .andExpect(jsonPath("$.watchedPercentage").value(0.0))
+                .andExpect(jsonPath("$.items[0].contentState.watchStatus").value("UNWATCHED"))
+                .andExpect(jsonPath("$.items[1].contentState.watchStatus").value("UNWATCHED"));
     }
 
     @Test
@@ -1016,8 +1020,10 @@ class UserListControllerIntegrationTest {
                 .andExpect(jsonPath("$.items.length()").value(2))
                 .andExpect(jsonPath("$.items[0].content.tmdbId").value("100"))
                 .andExpect(jsonPath("$.items[0].position").value(1))
+                .andExpect(jsonPath("$.items[0].contentState.watchStatus").value("UNWATCHED"))
                 .andExpect(jsonPath("$.items[1].content.tmdbId").value("200"))
                 .andExpect(jsonPath("$.items[1].position").value(2))
+                .andExpect(jsonPath("$.items[1].contentState.watchStatus").value("UNWATCHED"))
                 .andReturn();
 
         String listId = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.id");

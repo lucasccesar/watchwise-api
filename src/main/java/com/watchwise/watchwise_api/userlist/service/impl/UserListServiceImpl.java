@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.mapper.UserListMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -204,10 +205,11 @@ public class UserListServiceImpl implements UserListService {
         }
         assertValidSortDirection(sortDirection);
 
-        List<UserListItemResponseDTO> allItems = userListItemService.getItems(viewerId, listId);
+        UserListItemsWithState itemsWithState = userListItemService.getItemsWithState(viewerId, listId);
+        List<UserListItemResponseDTO> allItems = itemsWithState.items();
         List<UserListItemResponseDTO> items = filterAndSortItems(
                 allItems, type, genre, sortBy, sortDirection, userList.getUser().getId());
-        double watchedPercentage = userListItemService.getWatchedPercentage(listId, viewerId);
+        double watchedPercentage = itemsWithState.watchedPercentage();
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
         long commentsCount = commentRepository.countByListId(listId);
