@@ -41,4 +41,8 @@ public final class CalendarScheduleCadence {
                 || !lastDiscoveredAt.plusDays(SERIES_DISCOVERY_DAYS).isAfter(
                         LocalDateTime.ofInstant(now, ZoneOffset.UTC));
     }
+
+    public static Instant nextNegativeCheckAt(Instant checkedAt) {
+        return checkedAt.plusSeconds(SERIES_DISCOVERY_DAYS * DAY_SECONDS);
+    }
 }

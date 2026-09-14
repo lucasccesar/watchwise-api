@@ -59,6 +59,19 @@ public interface CalendarScheduleSnapshotRepository extends JpaRepository<Calend
             SELECT snapshot FROM CalendarScheduleSnapshot snapshot
             WHERE snapshot.region = :region
               AND snapshot.language = :language
+              AND snapshot.presentInLastTmdbSnapshot = false
+              AND snapshot.eventType = 'MOVIE'
+              AND snapshot.tmdbId IN :movieTmdbIds
+            """)
+    List<CalendarScheduleSnapshot> findNegativeMoviesForInterest(
+            @Param("region") String region,
+            @Param("language") String language,
+            @Param("movieTmdbIds") Collection<String> movieTmdbIds);
+
+    @Query("""
+            SELECT snapshot FROM CalendarScheduleSnapshot snapshot
+            WHERE snapshot.region = :region
+              AND snapshot.language = :language
               AND snapshot.presentInLastTmdbSnapshot = true
               AND ((snapshot.eventType = 'MOVIE' AND snapshot.tmdbId IN :movieTmdbIds)
                    OR (snapshot.eventType = 'EPISODE' AND snapshot.seriesTmdbId IN :seriesTmdbIds))

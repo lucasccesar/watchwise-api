@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleReadModel;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.calendar.service.CalendarWatchedContentReader;
@@ -71,7 +72,8 @@ public class CalendarServiceImpl implements CalendarService {
                 language,
                 requestLookups,
                 omittedKeys,
-                readModel.negativeSeriesKeys());
+                readModel.negativeSeriesKeys(),
+                readModel.seriesDiscoveryCheckedAt());
 
         if (synchronizedRemoteSchedule) {
             readModel = snapshotStore.findForInterest(interest, region, language);
@@ -109,12 +111,14 @@ public class CalendarServiceImpl implements CalendarService {
             String language,
             Map<CalendarScheduleKey, CalendarScheduleLookup> requestLookups,
             Set<CalendarScheduleKey> omittedKeys,
-            Set<CalendarScheduleKey> negativeSeriesKeys) {
+            Set<CalendarScheduleKey> negativeSeriesKeys,
+            Map<CalendarScheduleKey, LocalDateTime> seriesDiscoveryCheckedAt) {
         boolean synchronizedRemoteSchedule = false;
         Instant now = clock.instant();
         for (CalendarScheduleKey key : activeKeys) {
             List<CalendarScheduleSnapshot> snapshotsForKey = snapshotsForKey(snapshots, key);
-            if (!isMissingOrDue(key, snapshotsForKey, completeness, negativeSeriesKeys, now)) {
+            if (!isMissingOrDue(key, snapshotsForKey, completeness, negativeSeriesKeys,
+                    seriesDiscoveryCheckedAt, now)) {
                 continue;
             }
             CalendarScheduleLookup lookup = requestLookups.computeIfAbsent(key, ignored -> load(key, region, language));
@@ -124,7 +128,9 @@ public class CalendarServiceImpl implements CalendarService {
                 continue;
             }
             if (lookup instanceof CalendarScheduleLookup.Unavailable) {
-                if (key.type() == ContentType.SERIES || snapshotsForKey.isEmpty()) {
+                boolean hasUsableSnapshot = snapshotsForKey.stream()
+                        .anyMatch(snapshot -> Boolean.TRUE.equals(snapshot.getPresentInLastTmdbSnapshot()));
+                if (key.type() == ContentType.SERIES || !hasUsableSnapshot) {
                     throw new TmdbUnavailableException("TMDB is currently unavailable");
                 }
                 continue;
@@ -226,8 +232,13 @@ public class CalendarServiceImpl implements CalendarService {
             List<CalendarScheduleSnapshot> snapshots,
             CalendarAssemblyInput.Completeness completeness,
             Set<CalendarScheduleKey> negativeSeriesKeys,
+            Map<CalendarScheduleKey, LocalDateTime> seriesDiscoveryCheckedAt,
             Instant now) {
         if (key.type() == ContentType.SERIES) {
+            if (seriesDiscoveryCheckedAt.containsKey(key)
+                    && CalendarScheduleCadence.isSeriesDiscoveryDue(seriesDiscoveryCheckedAt.get(key), now)) {
+                return true;
+            }
             if (negativeSeriesKeys.contains(key)) {
                 return false;
             }
