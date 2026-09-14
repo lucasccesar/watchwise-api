@@ -212,17 +212,34 @@ public class CalendarScheduleSnapshotStore {
     }
 
     private boolean reconcileSeriesInTransaction(CalendarSeriesSchedule schedule, Instant checkedAt) {
+        if (hasNewerSeriesData(schedule, checkedAt)) {
+            return false;
+        }
         Map<Integer, CalendarSeriesSchedule.Season> seasonsByNumber = new LinkedHashMap<>();
         schedule.seasons().forEach(season -> seasonsByNumber.putIfAbsent(season.schedule().seasonNumber(), season));
         boolean changed = false;
         boolean hasCachedSeason = schedule.seasons().stream()
                 .anyMatch(season -> season.origin() == com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin.CACHE);
+        if (schedule.completeSchedule()) {
+            Set<Integer> expectedSeasonNumbers = schedule.expectedEpisodeCountsBySeason().keySet();
+            List<CalendarScheduleSnapshot> removedSeasons = snapshotRepository
+                    .findByEventTypeAndSeriesTmdbIdAndRegionAndLanguage(
+                            CalendarScheduleSnapshot.EventType.EPISODE,
+                            schedule.key().tmdbId(),
+                            schedule.key().preferredRegion(),
+                            schedule.key().preferredLanguage())
+                    .stream()
+                    .filter(snapshot -> !expectedSeasonNumbers.contains(snapshot.getSeasonNumber()))
+                    .toList();
+            snapshotRepository.deleteAll(removedSeasons);
+            changed |= !removedSeasons.isEmpty();
+        }
         boolean hasNewerCompleteness = completenessRepository.findBySeriesTmdbIdAndRegionAndLanguage(
                         schedule.key().tmdbId(), schedule.key().preferredRegion(), schedule.key().preferredLanguage()).stream()
                 .map(CalendarScheduleCompleteness::getLastCheckedAt)
                 .filter(Objects::nonNull)
                 .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(toLocalDateTime(checkedAt)));
-        if (hasCachedSeason && !hasNewerCompleteness) {
+        if ((hasCachedSeason || schedule.completeSchedule()) && !hasNewerCompleteness) {
             changed |= completenessRepository.deleteBySeriesTmdbIdAndRegionAndLanguage(
                     schedule.key().tmdbId(), schedule.key().preferredRegion(), schedule.key().preferredLanguage()) > 0;
         }
@@ -250,6 +267,25 @@ public class CalendarScheduleSnapshotStore {
                     schedule.totalRegularEpisodeCount(), allSeasonsComplete, checkedAt);
         }
         return changed;
+    }
+
+    private boolean hasNewerSeriesData(CalendarSeriesSchedule schedule, Instant checkedAt) {
+        LocalDateTime incomingCheckedAt = toLocalDateTime(checkedAt);
+        boolean newerSnapshot = snapshotRepository.findByEventTypeAndSeriesTmdbIdAndRegionAndLanguage(
+                        CalendarScheduleSnapshot.EventType.EPISODE,
+                        schedule.key().tmdbId(),
+                        schedule.key().preferredRegion(),
+                        schedule.key().preferredLanguage()).stream()
+                .map(CalendarScheduleSnapshot::getLastCheckedAt)
+                .filter(Objects::nonNull)
+                .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(incomingCheckedAt));
+        return newerSnapshot || completenessRepository.findBySeriesTmdbIdAndRegionAndLanguage(
+                        schedule.key().tmdbId(),
+                        schedule.key().preferredRegion(),
+                        schedule.key().preferredLanguage()).stream()
+                .map(CalendarScheduleCompleteness::getLastCheckedAt)
+                .filter(Objects::nonNull)
+                .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(incomingCheckedAt));
     }
 
     private Collection<String> nonEmptyIds(Collection<String> ids) {

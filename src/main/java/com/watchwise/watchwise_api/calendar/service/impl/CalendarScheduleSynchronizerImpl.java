@@ -74,7 +74,8 @@ public class CalendarScheduleSynchronizerImpl implements CalendarScheduleSynchro
                                 season.origin()))
                         .toList(),
                 schedule.expectedEpisodeCountsBySeason(),
-                schedule.totalRegularEpisodeCount());
+                schedule.totalRegularEpisodeCount(),
+                schedule.completeSchedule());
         if (snapshotStore.reconcileSeries(checkedSchedule, checkedAt)) {
             checkedSchedule.seasons().stream()
                     .filter(season -> season.origin() == TmdbLookupOrigin.REMOTE)

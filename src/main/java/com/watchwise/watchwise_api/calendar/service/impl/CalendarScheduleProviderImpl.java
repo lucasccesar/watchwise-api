@@ -135,7 +135,8 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 seasons,
                 expectedCounts,
                 expectedCounts.values().stream().filter(Objects::nonNull).filter(count -> count >= 0)
-                        .mapToInt(Integer::intValue).sum()));
+                        .mapToInt(Integer::intValue).sum(),
+                true));
     }
 
     private TmdbLookupResult<CalendarSeriesSchedule.Season> loadSeriesSeason(

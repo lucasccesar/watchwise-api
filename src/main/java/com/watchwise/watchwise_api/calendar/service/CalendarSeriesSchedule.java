@@ -16,7 +16,16 @@ public record CalendarSeriesSchedule(
         CalendarScheduleKey key,
         List<Season> seasons,
         Map<Integer, Integer> expectedEpisodeCountsBySeason,
-        int totalRegularEpisodeCount) {
+        int totalRegularEpisodeCount,
+        boolean completeSchedule) {
+
+    public CalendarSeriesSchedule(
+            CalendarScheduleKey key,
+            List<Season> seasons,
+            Map<Integer, Integer> expectedEpisodeCountsBySeason,
+            int totalRegularEpisodeCount) {
+        this(key, seasons, expectedEpisodeCountsBySeason, totalRegularEpisodeCount, false);
+    }
 
     public CalendarSeriesSchedule {
         Objects.requireNonNull(key, "key is required");
@@ -49,6 +58,9 @@ public record CalendarSeriesSchedule(
                     || details.episodeCoordinates().stream().distinct().count() != details.episodes().size()) {
                 throw new IllegalArgumentException("Season schedules require unique positive episode numbers");
             }
+        }
+        if (completeSchedule && !seasonNumbers.equals(expectedEpisodeCountsBySeason.keySet())) {
+            throw new IllegalArgumentException("Complete series schedules must represent every regular season");
         }
     }
 

@@ -165,6 +165,36 @@ class CalendarScheduleCompletenessRepositoryTest {
         assertThat(repository.findSeriesIdentity("1396", "BR", "pt-BR")).isEmpty();
     }
 
+    @Test
+    @DisplayName("[reconcileSeries] Should Remove A Season Missing From A Complete Payload")
+    void shouldRemoveASeasonMissingFromACompletePayload() {
+        CalendarScheduleSnapshot currentSeason = snapshot(
+                CalendarScheduleSnapshot.EventType.EPISODE, null, "1396", "BR", "pt-BR");
+        CalendarScheduleSnapshot staleSeason = currentSeason.toBuilder()
+                .id(null)
+                .seasonNumber(2)
+                .build();
+        snapshotRepository.saveAndFlush(currentSeason);
+        snapshotRepository.saveAndFlush(staleSeason);
+
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarSeriesSchedule completeSchedule = new CalendarSeriesSchedule(
+                key,
+                List.of(new CalendarSeriesSchedule.Season(
+                        new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
+                                List.of(new CalendarEpisodeSchedule(1, "Current", LocalDate.of(2026, 9, 12), null,
+                                        Instant.parse("2026-09-12T10:00:00Z"), null))),
+                        1, TmdbLookupOrigin.REMOTE)),
+                Map.of(1, 1), 1, true);
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
+                snapshotRepository, repository, new NewTransactionExecutor());
+
+        store.reconcileSeries(completeSchedule, Instant.parse("2026-09-12T10:00:00Z"));
+
+        assertThat(snapshotRepository.findByEventTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR")).isEmpty();
+    }
+
     private CalendarSeriesSchedule.Season remoteSeason(int number, String title) {
         return new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", number, "BR", "pt-BR",
                 "Series", null, List.of(new CalendarEpisodeSchedule(1, title, LocalDate.of(2026, 9, number), null,
