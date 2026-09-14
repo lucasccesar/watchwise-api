@@ -51,6 +51,9 @@ public interface UserListItemService {
 
     List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);
 
+    UserListItemsWithState addItemsWithState(
+            UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);
+
     UserListItemResponseDTO updateItem(UUID userId, UUID listId, UUID itemId, UserListItemPatchDTO userListItemPatchDTO);
 
     void removeItem(UUID userId, UUID listId, UUID itemId);

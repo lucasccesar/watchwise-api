@@ -277,6 +277,13 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
+        return addItemsWithState(userId, listId, userListItemBulkCreationDTO).items();
+    }
+
+    @Override
+    @Transactional
+    public UserListItemsWithState addItemsWithState(
+            UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
         UserList userList = findOwnedListForUpdate(userId, listId);
         assertListIsNotLockedAsListOfLists(listId);
         UserListItemScope lockedScope = resolveExistingContentScope(listId);
@@ -304,9 +311,12 @@ public class UserListItemServiceImpl implements UserListItemService {
             List<UserListItem> saved = userListItemRepository.saveAll(newItems);
             userListItemRepository.flush();
             UserListContentStateResult stateResult = userListContentStateService.resolve(userId, saved);
-            return saved.stream()
+            List<UserListItemResponseDTO> items = saved.stream()
                     .map(item -> toVisibilityScopedResponseDto(userId, item, stateResult.stateByItemId()))
                     .toList();
+            return new UserListItemsWithState(
+                    items,
+                    stateResult.watchedPercentageByListId().getOrDefault(listId, 0.0));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }

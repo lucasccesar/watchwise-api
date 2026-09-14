@@ -1130,8 +1130,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO movieItem = buildItemResponseDto(movieRef);
         UserListItemResponseDTO seriesItem = buildItemResponseDto(seriesRef);
 
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
-                .thenReturn(List.of(movieItem, seriesItem));
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(new UserListItemsWithState(List.of(movieItem, seriesItem), 0.0));
         when(userListItemService.getTotalRuntimeMinutes(any(UUID.class))).thenReturn(270L);
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
@@ -1145,15 +1145,15 @@ class UserListServiceImplTest {
         verify(userListRepository).save(listCaptor.capture());
         assertThat(listCaptor.getValue().getVisibility()).isEqualTo(UserListVisibility.PRIVATE);
 
-        verify(userListItemService).addItems(eq(lucasId), any(UUID.class), itemsCaptor.capture());
+        verify(userListItemService).addItemsWithState(eq(lucasId), any(UUID.class), itemsCaptor.capture());
         assertThat(itemsCaptor.getValue().items()).containsExactly(movieRef, seriesRef);
         verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(),
                 eq(2L), eq(0L), eq(270L), any());
     }
 
     @Test
-    @DisplayName("[createUserListWithItems] Should Populate Watched Percentage - From The Owner's Watch History")
-    void shouldPopulateWatchedPercentageFromTheOwnersWatchHistoryOnBulkCreate() {
+    @DisplayName("[createUserListWithItems] Should Not Resolve State Again - When Batch Items Are Already Resolved")
+    void shouldNotResolveStateAgainWhenBatchItemsAreAlreadyResolved() {
         UUID savedListId = UUID.randomUUID();
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> {
@@ -1162,16 +1162,15 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
-                .thenReturn(List.of(buildItemResponseDto(movieRef)));
-        when(userListItemService.getWatchedPercentage(savedListId, lucasId)).thenReturn(100.0);
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(new UserListItemsWithState(List.of(buildItemResponseDto(movieRef)), 100.0));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
         userListService.createUserListWithItems(
                 lucasId, new UserListBulkCreationDTO("My list", null, null, List.of(movieRef)));
 
-        verify(userListItemService).getWatchedPercentage(savedListId, lucasId);
+        verify(userListItemService, never()).getWatchedPercentage(any(UUID.class), any(UUID.class));
         verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean(), anyLong(), anyLong(), anyLong(), any());
     }
 
@@ -1185,8 +1184,8 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
-                .thenReturn(List.of(buildItemResponseDto(movieRef)));
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(new UserListItemsWithState(List.of(buildItemResponseDto(movieRef)), 0.0));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
@@ -1207,7 +1206,7 @@ class UserListServiceImplTest {
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
         ContentRefCreationDTO duplicateRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
                 .thenThrow(new ConflictException("This content is already in the list"));
 
         assertThatThrownBy(() -> userListService.createUserListWithItems(

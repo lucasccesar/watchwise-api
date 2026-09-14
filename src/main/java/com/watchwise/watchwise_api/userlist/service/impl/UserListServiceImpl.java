@@ -386,9 +386,10 @@ public class UserListServiceImpl implements UserListService {
 
         UserList savedList = userListRepository.save(userList);
 
-        List<UserListItemResponseDTO> items = userListItemService.addItems(
+        UserListItemsWithState itemsWithState = userListItemService.addItemsWithState(
                 userId, savedList.getId(), new UserListItemBulkCreationDTO(userListBulkCreationDTO.items()));
-        double watchedPercentage = userListItemService.getWatchedPercentage(savedList.getId(), userId);
+        List<UserListItemResponseDTO> items = itemsWithState.items();
+        double watchedPercentage = itemsWithState.watchedPercentage();
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(savedList.getId());
         UserListItemScope itemScope = resolveItemScopeFromLoadedItems(items);
 
