@@ -23,6 +23,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -167,12 +169,19 @@ class CalendarScheduleCompletenessRepositoryTest {
 
     @Test
     @DisplayName("[reconcileSeries] Should Remove A Season Missing From A Complete Payload")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void shouldRemoveASeasonMissingFromACompletePayload() {
         CalendarScheduleSnapshot currentSeason = snapshot(
                 CalendarScheduleSnapshot.EventType.EPISODE, null, "1396", "BR", "pt-BR");
         CalendarScheduleSnapshot staleSeason = currentSeason.toBuilder()
                 .id(null)
                 .seasonNumber(2)
+                .lastCheckedAt(LocalDateTime.of(2026, 9, 12, 9, 0))
+                .nextCheckAt(LocalDateTime.of(2026, 9, 12, 10, 0))
+                .build();
+        currentSeason = currentSeason.toBuilder()
+                .lastCheckedAt(LocalDateTime.of(2026, 9, 12, 9, 0))
+                .nextCheckAt(LocalDateTime.of(2026, 9, 12, 10, 0))
                 .build();
         snapshotRepository.saveAndFlush(currentSeason);
         snapshotRepository.saveAndFlush(staleSeason);

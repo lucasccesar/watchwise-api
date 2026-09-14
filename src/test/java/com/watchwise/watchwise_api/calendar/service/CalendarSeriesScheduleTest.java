@@ -24,4 +24,17 @@ class CalendarSeriesScheduleTest {
                 Map.of(1, 2),
                 2)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void shouldRejectACompleteScheduleThatOmitsARegularSeason() {
+        CalendarSeasonSchedule season = new CalendarSeasonSchedule("1396", 1, "BR", "pt-BR", "Series", null,
+                List.of(new CalendarEpisodeSchedule(1, "One", null, null, null, null)));
+
+        assertThatThrownBy(() -> new CalendarSeriesSchedule(
+                new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR"),
+                List.of(new CalendarSeriesSchedule.Season(season, 1, TmdbLookupOrigin.REMOTE)),
+                Map.of(1, 1, 2, 1),
+                2,
+                true)).isInstanceOf(IllegalArgumentException.class);
+    }
 }
