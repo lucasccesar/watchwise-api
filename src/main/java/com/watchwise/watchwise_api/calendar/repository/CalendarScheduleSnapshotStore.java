@@ -98,6 +98,37 @@ public class CalendarScheduleSnapshotStore {
                 .toList();
     }
 
+    public Set<CalendarScheduleKey> findSeriesDueForDiscovery(
+            Collection<CalendarScheduleKey> activeKeys, Instant now) {
+        Map<LocaleKey, Set<CalendarScheduleKey>> seriesByLocale = new LinkedHashMap<>();
+        activeKeys.stream()
+                .filter(key -> key.type() == ContentType.SERIES)
+                .forEach(key -> seriesByLocale
+                        .computeIfAbsent(new LocaleKey(key.preferredRegion(), key.preferredLanguage()), ignored -> new LinkedHashSet<>())
+                        .add(key));
+        Set<CalendarScheduleKey> due = new LinkedHashSet<>();
+        seriesByLocale.forEach((locale, keys) -> {
+            Map<String, CalendarScheduleCompleteness> markersBySeries = completenessRepository
+                    .findByGroupTypeAndSeriesTmdbIdInAndRegionAndLanguage(
+                            CalendarScheduleCompleteness.GroupType.SERIES,
+                            keys.stream().map(CalendarScheduleKey::tmdbId).toList(),
+                            locale.region(),
+                            locale.language())
+                    .stream()
+                    .collect(java.util.stream.Collectors.toMap(
+                            CalendarScheduleCompleteness::getSeriesTmdbId,
+                            marker -> marker,
+                            (first, ignored) -> first));
+            keys.stream()
+                    .filter(key -> CalendarScheduleCadence.isSeriesDiscoveryDue(
+                            Optional.ofNullable(markersBySeries.get(key.tmdbId()))
+                                    .map(CalendarScheduleCompleteness::getLastCheckedAt)
+                                    .orElse(null), now))
+                    .forEach(due::add);
+        });
+        return Set.copyOf(due);
+    }
+
     public boolean upsertMovie(CalendarMovieSchedule schedule) {
         try {
             return newTransactionExecutor.runInNewTransaction(() -> {
@@ -208,8 +239,28 @@ public class CalendarScheduleSnapshotStore {
             changed = true;
         }
         if (changed && invalidateCompleteness) {
-            completenessRepository.deleteBySeriesTmdbIdAndRegionAndLanguage(
-                    schedule.seriesTmdbId(), schedule.region(), schedule.language());
+            completenessRepository.deleteByGroupTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                    CalendarScheduleCompleteness.GroupType.SEASON,
+                    schedule.seriesTmdbId(),
+                    schedule.seasonNumber(),
+                    schedule.region(),
+                    schedule.language());
+            CalendarScheduleCompleteness seriesMarker = completenessRepository.findSeriesIdentity(
+                            schedule.seriesTmdbId(), schedule.region(), schedule.language())
+                    .map(existing -> existing.toBuilder()
+                            .complete(false)
+                            .lastCheckedAt(incomingCheckedAt != null ? incomingCheckedAt : existing.getLastCheckedAt())
+                            .build())
+                    .orElseGet(() -> CalendarScheduleCompleteness.builder()
+                            .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                            .seriesTmdbId(schedule.seriesTmdbId())
+                            .region(schedule.region())
+                            .language(schedule.language())
+                            .expectedEpisodeCount(schedule.episodes().size())
+                            .complete(false)
+                            .lastCheckedAt(incomingCheckedAt != null ? incomingCheckedAt : LocalDateTime.now())
+                            .build());
+            completenessRepository.save(seriesMarker);
         }
         return changed;
     }
@@ -408,7 +459,7 @@ public class CalendarScheduleSnapshotStore {
                 .posterPath(season.posterPath())
                 .stillPath(episode.stillPath())
                 .lastCheckedAt(toLocalDateTime(episode.lastCheckedAt()))
-                .nextCheckAt(nextSeriesCheckAt(releaseDate, episode.lastCheckedAt()))
+                .nextCheckAt(nextCheckAt(releaseDate, episode.lastCheckedAt()))
                 .presentInLastTmdbSnapshot(true)
                 .build();
     }
@@ -427,7 +478,7 @@ public class CalendarScheduleSnapshotStore {
                 .posterPath(season.posterPath())
                 .stillPath(episode.stillPath())
                 .lastCheckedAt(toLocalDateTime(episode.lastCheckedAt()))
-                .nextCheckAt(nextSeriesCheckAt(episode.releaseDate(), episode.lastCheckedAt()))
+                .nextCheckAt(nextCheckAt(episode.releaseDate(), episode.lastCheckedAt()))
                 .presentInLastTmdbSnapshot(true)
                 .build();
     }
@@ -459,10 +510,6 @@ public class CalendarScheduleSnapshotStore {
 
     private void lockSeries(String tmdbId, String region, String language) {
         scheduleLock.lock("series|" + tmdbId + "|" + region + "|" + language);
-    }
-
-    private LocalDateTime nextSeriesCheckAt(LocalDate releaseDate, Instant checkedAt) {
-        return toLocalDateTime(CalendarScheduleCadence.nextSeriesCheckAt(releaseDate, checkedAt));
     }
 
     private LocalDateTime toLocalDateTime(Instant instant) {

@@ -2,7 +2,9 @@ package com.watchwise.watchwise_api.calendar.service;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 public final class CalendarScheduleCadence {
 
@@ -32,5 +34,11 @@ public final class CalendarScheduleCadence {
             return checkedAt.plusSeconds(SERIES_DISCOVERY_DAYS * DAY_SECONDS);
         }
         return nextCheckAt(releaseDate, checkedAt);
+    }
+
+    public static boolean isSeriesDiscoveryDue(LocalDateTime lastCheckedAt, Instant now) {
+        return lastCheckedAt == null
+                || !lastCheckedAt.plusDays(SERIES_DISCOVERY_DAYS).isAfter(
+                        LocalDateTime.ofInstant(now, ZoneOffset.UTC));
     }
 }

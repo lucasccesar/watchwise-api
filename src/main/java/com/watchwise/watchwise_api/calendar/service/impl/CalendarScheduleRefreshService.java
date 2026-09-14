@@ -63,9 +63,15 @@ public class CalendarScheduleRefreshService {
         }
 
         List<CalendarScheduleSnapshot> dueSnapshots = snapshotStore.findDue(activeKeys, dueAt);
-        Map<CalendarScheduleKey, CalendarScheduleKey> uniqueRefreshKeys = new LinkedHashMap<>();
+        Set<CalendarScheduleKey> discoveryKeys = snapshotStore.findSeriesDueForDiscovery(activeKeys, checkedAt);
+        Map<RefreshKey, RefreshKey> uniqueRefreshKeys = new LinkedHashMap<>();
+        discoveryKeys.forEach(key -> {
+            RefreshKey refreshKey = new RefreshKey(key, null, true);
+            uniqueRefreshKeys.putIfAbsent(refreshKey, refreshKey);
+        });
         for (CalendarScheduleSnapshot snapshot : dueSnapshots) {
-            toRefreshKey(snapshot, activeKeys).ifPresent(key -> uniqueRefreshKeys.putIfAbsent(key, key));
+            toRefreshKey(snapshot, activeKeys, discoveryKeys)
+                    .ifPresent(key -> uniqueRefreshKeys.putIfAbsent(key, key));
         }
         if (uniqueRefreshKeys.isEmpty()) {
             return;
@@ -83,11 +89,18 @@ public class CalendarScheduleRefreshService {
         }
     }
 
-    private void refreshOne(CalendarScheduleKey key, Instant checkedAt) {
+    private void refreshOne(RefreshKey refreshKey, Instant checkedAt) {
         try {
-            CalendarScheduleLookup lookup = key.type() == ContentType.MOVIE
-                    ? scheduleProvider.loadMovie(key.tmdbId(), key.preferredRegion(), key.preferredLanguage())
-                    : scheduleProvider.loadSeries(key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
+            CalendarScheduleKey key = refreshKey.scheduleKey();
+            CalendarScheduleLookup lookup;
+            if (key.type() == ContentType.MOVIE) {
+                lookup = scheduleProvider.loadMovie(key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
+            } else if (refreshKey.discovery()) {
+                lookup = scheduleProvider.loadSeries(key.tmdbId(), key.preferredRegion(), key.preferredLanguage());
+            } else {
+                lookup = scheduleProvider.loadSeason(
+                        key.tmdbId(), refreshKey.seasonNumber(), key.preferredRegion(), key.preferredLanguage());
+            }
             if (lookup instanceof CalendarScheduleLookup.Found found
                     && found.batch().origin() == TmdbLookupOrigin.REMOTE) {
                 scheduleSynchronizer.synchronize(found.batch(), checkedAt);
@@ -97,12 +110,14 @@ public class CalendarScheduleRefreshService {
                 scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), checkedAt);
             }
         } catch (RuntimeException exception) {
-            log.warn("Calendar schedule refresh failed for {}", key, exception);
+            log.warn("Calendar schedule refresh failed for {}", refreshKey, exception);
         }
     }
 
-    private Optional<CalendarScheduleKey> toRefreshKey(
-            CalendarScheduleSnapshot snapshot, Set<CalendarScheduleKey> activeKeys) {
+    private Optional<RefreshKey> toRefreshKey(
+            CalendarScheduleSnapshot snapshot,
+            Set<CalendarScheduleKey> activeKeys,
+            Set<CalendarScheduleKey> discoveryKeys) {
         try {
             if (snapshot.getEventType() == CalendarScheduleSnapshot.EventType.MOVIE) {
                 CalendarScheduleKey key = new CalendarScheduleKey(
@@ -110,7 +125,7 @@ public class CalendarScheduleRefreshService {
                         snapshot.getTmdbId(),
                         snapshot.getLanguage(),
                         snapshot.getRegion());
-                return activeKeys.contains(key) ? Optional.of(key) : Optional.empty();
+                return activeKeys.contains(key) ? Optional.of(new RefreshKey(key, null, false)) : Optional.empty();
             }
             if (snapshot.getEventType() == CalendarScheduleSnapshot.EventType.EPISODE) {
                 CalendarScheduleKey key = new CalendarScheduleKey(
@@ -118,12 +133,32 @@ public class CalendarScheduleRefreshService {
                         snapshot.getSeriesTmdbId(),
                         snapshot.getLanguage(),
                         snapshot.getRegion());
-                return activeKeys.contains(key) ? Optional.of(key) : Optional.empty();
+                if (!activeKeys.contains(key) || discoveryKeys.contains(key)) {
+                    return Optional.empty();
+                }
+                return Optional.of(new RefreshKey(key, snapshot.getSeasonNumber(), false));
             }
         } catch (IllegalArgumentException exception) {
             log.warn("Ignoring malformed calendar schedule snapshot {}", snapshot.getId(), exception);
         }
         return Optional.empty();
+    }
+
+    private record RefreshKey(CalendarScheduleKey scheduleKey, Integer seasonNumber, boolean discovery) {
+
+        private RefreshKey {
+            if (scheduleKey.type() == ContentType.MOVIE && (seasonNumber != null || discovery)) {
+                throw new IllegalArgumentException("Movie refresh keys cannot represent discovery or a season");
+            }
+            if (scheduleKey.type() == ContentType.SERIES
+                    && !discovery
+                    && (seasonNumber == null || seasonNumber <= 0)) {
+                throw new IllegalArgumentException("Series refresh keys require a positive season");
+            }
+            if (scheduleKey.type() == ContentType.SERIES && discovery && seasonNumber != null) {
+                throw new IllegalArgumentException("Series discovery keys cannot represent a season");
+            }
+        }
     }
 
 }
