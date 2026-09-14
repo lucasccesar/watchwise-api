@@ -644,7 +644,7 @@ public class CalendarScheduleSnapshotStore {
 
     private LocalDateTime toLocalDateTime(Instant instant) {
         if (Instant.MAX.equals(instant)) {
-            return LocalDateTime.MAX;
+            return CalendarScheduleCadence.PERSISTED_NO_RECHECK_AT;
         }
         return instant.atOffset(ZoneOffset.UTC).toLocalDateTime();
     }

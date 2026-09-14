@@ -8,6 +8,9 @@ import java.time.ZoneOffset;
 
 public final class CalendarScheduleCadence {
 
+    public static final LocalDateTime PERSISTED_NO_RECHECK_AT =
+            LocalDateTime.of(294276, 12, 31, 23, 59, 59, 999_999_000);
+
     private static final int NEAR_FUTURE_DAYS = 7;
     private static final int SERIES_DISCOVERY_DAYS = 30;
     private static final long DAY_SECONDS = 24 * 60 * 60;

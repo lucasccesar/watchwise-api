@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -44,7 +45,8 @@ import static org.mockito.Mockito.mock;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
-@Import(NewTransactionExecutor.class)
+@Import({NewTransactionExecutor.class, PostgresCalendarScheduleIdentityLock.class})
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class CalendarScheduleCompletenessRepositoryTest {
 
     @Container
@@ -219,7 +221,8 @@ class CalendarScheduleCompletenessRepositoryTest {
                 .seasonNumber(eventType == CalendarScheduleSnapshot.EventType.EPISODE ? 1 : null)
                 .episodeNumber(eventType == CalendarScheduleSnapshot.EventType.EPISODE ? 1 : null)
                 .region(region).language(language).releaseDate(LocalDate.of(2026, 9, 12)).title("Title")
-                .lastCheckedAt(LocalDateTime.now()).nextCheckAt(LocalDateTime.MAX).presentInLastTmdbSnapshot(true).build();
+                .lastCheckedAt(LocalDateTime.now()).nextCheckAt(CalendarScheduleCadence.PERSISTED_NO_RECHECK_AT)
+                .presentInLastTmdbSnapshot(true).build();
     }
 
     private CalendarScheduleCompleteness markerFor(String seriesId, CalendarScheduleCompleteness.GroupType type,
