@@ -5,6 +5,7 @@ target/
 /.claude/
 /.codex/
 /.superpowers/
+/.worktrees/
 /docs/
 /CLAUDE.md
 /AGENTS.md
