@@ -23,5 +23,29 @@ public record TmdbMovieFullDetails(
         Long budget,
         Long revenue,
         @JsonProperty("production_companies") List<TmdbProductionCompany> productionCompanies,
-        TmdbVideos videos) {
+        TmdbVideos videos,
+        String status) {
+
+    public TmdbMovieFullDetails(
+            String id,
+            String title,
+            String originalTitle,
+            String overview,
+            String posterPath,
+            String backdropPath,
+            String releaseDate,
+            Integer runtime,
+            List<TmdbGenre> genres,
+            List<TmdbProductionCountry> productionCountries,
+            TmdbCredits credits,
+            TmdbWatchProviders watchProviders,
+            TmdbMovieAlternativeTitles alternativeTitles,
+            Long budget,
+            Long revenue,
+            List<TmdbProductionCompany> productionCompanies,
+            TmdbVideos videos) {
+        this(id, title, originalTitle, overview, posterPath, backdropPath, releaseDate, runtime, genres,
+                productionCountries, credits, watchProviders, alternativeTitles, budget, revenue,
+                productionCompanies, videos, null);
+    }
 }

@@ -1,17 +1,15 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
-import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
-import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDate;
-import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
-import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
-import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.service.ContentSchedule;
+import com.watchwise.watchwise_api.content.service.ContentScheduleEpisode;
+import com.watchwise.watchwise_api.content.service.ContentScheduleKey;
+import com.watchwise.watchwise_api.content.service.ContentScheduleLookup;
+import com.watchwise.watchwise_api.content.service.ContentScheduleReader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,15 +18,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -37,40 +30,41 @@ import static org.mockito.Mockito.when;
 class CalendarScheduleProviderTest {
 
     @Mock
-    private TmdbClient tmdbClient;
+    private ContentScheduleReader scheduleReader;
 
     private CalendarScheduleProviderImpl provider;
 
     @BeforeEach
     void setUp() {
-        provider = new CalendarScheduleProviderImpl(tmdbClient, Runnable::run);
+        provider = new CalendarScheduleProviderImpl(scheduleReader);
     }
 
     @Test
-    @DisplayName("[loadMovie] Should Prefer Regional Theatrical Date - When Multiple Release Types Exist")
-    void shouldPreferRegionalTheatricalDateWhenMultipleReleaseTypesExist() {
-        when(tmdbClient.getMovieReleaseDates("550", "pt-BR")).thenReturn(found(new TmdbMovieReleaseDates(
-                "550", List.of(new TmdbRegionReleaseDates("BR", List.of(
-                release("2026-10-03T00:00:00.000Z", 1),
-                release("2026-10-08T00:00:00.000Z", 3),
-                release("2026-10-02T00:00:00.000Z", 4)))))));
-        when(tmdbClient.getMovieFullDetails("550", "pt-BR")).thenReturn(found(movie("550", "Fight Club")));
+    @DisplayName("[loadMovie] Should Map The Shared Schedule - When The Movie Is Found")
+    void shouldMapTheSharedScheduleWhenTheMovieIsFound() {
+        when(scheduleReader.readMovie("550", "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Found(movieSchedule(
+                        LocalDate.of(2026, 10, 8), false), TmdbLookupOrigin.REMOTE));
 
         CalendarScheduleLookup result = provider.loadMovie("550", "BR", "pt-BR");
 
         assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.Found.class, found -> {
-            assertThat(found.batch().movie().releaseDate()).isEqualTo(LocalDate.of(2026, 10, 8));
-            assertThat(found.batch().movie().title()).isEqualTo("Fight Club");
+            assertThat(found.batch().key()).isEqualTo(new CalendarScheduleKey(ContentType.MOVIE, "550", "pt-BR", "BR"));
+            assertThat(found.batch().movie()).satisfies(movie -> {
+                assertThat(movie.releaseDate()).isEqualTo(LocalDate.of(2026, 10, 8));
+                assertThat(movie.title()).isEqualTo("Fight Club");
+                assertThat(movie.posterPath()).isEqualTo("/fight-club.jpg");
+            });
             assertThat(found.batch().origin()).isEqualTo(TmdbLookupOrigin.REMOTE);
         });
+        verify(scheduleReader).readMovie("550", "BR", "pt-BR");
     }
 
     @Test
-    @DisplayName("[loadMovie] Should Keep A Checked Movie Without Event Date - When The Region Is Absent")
-    void shouldKeepACheckedMovieWithoutEventDateWhenTheRegionIsAbsent() {
-        when(tmdbClient.getMovieReleaseDates("550", "pt-BR")).thenReturn(found(new TmdbMovieReleaseDates(
-                "550", List.of(new TmdbRegionReleaseDates("US", List.of(release("2026-10-08", 3)))))));
-        when(tmdbClient.getMovieFullDetails("550", "pt-BR")).thenReturn(found(movie("550", "Fight Club")));
+    @DisplayName("[loadMovie] Should Keep A Found Movie Without Event Date - When The Region Has No Date")
+    void shouldKeepAFoundMovieWithoutEventDateWhenTheRegionHasNoDate() {
+        when(scheduleReader.readMovie("550", "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Found(movieSchedule(null, false), TmdbLookupOrigin.REMOTE));
 
         CalendarScheduleLookup result = provider.loadMovie("550", "BR", "pt-BR");
 
@@ -79,222 +73,153 @@ class CalendarScheduleProviderTest {
     }
 
     @Test
-    @DisplayName("[loadMovie] Should Keep A Checked Movie Without Event Date - When The Preferred Region Has No Date")
-    void shouldKeepACheckedMovieWithoutEventDateWhenThePreferredRegionHasNoDate() {
-        when(tmdbClient.getMovieReleaseDates("550", "pt-BR")).thenReturn(found(new TmdbMovieReleaseDates(
-                "550", List.of(new TmdbRegionReleaseDates("BR", List.of(release(null, 3)))))));
-        when(tmdbClient.getMovieFullDetails("550", "pt-BR")).thenReturn(found(movie("550", "Fight Club")));
+    @DisplayName("[loadMovie] Should Return Unavailable - When Release Dates Cannot Be Loaded")
+    void shouldReturnUnavailableWhenReleaseDatesCannotBeLoaded() {
+        when(scheduleReader.readMovie("550", "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Found(movieSchedule(null, true), TmdbLookupOrigin.REMOTE));
 
         CalendarScheduleLookup result = provider.loadMovie("550", "BR", "pt-BR");
 
-        assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.Found.class,
-                found -> assertThat(found.batch().movie().releaseDate()).isNull());
+        assertThat(result).isInstanceOf(CalendarScheduleLookup.Unavailable.class);
     }
 
     @Test
-    @DisplayName("[loadSeason] Should Not Call TMDB - When The Season Is Zero")
-    void shouldNotCallTmdbWhenTheSeasonIsZero() {
-        CalendarScheduleLookup result = provider.loadSeason("1396", 0, "BR", "pt-BR");
+    @DisplayName("[loadMovie] Should Propagate Not Found - When The Shared Reader Does Not Find The Movie")
+    void shouldPropagateNotFoundWhenTheSharedReaderDoesNotFindTheMovie() {
+        when(scheduleReader.readMovie("550", "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.NotFound());
+
+        CalendarScheduleLookup result = provider.loadMovie("550", "BR", "pt-BR");
 
         assertThat(result).isInstanceOf(CalendarScheduleLookup.NotFound.class);
-        verifyNoInteractions(tmdbClient);
     }
 
     @Test
-    @DisplayName("[loadSeason] Should Map Every Episode Including Missing Air Dates - When A Season Is Found")
-    void shouldMapEveryEpisodeIncludingMissingAirDatesWhenASeasonIsFound() {
-        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                3572, "Season 2", null, "/season.jpg", null, 2, List.of(
-                episode(1, "Seven Thirty-Seven", "2026-10-01", "/one.jpg"),
-                episode(2, "Grilled", null, "/two.jpg")), null, null)));
-        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(series("1396", "Breaking Bad")));
+    @DisplayName("[loadSeason] Should Map Every Shared Episode - When The Season Is Found")
+    void shouldMapEverySharedEpisodeWhenTheSeasonIsFound() {
+        ContentSchedule schedule = new ContentSchedule(
+                ContentScheduleKey.season("1396", 2),
+                LocalDate.of(2026, 9, 1),
+                "Returning Series",
+                List.of(
+                        new ContentScheduleEpisode("1396", 2, 1, LocalDate.of(2026, 10, 1), "Seven Thirty-Seven", "/one.jpg"),
+                        new ContentScheduleEpisode("1396", 2, 2, null, "Grilled", "/two.jpg")),
+                true,
+                false,
+                "Breaking Bad",
+                "/breaking-bad.jpg",
+                Map.of());
+        when(scheduleReader.readSeason("1396", 2, "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.CACHE));
 
         CalendarScheduleLookup result = provider.loadSeason("1396", 2, "BR", "pt-BR");
 
         assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.Found.class, found -> {
+            assertThat(found.batch().origin()).isEqualTo(TmdbLookupOrigin.CACHE);
             assertThat(found.batch().season().seriesTitle()).isEqualTo("Breaking Bad");
             assertThat(found.batch().season().episodes()).extracting("episodeNumber", "title", "releaseDate", "stillPath")
                     .containsExactly(
                             org.assertj.core.groups.Tuple.tuple(1, "Seven Thirty-Seven", LocalDate.of(2026, 10, 1), "/one.jpg"),
                             org.assertj.core.groups.Tuple.tuple(2, "Grilled", null, "/two.jpg"));
-            assertThat(found.batch().season().episodeCoordinates()).containsExactly(1, 2);
         });
-        verify(tmdbClient).getCalendarSeasonDetails("1396", 2, "pt-BR");
+        verify(scheduleReader).readSeason("1396", 2, "BR", "pt-BR");
     }
 
     @Test
-    @DisplayName("[loadMovie] Should Propagate Not Found - When TMDB Does Not Find The Release Data")
-    void shouldPropagateNotFoundWhenTmdbDoesNotFindTheReleaseData() {
-        when(tmdbClient.getMovieReleaseDates("550", "pt-BR")).thenReturn(new TmdbLookupResult.NotFound<>());
-
-        CalendarScheduleLookup result = provider.loadMovie("550", "BR", "pt-BR");
+    @DisplayName("[loadSeason] Should Return Not Found Without Calling The Reader - When The Season Is Invalid")
+    void shouldReturnNotFoundWithoutCallingTheReaderWhenTheSeasonIsInvalid() {
+        CalendarScheduleLookup result = provider.loadSeason("1396", 0, "BR", "pt-BR");
 
         assertThat(result).isInstanceOf(CalendarScheduleLookup.NotFound.class);
-        verify(tmdbClient, never()).getMovieFullDetails("550", "pt-BR");
+        verifyNoInteractions(scheduleReader);
     }
 
     @Test
-    @DisplayName("[loadSeason] Should Propagate Unavailable - When TMDB Cannot Load The Season")
-    void shouldPropagateUnavailableWhenTmdbCannotLoadTheSeason() {
-        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(new TmdbLookupResult.Unavailable<>());
+    @DisplayName("[loadSeason] Should Propagate Unavailable - When The Shared Reader Cannot Load The Season")
+    void shouldPropagateUnavailableWhenTheSharedReaderCannotLoadTheSeason() {
+        when(scheduleReader.readSeason("1396", 2, "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Unavailable());
 
         CalendarScheduleLookup result = provider.loadSeason("1396", 2, "BR", "pt-BR");
 
         assertThat(result).isInstanceOf(CalendarScheduleLookup.Unavailable.class);
-        verify(tmdbClient, never()).getTvFullDetails("1396", "pt-BR");
     }
 
     @Test
-    @DisplayName("[loadSeries] Should Load Every Regular Season And Exclude Specials")
-    void shouldLoadEveryRegularSeasonAndExcludeSpecials() {
-        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
-                new TmdbSeasonSummary(0, "Specials", null, null, 2, null),
-                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null),
-                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null)))));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                2, "Season 2", null, null, null, 2, List.of(episode(1, "Return", "2026-09-08", null)), null, null)));
+    @DisplayName("[loadSeries] Should Map The Shared Episodes Into Regular Seasons")
+    void shouldMapTheSharedEpisodesIntoRegularSeasons() {
+        ContentSchedule schedule = new ContentSchedule(
+                ContentScheduleKey.series("1396"),
+                LocalDate.of(2008, 1, 20),
+                "Ended",
+                List.of(
+                        new ContentScheduleEpisode("1396", 1, 1, LocalDate.of(2026, 9, 1), "Pilot", null),
+                        new ContentScheduleEpisode("1396", 2, 1, LocalDate.of(2026, 9, 8), "Return", null)),
+                true,
+                false,
+                "Breaking Bad",
+                "/breaking-bad.jpg",
+                Map.of(1, 1, 2, 1));
+        when(scheduleReader.readSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.REMOTE,
+                        Map.of(1, TmdbLookupOrigin.REMOTE, 2, TmdbLookupOrigin.CACHE)));
 
         CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
 
         assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.FoundSeries.class, found -> {
             assertThat(found.schedule().seasons()).extracting(season -> season.schedule().seasonNumber())
                     .containsExactly(1, 2);
+            assertThat(found.schedule().seasons()).extracting(CalendarSeriesSchedule.Season::origin)
+                    .containsExactly(TmdbLookupOrigin.REMOTE, TmdbLookupOrigin.CACHE);
             assertThat(found.schedule().totalRegularEpisodeCount()).isEqualTo(2);
+            assertThat(found.schedule().completeSchedule()).isTrue();
         });
-        verify(tmdbClient, never()).getCalendarSeasonDetails("1396", 0, "pt-BR");
     }
 
     @Test
-    @DisplayName("[loadSeries] Should Return Unavailable - When A Required Season Is Unavailable")
-    void shouldReturnUnavailableWhenARequiredSeasonIsUnavailable() {
-        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
-                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null),
-                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null)))));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(new TmdbLookupResult.Unavailable<>());
+    @DisplayName("[loadSeries] Should Return Not Found With The Missing Season - When The Shared Reader Reports It")
+    void shouldReturnNotFoundWithTheMissingSeasonWhenTheSharedReaderReportsIt() {
+        when(scheduleReader.readSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.NotFound(2));
+
+        CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.NotFound.class,
+                notFound -> assertThat(notFound.seasonNumber()).isEqualTo(2));
+    }
+
+    @Test
+    @DisplayName("[loadSeries] Should Return Unavailable - When The Shared Schedule Is Incomplete")
+    void shouldReturnUnavailableWhenTheSharedScheduleIsIncomplete() {
+        ContentSchedule schedule = new ContentSchedule(
+                ContentScheduleKey.series("1396"),
+                null,
+                "Ended",
+                List.of(new ContentScheduleEpisode("1396", 1, 1, LocalDate.of(2026, 9, 1), "Pilot", null)),
+                false,
+                false,
+                "Breaking Bad",
+                "/breaking-bad.jpg",
+                Map.of(1, 2));
+        when(scheduleReader.readSeries("1396", "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.REMOTE,
+                        Map.of(1, TmdbLookupOrigin.REMOTE)));
 
         CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
 
         assertThat(result).isInstanceOf(CalendarScheduleLookup.Unavailable.class);
     }
 
-    @Test
-    @DisplayName("[loadSeries] Should Return Unavailable - When A Found Season Has Fewer Episodes Than Expected")
-    void shouldReturnUnavailableWhenAFoundSeasonHasFewerEpisodesThanExpected() {
-        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
-                new TmdbSeasonSummary(1, "Season 1", null, null, 2, null)))));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                1, "Season 1", null, null, null, 2,
-                List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
-
-        CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
-
-        assertThat(result).isInstanceOf(CalendarScheduleLookup.Unavailable.class);
-    }
-
-    @Test
-    @DisplayName("[loadSeries] Should Return Not Found - When A Required Season Is Not Found")
-    void shouldReturnNotFoundWhenARequiredSeasonIsNotFound() {
-        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
-                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null),
-                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null)))));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(new TmdbLookupResult.NotFound<>());
-
-        CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
-
-        assertThat(result).isInstanceOf(CalendarScheduleLookup.NotFound.class);
-        assertThat(((CalendarScheduleLookup.NotFound) result).seasonNumber()).isEqualTo(2);
-    }
-
-    @Test
-    @DisplayName("[loadSeries] Should Submit Every Regular Season - Before Waiting For A Season Result")
-    void shouldSubmitEveryRegularSeasonBeforeWaitingForASeasonResult() throws Exception {
-        BlockingExecutor executor = new BlockingExecutor(2);
-        provider = new CalendarScheduleProviderImpl(tmdbClient, executor);
-        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(seriesWithSeasons("1396", List.of(
-                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null),
-                new TmdbSeasonSummary(2, "Season 2", null, null, 1, null)))));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                1, "Season 1", null, null, null, 1, List.of(episode(1, "Pilot", "2026-09-01", null)), null, null)));
-        when(tmdbClient.getCalendarSeasonDetails("1396", 2, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
-                2, "Season 2", null, null, null, 2, List.of(episode(1, "Return", "2026-09-08", null)), null, null)));
-        ExecutorService caller = Executors.newSingleThreadExecutor();
-        try {
-            var result = caller.submit(() -> provider.loadSeries("1396", "BR", "pt-BR"));
-
-            assertThat(executor.awaitAllSubmissions()).isTrue();
-
-            executor.releaseTasks();
-            assertThat(result.get(1, TimeUnit.SECONDS)).isInstanceOf(CalendarScheduleLookup.FoundSeries.class);
-        } finally {
-            executor.releaseTasks();
-            caller.shutdownNow();
-            caller.awaitTermination(1, TimeUnit.SECONDS);
-        }
-    }
-
-    private static final class BlockingExecutor implements Executor {
-
-        private final CountDownLatch submissions;
-        private final CountDownLatch release = new CountDownLatch(1);
-
-        private BlockingExecutor(int expectedSubmissions) {
-            this.submissions = new CountDownLatch(expectedSubmissions);
-        }
-
-        @Override
-        public void execute(Runnable task) {
-            submissions.countDown();
-            Thread worker = new Thread(() -> {
-                try {
-                    release.await();
-                    task.run();
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                }
-            });
-            worker.setDaemon(true);
-            worker.start();
-        }
-
-        private boolean awaitAllSubmissions() throws InterruptedException {
-            return submissions.await(250, TimeUnit.MILLISECONDS);
-        }
-
-        private void releaseTasks() {
-            release.countDown();
-        }
-    }
-
-    private static <T> TmdbLookupResult.Found<T> found(T value) {
-        return new TmdbLookupResult.Found<>(value, TmdbLookupOrigin.REMOTE);
-    }
-
-    private static TmdbMovieReleaseDate release(String releaseDate, int type) {
-        return new TmdbMovieReleaseDate(null, null, releaseDate, null, type);
-    }
-
-    private static TmdbMovieFullDetails movie(String id, String title) {
-        return new TmdbMovieFullDetails(id, title, null, null, "/fight-club.jpg", null, null,
-                null, null, null, null, null, null, null, null, null, null);
-    }
-
-    private static TmdbTvFullDetails series(String id, String name) {
-        return new TmdbTvFullDetails(id, name, null, null, "/breaking-bad.jpg", null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
-    }
-
-    private static TmdbTvFullDetails seriesWithSeasons(String id, List<TmdbSeasonSummary> seasons) {
-        return new TmdbTvFullDetails(id, "Breaking Bad", null, null, "/breaking-bad.jpg", null, null,
-                null, null, null, null, seasons, null, null, null, null, null, null, null, null, null);
-    }
-
-    private static TmdbEpisodeSummary episode(Integer number, String name, String airDate, String stillPath) {
-        return new TmdbEpisodeSummary(number, name, null, airDate, null, stillPath, null);
+    private static ContentSchedule movieSchedule(LocalDate releaseDate, boolean releaseDateLookupUnavailable) {
+        return new ContentSchedule(
+                ContentScheduleKey.movie("550"),
+                releaseDate,
+                "Released",
+                List.of(),
+                true,
+                releaseDateLookupUnavailable,
+                "Fight Club",
+                "/fight-club.jpg",
+                Map.of());
     }
 }
