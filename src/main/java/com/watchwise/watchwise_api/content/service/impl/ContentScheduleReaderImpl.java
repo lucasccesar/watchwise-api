@@ -66,10 +66,6 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
                             Map.of()),
                     found.origin());
         }
-        if (releaseLookup instanceof TmdbLookupResult.NotFound<?>) {
-            return new ContentScheduleLookup.NotFound();
-        }
-
         return new ContentScheduleLookup.Found(
                 new ContentSchedule(
                         ContentScheduleKey.movie(tmdbId),
@@ -193,10 +189,13 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
     }
 
     private boolean regularSeasonSummariesAreTrustworthy(TmdbTvFullDetails series) {
-        return Optional.ofNullable(series.seasons()).orElseGet(List::of).stream()
+        List<TmdbSeasonSummary> regularSeasons = Optional.ofNullable(series.seasons()).orElseGet(List::of).stream()
                 .filter(Objects::nonNull)
                 .filter(summary -> summary.seasonNumber() != null && summary.seasonNumber() > 0)
-                .allMatch(summary -> summary.episodeCount() != null && summary.episodeCount() >= 0);
+                .toList();
+        return regularSeasons.stream()
+                .allMatch(summary -> summary.episodeCount() != null && summary.episodeCount() >= 0)
+                && regularSeasons.stream().map(TmdbSeasonSummary::seasonNumber).distinct().count() == regularSeasons.size();
     }
 
     private List<ContentScheduleEpisode> toEpisodes(

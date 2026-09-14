@@ -100,6 +100,21 @@ class ContentScheduleReaderImplTest {
     }
 
     @Test
+    @DisplayName("[readMovie] Should Keep The Known Movie - When Release-Date Lookup Returns Not Found")
+    void shouldKeepTheKnownMovieWhenReleaseDateLookupReturnsNotFound() {
+        when(tmdbClient.getMovieFullDetails("550", "pt-BR")).thenReturn(found(movie("550", "Fight Club", "Released")));
+        when(tmdbClient.getMovieReleaseDates("550", "pt-BR")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        ContentScheduleLookup result = reader.readMovie("550", "BR", "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(ContentScheduleLookup.Found.class, found -> {
+            assertThat(found.schedule().externalStatus()).isEqualTo("Released");
+            assertThat(found.schedule().releaseDate()).isNull();
+            assertThat(found.schedule().releaseDateLookupUnavailable()).isTrue();
+        });
+    }
+
+    @Test
     @DisplayName("[readMovie] Should Return Unavailable - When Movie Details Cannot Be Loaded")
     void shouldReturnUnavailableWhenMovieDetailsCannotBeLoaded() {
         when(tmdbClient.getMovieFullDetails("550", "pt-BR")).thenReturn(new TmdbLookupResult.Unavailable<>());
@@ -213,6 +228,22 @@ class ContentScheduleReaderImplTest {
         when(tmdbClient.getSeasonFullDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
                 1, "Season 1", null, null, "2026-09-01", 1,
                 List.of(episode(1, "Pilot", "2026-09-01"), episode(1, "Pilot Again", "2026-09-08")), null, null)));
+
+        ContentScheduleLookup result = reader.readSeries("1396", "BR", "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(ContentScheduleLookup.Found.class,
+                found -> assertThat(found.schedule().complete()).isFalse());
+    }
+
+    @Test
+    @DisplayName("[readSeries] Should Mark The Schedule Incomplete - When Regular Season Summaries Repeat A Season Number")
+    void shouldMarkTheScheduleIncompleteWhenRegularSeasonSummariesRepeatASeasonNumber() {
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(series("1396", "Breaking Bad", "Ended", List.of(
+                new TmdbSeasonSummary(1, "Season 1", null, null, 1, null),
+                new TmdbSeasonSummary(1, "Season 1 (duplicate)", null, null, 2, null)))));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                1, "Season 1", null, null, "2026-09-01", 1,
+                List.of(episode(1, "Pilot", "2026-09-01")), null, null)));
 
         ContentScheduleLookup result = reader.readSeries("1396", "BR", "pt-BR");
 
