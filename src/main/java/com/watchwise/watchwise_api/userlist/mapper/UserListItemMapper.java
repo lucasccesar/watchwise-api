@@ -7,11 +7,13 @@ import com.watchwise.watchwise_api.userlist.dto.UserListPreviewDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 import org.mapstruct.ReportingPolicy;
 
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.ERROR, uses = {ContentMapper.class, UserMapper.class})
 public interface UserListItemMapper {
 
+    @Mapping(target = "contentState", ignore = true)
     UserListItemResponseDTO userListItemToResponseDto(UserListItem userListItem);
 
     UserListPreviewDTO userListToPreviewDto(UserList userList);

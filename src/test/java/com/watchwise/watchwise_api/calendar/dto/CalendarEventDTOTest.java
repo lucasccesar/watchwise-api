@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.calendar.dto;
 
+import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
