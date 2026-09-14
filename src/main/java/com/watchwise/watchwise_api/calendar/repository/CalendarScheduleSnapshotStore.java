@@ -257,6 +257,14 @@ public class CalendarScheduleSnapshotStore {
                     .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(toLocalDateTime(checkedAt)))) {
                 return null;
             }
+            if (completenessRepository.findBySeriesTmdbIdAndRegionAndLanguage(
+                            key.tmdbId(), key.preferredRegion(), key.preferredLanguage()).stream()
+                    .filter(marker -> marker.getGroupType() == CalendarScheduleCompleteness.GroupType.SEASON)
+                    .map(CalendarScheduleCompleteness::getLastCheckedAt)
+                    .filter(Objects::nonNull)
+                    .anyMatch(lastCheckedAt -> lastCheckedAt.isAfter(toLocalDateTime(checkedAt)))) {
+                return null;
+            }
             CalendarScheduleCompleteness existingSeriesMarker = completenessRepository.findSeriesIdentity(
                     key.tmdbId(), key.preferredRegion(), key.preferredLanguage()).orElse(null);
             if (existingSeriesMarker != null
@@ -344,7 +352,8 @@ public class CalendarScheduleSnapshotStore {
                     schedule.seriesTmdbId(), schedule.seasonNumber(), schedule.region(), schedule.language(),
                     schedule.episodes().size(), true, checkedAt);
             changed |= markSeriesIncomplete(
-                    schedule.seriesTmdbId(), schedule.region(), schedule.language(), checkedAt);
+                    schedule.seriesTmdbId(), schedule.region(), schedule.language(), checkedAt,
+                    schedule.episodes().size());
         }
         return changed;
     }

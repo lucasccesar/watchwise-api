@@ -69,6 +69,9 @@ class CalendarScheduleCompletenessRepositoryTest {
     @Autowired
     private NewTransactionExecutor newTransactionExecutor;
 
+    @Autowired
+    private CalendarScheduleIdentityLock scheduleLock;
+
     @BeforeEach
     void setUp() {
         repository.deleteAll();
@@ -196,7 +199,7 @@ class CalendarScheduleCompletenessRepositoryTest {
                         1, TmdbLookupOrigin.REMOTE)),
                 Map.of(1, 1), 1, true);
         CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
-                snapshotRepository, repository, new NewTransactionExecutor());
+                snapshotRepository, repository, newTransactionExecutor, scheduleLock);
 
         store.reconcileSeries(completeSchedule, Instant.parse("2026-09-12T10:00:00Z"));
 
