@@ -594,9 +594,6 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             return;
         }
         LocalDate releaseDate = CalendarMovieReleaseDateSelector.select(releaseDates.value(), region).orElse(null);
-        if (releaseDate == null) {
-            return;
-        }
         CalendarMovieSchedule schedule = new CalendarMovieSchedule(
                 content.getTmdbId(),
                 region,

@@ -31,7 +31,6 @@ public final class CalendarScheduleCadence {
                 : checkedAt.plusSeconds(DAY_SECONDS);
     }
 
-    /** A series remains discoverable after release: new seasons have no prior episode row to become due. */
     public static Instant nextSeriesCheckAt(LocalDate releaseDate, Instant checkedAt) {
         if (releaseDate != null && !releaseDate.isAfter(checkedAt.atZone(ZoneId.systemDefault()).toLocalDate())) {
             return checkedAt.plusSeconds(SERIES_DISCOVERY_DAYS * DAY_SECONDS);

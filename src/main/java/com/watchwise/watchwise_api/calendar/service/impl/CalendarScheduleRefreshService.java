@@ -109,8 +109,12 @@ public class CalendarScheduleRefreshService {
                     && foundSeries.schedule().hasRemoteResults()) {
                 scheduleSynchronizer.synchronizeSeries(foundSeries.schedule(), checkedAt);
             }
-            if (lookup instanceof CalendarScheduleLookup.NotFound) {
-                snapshotStore.invalidate(key, checkedAt, refreshKey.discovery());
+            if (lookup instanceof CalendarScheduleLookup.NotFound notFound) {
+                if (key.type() == ContentType.SERIES && notFound.seasonNumber() != null) {
+                    snapshotStore.invalidateSeason(key, notFound.seasonNumber(), checkedAt);
+                } else {
+                    snapshotStore.invalidate(key, checkedAt, refreshKey.discovery());
+                }
             }
         } catch (RuntimeException exception) {
             log.warn("Calendar schedule refresh failed for {}", refreshKey, exception);

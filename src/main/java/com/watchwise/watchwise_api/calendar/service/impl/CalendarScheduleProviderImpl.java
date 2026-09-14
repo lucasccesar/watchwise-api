@@ -79,7 +79,9 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup =
                 tmdbClient.getCalendarSeasonDetails(seriesTmdbId, seasonNumber, language);
         if (!(seasonLookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> season)) {
-            return mapFailure(seasonLookup);
+            return seasonLookup instanceof TmdbLookupResult.NotFound<?>
+                    ? new CalendarScheduleLookup.NotFound(seasonNumber)
+                    : new CalendarScheduleLookup.Unavailable();
         }
 
         TmdbLookupResult<TmdbTvFullDetails> seriesLookup = tmdbClient.getTvFullDetails(seriesTmdbId, language);
@@ -124,8 +126,10 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
         if (seasonLookups.stream().anyMatch(TmdbLookupResult::isUnavailable)) {
             return new CalendarScheduleLookup.Unavailable();
         }
-        if (seasonLookups.stream().anyMatch(lookup -> lookup instanceof TmdbLookupResult.NotFound<?>)) {
-            return new CalendarScheduleLookup.NotFound();
+        for (int index = 0; index < seasonLookups.size(); index++) {
+            if (seasonLookups.get(index) instanceof TmdbLookupResult.NotFound<?>) {
+                return new CalendarScheduleLookup.NotFound(expectedCounts.keySet().stream().toList().get(index));
+            }
         }
         List<CalendarSeriesSchedule.Season> seasons = seasonLookups.stream()
                 .flatMap(lookup -> foundSeason(lookup).stream())

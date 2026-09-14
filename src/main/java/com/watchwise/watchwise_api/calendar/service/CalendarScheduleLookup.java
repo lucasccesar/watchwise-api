@@ -8,7 +8,11 @@ public sealed interface CalendarScheduleLookup {
     record FoundSeries(CalendarSeriesSchedule schedule) implements CalendarScheduleLookup {
     }
 
-    record NotFound() implements CalendarScheduleLookup {
+    record NotFound(Integer seasonNumber) implements CalendarScheduleLookup {
+
+        public NotFound() {
+            this(null);
+        }
     }
 
     record Unavailable() implements CalendarScheduleLookup {

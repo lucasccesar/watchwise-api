@@ -36,12 +36,6 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
-/**
- * Exercises {@link TmdbClient} wired with the real {@link TmdbCacheConfig} caches — {@link TmdbClientTest}
- * constructs {@code TmdbClient} with disposable, per-test Caffeine caches that are never reused across
- * calls, so it never exercises the actual cache-hit / never-cache-a-failure behavior these caches exist
- * for (see {@code TmdbClient.cachedLookup} — a computed {@code Unavailable} result must never be cached).
- */
 @SpringJUnitConfig
 @ContextConfiguration(classes = {TmdbCacheConfig.class, TmdbClientCachingTest.Config.class})
 @TestPropertySource(properties = {

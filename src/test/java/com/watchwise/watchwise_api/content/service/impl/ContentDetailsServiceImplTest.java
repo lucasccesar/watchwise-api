@@ -1159,6 +1159,30 @@ class ContentDetailsServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDetails] Should Synchronize A Movie Schedule Without A Regional Date - When TMDB Returns Valid Details")
+    void shouldSynchronizeAMovieScheduleWithoutARegionalDateWhenTmdbReturnsValidDetails() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        TmdbMovieFullDetails details = new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, "/matrix.jpg", null,
+                "1999-03-31", 136, List.of(), List.of(), null, null, null, null, null, null, null);
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(details, TmdbLookupOrigin.REMOTE));
+        when(tmdbClient.getMovieReleaseDates("603", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieReleaseDates("603", List.of()),
+                        TmdbLookupOrigin.REMOTE));
+
+        contentDetailsService.getDetails(contentId, requestingUserId);
+
+        ArgumentCaptor<CalendarScheduleBatch> batch = ArgumentCaptor.forClass(CalendarScheduleBatch.class);
+        verify(calendarScheduleSynchronizer).synchronize(batch.capture(), any(Instant.class));
+        assertThat(batch.getValue().movie()).extracting(
+                CalendarMovieSchedule::releaseDate, CalendarMovieSchedule::title, CalendarMovieSchedule::posterPath)
+                .containsExactly(null, "The Matrix", "/matrix.jpg");
+    }
+
+    @Test
     @DisplayName("[getDetails] Should Synchronize A Fresh Regular Season Schedule With Episode Facts")
     void shouldSynchronizeAFreshRegularSeasonScheduleWithEpisodeFacts() {
         UUID contentId = UUID.randomUUID();

@@ -9,9 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * One TV lookup's regular-season schedule payload and its evidence of completeness.
- */
 public record CalendarSeriesSchedule(
         CalendarScheduleKey key,
         List<Season> seasons,

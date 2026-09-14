@@ -28,9 +28,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * Pure transformation from complete schedule snapshots to a single month's calendar events.
- */
 public class CalendarEventAssembler {
 
     private static final Comparator<AssembledEvent> EVENT_ORDER = Comparator

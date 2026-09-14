@@ -8,9 +8,6 @@ import java.util.Map;
 import java.util.Set;
 import java.time.LocalDateTime;
 
-/**
- * Shared schedule facts available for one user's active keys and one exact locale.
- */
 public record CalendarScheduleReadModel(
         List<CalendarScheduleSnapshot> snapshots,
         CalendarAssemblyInput.Completeness completeness,

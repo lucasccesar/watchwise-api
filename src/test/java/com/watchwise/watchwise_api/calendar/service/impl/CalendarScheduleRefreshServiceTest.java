@@ -177,6 +177,22 @@ class CalendarScheduleRefreshServiceTest {
     }
 
     @Test
+    @DisplayName("[refreshDueSchedules] Should Invalidate Only The Missing Season - When Season Refresh Returns NotFound")
+    void shouldInvalidateOnlyTheMissingSeasonWhenSeasonRefreshReturnsNotFound() {
+        CalendarScheduleKey series = key(ContentType.SERIES, "1396", "pt-BR", "BR");
+        when(watchlistEntryRepository.findActiveCalendarScheduleKeys()).thenReturn(List.of(series));
+        when(snapshotStore.findDue(Set.of(series), NOW_UTC)).thenReturn(List.of(
+                episodeSnapshot("1396", 2, 1, "BR", "pt-BR")));
+        when(scheduleProvider.loadSeason("1396", 2, "BR", "pt-BR"))
+                .thenReturn(new CalendarScheduleLookup.NotFound(2));
+
+        refreshService.refreshDueSchedules();
+
+        verify(snapshotStore).invalidateSeason(series, 2, NOW);
+        verify(snapshotStore, never()).invalidate(series, NOW, false);
+    }
+
+    @Test
     @DisplayName("[refreshDueSchedules] Should Ignore Cache-Origin Results")
     void shouldIgnoreCacheOriginResults() {
         CalendarScheduleKey activeMovie = key(ContentType.MOVIE, "550", "pt-BR", "BR");

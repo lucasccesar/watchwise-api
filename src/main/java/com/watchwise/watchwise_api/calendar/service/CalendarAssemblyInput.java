@@ -11,9 +11,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/**
- * Immutable facts consumed when assembling one calendar month.
- */
 public record CalendarAssemblyInput(
         YearMonth month,
         Clock clock,

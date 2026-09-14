@@ -122,8 +122,12 @@ public class CalendarServiceImpl implements CalendarService {
                 continue;
             }
             CalendarScheduleLookup lookup = requestLookups.computeIfAbsent(key, ignored -> load(key, region, language));
-            if (lookup instanceof CalendarScheduleLookup.NotFound) {
-                snapshotStore.invalidate(key, now, key.type() == ContentType.SERIES);
+            if (lookup instanceof CalendarScheduleLookup.NotFound notFound) {
+                if (key.type() == ContentType.SERIES && notFound.seasonNumber() != null) {
+                    snapshotStore.invalidateSeason(key, notFound.seasonNumber(), now);
+                } else {
+                    snapshotStore.invalidate(key, now, key.type() == ContentType.SERIES);
+                }
                 omittedKeys.add(key);
                 continue;
             }

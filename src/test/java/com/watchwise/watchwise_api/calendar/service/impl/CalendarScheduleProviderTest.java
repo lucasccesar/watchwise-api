@@ -208,6 +208,7 @@ class CalendarScheduleProviderTest {
         CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
 
         assertThat(result).isInstanceOf(CalendarScheduleLookup.NotFound.class);
+        assertThat(((CalendarScheduleLookup.NotFound) result).seasonNumber()).isEqualTo(2);
     }
 
     @Test
