@@ -15,6 +15,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE) @Testcontainers
@@ -29,5 +30,20 @@ class PicksTemplateOptionRepositoryTest {
         Content content = contentRepository.saveAndFlush(Content.builder().tmdbId("550").type(ContentType.MOVIE).createdAt(now).updatedAt(now).build());
         repository.saveAndFlush(PicksTemplateOption.builder().category(category).content(content).createdAt(now).build());
         assertThatThrownBy(() -> repository.saveAndFlush(PicksTemplateOption.builder().category(category).content(content).createdAt(now).build())).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void listsOptionsAndMatchesFullTargetTupleForIsolatedAndContextualPeople() {
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
+        PicksTemplateCategory category = categoryRepository.saveAndFlush(PicksTemplateCategory.builder().picksTemplate(template).name("Actor").group(PickCategoryGroup.PRIMARY).displayOrder(1).allowedType(PickAllowedType.PERSON).optionMode(PickCategoryOptionMode.FIXED).createdAt(now).updatedAt(now).build());
+        Content context = contentRepository.saveAndFlush(Content.builder().tmdbId("1399").type(ContentType.SERIES).createdAt(now).updatedAt(now).build());
+        repository.save(PicksTemplateOption.builder().category(category).personTmdbId("287").createdAt(now).build());
+        repository.saveAndFlush(PicksTemplateOption.builder().category(category).personTmdbId("287").contextContent(context).createdAt(now).build());
+
+        assertThat(repository.findByCategoryId(category.getId())).hasSize(2);
+        assertThat(repository.existsByCategoryIdAndContentIdAndPersonTmdbIdAndContextContentId(category.getId(), null, "287", null)).isTrue();
+        assertThat(repository.existsByCategoryIdAndContentIdAndPersonTmdbIdAndContextContentId(category.getId(), null, "287", context.getId())).isTrue();
+        assertThat(repository.existsByCategoryIdAndContentIdAndPersonTmdbIdAndContextContentId(category.getId(), null, "287", java.util.UUID.randomUUID())).isFalse();
     }
 }
