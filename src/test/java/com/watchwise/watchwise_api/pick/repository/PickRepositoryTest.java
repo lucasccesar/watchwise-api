@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -20,6 +21,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
+import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE) @Testcontainers
@@ -54,9 +56,15 @@ class PickRepositoryTest {
         User owner = user("page-owner", now), otherOwner = user("page-other", now), viewer = user("page-viewer", now);
         PicksTemplate first = templateRepository.save(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("First").createdAt(now).updatedAt(now).build());
         PicksTemplate second = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Second").createdAt(now).updatedAt(now).build());
-        save(owner, first, PickVisibility.PUBLIC, now); save(owner, second, PickVisibility.PUBLIC, now); save(otherOwner, first, PickVisibility.PUBLIC, now);
+        Pick firstPick = save(owner, first, PickVisibility.PUBLIC, now); Pick secondPick = save(owner, first, PickVisibility.PUBLIC, now); Pick thirdPick = save(owner, first, PickVisibility.PUBLIC, now);
+        save(owner, second, PickVisibility.PUBLIC, now); save(otherOwner, first, PickVisibility.PUBLIC, now);
 
-        assertThat(repository.findByUserIdAndPicksTemplateId(owner.getId(), first.getId(), PageRequest.of(0, 1)).getTotalElements()).isEqualTo(1);
+        Page<Pick> firstPage = repository.findByUserIdAndPicksTemplateId(owner.getId(), first.getId(), PageRequest.of(0, 2));
+        Page<Pick> secondPage = repository.findByUserIdAndPicksTemplateId(owner.getId(), first.getId(), PageRequest.of(1, 2));
+        assertThat(firstPage.getTotalElements()).isEqualTo(3); assertThat(firstPage.getTotalPages()).isEqualTo(2); assertThat(firstPage.getContent()).hasSize(2);
+        assertThat(secondPage.getTotalElements()).isEqualTo(3); assertThat(secondPage.getTotalPages()).isEqualTo(2); assertThat(secondPage.getContent()).hasSize(1);
+        assertThat(Stream.concat(firstPage.getContent().stream(), secondPage.getContent().stream()).map(Pick::getId).toList())
+                .containsExactlyInAnyOrder(firstPick.getId(), secondPick.getId(), thirdPick.getId());
         assertThat(repository.findVisibleByOwner(viewer.getId(), owner.getId(), null, PageRequest.of(0, 10)).getTotalElements()).isEqualTo(2);
     }
 

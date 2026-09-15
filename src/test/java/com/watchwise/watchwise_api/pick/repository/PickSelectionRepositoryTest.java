@@ -45,11 +45,16 @@ class PickSelectionRepositoryTest {
         PicksTemplateCategory category = category(template, "Actor", 1, now);
         PicksTemplateCategory otherCategory = category(template, "Director", 2, now);
         Pick pick = pickRepository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PUBLIC).createdAt(now).updatedAt(now).build());
+        Pick requestedPick = pickRepository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PUBLIC).createdAt(now).updatedAt(now).build());
+        Pick excludedPick = pickRepository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PUBLIC).createdAt(now).updatedAt(now).build());
         Content context = contentRepository.saveAndFlush(Content.builder().tmdbId("1399").type(ContentType.SERIES).createdAt(now).updatedAt(now).build());
         PickSelection selection = repository.saveAndFlush(PickSelection.builder().pick(pick).category(category).personTmdbId("287").contextContent(context).createdAt(now).updatedAt(now).build());
-        repository.saveAndFlush(PickSelection.builder().pick(pick).category(otherCategory).personTmdbId("6384").createdAt(now).updatedAt(now).build());
+        PickSelection otherSelection = repository.saveAndFlush(PickSelection.builder().pick(pick).category(otherCategory).personTmdbId("6384").createdAt(now).updatedAt(now).build());
+        PickSelection requestedSelection = repository.saveAndFlush(PickSelection.builder().pick(requestedPick).category(category).personTmdbId("100").createdAt(now).updatedAt(now).build());
+        repository.saveAndFlush(PickSelection.builder().pick(excludedPick).category(category).personTmdbId("200").createdAt(now).updatedAt(now).build());
 
-        assertThat(repository.findByPickIdIn(java.util.List.of(pick.getId()))).hasSize(2);
+        assertThat(repository.findByPickIdIn(java.util.List.of(pick.getId(), requestedPick.getId())))
+                .extracting(PickSelection::getId).containsExactlyInAnyOrder(selection.getId(), requestedSelection.getId(), otherSelection.getId());
         assertThat(repository.countByPickId(pick.getId())).isEqualTo(2);
         assertThat(repository.existsByCategoryId(category.getId())).isTrue();
         assertThat(repository.existsByCategoryIdAndContentIdAndPersonTmdbIdAndContextContentId(category.getId(), null, "287", context.getId())).isTrue();

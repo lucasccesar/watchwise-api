@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 @DataJpaTest @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE) @Testcontainers
 class PicksTemplateCategoryRepositoryTest {
@@ -37,11 +38,14 @@ class PicksTemplateCategoryRepositoryTest {
         PicksTemplate otherTemplate = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Other").createdAt(now).updatedAt(now).build());
         PicksTemplateCategory second = repository.save(category(template, "Second", PickCategoryGroup.PRIMARY, 2, now));
         PicksTemplateCategory first = repository.saveAndFlush(category(template, "First", PickCategoryGroup.PRIMARY, 1, now));
+        PicksTemplateCategory secondary = repository.saveAndFlush(category(template, "Secondary first", PickCategoryGroup.SECONDARY, 1, now));
         PicksTemplateCategory other = repository.saveAndFlush(category(otherTemplate, "Other", PickCategoryGroup.PRIMARY, 1, now));
 
         List<PicksTemplateCategory> result = repository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId());
 
-        assertThat(result).extracting(PicksTemplateCategory::getId).containsExactly(first.getId(), second.getId());
+        assertThat(result).extracting(PicksTemplateCategory::getGroup, PicksTemplateCategory::getDisplayOrder)
+                .containsExactly(tuple(PickCategoryGroup.PRIMARY, 1), tuple(PickCategoryGroup.PRIMARY, 2), tuple(PickCategoryGroup.SECONDARY, 1));
+        assertThat(result).extracting(PicksTemplateCategory::getId).containsExactly(first.getId(), second.getId(), secondary.getId());
         assertThat(repository.findByIdAndPicksTemplateId(first.getId(), otherTemplate.getId())).isEmpty();
         assertThat(repository.existsByPicksTemplateId(template.getId())).isTrue();
         assertThat(repository.findByIdAndPicksTemplateId(other.getId(), template.getId())).isEmpty();
