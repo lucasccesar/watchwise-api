@@ -9,7 +9,11 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
@@ -28,10 +32,6 @@ import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategor
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateOptionService;
-import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
-import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
-import com.watchwise.watchwise_api.search.service.SearchService;
-import com.watchwise.watchwise_api.search.service.SearchType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -58,7 +58,6 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     private final PickTargetService pickTargetService;
     private final PicksTemplateOptionMapper optionMapper;
     private final PageRequestFactory pageRequestFactory;
-    private final SearchService searchService;
     private final TmdbClient tmdbClient;
 
     @Override
@@ -84,7 +83,10 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
                 .orElseThrow(() -> new NotFoundException("Picks template category not found"));
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         if (category.getOptionMode() == PickCategoryOptionMode.FIXED) {
-            return localOptions(categoryId, pageRequest);
+            return optionRepository.findByCategoryId(categoryId, pageRequest).map(optionMapper::picksTemplateOptionToSearchDto);
+        }
+        if (category.getAllowedType() != PickAllowedType.EPISODE && (query == null || query.isBlank())) {
+            throw new BadRequestException("q must be provided for open movie, series and person searches");
         }
         return openOptions(viewerId, category, query, seriesTmdbId, seasonNumber, pageRequest);
     }
@@ -108,30 +110,42 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         optionRepository.delete(option);
     }
 
-    private Page<PickOptionSearchDTO> localOptions(UUID categoryId, PageRequest pageRequest) {
-        List<PickOptionSearchDTO> all = optionRepository.findByCategoryId(categoryId).stream()
-                .map(optionMapper::picksTemplateOptionToSearchDto).toList();
-        int from = Math.min((int) pageRequest.getOffset(), all.size());
-        int to = Math.min(from + pageRequest.getPageSize(), all.size());
-        return new PageImpl<>(all.subList(from, to), pageRequest, all.size());
-    }
-
     private Page<PickOptionSearchDTO> openOptions(UUID viewerId, PicksTemplateCategory category, String query,
                                                    String seriesTmdbId, Integer seasonNumber, PageRequest pageRequest) {
-        if (category.getAllowedType() == PickAllowedType.EPISODE) {
-            return openEpisodes(seriesTmdbId, seasonNumber, pageRequest);
-        }
-        SearchType type = switch (category.getAllowedType()) {
-            case MOVIE -> SearchType.MOVIE;
-            case SERIES -> SearchType.SERIES;
-            case PERSON -> SearchType.PERSON;
-            case EPISODE -> throw new IllegalStateException("Episode categories are handled separately");
+        int requestedPage = pageRequest.getPageNumber() + 1;
+        return switch (category.getAllowedType()) {
+            case MOVIE -> movieOptions(query.trim(), requestedPage, pageRequest);
+            case SERIES -> seriesOptions(query.trim(), requestedPage, pageRequest);
+            case PERSON -> personOptions(query.trim(), requestedPage, pageRequest);
+            case EPISODE -> openEpisodes(seriesTmdbId, seasonNumber, pageRequest);
         };
-        SearchResultDTO results = searchService.search(viewerId, query, type, pageRequest.getPageNumber() + 1, pageRequest.getPageSize());
-        List<PickOptionSearchDTO> content = category.getAllowedType() == PickAllowedType.PERSON
-                ? results.people().stream().map(person -> new PickOptionSearchDTO(null, null, person.tmdbId(), null)).toList()
-                : results.contents().stream().map(this::toSearchTarget).toList();
-        return new PageImpl<>(content, pageRequest, content.size());
+    }
+
+    private Page<PickOptionSearchDTO> movieOptions(String query, int page, PageRequest pageRequest) {
+        TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> lookup = tmdbClient.searchMovies(query,
+                TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, page);
+        TmdbSearchPage<TmdbMovieSearchResult> searchPage = searchPageOrEmpty(lookup);
+        List<PickOptionSearchDTO> options = searchPage.results().stream().map(movie ->
+                new PickOptionSearchDTO(null, content(movie.id(), ContentType.MOVIE), null, null)).toList();
+        return new PageImpl<>(options, pageRequest, searchPage.totalResults());
+    }
+
+    private Page<PickOptionSearchDTO> seriesOptions(String query, int page, PageRequest pageRequest) {
+        TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>> lookup = tmdbClient.searchTv(query,
+                TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, page);
+        TmdbSearchPage<TmdbTvSearchResult> searchPage = searchPageOrEmpty(lookup);
+        List<PickOptionSearchDTO> options = searchPage.results().stream().map(series ->
+                new PickOptionSearchDTO(null, content(series.id(), ContentType.SERIES), null, null)).toList();
+        return new PageImpl<>(options, pageRequest, searchPage.totalResults());
+    }
+
+    private Page<PickOptionSearchDTO> personOptions(String query, int page, PageRequest pageRequest) {
+        TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>> lookup = tmdbClient.searchPeople(query,
+                TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, page);
+        TmdbSearchPage<TmdbPersonSearchResult> searchPage = searchPageOrEmpty(lookup);
+        List<PickOptionSearchDTO> options = searchPage.results().stream()
+                .map(person -> new PickOptionSearchDTO(null, null, person.id(), null)).toList();
+        return new PageImpl<>(options, pageRequest, searchPage.totalResults());
     }
 
     private Page<PickOptionSearchDTO> openEpisodes(String seriesTmdbId, Integer seasonNumber, PageRequest pageRequest) {
@@ -141,7 +155,8 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(seriesTmdbId, seasonNumber,
                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
         if (lookup.isUnavailable()) throw new TmdbUnavailableException("TMDB is currently unavailable");
-        TmdbSeasonFullDetails season = lookup.toOptional().orElseThrow(() -> new NotFoundException("Season was not found in TMDB"));
+        TmdbSeasonFullDetails season = lookup.toOptional().orElse(null);
+        if (season == null) return new PageImpl<>(List.of(), pageRequest, 0);
         List<PickOptionSearchDTO> all = season.episodes() == null ? List.of() : season.episodes().stream()
                 .filter(episode -> episode.episodeNumber() != null)
                 .map(episode -> toEpisodeTarget(seriesTmdbId, seasonNumber, episode)).toList();
@@ -150,15 +165,18 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         return new PageImpl<>(all.subList(from, to), pageRequest, all.size());
     }
 
-    private PickOptionSearchDTO toSearchTarget(SearchContentDTO content) {
-        ContentType type = content.type().toContentType();
-        return new PickOptionSearchDTO(null, new ContentRefDTO(null, content.tmdbId(), type, null, null, null,
-                null, null, null, null), null, null);
+    private <T> TmdbSearchPage<T> searchPageOrEmpty(TmdbLookupResult<TmdbSearchPage<T>> lookup) {
+        if (lookup.isUnavailable()) throw new TmdbUnavailableException("TMDB is currently unavailable");
+        return lookup.toOptional().orElseGet(() -> new TmdbSearchPage<>(1, List.of(), 0, 0));
     }
 
     private PickOptionSearchDTO toEpisodeTarget(String seriesTmdbId, Integer seasonNumber, TmdbEpisodeSummary episode) {
         return new PickOptionSearchDTO(null, new ContentRefDTO(null, null, ContentType.EPISODE, seriesTmdbId,
                 seasonNumber, episode.episodeNumber(), null, null, null, null), null, null);
+    }
+
+    private ContentRefDTO content(String tmdbId, ContentType type) {
+        return new ContentRefDTO(null, tmdbId, type, null, null, null, null, null, null, null);
     }
 
     private PicksTemplateOptionDTO toDto(PicksTemplateOption option) {

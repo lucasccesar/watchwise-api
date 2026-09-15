@@ -85,7 +85,7 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
     @Override
     @Transactional
     public PicksTemplateResponseDTO updateTemplate(UUID actorId, UUID templateId, PicksTemplatePatchDTO dto) {
-        validateDatePair(dto.eligibilityStartDate(), dto.eligibilityEndDate());
+        validatePatchPeriod(dto);
         PicksTemplate template = templateRepository.findByIdForUpdate(templateId)
                 .orElseThrow(() -> new NotFoundException("Picks template not found"));
         assertCanManage(actorId, template);
@@ -147,16 +147,32 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
         if (dto.description() != null) template.setDescription(dto.description());
         if (dto.coverImage() != null) template.setCoverImage(dto.coverImage());
         if (dto.instructions() != null) template.setInstructions(dto.instructions());
-        if (dto.eligibilityStartDate() != null || dto.eligibilityEndDate() != null) {
+        if (Boolean.TRUE.equals(dto.clearEligibilityPeriod())) {
+            template.setEligibilityStartDate(null);
+            template.setEligibilityEndDate(null);
+        } else if (dto.eligibilityStartDate() != null && dto.eligibilityEndDate() != null) {
             template.setEligibilityStartDate(dto.eligibilityStartDate());
             template.setEligibilityEndDate(dto.eligibilityEndDate());
         }
     }
 
     private boolean changesPeriod(PicksTemplate template, PicksTemplatePatchDTO dto) {
-        return (dto.eligibilityStartDate() != null || dto.eligibilityEndDate() != null)
+        return (Boolean.TRUE.equals(dto.clearEligibilityPeriod())
+                && (template.getEligibilityStartDate() != null || template.getEligibilityEndDate() != null))
+                || ((dto.eligibilityStartDate() != null && dto.eligibilityEndDate() != null)
                 && (!java.util.Objects.equals(template.getEligibilityStartDate(), dto.eligibilityStartDate())
-                || !java.util.Objects.equals(template.getEligibilityEndDate(), dto.eligibilityEndDate()));
+                || !java.util.Objects.equals(template.getEligibilityEndDate(), dto.eligibilityEndDate())));
+    }
+
+    private void validatePatchPeriod(PicksTemplatePatchDTO dto) {
+        if (dto == null) {
+            throw new BadRequestException("Patch body is required");
+        }
+        if (Boolean.TRUE.equals(dto.clearEligibilityPeriod())
+                && (dto.eligibilityStartDate() != null || dto.eligibilityEndDate() != null)) {
+            throw new BadRequestException("clearEligibilityPeriod cannot be combined with eligibility dates");
+        }
+        validateDatePair(dto.eligibilityStartDate(), dto.eligibilityEndDate());
     }
 
     private boolean hasUsedContentCategory(UUID templateId) {

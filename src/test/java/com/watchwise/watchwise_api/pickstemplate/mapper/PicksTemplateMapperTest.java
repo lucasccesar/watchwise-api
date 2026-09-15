@@ -41,7 +41,7 @@ class PicksTemplateMapperTest {
         PicksTemplateCreationDTO missingEnd = new PicksTemplateCreationDTO("Awards", null, null, null,
                 LocalDate.of(2026, 1, 1), null, List.of(category()));
         PicksTemplatePatchDTO inverted = new PicksTemplatePatchDTO(null, null, null, null,
-                LocalDate.of(2026, 12, 31), LocalDate.of(2026, 1, 1));
+                LocalDate.of(2026, 12, 31), LocalDate.of(2026, 1, 1), false);
 
         assertThat(validator.validate(missingEnd)).isNotEmpty();
         assertThat(validator.validate(inverted)).isNotEmpty();
@@ -53,6 +53,16 @@ class PicksTemplateMapperTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), List.of(category()));
 
         assertThat(validator.validate(request)).isEmpty();
+    }
+
+    @Test
+    void shouldRequireExplicitIntentToClearAnEligibilityPeriod() {
+        PicksTemplatePatchDTO clear = new PicksTemplatePatchDTO(null, null, null, null, null, null, true);
+        PicksTemplatePatchDTO conflicting = new PicksTemplatePatchDTO(null, null, null, null,
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), true);
+
+        assertThat(clear.hasValidEligibilityDatePair()).isTrue();
+        assertThat(conflicting.hasValidEligibilityDatePair()).isFalse();
     }
 
     @Test

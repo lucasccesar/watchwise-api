@@ -29,7 +29,7 @@ public class PicksTemplateOptionController {
 
     @GetMapping
     public ResponseEntity<PageResponseDTO<PickOptionSearchDTO>> searchOptions(@PathVariable UUID templateId,
-            @PathVariable UUID categoryId, @RequestParam(required = false) String query,
+            @PathVariable UUID categoryId, @RequestParam(name = "q", required = false) String query,
             @RequestParam(required = false) String seriesTmdbId, @RequestParam(required = false) Integer seasonNumber,
             @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
         Page<PickOptionSearchDTO> options = picksTemplateOptionService.searchOptions(currentUserId(), templateId, categoryId,

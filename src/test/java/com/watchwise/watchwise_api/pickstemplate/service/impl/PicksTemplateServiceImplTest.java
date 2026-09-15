@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.pickstemplate.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
@@ -24,6 +25,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -100,6 +102,43 @@ class PicksTemplateServiceImplTest {
         verify(templateRepository).save(captor.capture());
         assertThat(captor.getValue().getCreator()).isNull();
         assertThat(captor.getValue().getOrigin()).isEqualTo(PickOrigin.COMMUNITY);
+    }
+
+    @Test
+    void shouldClearUnusedEligibilityPeriodOnlyWhenExplicitlyRequested() {
+        UUID actorId = UUID.randomUUID();
+        User actor = user(actorId, UserRole.USER);
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).creator(actor).origin(PickOrigin.COMMUNITY)
+                .name("Awards").eligibilityStartDate(LocalDate.of(2026, 1, 1)).eligibilityEndDate(LocalDate.of(2026, 12, 31))
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(templateRepository.findByIdForUpdate(template.getId())).thenReturn(Optional.of(template));
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(List.of());
+
+        PicksTemplateResponseDTO result = service.updateTemplate(actorId, template.getId(),
+                new PicksTemplatePatchDTO(null, null, null, null, null, null, true));
+
+        assertThat(result.eligibilityStartDate()).isNull();
+        assertThat(result.eligibilityEndDate()).isNull();
+    }
+
+    @Test
+    void shouldBlockExplicitEligibilityClearAfterContentCategoryUse() {
+        UUID actorId = UUID.randomUUID();
+        User actor = user(actorId, UserRole.USER);
+        PicksTemplate template = template(actor, PickOrigin.COMMUNITY);
+        template.setEligibilityStartDate(LocalDate.of(2026, 1, 1));
+        template.setEligibilityEndDate(LocalDate.of(2026, 12, 31));
+        PicksTemplateCategory category = category(PickCategoryOptionMode.OPEN);
+        category.setId(UUID.randomUUID());
+        category.setAllowedType(PickAllowedType.MOVIE);
+        when(templateRepository.findByIdForUpdate(template.getId())).thenReturn(Optional.of(template));
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(actor));
+        when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(List.of(category));
+        when(selectionRepository.existsByCategoryId(category.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.updateTemplate(actorId, template.getId(),
+                new PicksTemplatePatchDTO(null, null, null, null, null, null, true))).isInstanceOf(ConflictException.class);
     }
 
     private PicksTemplateCreationDTO creation(List<PicksTemplateCategoryCreationDTO> categories) {
