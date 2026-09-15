@@ -401,6 +401,7 @@ class PickTargetServiceImplTest {
         PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED);
         Content content = content("550", ContentType.MOVIE, null, null, null);
         PicksTemplateOption option = PicksTemplateOption.builder().category(category).content(content).build();
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(option));
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(found(movie("2023-06-01")));
 
