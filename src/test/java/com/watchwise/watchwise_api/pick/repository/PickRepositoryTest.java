@@ -57,7 +57,7 @@ class PickRepositoryTest {
         PicksTemplate first = templateRepository.save(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("First").createdAt(now).updatedAt(now).build());
         PicksTemplate second = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Second").createdAt(now).updatedAt(now).build());
         Pick firstPick = save(owner, first, PickVisibility.PUBLIC, now); Pick secondPick = save(owner, first, PickVisibility.PUBLIC, now); Pick thirdPick = save(owner, first, PickVisibility.PUBLIC, now);
-        save(owner, second, PickVisibility.PUBLIC, now); save(otherOwner, first, PickVisibility.PUBLIC, now);
+        Pick secondTemplatePick = save(owner, second, PickVisibility.PUBLIC, now); save(otherOwner, first, PickVisibility.PUBLIC, now);
 
         Page<Pick> firstPage = repository.findByUserIdAndPicksTemplateId(owner.getId(), first.getId(), PageRequest.of(0, 2));
         Page<Pick> secondPage = repository.findByUserIdAndPicksTemplateId(owner.getId(), first.getId(), PageRequest.of(1, 2));
@@ -65,7 +65,10 @@ class PickRepositoryTest {
         assertThat(secondPage.getTotalElements()).isEqualTo(3); assertThat(secondPage.getTotalPages()).isEqualTo(2); assertThat(secondPage.getContent()).hasSize(1);
         assertThat(Stream.concat(firstPage.getContent().stream(), secondPage.getContent().stream()).map(Pick::getId).toList())
                 .containsExactlyInAnyOrder(firstPick.getId(), secondPick.getId(), thirdPick.getId());
-        assertThat(repository.findVisibleByOwner(viewer.getId(), owner.getId(), null, PageRequest.of(0, 10)).getTotalElements()).isEqualTo(2);
+        Page<Pick> visiblePicks = repository.findVisibleByOwner(viewer.getId(), owner.getId(), null, PageRequest.of(0, 10));
+        assertThat(visiblePicks.getTotalElements()).isEqualTo(4);
+        assertThat(visiblePicks.getContent()).extracting(Pick::getId)
+                .containsExactlyInAnyOrder(firstPick.getId(), secondPick.getId(), thirdPick.getId(), secondTemplatePick.getId());
     }
 
     @Test
