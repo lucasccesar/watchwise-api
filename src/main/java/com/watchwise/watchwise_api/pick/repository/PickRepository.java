@@ -1,5 +1,31 @@
 package com.watchwise.watchwise_api.pick.repository;
+
 import com.watchwise.watchwise_api.pick.entity.Pick;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.Optional;
 import java.util.UUID;
-public interface PickRepository extends JpaRepository<Pick, UUID> {}
+
+public interface PickRepository extends JpaRepository<Pick, UUID> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select pick from Pick pick where pick.id = :id")
+    Optional<Pick> findByIdForUpdate(@Param("id") UUID id);
+    Page<Pick> findByUserIdAndPicksTemplateId(UUID userId, UUID templateId, Pageable pageable);
+    @Query("""
+            select pick from Pick pick where pick.user.id = :ownerId
+              and (:templateId is null or pick.picksTemplate.id = :templateId)
+              and (pick.user.id = :viewerId
+                or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
+                or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists
+                    (select 1 from Follower follower where follower.follower.id = :viewerId and follower.followed.id = pick.user.id
+                     and follower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED)))
+            """)
+    Page<Pick> findVisibleByOwner(@Param("viewerId") UUID viewerId, @Param("ownerId") UUID ownerId, @Param("templateId") UUID templateId, Pageable pageable);
+    boolean existsByPicksTemplateId(UUID picksTemplateId);
+}

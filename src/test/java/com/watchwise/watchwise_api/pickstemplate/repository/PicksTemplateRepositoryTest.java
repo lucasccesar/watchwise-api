@@ -8,8 +8,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -35,5 +38,28 @@ class PicksTemplateRepositoryTest {
         PicksTemplate template = repository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
         assertThat(template.getId()).isNotNull();
         assertThat(template.getCreator()).isNull();
+    }
+
+    @Test
+    void searchesByOptionalOriginAndEscapedNameWithPagination() {
+        LocalDateTime now = LocalDateTime.now();
+        repository.save(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("100% Awards").createdAt(now).updatedAt(now).build());
+        repository.save(PicksTemplate.builder().origin(PickOrigin.COMMUNITY).name("1000 Awards").createdAt(now).updatedAt(now).build());
+        repository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Other Awards").createdAt(now).updatedAt(now).build());
+
+        Page<PicksTemplate> result = repository.search(PickOrigin.OFFICIAL, "100\\%", PageRequest.of(0, 1));
+
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getTotalPages()).isEqualTo(1);
+        assertThat(result.getContent()).extracting(PicksTemplate::getName).containsExactly("100% Awards");
+    }
+
+    @Test
+    @Transactional
+    void findsTemplateByIdWhileHoldingPessimisticWriteLock() {
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplate template = repository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
+
+        assertThat(repository.findByIdForUpdate(template.getId())).contains(template);
     }
 }
