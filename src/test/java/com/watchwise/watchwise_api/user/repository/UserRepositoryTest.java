@@ -1,12 +1,14 @@
 package com.watchwise.watchwise_api.user.repository;
 
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.entity.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -39,6 +41,9 @@ class UserRepositoryTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUp() {
@@ -148,6 +153,31 @@ class UserRepositoryTest {
         Optional<User> result = userRepository.findByEmailIgnoreCase("nobody@email.com");
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[role] Should Read USER Role - When Existing User Was Migrated")
+    void shouldReadUserRoleWhenExistingUserWasMigrated() {
+        UUID userId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO users (id, username, email, password, profile_picture)
+                VALUES (?, ?, ?, ?, ?)
+                """, userId, "migrated-user", "migrated-user@email.com", "hashed_password",
+                "https://example.com/photo.png");
+
+        User result = userRepository.findById(userId).orElseThrow();
+
+        assertThat(result.getRole()).isEqualTo(UserRole.USER);
+    }
+
+    @Test
+    @DisplayName("[role] Should Persist USER Role - When New User Has No Explicit Role")
+    void shouldPersistUserRoleWhenNewUserHasNoExplicitRole() {
+        User saved = userRepository.saveAndFlush(buildUser("role-default", "role-default@email.com", true));
+
+        User result = userRepository.findById(saved.getId()).orElseThrow();
+
+        assertThat(result.getRole()).isEqualTo(UserRole.USER);
     }
 
     @Test

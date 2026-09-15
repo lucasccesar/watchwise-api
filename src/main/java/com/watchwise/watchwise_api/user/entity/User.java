@@ -19,6 +19,12 @@ public class User {
     @Setter
     private UUID id;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Setter
+    @Builder.Default
+    private UserRole role = UserRole.USER;
+
     @Column(length = 60, nullable = false)
     @Setter
     private String username;

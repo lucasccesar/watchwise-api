@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.entity.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,23 @@ class UserMapperTest {
         assertThat(result.getDescription()).isEqualTo("Some description");
         assertThat(result.getProfilePicture()).isEqualTo("https://picture.com/pic.png");
         assertThat(result.getIsProfilePublic()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[postUserDtoToUser] Should Apply Default User Role - When Mapping PostUserDTO")
+    void shouldApplyDefaultUserRoleWhenMappingPostUserDto() {
+        PostUserDTO dto = new PostUserDTO(
+                "JohnDoe",
+                "john.doe@email.com",
+                "Password123",
+                "Some description",
+                "https://picture.com/pic.png",
+                true
+        );
+
+        User result = userMapper.postUserDtoToUser(dto);
+
+        assertThat(result.getRole()).isEqualTo(UserRole.USER);
     }
 
     @Test

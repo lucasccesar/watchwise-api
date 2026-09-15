@@ -15,6 +15,7 @@ import java.util.List;
 public interface UserMapper {
 
     @Mapping(target = "id", ignore = true)
+    @Mapping(target = "role", ignore = true)
     @Mapping(target = "password", ignore = true)
     @Mapping(target = "isEmailVerified", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
