@@ -9,7 +9,6 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentSchedule;
 import com.watchwise.watchwise_api.content.service.ContentScheduleEpisode;
-import com.watchwise.watchwise_api.content.service.ContentScheduleEpisode;
 import com.watchwise.watchwise_api.content.service.ContentScheduleKey;
 import com.watchwise.watchwise_api.content.service.ContentScheduleLookup;
 import com.watchwise.watchwise_api.content.service.ContentScheduleReader;
@@ -221,6 +220,32 @@ class UserListContentStateServiceImplTest {
         assertThat(scheduleCaptor.getValue().externalStatus()).isNull();
         assertThat(scheduleCaptor.getValue().complete()).isFalse();
         verify(diaryEntryRepository).findWatchedEpisodeCoordinates(viewerId, Set.of(SERIES_TMDB_ID));
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Keep A Content Item With Unknown Metadata - When Its Schedule Is Not Found")
+    void shouldKeepAContentItemWithUnknownMetadataWhenItsScheduleIsNotFound() {
+        when(userRepository.findById(viewerId)).thenReturn(Optional.of(viewer));
+        UserList list = list();
+        Content series = content(ContentType.SERIES, SERIES_TMDB_ID, null, null, null);
+        UserListItem item = contentItem(list, series, 1);
+        when(diaryEntryRepository.findWatchedDirectContentIds(viewerId, Set.of(series.getId())))
+                .thenReturn(Set.of());
+        when(diaryEntryRepository.findWatchedEpisodeCoordinates(viewerId, Set.of(SERIES_TMDB_ID)))
+                .thenReturn(Set.of());
+        when(contentScheduleReader.readSeries(SERIES_TMDB_ID, "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.NotFound(null));
+        ContentStateDTO unknown = state(WatchStatus.UNKNOWN);
+        when(contentStateResolver.resolve(any(), any(), anySet(), anySet(), same(clock))).thenReturn(unknown);
+
+        UserListContentStateResult result = service.resolve(viewerId, List.of(item));
+
+        assertThat(result.stateByItemId()).containsEntry(item.getId(), unknown);
+        assertThat(result.watchedPercentageByListId()).containsEntry(list.getId(), 0.0);
+        ArgumentCaptor<ContentSchedule> scheduleCaptor = ArgumentCaptor.forClass(ContentSchedule.class);
+        verify(contentStateResolver).resolve(eq(series), scheduleCaptor.capture(), eq(Set.of()), eq(Set.of()), same(clock));
+        assertThat(scheduleCaptor.getValue().key()).isEqualTo(ContentScheduleKey.series(SERIES_TMDB_ID));
+        assertThat(scheduleCaptor.getValue().complete()).isFalse();
     }
 
     @Test

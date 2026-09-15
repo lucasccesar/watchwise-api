@@ -109,7 +109,7 @@ class CalendarScheduleProviderTest {
                 "Breaking Bad",
                 "/breaking-bad.jpg",
                 Map.of());
-        when(scheduleReader.readSeason("1396", 2, "BR", "pt-BR"))
+        when(scheduleReader.readCalendarSeason("1396", 2, "BR", "pt-BR"))
                 .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.CACHE));
 
         CalendarScheduleLookup result = provider.loadSeason("1396", 2, "BR", "pt-BR");
@@ -122,7 +122,7 @@ class CalendarScheduleProviderTest {
                             org.assertj.core.groups.Tuple.tuple(1, "Seven Thirty-Seven", LocalDate.of(2026, 10, 1), "/one.jpg"),
                             org.assertj.core.groups.Tuple.tuple(2, "Grilled", null, "/two.jpg"));
         });
-        verify(scheduleReader).readSeason("1396", 2, "BR", "pt-BR");
+        verify(scheduleReader).readCalendarSeason("1396", 2, "BR", "pt-BR");
     }
 
     @Test
@@ -137,7 +137,7 @@ class CalendarScheduleProviderTest {
     @Test
     @DisplayName("[loadSeason] Should Propagate Unavailable - When The Shared Reader Cannot Load The Season")
     void shouldPropagateUnavailableWhenTheSharedReaderCannotLoadTheSeason() {
-        when(scheduleReader.readSeason("1396", 2, "BR", "pt-BR"))
+        when(scheduleReader.readCalendarSeason("1396", 2, "BR", "pt-BR"))
                 .thenReturn(new ContentScheduleLookup.Unavailable());
 
         CalendarScheduleLookup result = provider.loadSeason("1396", 2, "BR", "pt-BR");
@@ -160,7 +160,7 @@ class CalendarScheduleProviderTest {
                 "Breaking Bad",
                 "/breaking-bad.jpg",
                 Map.of(1, 1, 2, 1));
-        when(scheduleReader.readSeries("1396", "BR", "pt-BR"))
+        when(scheduleReader.readCalendarSeries("1396", "BR", "pt-BR"))
                 .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.REMOTE,
                         Map.of(1, TmdbLookupOrigin.REMOTE, 2, TmdbLookupOrigin.CACHE)));
 
@@ -179,7 +179,7 @@ class CalendarScheduleProviderTest {
     @Test
     @DisplayName("[loadSeries] Should Return Not Found With The Missing Season - When The Shared Reader Reports It")
     void shouldReturnNotFoundWithTheMissingSeasonWhenTheSharedReaderReportsIt() {
-        when(scheduleReader.readSeries("1396", "BR", "pt-BR"))
+        when(scheduleReader.readCalendarSeries("1396", "BR", "pt-BR"))
                 .thenReturn(new ContentScheduleLookup.NotFound(2));
 
         CalendarScheduleLookup result = provider.loadSeries("1396", "BR", "pt-BR");
@@ -201,7 +201,7 @@ class CalendarScheduleProviderTest {
                 "Breaking Bad",
                 "/breaking-bad.jpg",
                 Map.of(1, 2));
-        when(scheduleReader.readSeries("1396", "BR", "pt-BR"))
+        when(scheduleReader.readCalendarSeries("1396", "BR", "pt-BR"))
                 .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.REMOTE,
                         Map.of(1, TmdbLookupOrigin.REMOTE)));
 

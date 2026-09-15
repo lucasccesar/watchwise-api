@@ -41,7 +41,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
             return new CalendarScheduleLookup.NotFound();
         }
         return mapSeason(
-                scheduleReader.readSeason(seriesTmdbId, seasonNumber, region, language),
+                scheduleReader.readCalendarSeason(seriesTmdbId, seasonNumber, region, language),
                 seriesTmdbId,
                 seasonNumber,
                 region,
@@ -50,7 +50,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
 
     @Override
     public CalendarScheduleLookup loadSeries(String seriesTmdbId, String region, String language) {
-        return mapSeries(scheduleReader.readSeries(seriesTmdbId, region, language), seriesTmdbId, region, language);
+        return mapSeries(scheduleReader.readCalendarSeries(seriesTmdbId, region, language), seriesTmdbId, region, language);
     }
 
     private CalendarScheduleLookup mapMovie(

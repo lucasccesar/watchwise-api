@@ -974,6 +974,7 @@ class DiaryEntryRepositoryTest {
         Content targetSeason = contentRepository.save(buildSeason("1399", 1));
         Content targetSeries = contentRepository.save(buildContent("1399", ContentType.SERIES));
         Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        Content marinaOnlyEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
 
         diaryEntryRepository.save(buildEntry(lucas, fightClub));
         diaryEntryRepository.save(buildEntry(lucas, targetSeason));
@@ -982,7 +983,7 @@ class DiaryEntryRepositoryTest {
         diaryEntryRepository.save(buildEntry(lucas, targetEpisode, 2));
         diaryEntryRepository.save(buildEntry(lucas, secondTargetEpisode));
         diaryEntryRepository.save(buildEntry(lucas, otherSeriesEpisode));
-        diaryEntryRepository.saveAndFlush(buildEntry(marina, targetEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(marina, marinaOnlyEpisode));
         entityManager.clear();
 
         Set<WatchedEpisodeCoordinate> result = diaryEntryRepository.findWatchedEpisodeCoordinates(
