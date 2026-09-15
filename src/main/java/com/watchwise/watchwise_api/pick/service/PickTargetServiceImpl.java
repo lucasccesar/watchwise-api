@@ -83,8 +83,76 @@ public class PickTargetServiceImpl implements PickTargetService {
         if (!matchesCategory(category, target.key())) {
             return false;
         }
-        return category.getOptionMode() != PickCategoryOptionMode.FIXED
-                || optionRepository.findByCategoryId(category.getId()).stream().anyMatch(option -> matches(option, target));
+        if (category.getOptionMode() == PickCategoryOptionMode.FIXED
+                && optionRepository.findByCategoryId(category.getId()).stream()
+                .noneMatch(option -> matches(option, target))) {
+            return false;
+        }
+        if (!isCurrentTargetValid(template, target)) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isCurrentTargetValid(PicksTemplate template, ResolvedPickTarget target) {
+        if (target.key().personTmdbId() != null) {
+            if (!currentPersonExists(target.key().personTmdbId())) {
+                return false;
+            }
+            return target.key().contextContent() == null
+                    || validateCurrentContent(target.key().contextContent()).exists();
+        }
+
+        CurrentContentValidation currentContent = validateCurrentContent(target.key().content());
+        if (!currentContent.exists()) {
+            return false;
+        }
+        return isWithinEligibilityPeriod(template, currentContent.date());
+    }
+
+    private boolean currentPersonExists(String personTmdbId) {
+        return lookupValue(tmdbClient.getPersonDetails(personTmdbId)) != null;
+    }
+
+    private CurrentContentValidation validateCurrentContent(ResolvedPickTarget.ContentKey key) {
+        if (!hasValidContentIdentity(key)) {
+            return new CurrentContentValidation(false, null);
+        }
+        return switch (key.type()) {
+            case MOVIE -> currentMovie(key.tmdbId());
+            case SERIES -> currentSeries(key.tmdbId());
+            case EPISODE -> currentEpisode(key.seriesTmdbId(), key.seasonNumber(), key.episodeNumber());
+            case SEASON -> new CurrentContentValidation(false, null);
+        };
+    }
+
+    private CurrentContentValidation currentMovie(String tmdbId) {
+        TmdbMovieFullDetails details = lookupValue(
+                tmdbClient.getMovieFullDetails(tmdbId, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+        return details == null ? new CurrentContentValidation(false, null)
+                : new CurrentContentValidation(true, parseDate(details.releaseDate()));
+    }
+
+    private CurrentContentValidation currentSeries(String tmdbId) {
+        TmdbTvFullDetails details = lookupValue(
+                tmdbClient.getTvFullDetails(tmdbId, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+        return details == null ? new CurrentContentValidation(false, null)
+                : new CurrentContentValidation(true, parseDate(details.firstAirDate()));
+    }
+
+    private CurrentContentValidation currentEpisode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        TmdbEpisodeFullDetails details = lookupValue(tmdbClient.getEpisodeFullDetails(
+                seriesTmdbId, seasonNumber, episodeNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+        return details == null ? new CurrentContentValidation(false, null)
+                : new CurrentContentValidation(true, parseDate(details.airDate()));
+    }
+
+    private boolean isWithinEligibilityPeriod(PicksTemplate template, LocalDate date) {
+        if (template == null || template.getEligibilityStartDate() == null || template.getEligibilityEndDate() == null) {
+            return true;
+        }
+        return date != null && !date.isBefore(template.getEligibilityStartDate())
+                && !date.isAfter(template.getEligibilityEndDate());
     }
 
     private ResolvedPickTarget resolveFixedSelection(PicksTemplateCategory category, PickTargetDTO target) {
@@ -221,14 +289,28 @@ public class PickTargetServiceImpl implements PickTargetService {
             return false;
         }
         if (category.getAllowedType() == PickAllowedType.PERSON) {
-            return key.content() == null && hasText(key.personTmdbId()) && isContextKey(key.contextContent());
+            return key.content() == null && isNumericIdentity(key.personTmdbId()) && isContextKey(key.contextContent());
         }
-        return key.personTmdbId() == null && key.contextContent() == null && key.content() != null
+        return key.personTmdbId() == null && key.contextContent() == null && hasValidContentIdentity(key.content())
                 && key.content().type() == contentType(category.getAllowedType());
     }
 
     private boolean isContextKey(ResolvedPickTarget.ContentKey key) {
-        return key == null || key.type() == ContentType.MOVIE || key.type() == ContentType.SERIES || key.type() == ContentType.EPISODE;
+        return key == null || hasValidContentIdentity(key);
+    }
+
+    private boolean hasValidContentIdentity(ResolvedPickTarget.ContentKey key) {
+        if (key == null || key.type() == null) {
+            return false;
+        }
+        return switch (key.type()) {
+            case MOVIE, SERIES -> isNumericIdentity(key.tmdbId()) && key.seriesTmdbId() == null
+                    && key.seasonNumber() == null && key.episodeNumber() == null;
+            case EPISODE -> key.tmdbId() == null && isNumericIdentity(key.seriesTmdbId())
+                    && key.seasonNumber() != null && key.seasonNumber() >= 0
+                    && key.episodeNumber() != null && key.episodeNumber() > 0;
+            case SEASON -> false;
+        };
     }
 
     private ResolvedPickTarget fromSelection(PickSelection selection) {
@@ -268,10 +350,14 @@ public class PickTargetServiceImpl implements PickTargetService {
 
     private String numericIdentity(String value, String message) {
         String normalized = trim(value);
-        if (normalized == null || !normalized.matches("[0-9]+")) {
+        if (!isNumericIdentity(normalized)) {
             throw new BadRequestException(message);
         }
         return normalized;
+    }
+
+    private boolean isNumericIdentity(String value) {
+        return value != null && value.matches("[0-9]+");
     }
 
     private boolean hasText(String value) {
@@ -302,5 +388,18 @@ public class PickTargetServiceImpl implements PickTargetService {
             throw new TmdbUnavailableException("TMDB is currently unavailable");
         }
         return result.toOptional().orElseThrow(() -> new NotFoundException(targetType + " was not found in TMDB"));
+    }
+
+    private <T> T lookupValue(TmdbLookupResult<T> result) {
+        if (result == null) {
+            return null;
+        }
+        if (result.isUnavailable()) {
+            throw new TmdbUnavailableException("TMDB is currently unavailable");
+        }
+        return result.toOptional().orElse(null);
+    }
+
+    private record CurrentContentValidation(boolean exists, LocalDate date) {
     }
 }

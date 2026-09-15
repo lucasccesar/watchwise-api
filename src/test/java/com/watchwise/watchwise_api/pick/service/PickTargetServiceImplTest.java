@@ -241,6 +241,8 @@ class PickTargetServiceImplTest {
         PicksTemplateOption option = PicksTemplateOption.builder().category(category).content(content).build();
         PickSelection selection = PickSelection.builder().category(category).content(content).build();
         when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(option));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("1999-03-31")));
 
         assertThat(service.isValid(UUID.randomUUID(), template, category, selection)).isTrue();
 
@@ -248,9 +250,227 @@ class PickTargetServiceImplTest {
         assertThat(service.isValid(UUID.randomUUID(), template, category, selection)).isFalse();
     }
 
+    @Test
+    void shouldValidatePersistedOpenMovieAgainstCurrentTmdbDate() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN);
+        Content content = content("550", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("2024-06-01")));
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isTrue();
+        verify(tmdbClient).getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    void shouldInvalidatePersistedOpenContentOutsideTheCurrentPeriod() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.SERIES, PickCategoryOptionMode.OPEN);
+        Content content = content("1399", ContentType.SERIES, null, null, null);
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(tv("2023-12-31")));
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isFalse();
+        verify(tmdbClient).getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    void shouldInvalidatePersistedOpenContentWhenTmdbDateIsMissing() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN);
+        Content content = content("550", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie(null)));
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isFalse();
+    }
+
+    @Test
+    void shouldInvalidatePersistedOpenContentWhenTmdbCannotFindIt() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN);
+        Content content = content("404", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getMovieFullDetails("404", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isFalse();
+    }
+
+    @Test
+    void shouldAcceptInclusivePeriodBoundariesForPersistedContent() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN);
+        Content content = content("550", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("2024-01-01")), found(movie("2024-12-31")));
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isTrue();
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isTrue();
+    }
+
+    @Test
+    void shouldAllowMissingPersistedContentDateWhenTheTemplateHasNoCompletePeriod() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), null);
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN);
+        Content content = content("550", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie(null)));
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isTrue();
+    }
+
+    @Test
+    void shouldPropagateTmdbUnavailableWhenValidatingPersistedOpenContent() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.EPISODE, PickCategoryOptionMode.OPEN);
+        Content content = content(null, ContentType.EPISODE, "1399", 1, 2);
+        when(tmdbClient.getEpisodeFullDetails("1399", 1, 2, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        assertThatThrownBy(() -> service.isValid(UUID.randomUUID(), template, category, selection(category, content)))
+                .isInstanceOf(TmdbUnavailableException.class);
+    }
+
+    @Test
+    void shouldInvalidatePersistedPersonWhenTmdbCannotFindIt() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN);
+        when(tmdbClient.getPersonDetails("42")).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        PickSelection selection = PickSelection.builder().category(category).personTmdbId("42").build();
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection)).isFalse();
+    }
+
+    @Test
+    void shouldPropagateTmdbUnavailableWhenValidatingPersistedPerson() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN);
+        when(tmdbClient.getPersonDetails("42")).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        PickSelection selection = PickSelection.builder().category(category).personTmdbId("42").build();
+
+        assertThatThrownBy(() -> service.isValid(UUID.randomUUID(), template, category, selection))
+                .isInstanceOf(TmdbUnavailableException.class);
+    }
+
+    @Test
+    void shouldInvalidatePersistedPersonWhenItsContextCannotBeFound() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN);
+        Content context = content("404", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getPersonDetails("42")).thenReturn(found(new TmdbPersonDetails("42")));
+        when(tmdbClient.getMovieFullDetails("404", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
+
+        PickSelection selection = PickSelection.builder().category(category).personTmdbId("42")
+                .contextContent(context).build();
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection)).isFalse();
+    }
+
+    @Test
+    void shouldPropagateTmdbUnavailableWhenValidatingPersistedPersonContext() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN);
+        Content context = content("503", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getPersonDetails("42")).thenReturn(found(new TmdbPersonDetails("42")));
+        when(tmdbClient.getMovieFullDetails("503", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        PickSelection selection = PickSelection.builder().category(category).personTmdbId("42")
+                .contextContent(context).build();
+
+        assertThatThrownBy(() -> service.isValid(UUID.randomUUID(), template, category, selection))
+                .isInstanceOf(TmdbUnavailableException.class);
+    }
+
+    @Test
+    void shouldInvalidatePersistedSelectionWithMissingTmdbIdentity() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN);
+        Content content = content(null, ContentType.MOVIE, null, null, null);
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isFalse();
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    void shouldRecheckTmdbPeriodForFixedContentAfterTheTemplatePeriodChanges() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED);
+        Content content = content("550", ContentType.MOVIE, null, null, null);
+        PicksTemplateOption option = PicksTemplateOption.builder().category(category).content(content).build();
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("2023-06-01")));
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isFalse();
+        verify(tmdbClient).getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    void shouldRejectPersistedFixedSelectionBeforeTmdbWhenOptionWasRemoved() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED);
+        Content content = content("550", ContentType.MOVIE, null, null, null);
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of());
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection(category, content))).isFalse();
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    void shouldValidateOpenPersonAndContextButIgnoreContextDateEligibility() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN);
+        Content context = content("550", ContentType.MOVIE, null, null, null);
+        when(tmdbClient.getPersonDetails("42")).thenReturn(found(new TmdbPersonDetails("42")));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("1999-03-31")));
+
+        PickSelection selection = PickSelection.builder().category(category).personTmdbId("42").contextContent(context).build();
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection)).isTrue();
+        verify(tmdbClient).getPersonDetails("42");
+        verify(tmdbClient).getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    void shouldValidateFixedPersonMembershipAndIgnoreContextDateEligibility() {
+        PicksTemplate template = template(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.FIXED);
+        Content context = content("550", ContentType.MOVIE, null, null, null);
+        PicksTemplateOption option = PicksTemplateOption.builder().category(category).personTmdbId("42")
+                .contextContent(context).build();
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(option));
+        when(tmdbClient.getPersonDetails("42")).thenReturn(found(new TmdbPersonDetails("42")));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("1999-03-31")));
+
+        PickSelection selection = PickSelection.builder().category(category).personTmdbId("42").contextContent(context).build();
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection)).isTrue();
+        verify(tmdbClient).getPersonDetails("42");
+        verify(tmdbClient).getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    void shouldInvalidatePersistedPersonWhenContextIsNotAContentTarget() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.OPEN);
+        Content invalidContext = content(null, ContentType.SEASON, "1399", 1, null);
+        PickSelection selection = PickSelection.builder().category(category).personTmdbId("42")
+                .contextContent(invalidContext).build();
+
+        assertThat(service.isValid(UUID.randomUUID(), template, category, selection)).isFalse();
+        verifyNoInteractions(tmdbClient, contentService);
+    }
+
     private PickTargetDTO contentTarget(PickAllowedType type, String tmdbId, String seriesTmdbId,
                                         Integer seasonNumber, Integer episodeNumber) {
         return new PickTargetDTO(new PickContentTargetDTO(type, tmdbId, seriesTmdbId, seasonNumber, episodeNumber), null, null);
+    }
+
+    private PickSelection selection(PicksTemplateCategory category, Content content) {
+        return PickSelection.builder().category(category).content(content).build();
     }
 
     private PicksTemplate template(LocalDate start, LocalDate end) {
