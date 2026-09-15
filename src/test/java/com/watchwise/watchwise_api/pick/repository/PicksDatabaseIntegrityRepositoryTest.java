@@ -38,6 +38,8 @@ class PicksDatabaseIntegrityRepositoryTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    private long nextContentTmdbId = 1;
+
     @Test
     @DisplayName("[picks_templates] Should Reject An Eligibility End Date Before Its Start Date")
     void shouldRejectEligibilityEndDateBeforeStartDate() {
@@ -309,10 +311,11 @@ class PicksDatabaseIntegrityRepositoryTest {
     private UUID insertContent() {
         UUID id = UUID.randomUUID();
         LocalDateTime now = LocalDateTime.now();
+        String tmdbId = Long.toString(nextContentTmdbId++);
         jdbcTemplate.update("""
                 INSERT INTO contents (id, tmdb_id, type, created_at, updated_at)
                 VALUES (?, ?, 'MOVIE', ?, ?)
-                """, id, id.toString(), now, now);
+                """, id, tmdbId, now, now);
         return id;
     }
 
