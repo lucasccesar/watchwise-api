@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.pickstemplate.controller;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionDTO;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateOptionService;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @ExtendWith(MockitoExtension.class)
 class PicksTemplateOptionControllerTest {
@@ -41,14 +43,34 @@ class PicksTemplateOptionControllerTest {
         UUID categoryId = UUID.randomUUID();
         UUID optionId = UUID.randomUUID();
         when(service.addOption(eq(actorId), eq(templateId), eq(categoryId), any())).thenReturn(new PicksTemplateOptionDTO(optionId, null, null));
-        when(service.searchOptions(actorId, templateId, categoryId, "Ada", null, null, 1, 20))
-                .thenReturn(new PageImpl<>(List.<PickOptionSearchDTO>of(), PageRequest.of(0, 20), 0));
+        when(service.searchOptions(actorId, templateId, categoryId, "Ada", null, null, 1, 40))
+                .thenReturn(new PageImpl<>(List.<PickOptionSearchDTO>of(), PageRequest.of(0, 40), 200));
 
         mockMvc.perform(post("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"target\":{\"content\":{\"type\":\"MOVIE\",\"tmdbId\":\"550\"}}}")).andExpect(status().isCreated());
         mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId)
-                        .param("q", "Ada").param("page", "1").param("size", "20")).andExpect(status().isOk());
+                        .param("q", "Ada").param("page", "1").param("size", "40"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(40))
+                .andExpect(jsonPath("$.totalElements").value(200))
+                .andExpect(jsonPath("$.totalPages").value(5))
+                .andExpect(jsonPath("$.hasNext").value(true));
         mockMvc.perform(delete("/picks-templates/{templateId}/categories/{categoryId}/options/{optionId}", templateId, categoryId, optionId)).andExpect(status().isNoContent());
-        verify(service).searchOptions(actorId, templateId, categoryId, "Ada", null, null, 1, 20);
+        verify(service).searchOptions(actorId, templateId, categoryId, "Ada", null, null, 1, 40);
+    }
+
+    @Test void shouldReturnBadRequestForMissingOrBlankOpenSearchQuery() throws Exception {
+        UUID templateId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+        when(service.searchOptions(eq(actorId), eq(templateId), eq(categoryId), isNull(), isNull(), isNull(), isNull(), isNull()))
+                .thenThrow(new BadRequestException("q must be provided"));
+        when(service.searchOptions(eq(actorId), eq(templateId), eq(categoryId), eq("   "), isNull(), isNull(), isNull(), isNull()))
+                .thenThrow(new BadRequestException("q must be provided"));
+
+        mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId).param("q", "   "))
+                .andExpect(status().isBadRequest());
     }
 }

@@ -127,7 +127,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         TmdbSearchPage<TmdbMovieSearchResult> searchPage = searchPageOrEmpty(lookup);
         List<PickOptionSearchDTO> options = searchPage.results().stream().map(movie ->
                 new PickOptionSearchDTO(null, content(movie.id(), ContentType.MOVIE), null, null)).toList();
-        return new PageImpl<>(options, pageRequest, searchPage.totalResults());
+        return externalPage(searchPage, pageRequest, options);
     }
 
     private Page<PickOptionSearchDTO> seriesOptions(String query, int page, PageRequest pageRequest) {
@@ -136,7 +136,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         TmdbSearchPage<TmdbTvSearchResult> searchPage = searchPageOrEmpty(lookup);
         List<PickOptionSearchDTO> options = searchPage.results().stream().map(series ->
                 new PickOptionSearchDTO(null, content(series.id(), ContentType.SERIES), null, null)).toList();
-        return new PageImpl<>(options, pageRequest, searchPage.totalResults());
+        return externalPage(searchPage, pageRequest, options);
     }
 
     private Page<PickOptionSearchDTO> personOptions(String query, int page, PageRequest pageRequest) {
@@ -145,7 +145,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         TmdbSearchPage<TmdbPersonSearchResult> searchPage = searchPageOrEmpty(lookup);
         List<PickOptionSearchDTO> options = searchPage.results().stream()
                 .map(person -> new PickOptionSearchDTO(null, null, person.id(), null)).toList();
-        return new PageImpl<>(options, pageRequest, searchPage.totalResults());
+        return externalPage(searchPage, pageRequest, options);
     }
 
     private Page<PickOptionSearchDTO> openEpisodes(String seriesTmdbId, Integer seasonNumber, PageRequest pageRequest) {
@@ -168,6 +168,31 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     private <T> TmdbSearchPage<T> searchPageOrEmpty(TmdbLookupResult<TmdbSearchPage<T>> lookup) {
         if (lookup.isUnavailable()) throw new TmdbUnavailableException("TMDB is currently unavailable");
         return lookup.toOptional().orElseGet(() -> new TmdbSearchPage<>(1, List.of(), 0, 0));
+    }
+
+    private Page<PickOptionSearchDTO> externalPage(TmdbSearchPage<?> searchPage, PageRequest pageRequest,
+                                                    List<PickOptionSearchDTO> options) {
+        return new PageImpl<>(options, pageRequest, searchPage.totalResults()) {
+            @Override
+            public int getNumber() {
+                return Math.max(0, searchPage.page() - 1);
+            }
+
+            @Override
+            public int getTotalPages() {
+                return searchPage.totalPages();
+            }
+
+            @Override
+            public boolean hasNext() {
+                return searchPage.page() < searchPage.totalPages();
+            }
+
+            @Override
+            public boolean isLast() {
+                return !hasNext();
+            }
+        };
     }
 
     private PickOptionSearchDTO toEpisodeTarget(String seriesTmdbId, Integer seasonNumber, TmdbEpisodeSummary episode) {

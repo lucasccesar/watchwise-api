@@ -3,8 +3,10 @@ package com.watchwise.watchwise_api.pickstemplate.service.impl;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
 import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
@@ -47,18 +49,53 @@ class PicksTemplateOptionServiceImplTest {
         UUID viewerId = UUID.randomUUID();
         PicksTemplateCategory category = category();
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
-        when(pageRequestFactory.build(2, 20)).thenReturn(PageRequest.of(1, 20));
+        when(pageRequestFactory.build(2, 40)).thenReturn(PageRequest.of(1, 40));
         when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 2))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(2,
                         List.of(new TmdbPersonSearchResult("42", "Ada", null)), 5, 81)));
 
-        Page<PickOptionSearchDTO> result = service.searchOptions(viewerId, category.getPicksTemplate().getId(), category.getId(), "Ada", null, null, 2, 20);
+        Page<PickOptionSearchDTO> result = service.searchOptions(viewerId, category.getPicksTemplate().getId(), category.getId(), "Ada", null, null, 2, 40);
 
         assertThat(result.getContent()).extracting(PickOptionSearchDTO::personTmdbId).containsExactly("42");
         assertThat(result.getTotalElements()).isEqualTo(81);
+        assertThat(result.getTotalPages()).isEqualTo(5);
         assertThat(result.getNumber()).isEqualTo(1);
         assertThat(result.hasNext()).isTrue();
         verifyNoInteractions(optionRepository);
+    }
+
+    @Test
+    void shouldPreserveMovieTmdbPageMetadataWithNonDefaultSize() {
+        PicksTemplateCategory category = category(PickAllowedType.MOVIE);
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
+        when(pageRequestFactory.build(3, 40)).thenReturn(PageRequest.of(2, 40));
+        when(tmdbClient.searchMovies("Fight", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 3))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(3,
+                        List.of(new TmdbMovieSearchResult("550", "Fight Club", null, "1999-10-15")), 5, 81)));
+
+        Page<PickOptionSearchDTO> result = service.searchOptions(UUID.randomUUID(), category.getPicksTemplate().getId(), category.getId(), "Fight", null, null, 3, 40);
+
+        assertThat(result.getTotalElements()).isEqualTo(81);
+        assertThat(result.getTotalPages()).isEqualTo(5);
+        assertThat(result.getNumber()).isEqualTo(2);
+        assertThat(result.hasNext()).isTrue();
+    }
+
+    @Test
+    void shouldPreserveSeriesTmdbPageMetadataWithSmallNonDefaultSize() {
+        PicksTemplateCategory category = category(PickAllowedType.SERIES);
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
+        when(pageRequestFactory.build(2, 5)).thenReturn(PageRequest.of(1, 5));
+        when(tmdbClient.searchTv("Breaking", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 2))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(2,
+                        List.of(new TmdbTvSearchResult("1396", "Breaking Bad", null, "2008-01-20")), 5, 81)));
+
+        Page<PickOptionSearchDTO> result = service.searchOptions(UUID.randomUUID(), category.getPicksTemplate().getId(), category.getId(), "Breaking", null, null, 2, 5);
+
+        assertThat(result.getTotalElements()).isEqualTo(81);
+        assertThat(result.getTotalPages()).isEqualTo(5);
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.hasNext()).isTrue();
     }
 
     @Test
@@ -91,10 +128,14 @@ class PicksTemplateOptionServiceImplTest {
     }
 
     private PicksTemplateCategory category() {
+        return category(PickAllowedType.PERSON);
+    }
+
+    private PicksTemplateCategory category(PickAllowedType allowedType) {
         PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).origin(PickOrigin.COMMUNITY).name("Awards")
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         return PicksTemplateCategory.builder().id(UUID.randomUUID()).picksTemplate(template).name("Best person")
-                .group(PickCategoryGroup.PRIMARY).displayOrder(1).allowedType(PickAllowedType.PERSON).optionMode(PickCategoryOptionMode.OPEN)
+                .group(PickCategoryGroup.PRIMARY).displayOrder(1).allowedType(allowedType).optionMode(PickCategoryOptionMode.OPEN)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
     }
 
