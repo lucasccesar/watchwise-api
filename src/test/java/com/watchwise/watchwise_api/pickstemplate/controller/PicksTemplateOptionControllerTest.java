@@ -16,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -43,21 +44,41 @@ class PicksTemplateOptionControllerTest {
         UUID categoryId = UUID.randomUUID();
         UUID optionId = UUID.randomUUID();
         when(service.addOption(eq(actorId), eq(templateId), eq(categoryId), any())).thenReturn(new PicksTemplateOptionDTO(optionId, null, null));
-        when(service.searchOptions(actorId, templateId, categoryId, "Ada", null, null, 1, 40))
-                .thenReturn(new PageImpl<>(List.<PickOptionSearchDTO>of(), PageRequest.of(0, 40), 200));
+        when(service.searchOptions(actorId, templateId, categoryId, "Ada", null, null, 2, 40))
+                .thenReturn(tmdbMetadataPage());
 
         mockMvc.perform(post("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"target\":{\"content\":{\"type\":\"MOVIE\",\"tmdbId\":\"550\"}}}")).andExpect(status().isCreated());
         mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId)
-                        .param("q", "Ada").param("page", "1").param("size", "40"))
+                        .param("q", "Ada").param("page", "2").param("size", "40"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.page").value(2))
                 .andExpect(jsonPath("$.size").value(40))
-                .andExpect(jsonPath("$.totalElements").value(200))
+                .andExpect(jsonPath("$.totalElements").value(81))
                 .andExpect(jsonPath("$.totalPages").value(5))
                 .andExpect(jsonPath("$.hasNext").value(true));
         mockMvc.perform(delete("/picks-templates/{templateId}/categories/{categoryId}/options/{optionId}", templateId, categoryId, optionId)).andExpect(status().isNoContent());
-        verify(service).searchOptions(actorId, templateId, categoryId, "Ada", null, null, 1, 40);
+        verify(service).searchOptions(actorId, templateId, categoryId, "Ada", null, null, 2, 40);
+    }
+
+    private Page<PickOptionSearchDTO> tmdbMetadataPage() {
+        PageRequest requestedPage = PageRequest.of(1, 40);
+        return new PageImpl<>(List.of(), requestedPage, 81) {
+            @Override
+            public int getNumber() {
+                return 1;
+            }
+
+            @Override
+            public int getTotalPages() {
+                return 5;
+            }
+
+            @Override
+            public boolean hasNext() {
+                return true;
+            }
+        };
     }
 
     @Test void shouldReturnBadRequestForMissingOrBlankOpenSearchQuery() throws Exception {
