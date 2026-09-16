@@ -71,11 +71,11 @@ public class PickSelectionServiceImpl implements PickSelectionService {
     @Transactional
     public void deleteSelection(UUID userId, UUID pickId, UUID categoryId) {
         Pick pick = findOwnedPickForUpdate(userId, pickId);
+        PickSelection selection = selectionRepository.findByPickIdAndCategoryIdForUpdate(pickId, categoryId)
+                .orElseThrow(() -> new NotFoundException("Pick selection not found"));
         if (selectionRepository.countByPickId(pickId) <= 1) {
             throw new ConflictException("A Pick must keep at least one selection");
         }
-        PickSelection selection = selectionRepository.findByPickIdAndCategoryIdForUpdate(pickId, categoryId)
-                .orElseThrow(() -> new NotFoundException("Pick selection not found"));
         selectionRepository.delete(selection);
         pick.setUpdatedAt(LocalDateTime.now());
     }

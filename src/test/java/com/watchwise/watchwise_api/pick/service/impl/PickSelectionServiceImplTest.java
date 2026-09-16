@@ -150,11 +150,26 @@ class PickSelectionServiceImplTest {
     @Test
     void shouldRejectDeletingTheLastSelection() {
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
+        when(selectionRepository.findByPickIdAndCategoryIdForUpdate(pick.getId(), movieCategory.getId()))
+                .thenReturn(Optional.of(selection(pick, movieCategory, content("550"))));
         when(selectionRepository.countByPickId(pick.getId())).thenReturn(1L);
 
         assertThatThrownBy(() -> service.deleteSelection(ownerId, pick.getId(), movieCategory.getId()))
                 .isInstanceOf(ConflictException.class);
 
+        verify(selectionRepository, never()).delete(any());
+    }
+
+    @Test
+    void shouldReportMissingSelectionBeforeLastSelectionConflict() {
+        when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
+        when(selectionRepository.findByPickIdAndCategoryIdForUpdate(pick.getId(), movieCategory.getId()))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.deleteSelection(ownerId, pick.getId(), movieCategory.getId()))
+                .isInstanceOf(NotFoundException.class);
+
+        verify(selectionRepository, never()).countByPickId(pick.getId());
         verify(selectionRepository, never()).delete(any());
     }
 
