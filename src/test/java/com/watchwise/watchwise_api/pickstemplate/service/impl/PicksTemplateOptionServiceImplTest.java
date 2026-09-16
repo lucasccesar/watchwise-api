@@ -132,14 +132,17 @@ class PicksTemplateOptionServiceImplTest {
 
         Page<PickOptionSearchDTO> fixedResult = service.searchOptions(viewerId, category.getPicksTemplate().getId(),
                 category.getId(), null, null, null, 2, 1);
+
+        assertThat(fixedResult.getTotalElements()).isEqualTo(2);
+        verify(optionRepository).findByCategoryId(category.getId(), pageRequest);
+        verify(optionRepository, never()).findByCategoryId(category.getId());
+        verifyNoInteractions(requestThrottler, tmdbClient);
+
         category.setOptionMode(PickCategoryOptionMode.OPEN);
         Page<PickOptionSearchDTO> openResult = service.searchOptions(viewerId, category.getPicksTemplate().getId(),
                 category.getId(), "Ada", null, null, 1, 20);
 
-        assertThat(fixedResult.getTotalElements()).isEqualTo(2);
         assertThat(openResult.getContent()).extracting(PickOptionSearchDTO::personTmdbId).containsExactly("84");
-        verify(optionRepository).findByCategoryId(category.getId(), pageRequest);
-        verify(optionRepository, never()).findByCategoryId(category.getId());
         InOrder inOrder = inOrder(requestThrottler, tmdbClient);
         inOrder.verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
         inOrder.verify(tmdbClient).searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1);
