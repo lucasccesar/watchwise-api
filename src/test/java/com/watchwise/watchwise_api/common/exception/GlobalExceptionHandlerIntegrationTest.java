@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.security.TokenType;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -59,6 +61,12 @@ class GlobalExceptionHandlerIntegrationTest {
     @MockitoBean
     private UserRepository userRepository;
 
+    @MockitoBean
+    private TmdbClient tmdbClient;
+
+    @MockitoBean(name = "tmdbRestClient")
+    private RestClient tmdbRestClient;
+
     @BeforeEach
     void setUp() {
         RequestThrottlerTestSupport.reset(requestThrottler);
@@ -83,6 +91,23 @@ class GlobalExceptionHandlerIntegrationTest {
                 .andExpect(jsonPath("$.error").value("Internal Server Error"))
                 .andExpect(jsonPath("$.message").value("An unexpected error occurred"))
                 .andExpect(jsonPath("$.path").value("/users/" + lookedUpUserId))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.title").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[handleTypeMismatch] Should Return ApiError, Not ProblemDetail - When A Pick Route Receives An Invalid UUID")
+    void shouldReturnApiErrorNotProblemDetailWhenAPickRouteReceivesAnInvalidUuid() throws Exception {
+        UUID userId = UUID.randomUUID();
+        when(userRepository.findSessionsInvalidatedAtById(any()))
+                .thenReturn(Optional.of(sessionsInvalidatedAtView(userId, null)));
+        String accessToken = jwtService.generateToken(userId, TokenType.ACCESS);
+
+        mockMvc.perform(get("/picks/not-a-uuid").cookie(new Cookie(CookieUtil.ACCESS_TOKEN_COOKIE, accessToken)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.path").value("/picks/not-a-uuid"))
                 .andExpect(jsonPath("$.detail").doesNotExist())
                 .andExpect(jsonPath("$.title").doesNotExist());
     }
