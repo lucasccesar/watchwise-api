@@ -1,12 +1,14 @@
 package com.watchwise.watchwise_api.pickstemplate.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionCreationDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionDTO;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateOptionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,12 +16,20 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import java.time.Duration;
 
 @RestController
 @RequestMapping("/picks-templates/{templateId}/categories/{categoryId}/options")
 @RequiredArgsConstructor
 public class PicksTemplateOptionController {
     private final PicksTemplateOptionService picksTemplateOptionService;
+    private final RequestThrottler requestThrottler;
+
+    @Value("${app.rate-limit.search.max-requests}")
+    private int searchMaxRequests;
+
+    @Value("${app.rate-limit.search.window-minutes}")
+    private long searchWindowMinutes;
 
     @PostMapping
     public ResponseEntity<PicksTemplateOptionDTO> addOption(@PathVariable UUID templateId, @PathVariable UUID categoryId,
@@ -32,7 +42,12 @@ public class PicksTemplateOptionController {
             @PathVariable UUID categoryId, @RequestParam(name = "q", required = false) String query,
             @RequestParam(required = false) String seriesTmdbId, @RequestParam(required = false) Integer seasonNumber,
             @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
-        Page<PickOptionSearchDTO> options = picksTemplateOptionService.searchOptions(currentUserId(), templateId, categoryId,
+        UUID currentUserId = currentUserId();
+        requestThrottler.checkAllowed(
+                "search|" + currentUserId,
+                searchMaxRequests,
+                Duration.ofMinutes(searchWindowMinutes));
+        Page<PickOptionSearchDTO> options = picksTemplateOptionService.searchOptions(currentUserId, templateId, categoryId,
                 query, seriesTmdbId, seasonNumber, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(options));
     }

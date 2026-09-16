@@ -125,6 +125,7 @@ class PicksTemplateOptionServiceImplTest {
         assertThat(result.getTotalElements()).isEqualTo(2);
         verify(optionRepository).findByCategoryId(category.getId(), pageRequest);
         verify(optionRepository, never()).findByCategoryId(category.getId());
+        verifyNoInteractions(tmdbClient);
     }
 
     private PicksTemplateCategory category() {
