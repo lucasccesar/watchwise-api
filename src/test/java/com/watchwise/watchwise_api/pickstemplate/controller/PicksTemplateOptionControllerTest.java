@@ -5,8 +5,6 @@ import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionDTO;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateOptionService;
 import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
-import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
-import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,7 +35,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class PicksTemplateOptionControllerTest {
     @Mock PicksTemplateOptionService service;
-    @Mock RequestThrottler requestThrottler;
     @InjectMocks PicksTemplateOptionController controller;
     MockMvc mockMvc;
     UUID actorId;
@@ -99,19 +96,4 @@ class PicksTemplateOptionControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
-    @Test void shouldThrottleExternalOptionSearchWithoutCallingTheSearchService() throws Exception {
-        UUID templateId = UUID.randomUUID();
-        UUID categoryId = UUID.randomUUID();
-        doThrow(new TooManyRequestsException("Too many requests. Try again later."))
-                .when(requestThrottler).checkAllowed(eq("search|" + actorId), anyInt(), any());
-
-        mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId)
-                        .param("q", "Alien"))
-                .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.status").value(429))
-                .andExpect(jsonPath("$.path").value("/picks-templates/" + templateId + "/categories/" + categoryId + "/options"));
-
-        verify(requestThrottler).checkAllowed(eq("search|" + actorId), anyInt(), any());
-        verifyNoInteractions(service);
-    }
 }

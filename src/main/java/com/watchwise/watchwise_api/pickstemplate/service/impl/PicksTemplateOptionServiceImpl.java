@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -36,6 +37,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -43,6 +45,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -59,6 +62,13 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     private final PicksTemplateOptionMapper optionMapper;
     private final PageRequestFactory pageRequestFactory;
     private final TmdbClient tmdbClient;
+    private final RequestThrottler requestThrottler;
+
+    @Value("${app.rate-limit.search.max-requests}")
+    private int searchMaxRequests;
+
+    @Value("${app.rate-limit.search.window-minutes}")
+    private long searchWindowMinutes;
 
     @Override
     @Transactional
@@ -85,6 +95,10 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
         if (category.getOptionMode() == PickCategoryOptionMode.FIXED) {
             return optionRepository.findByCategoryId(categoryId, pageRequest).map(optionMapper::picksTemplateOptionToSearchDto);
         }
+        requestThrottler.checkAllowed(
+                "search|" + viewerId,
+                searchMaxRequests,
+                Duration.ofMinutes(searchWindowMinutes));
         if (category.getAllowedType() != PickAllowedType.EPISODE && (query == null || query.isBlank())) {
             throw new BadRequestException("q must be provided for open movie, series and person searches");
         }

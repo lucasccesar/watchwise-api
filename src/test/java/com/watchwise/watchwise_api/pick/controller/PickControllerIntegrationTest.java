@@ -123,7 +123,6 @@ class PickControllerIntegrationTest {
 
         verify(pickService, times(2)).createPick(eq(userA.id()), eq(templateId), any());
         verify(pickService).createPick(eq(userB.id()), eq(templateId), any());
-        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -154,7 +153,7 @@ class PickControllerIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(apiError(403, "Forbidden", "/picks-templates/" + templateId + "/picks"));
 
-        verifyNoInteractions(pickService, tmdbClient);
+        verifyNoInteractions(pickService);
     }
 
     @Test

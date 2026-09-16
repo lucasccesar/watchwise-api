@@ -1,8 +1,6 @@
 package com.watchwise.watchwise_api.pick.controller;
 
 import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
-import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
-import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
@@ -31,10 +29,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -44,7 +39,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class PickControllerTest {
     @Mock PickService pickService;
     @Mock PickSelectionService selectionService;
-    @Mock RequestThrottler requestThrottler;
     @InjectMocks PickController controller;
 
     MockMvc mockMvc;
@@ -109,60 +103,6 @@ class PickControllerTest {
 
         verify(pickService).deletePick(currentUserId, pickId);
         verify(selectionService).deleteSelection(currentUserId, pickId, categoryId);
-    }
-
-    @Test
-    void shouldRejectTheThirdPickCreationWithoutCallingThePickService() throws Exception {
-        UUID templateId = UUID.randomUUID();
-        UUID categoryId = UUID.randomUUID();
-        PickResponseDTO response = response(UUID.randomUUID(), templateId);
-        when(pickService.createPick(eq(currentUserId), eq(templateId), any())).thenReturn(response);
-        doNothing().doNothing().doThrow(new TooManyRequestsException("Too many requests. Try again later."))
-                .when(requestThrottler).checkAllowed(eq("pick-create|" + currentUserId), anyInt(), any());
-
-        String requestBody = """
-                {"visibility":"PUBLIC","selections":[{"categoryId":"%s","target":{"content":{"type":"MOVIE","tmdbId":"550"}}}]}
-                """.formatted(categoryId);
-
-        mockMvc.perform(post("/picks-templates/{templateId}/picks", templateId)
-                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
-                .andExpect(status().isCreated());
-        mockMvc.perform(post("/picks-templates/{templateId}/picks", templateId)
-                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
-                .andExpect(status().isCreated());
-        mockMvc.perform(post("/picks-templates/{templateId}/picks", templateId)
-                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
-                .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.status").value(429))
-                .andExpect(jsonPath("$.path").value("/picks-templates/" + templateId + "/picks"));
-
-        verify(requestThrottler, times(3)).checkAllowed(eq("pick-create|" + currentUserId), anyInt(), any());
-        verify(pickService, times(2)).createPick(eq(currentUserId), eq(templateId), any());
-    }
-
-    @Test
-    void shouldUseAnIndependentPickCreationThrottleKeyForEachAuthenticatedUser() throws Exception {
-        UUID templateId = UUID.randomUUID();
-        UUID categoryId = UUID.randomUUID();
-        UUID secondUserId = UUID.randomUUID();
-        when(pickService.createPick(any(), eq(templateId), any())).thenReturn(response(UUID.randomUUID(), templateId));
-
-        String requestBody = """
-                {"visibility":"PUBLIC","selections":[{"categoryId":"%s","target":{"content":{"type":"MOVIE","tmdbId":"550"}}}]}
-                """.formatted(categoryId);
-
-        mockMvc.perform(post("/picks-templates/{templateId}/picks", templateId)
-                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
-                .andExpect(status().isCreated());
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(secondUserId, null, List.of()));
-        mockMvc.perform(post("/picks-templates/{templateId}/picks", templateId)
-                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
-                .andExpect(status().isCreated());
-
-        verify(requestThrottler).checkAllowed(eq("pick-create|" + currentUserId), anyInt(), any());
-        verify(requestThrottler).checkAllowed(eq("pick-create|" + secondUserId), anyInt(), any());
-        verify(pickService, never()).getPick(any(), any());
     }
 
     private PickResponseDTO response(UUID pickId, UUID templateId) {

@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.pick.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
-import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
@@ -10,7 +9,6 @@ import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,30 +16,17 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
-import java.time.Duration;
 
 @RestController
 @RequiredArgsConstructor
 public class PickController {
     private final PickService pickService;
     private final PickSelectionService pickSelectionService;
-    private final RequestThrottler requestThrottler;
-
-    @Value("${app.rate-limit.pick-create.max-requests}")
-    private int pickCreateMaxRequests;
-
-    @Value("${app.rate-limit.pick-create.window-minutes}")
-    private long pickCreateWindowMinutes;
 
     @PostMapping("/picks-templates/{templateId}/picks")
     public ResponseEntity<PickResponseDTO> createPick(@PathVariable UUID templateId,
                                                       @Valid @RequestBody PickCreationDTO dto) {
-        UUID currentUserId = currentUserId();
-        requestThrottler.checkAllowed(
-                "pick-create|" + currentUserId,
-                pickCreateMaxRequests,
-                Duration.ofMinutes(pickCreateWindowMinutes));
-        return ResponseEntity.status(HttpStatus.CREATED).body(pickService.createPick(currentUserId, templateId, dto));
+        return ResponseEntity.status(HttpStatus.CREATED).body(pickService.createPick(currentUserId(), templateId, dto));
     }
 
     @GetMapping("/picks-templates/{templateId}/my-picks")

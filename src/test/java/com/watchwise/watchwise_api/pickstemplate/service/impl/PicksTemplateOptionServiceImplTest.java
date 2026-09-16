@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.pickstemplate.service.impl;
 
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
@@ -42,6 +43,7 @@ class PicksTemplateOptionServiceImplTest {
     @Mock PicksTemplateOptionMapper optionMapper;
     @Mock PageRequestFactory pageRequestFactory;
     @Mock TmdbClient tmdbClient;
+    @Mock RequestThrottler requestThrottler;
     @InjectMocks PicksTemplateOptionServiceImpl service;
 
     @Test
@@ -61,6 +63,7 @@ class PicksTemplateOptionServiceImplTest {
         assertThat(result.getTotalPages()).isEqualTo(5);
         assertThat(result.getNumber()).isEqualTo(1);
         assertThat(result.hasNext()).isTrue();
+        verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
         verifyNoInteractions(optionRepository);
     }
 
@@ -110,22 +113,33 @@ class PicksTemplateOptionServiceImplTest {
     }
 
     @Test
-    void shouldUseRepositoryPageableForFixedOptions() {
+    void shouldKeepFixedLookupOutOfTheThrottleBucketAndAllowTheFollowingOpenSearch() {
+        UUID viewerId = UUID.randomUUID();
         PicksTemplateCategory category = fixedCategory();
         PageRequest pageRequest = PageRequest.of(1, 1);
+        PageRequest openPageRequest = PageRequest.of(0, 20);
         PicksTemplateOption option = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category).personTmdbId("42")
                 .createdAt(LocalDateTime.now()).build();
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
         when(pageRequestFactory.build(2, 1)).thenReturn(pageRequest);
+        when(pageRequestFactory.build(1, 20)).thenReturn(openPageRequest);
         when(optionRepository.findByCategoryId(category.getId(), pageRequest)).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(option), pageRequest, 2));
         when(optionMapper.picksTemplateOptionToSearchDto(option)).thenReturn(new PickOptionSearchDTO(option.getId(), null, "42", null));
+        when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1,
+                        List.of(new TmdbPersonSearchResult("84", "Ada", null)), 1, 1)));
 
-        Page<PickOptionSearchDTO> result = service.searchOptions(UUID.randomUUID(), category.getPicksTemplate().getId(), category.getId(), null, null, null, 2, 1);
+        Page<PickOptionSearchDTO> fixedResult = service.searchOptions(viewerId, category.getPicksTemplate().getId(),
+                category.getId(), null, null, null, 2, 1);
+        category.setOptionMode(PickCategoryOptionMode.OPEN);
+        Page<PickOptionSearchDTO> openResult = service.searchOptions(viewerId, category.getPicksTemplate().getId(),
+                category.getId(), "Ada", null, null, 1, 20);
 
-        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(fixedResult.getTotalElements()).isEqualTo(2);
+        assertThat(openResult.getContent()).extracting(PickOptionSearchDTO::personTmdbId).containsExactly("84");
         verify(optionRepository).findByCategoryId(category.getId(), pageRequest);
         verify(optionRepository, never()).findByCategoryId(category.getId());
-        verifyNoInteractions(tmdbClient);
+        verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
     }
 
     private PicksTemplateCategory category() {

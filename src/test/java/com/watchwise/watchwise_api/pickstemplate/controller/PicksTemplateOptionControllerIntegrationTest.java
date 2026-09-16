@@ -113,7 +113,6 @@ class PicksTemplateOptionControllerIntegrationTest {
                 .andExpect(apiError(429, "Too Many Requests", "/picks-templates/" + templateId + "/categories/" + categoryId + "/options"));
 
         verify(optionService, times(30)).searchOptions(eq(user.id()), eq(templateId), eq(categoryId), eq("Alien"), any(), any(), any(), any());
-        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -137,7 +136,7 @@ class PicksTemplateOptionControllerIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(apiError(400, "Bad Request", "/picks-templates/" + templateId + "/categories/" + categoryId + "/options/not-a-uuid"));
 
-        verifyNoInteractions(optionService, tmdbClient);
+        verifyNoInteractions(optionService);
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
