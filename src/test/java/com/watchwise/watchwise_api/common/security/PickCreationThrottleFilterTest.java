@@ -17,6 +17,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -39,21 +40,20 @@ class PickCreationThrottleFilterTest {
         HandlerExceptionResolver exceptionResolver = mock(HandlerExceptionResolver.class);
         PickCreationThrottleFilter filter = new PickCreationThrottleFilter(
                 new RequestThrottler(Clock.systemUTC()), exceptionResolver, 2, 1);
-        MockHttpServletRequest malformedRequest = new MockHttpServletRequest(
-                "POST", "/picks-templates/not-a-uuid/picks");
         when(exceptionResolver.resolveException(any(), any(), isNull(), any(TooManyRequestsException.class)))
                 .thenAnswer(invocation -> {
                     ((MockHttpServletResponse) invocation.getArgument(1)).setStatus(429);
                     return new ModelAndView();
                 });
 
-        filter.doFilter(malformedRequest, new MockHttpServletResponse(), filterChain);
-        filter.doFilter(malformedRequest, new MockHttpServletResponse(), filterChain);
+        filter.doFilter(malformedPickCreationRequest(), new MockHttpServletResponse(), filterChain);
+        filter.doFilter(malformedPickCreationRequest(), new MockHttpServletResponse(), filterChain);
+        MockHttpServletRequest thirdRequest = malformedPickCreationRequest();
         MockHttpServletResponse thirdResponse = new MockHttpServletResponse();
-        filter.doFilter(malformedRequest, thirdResponse, filterChain);
+        filter.doFilter(thirdRequest, thirdResponse, filterChain);
 
         verify(filterChain, times(2)).doFilter(any(), any());
-        verify(exceptionResolver).resolveException(any(), any(), isNull(), any(TooManyRequestsException.class));
+        verify(exceptionResolver).resolveException(eq(thirdRequest), eq(thirdResponse), isNull(), any(TooManyRequestsException.class));
         assertThat(thirdResponse.getStatus()).isEqualTo(429);
     }
 
@@ -79,5 +79,9 @@ class PickCreationThrottleFilterTest {
                 org.mockito.ArgumentMatchers.eq(2),
                 org.mockito.ArgumentMatchers.eq(java.time.Duration.ofMinutes(1)));
         verify(filterChain, times(3)).doFilter(any(), any());
+    }
+
+    private MockHttpServletRequest malformedPickCreationRequest() {
+        return new MockHttpServletRequest("POST", "/picks-templates/not-a-uuid/picks");
     }
 }

@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -139,7 +140,9 @@ class PicksTemplateOptionServiceImplTest {
         assertThat(openResult.getContent()).extracting(PickOptionSearchDTO::personTmdbId).containsExactly("84");
         verify(optionRepository).findByCategoryId(category.getId(), pageRequest);
         verify(optionRepository, never()).findByCategoryId(category.getId());
-        verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
+        InOrder inOrder = inOrder(requestThrottler, tmdbClient);
+        inOrder.verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
+        inOrder.verify(tmdbClient).searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1);
     }
 
     private PicksTemplateCategory category() {

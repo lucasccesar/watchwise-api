@@ -127,31 +127,46 @@ class PickControllerIntegrationTest {
 
     @Test
     void shouldReturnApiErrorForPickBindingFailuresAndRejectMissingOrInvalidCsrf() throws Exception {
-        RegisteredUser user = registerUser("pickbindings");
+        RegisteredUser bindingUser = registerUser("pickbindings");
+        RegisteredUser mediaTypeUser = registerUser("pickmediatype");
+        RegisteredUser csrfUser = registerUser("pickcsrf");
         UUID templateId = UUID.randomUUID();
 
-        mockMvc.perform(createPickRequest(user, templateId).content("{"))
+        mockMvc.perform(createPickRequest(bindingUser, templateId).content("{"))
                 .andExpect(status().isBadRequest())
                 .andExpect(apiError(400, "Bad Request", "/picks-templates/" + templateId + "/picks"));
-        mockMvc.perform(createPickRequest(user, templateId).content("""
+        mockMvc.perform(createPickRequest(bindingUser, templateId).content("""
                 {"visibility":"UNKNOWN","selections":[{"categoryId":"%s","target":{"content":{"type":"MOVIE","tmdbId":"550"}}}]}
                 """.formatted(UUID.randomUUID())))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values: PUBLIC, FOLLOWERS, PRIVATE")))
                 .andExpect(apiError(400, "Bad Request", "/picks-templates/" + templateId + "/picks"));
-        mockMvc.perform(createPickRequest(user, templateId).contentType(MediaType.TEXT_PLAIN))
+        mockMvc.perform(createPickRequest(bindingUser, templateId))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(apiError(429, "Too Many Requests", "/picks-templates/" + templateId + "/picks"));
+
+        mockMvc.perform(createPickRequest(mediaTypeUser, templateId).contentType(MediaType.TEXT_PLAIN))
                 .andExpect(status().isUnsupportedMediaType())
                 .andExpect(apiError(415, "Unsupported Media Type", "/picks-templates/" + templateId + "/picks"));
+        mockMvc.perform(createPickRequest(mediaTypeUser, templateId).content("{"))
+                .andExpect(status().isBadRequest())
+                .andExpect(apiError(400, "Bad Request", "/picks-templates/" + templateId + "/picks"));
+        mockMvc.perform(createPickRequest(mediaTypeUser, templateId))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(apiError(429, "Too Many Requests", "/picks-templates/" + templateId + "/picks"));
 
         mockMvc.perform(post("/picks-templates/{templateId}/picks", templateId)
-                        .cookie(user.accessToken())
+                        .cookie(csrfUser.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validPickBody()))
                 .andExpect(status().isForbidden())
                 .andExpect(apiError(403, "Forbidden", "/picks-templates/" + templateId + "/picks"));
-        mockMvc.perform(createPickRequest(user, templateId).header("X-XSRF-TOKEN", "invalid"))
+        mockMvc.perform(createPickRequest(csrfUser, templateId).header("X-XSRF-TOKEN", "invalid"))
                 .andExpect(status().isForbidden())
                 .andExpect(apiError(403, "Forbidden", "/picks-templates/" + templateId + "/picks"));
+        mockMvc.perform(createPickRequest(csrfUser, templateId))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(apiError(429, "Too Many Requests", "/picks-templates/" + templateId + "/picks"));
 
         verifyNoInteractions(pickService);
     }
