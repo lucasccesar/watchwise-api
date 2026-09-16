@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +35,7 @@ public class PickSelectionServiceImpl implements PickSelectionService {
     private final PickRepository pickRepository;
     private final PickSelectionRepository selectionRepository;
     private final PicksTemplateCategoryRepository categoryRepository;
+    private final PicksTemplateRepository templateRepository;
     private final PickTargetService targetService;
     private final PickMapper pickMapper;
     private final PicksTemplateMapper templateMapper;
@@ -40,6 +43,10 @@ public class PickSelectionServiceImpl implements PickSelectionService {
     @Override
     @Transactional
     public PickResponseDTO upsertSelection(UUID userId, UUID pickId, UUID categoryId, PickTargetDTO target) {
+        UUID templateId = pickRepository.findOwnedTemplateId(pickId, userId)
+                .orElseThrow(() -> new NotFoundException("Pick not found"));
+        PicksTemplate template = templateRepository.findByIdForUpdate(templateId)
+                .orElseThrow(() -> new NotFoundException("Picks template not found"));
         Pick pick = findOwnedPickForUpdate(userId, pickId);
         PicksTemplateCategory category = categoryRepository.findByIdForUpdate(categoryId)
                 .orElseThrow(() -> new NotFoundException("Picks template category not found"));
@@ -47,7 +54,7 @@ public class PickSelectionServiceImpl implements PickSelectionService {
             throw new BadRequestException("Category does not belong to this Pick's template");
         }
 
-        ResolvedPickTarget resolved = targetService.validateForCategory(userId, pick.getPicksTemplate(), category, target);
+        ResolvedPickTarget resolved = targetService.validateForCategory(userId, template, category, target);
         selectionRepository.findByPickIdAndCategoryIdForUpdate(pickId, categoryId).ifPresent(existing -> {
             selectionRepository.delete(existing);
             selectionRepository.flush();

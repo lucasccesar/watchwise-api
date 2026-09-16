@@ -75,7 +75,7 @@ class PicksTemplateOptionServiceImplTest {
         when(pageRequestFactory.build(3, 40)).thenReturn(PageRequest.of(2, 40));
         when(tmdbClient.searchMovies("Fight", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 3))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(3,
-                        List.of(new TmdbMovieSearchResult("550", "Fight Club", null, "1999-10-15")), 5, 81)));
+                        java.util.Collections.nCopies(20, new TmdbMovieSearchResult("550", "Fight Club", null, "1999-10-15")), 5, 81)));
 
         Page<PickOptionSearchDTO> result = service.searchOptions(UUID.randomUUID(), category.getPicksTemplate().getId(), category.getId(), "Fight", null, null, 3, 40);
 
@@ -83,6 +83,31 @@ class PicksTemplateOptionServiceImplTest {
         assertThat(result.getTotalPages()).isEqualTo(5);
         assertThat(result.getNumber()).isEqualTo(2);
         assertThat(result.hasNext()).isTrue();
+        assertThat(result.getSize()).isEqualTo(40);
+        assertThat(result.getNumberOfElements()).isEqualTo(20);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("[searchOptions] Should Preserve External Total And Requested Size - When Last Page Uses Nondefault Size")
+    void shouldPreserveExternalTotalWhenLastPageUsesNondefaultSize() {
+        PicksTemplateCategory category = category();
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId()))
+                .thenReturn(Optional.of(category));
+        when(pageRequestFactory.build(5, 40)).thenReturn(PageRequest.of(4, 40));
+        when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 5))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(5,
+                        List.of(new TmdbPersonSearchResult("42", "Ada", null)), 5, 81)));
+
+        Page<PickOptionSearchDTO> result = service.searchOptions(UUID.randomUUID(), category.getPicksTemplate().getId(),
+                category.getId(), "Ada", null, null, 5, 40);
+        var response = com.watchwise.watchwise_api.common.dto.PageResponseDTO.of(result);
+
+        assertThat(response.totalElements()).isEqualTo(81);
+        assertThat(response.page()).isEqualTo(5);
+        assertThat(response.size()).isEqualTo(40);
+        assertThat(response.totalPages()).isEqualTo(5);
+        assertThat(response.hasNext()).isFalse();
+        assertThat(response.content()).hasSize(1);
     }
 
     @Test

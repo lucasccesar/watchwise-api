@@ -47,7 +47,16 @@ public class PickTargetServiceImpl implements PickTargetService {
             PickTargetDTO target) {
         requireCategory(category);
         if (category.getOptionMode() == PickCategoryOptionMode.FIXED) {
-            return resolveFixedSelection(category, target);
+            ResolvedPickTarget resolved = resolveFixedSelection(category, target);
+            if (resolved.personTmdbId() != null) {
+                requireFound(tmdbClient.getPersonDetails(resolved.personTmdbId()), "person");
+                if (resolved.key().contextContent() != null) {
+                    validateContentWithTmdb(resolved.key().contextContent());
+                }
+            } else {
+                ensureEligible(template, validateContentWithTmdb(resolved.key().content()));
+            }
+            return resolved;
         }
         return resolveTarget(template, category, target);
     }

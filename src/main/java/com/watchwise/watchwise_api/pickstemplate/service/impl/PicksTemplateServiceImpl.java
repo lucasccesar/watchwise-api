@@ -136,8 +136,11 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
                                     List<PicksTemplateOptionCreationDTO> options, LocalDateTime now) {
         if (options == null) return;
         for (PicksTemplateOptionCreationDTO optionDto : options) {
+            if (optionDto == null) {
+                throw new com.watchwise.watchwise_api.common.exception.BadRequestException("Fixed option must not be null");
+            }
             ResolvedPickTarget target = pickTargetService.validateFixedOption(actorId, template, category, optionDto.target());
-            optionRepository.save(PicksTemplateOption.builder().category(category).content(target.content())
+            FixedOptionPersistence.saveAndFlush(optionRepository, PicksTemplateOption.builder().category(category).content(target.content())
                     .personTmdbId(target.personTmdbId()).contextContent(target.contextContent()).createdAt(now).build());
         }
     }

@@ -15,4 +15,4 @@ public record PicksTemplateCategoryCreationDTO(@NotBlank @Size(max = 120) String
                                                 @NotNull @Positive Integer displayOrder,
                                                 @NotNull PickAllowedType allowedType,
                                                 @NotNull PickCategoryOptionMode optionMode,
-                                                List<@Valid PicksTemplateOptionCreationDTO> options) { }
+                                                List<@NotNull @Valid PicksTemplateOptionCreationDTO> options) { }

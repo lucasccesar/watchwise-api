@@ -45,6 +45,9 @@ class UserRepositoryTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private jakarta.persistence.EntityManager entityManager;
+
     @BeforeEach
     void setUp() {
         userRepository.deleteAll();
@@ -156,8 +159,8 @@ class UserRepositoryTest {
     }
 
     @Test
-    @DisplayName("[role] Should Read USER Role - When Existing User Was Migrated")
-    void shouldReadUserRoleWhenExistingUserWasMigrated() {
+    @DisplayName("[findById] Should Read USER Role - When SQL Insert Omits Role")
+    void shouldReadUserRoleWhenSqlInsertOmitsRole() {
         UUID userId = UUID.randomUUID();
         jdbcTemplate.update("""
                 INSERT INTO users (id, username, email, password, profile_picture)
@@ -171,12 +174,14 @@ class UserRepositoryTest {
     }
 
     @Test
-    @DisplayName("[role] Should Persist USER Role - When New User Has No Explicit Role")
+    @DisplayName("[saveAndFlush] Should Persist USER Role - When New User Has No Explicit Role")
     void shouldPersistUserRoleWhenNewUserHasNoExplicitRole() {
         User saved = userRepository.saveAndFlush(buildUser("role-default", "role-default@email.com", true));
+        entityManager.clear();
 
         User result = userRepository.findById(saved.getId()).orElseThrow();
 
+        assertThat(result).isNotSameAs(saved);
         assertThat(result.getRole()).isEqualTo(UserRole.USER);
     }
 

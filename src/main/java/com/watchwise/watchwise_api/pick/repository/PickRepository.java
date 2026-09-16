@@ -13,6 +13,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PickRepository extends JpaRepository<Pick, UUID> {
+    @Query("select pick.picksTemplate.id from Pick pick where pick.id = :id and pick.user.id = :userId")
+    Optional<UUID> findOwnedTemplateId(@Param("id") UUID id, @Param("userId") UUID userId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select pick from Pick pick where pick.id = :id")
     Optional<Pick> findByIdForUpdate(@Param("id") UUID id);

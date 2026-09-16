@@ -80,7 +80,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
             throw new BadRequestException("Open categories cannot receive fixed options");
         }
         ResolvedPickTarget target = pickTargetService.validateFixedOption(actorId, template, category, dto.target());
-        PicksTemplateOption saved = optionRepository.save(PicksTemplateOption.builder().category(category).content(target.content())
+        PicksTemplateOption saved = FixedOptionPersistence.saveAndFlush(optionRepository, PicksTemplateOption.builder().category(category).content(target.content())
                 .personTmdbId(target.personTmdbId()).contextContent(target.contextContent()).createdAt(LocalDateTime.now()).build());
         return toDto(saved);
     }
@@ -187,6 +187,11 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     private Page<PickOptionSearchDTO> externalPage(TmdbSearchPage<?> searchPage, PageRequest pageRequest,
                                                     List<PickOptionSearchDTO> options) {
         return new PageImpl<>(options, pageRequest, searchPage.totalResults()) {
+            @Override
+            public long getTotalElements() {
+                return searchPage.totalResults();
+            }
+
             @Override
             public int getNumber() {
                 return Math.max(0, searchPage.page() - 1);

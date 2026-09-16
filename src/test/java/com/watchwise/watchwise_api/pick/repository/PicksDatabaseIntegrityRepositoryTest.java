@@ -41,6 +41,22 @@ class PicksDatabaseIntegrityRepositoryTest {
     private long nextContentTmdbId = 1;
 
     @Test
+    @DisplayName("[insertTemplate] Should Reject Incomplete Dates - When Only Start Is Present")
+    void shouldRejectStartWithoutEnd() {
+        assertThatThrownBy(() -> insertTemplate(null, LocalDate.of(2026, 1, 1), null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_picks_templates_dates");
+    }
+
+    @Test
+    @DisplayName("[insertTemplate] Should Reject Incomplete Dates - When Only End Is Present")
+    void shouldRejectEndWithoutStart() {
+        assertThatThrownBy(() -> insertTemplate(null, null, LocalDate.of(2026, 12, 31)))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_picks_templates_dates");
+    }
+
+    @Test
     @DisplayName("[picks_templates] Should Reject An Eligibility End Date Before Its Start Date")
     void shouldRejectEligibilityEndDateBeforeStartDate() {
         assertThatThrownBy(() -> insertTemplate(null, LocalDate.of(2026, 2, 1), LocalDate.of(2026, 1, 31)))

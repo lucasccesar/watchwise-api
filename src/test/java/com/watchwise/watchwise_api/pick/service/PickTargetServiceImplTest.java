@@ -133,18 +133,77 @@ class PickTargetServiceImplTest {
     }
 
     @Test
-    void shouldMatchFixedPersonOptionWithoutCallingTmdbOrContentService() {
+    void shouldValidateFixedPersonWithoutResolvingContentAgain() {
         PicksTemplate template = template(null, null);
         PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.FIXED);
         PicksTemplateOption option = PicksTemplateOption.builder().category(category).personTmdbId(" 42 ").build();
         when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(option));
+        when(tmdbClient.getPersonDetails("42")).thenReturn(found(new TmdbPersonDetails("42")));
 
         ResolvedPickTarget result = service.validateForCategory(UUID.randomUUID(), template, category,
                 new PickTargetDTO(null, "42", null));
 
         assertThat(result.personTmdbId()).isEqualTo("42");
         assertThat(service.matches(option, result)).isTrue();
-        verifyNoInteractions(tmdbClient, contentService, contentRepository);
+        verify(tmdbClient).getPersonDetails("42");
+        verifyNoInteractions(contentService, contentRepository);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("[validateForCategory] Should Reject Fixed Movie - When Period Changed Before First Use")
+    void shouldRejectFixedMovieWhenPeriodChangedBeforeFirstUse() {
+        PicksTemplate template = template(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED);
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(
+                PicksTemplateOption.builder().category(category)
+                        .content(content("550", ContentType.MOVIE, null, null, null)).build()));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("2025-06-01")));
+
+        assertThatThrownBy(() -> service.validateForCategory(UUID.randomUUID(), template, category,
+                contentTarget(PickAllowedType.MOVIE, "550", null, null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Content is outside the template eligibility period");
+        verifyNoInteractions(contentService, contentRepository);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("[validateForCategory] Should Reject Fixed Target - When Removed Or Unavailable")
+    void shouldRejectFixedTargetWhenRemovedOrUnavailable() {
+        PicksTemplate template = template(null, null);
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED);
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(
+                PicksTemplateOption.builder().category(category)
+                        .content(content("550", ContentType.MOVIE, null, null, null)).build()));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.NotFound<>(), new TmdbLookupResult.Unavailable<>());
+
+        assertThatThrownBy(() -> service.validateForCategory(UUID.randomUUID(), template, category,
+                contentTarget(PickAllowedType.MOVIE, "550", null, null, null)))
+                .isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> service.validateForCategory(UUID.randomUUID(), template, category,
+                contentTarget(PickAllowedType.MOVIE, "550", null, null, null)))
+                .isInstanceOf(TmdbUnavailableException.class);
+        verifyNoInteractions(contentService, contentRepository);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("[validateForCategory] Should Ignore Dates - When Fixed Person Has Context")
+    void shouldIgnoreDatesWhenFixedPersonHasContext() {
+        PicksTemplate template = template(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31));
+        PicksTemplateCategory category = category(template, PickAllowedType.PERSON, PickCategoryOptionMode.FIXED);
+        Content context = content("550", ContentType.MOVIE, null, null, null);
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(
+                PicksTemplateOption.builder().category(category).personTmdbId("42").contextContent(context).build()));
+        when(tmdbClient.getPersonDetails("42")).thenReturn(found(new TmdbPersonDetails("42")));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(found(movie("1999-03-31")));
+
+        ResolvedPickTarget result = service.validateForCategory(UUID.randomUUID(), template, category,
+                new PickTargetDTO(null, "42", new PickContentTargetDTO(PickAllowedType.MOVIE, "550", null, null, null)));
+
+        assertThat(result.contextContent()).isSameAs(context);
+        verifyNoInteractions(contentService, contentRepository);
     }
 
     @Test

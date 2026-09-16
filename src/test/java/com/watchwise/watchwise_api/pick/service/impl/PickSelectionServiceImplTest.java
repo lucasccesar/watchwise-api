@@ -62,7 +62,7 @@ class PickSelectionServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new PickSelectionServiceImpl(pickRepository, selectionRepository, categoryRepository,
-                targetService, pickMapper, templateMapper);
+                templateRepository, targetService, pickMapper, templateMapper);
         ownerId = UUID.randomUUID();
         template = template();
         movieCategory = category(template, PickAllowedType.MOVIE, PickCategoryOptionMode.FIXED, 1);
@@ -72,6 +72,7 @@ class PickSelectionServiceImplTest {
 
     @Test
     void shouldReplaceExistingSelectionForTheSameCategory() {
+        stubTemplateLock();
         Content oldContent = content("550");
         Content newContent = content("551");
         PickSelection existing = selection(pick, movieCategory, oldContent);
@@ -96,6 +97,7 @@ class PickSelectionServiceImplTest {
 
     @Test
     void shouldAllowReplacingSelectionInAFixedCategoryBecauseFreezeOnlyProtectsTemplateStructure() {
+        stubTemplateLock();
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
         when(categoryRepository.findByIdForUpdate(movieCategory.getId())).thenReturn(Optional.of(movieCategory));
         when(selectionRepository.findByPickIdAndCategoryIdForUpdate(pick.getId(), movieCategory.getId()))
@@ -114,6 +116,7 @@ class PickSelectionServiceImplTest {
 
     @Test
     void shouldPersistOpenPersonTargetWithContext() {
+        stubTemplateLock();
         Content context = content("550");
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
         when(categoryRepository.findByIdForUpdate(personCategory.getId())).thenReturn(Optional.of(personCategory));
@@ -185,6 +188,7 @@ class PickSelectionServiceImplTest {
 
     @Test
     void shouldReportInvalidSelectionsAfterTemplateRulesChange() {
+        stubTemplateLock();
         PickSelection selection = selection(pick, movieCategory, content("550"));
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
         when(categoryRepository.findByIdForUpdate(movieCategory.getId())).thenReturn(Optional.of(movieCategory));
@@ -199,6 +203,11 @@ class PickSelectionServiceImplTest {
 
         assertThat(result.progress()).isEqualTo(PickProgress.EMPTY);
         assertThat(result.selections()).extracting(PickSelectionDTO::isValid).containsExactly(false);
+    }
+
+    private void stubTemplateLock() {
+        when(pickRepository.findOwnedTemplateId(pick.getId(), ownerId)).thenReturn(Optional.of(template.getId()));
+        when(templateRepository.findByIdForUpdate(template.getId())).thenReturn(Optional.of(template));
     }
 
     private void stubAssembly(List<PickSelection> selections, boolean valid) {
