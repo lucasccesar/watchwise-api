@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateReposit
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -71,6 +72,7 @@ class PickSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[upsertSelection] Should Replace Existing Selection - When Category Already Has A Target")
     void shouldReplaceExistingSelectionForTheSameCategory() {
         stubTemplateLock();
         Content oldContent = content("550");
@@ -96,6 +98,7 @@ class PickSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[upsertSelection] Should Allow Replacement In Fixed Category - When Structure Is Already Used")
     void shouldAllowReplacingSelectionInAFixedCategoryBecauseFreezeOnlyProtectsTemplateStructure() {
         stubTemplateLock();
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
@@ -115,6 +118,7 @@ class PickSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[upsertSelection] Should Persist Person Context - When Open Category Receives A Person")
     void shouldPersistOpenPersonTargetWithContext() {
         stubTemplateLock();
         Content context = content("550");
@@ -138,6 +142,7 @@ class PickSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[deleteSelection] Should Delete Selection - When Another Selection Remains")
     void shouldDeleteOneSelectionWhenSeveralRemain() {
         PickSelection existing = selection(pick, movieCategory, content("550"));
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
@@ -151,6 +156,7 @@ class PickSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[deleteSelection] Should Reject Deletion - When It Is The Last Selection")
     void shouldRejectDeletingTheLastSelection() {
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
         when(selectionRepository.findByPickIdAndCategoryIdForUpdate(pick.getId(), movieCategory.getId()))
@@ -164,6 +170,7 @@ class PickSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[deleteSelection] Should Report Missing Selection - Before Checking Last-Selection Rule")
     void shouldReportMissingSelectionBeforeLastSelectionConflict() {
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
         when(selectionRepository.findByPickIdAndCategoryIdForUpdate(pick.getId(), movieCategory.getId()))
@@ -177,16 +184,23 @@ class PickSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[selectionMutations] Should Restrict Mutations - When Pick Belongs To Another User")
     void shouldRestrictSelectionMutationsToThePickOwner() {
+        UUID strangerId = UUID.randomUUID();
+        when(pickRepository.findOwnedTemplateId(pick.getId(), strangerId)).thenReturn(Optional.empty());
         when(pickRepository.findByIdForUpdate(pick.getId())).thenReturn(Optional.of(pick));
 
-        assertThatThrownBy(() -> service.upsertSelection(UUID.randomUUID(), pick.getId(), movieCategory.getId(), movieTarget("550")))
+        assertThatThrownBy(() -> service.upsertSelection(strangerId, pick.getId(), movieCategory.getId(), movieTarget("550")))
                 .isInstanceOf(NotFoundException.class);
-        assertThatThrownBy(() -> service.deleteSelection(UUID.randomUUID(), pick.getId(), movieCategory.getId()))
+        verify(pickRepository).findOwnedTemplateId(pick.getId(), strangerId);
+        verify(templateRepository, never()).findByIdForUpdate(any());
+
+        assertThatThrownBy(() -> service.deleteSelection(strangerId, pick.getId(), movieCategory.getId()))
                 .isInstanceOf(NotFoundException.class);
     }
 
     @Test
+    @DisplayName("[upsertSelection] Should Report Invalid Selection - When Template Rules Change")
     void shouldReportInvalidSelectionsAfterTemplateRulesChange() {
         stubTemplateLock();
         PickSelection selection = selection(pick, movieCategory, content("550"));

@@ -47,6 +47,62 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
     }
 
     @Test
+    @DisplayName("[createPick] Should Roll Back Pick And Selections - When Response Revalidation Cannot Reach TMDB")
+    void shouldRollBackPickAndSelectionsWhenResponseRevalidationIsUnavailable() throws Exception {
+        var template = template();
+        when(tmdb.getMovieFullDetails(eq("550"), anyString())).thenReturn(
+                new TmdbLookupResult.Found<>(movie("550", "2025-06-01")),
+                new TmdbLookupResult.Found<>(movie("550", "2025-06-01")),
+                new TmdbLookupResult.Unavailable<>());
+
+        mvc.perform(authenticated(owner, HttpMethod.POST, "/picks-templates/" + template.id() + "/picks", """
+                {"selections":[{"categoryId":"%s","target":{"content":{"type":"MOVIE","tmdbId":"550"}}}]}
+                """.formatted(template.movie())))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.status").value(502));
+
+        assertThat(picks.count()).isZero();
+        assertThat(selections.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("[upsertSelection] Should Persist Replacement And Keep Cardinality - When A Category Already Has A Selection")
+    void shouldPersistReplacementAndKeepCardinalityWhenCategoryAlreadyHasSelection() throws Exception {
+        var template = template();
+        var pick = personPick(template, PickVisibility.PUBLIC);
+        selectionService.upsertSelection(owner.getId(), pick.id(), template.movie(), movieTarget("550"));
+
+        selectionService.upsertSelection(owner.getId(), pick.id(), template.movie(), movieTarget("551"));
+
+        var persistedSelections = selections.findByPickIdIn(List.of(pick.id()));
+        assertThat(persistedSelections).hasSize(2);
+        assertThat(selectedMovieTmdbId(pick.id(), template.movie())).isEqualTo("551");
+    }
+
+    @Test
+    @DisplayName("[upsertSelection] Should Restore Existing Target - When Response Revalidation Fails After Replacement")
+    void shouldRestoreExistingTargetWhenResponseRevalidationFailsAfterReplacement() throws Exception {
+        var template = template();
+        var pick = personPick(template, PickVisibility.PUBLIC);
+        selectionService.upsertSelection(owner.getId(), pick.id(), template.movie(), movieTarget("550"));
+        when(tmdb.getMovieFullDetails(eq("551"), anyString())).thenReturn(
+                new TmdbLookupResult.Found<>(movie("551", "2025-06-01")),
+                new TmdbLookupResult.Found<>(movie("551", "2025-06-01")),
+                new TmdbLookupResult.Unavailable<>());
+
+        mvc.perform(authenticated(owner, HttpMethod.PUT,
+                "/picks/" + pick.id() + "/categories/" + template.movie() + "/selection", """
+                {"content":{"type":"MOVIE","tmdbId":"551"}}
+                """))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.status").value(502));
+
+        var persistedSelections = selections.findByPickIdIn(List.of(pick.id()));
+        assertThat(persistedSelections).hasSize(2);
+        assertThat(selectedMovieTmdbId(pick.id(), template.movie())).isEqualTo("550");
+    }
+
+    @Test
     @DisplayName("[getPick] Should Apply Pick Visibility And Accepted Followers - When Owner Profile Is Private")
     void shouldApplyPickVisibilityAndAcceptedFollowers() throws Exception {
         owner.setIsProfilePublic(false);
@@ -170,5 +226,14 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
         } catch (ConflictException exception) {
             return "conflict";
         }
+    }
+
+    private String selectedMovieTmdbId(java.util.UUID pickId, java.util.UUID categoryId) {
+        return jdbc.queryForObject("""
+                SELECT content.tmdb_id
+                FROM pick_selections selection
+                JOIN contents content ON content.id = selection.content_id
+                WHERE selection.pick_id = ? AND selection.category_id = ?
+                """, String.class, pickId, categoryId);
     }
 }
