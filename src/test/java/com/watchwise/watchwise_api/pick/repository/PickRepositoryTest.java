@@ -21,6 +21,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,8 +54,13 @@ class PickRepositoryTest {
     }
 
     private Pick save(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime createdAt, int likesCount) {
+        return save(null, user, template, visibility, createdAt, likesCount);
+    }
+
+    private Pick save(UUID id, User user, PicksTemplate template, PickVisibility visibility,
+                      LocalDateTime createdAt, int likesCount) {
         return repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(visibility)
-                .createdAt(createdAt).updatedAt(createdAt).likesCount(likesCount).build());
+                .id(id).createdAt(createdAt).updatedAt(createdAt).likesCount(likesCount).build());
     }
 
     @Test
@@ -66,9 +72,12 @@ class PickRepositoryTest {
         PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder()
                 .origin(PickOrigin.OFFICIAL).name("Template ranking").createdAt(now).updatedAt(now).build());
 
-        Pick publicPick = save(owner, template, PickVisibility.PUBLIC, now.plusHours(2), 1);
-        Pick followersPick = save(owner, template, PickVisibility.FOLLOWERS, now.plusHours(2), 1);
-        Pick privatePick = save(owner, template, PickVisibility.PRIVATE, now.plusHours(3), 10);
+        Pick publicPick = save(UUID.fromString("00000000-0000-0000-0000-000000000001"), owner, template,
+                PickVisibility.PUBLIC, now.plusHours(2), 1);
+        Pick followersPick = save(UUID.fromString("00000000-0000-0000-0000-000000000002"), owner, template,
+                PickVisibility.FOLLOWERS, now.plusHours(2), 1);
+        Pick privatePick = save(UUID.fromString("00000000-0000-0000-0000-000000000003"), owner, template,
+                PickVisibility.PRIVATE, now.plusHours(3), 10);
 
         followerRepository.saveAndFlush(Follower.builder().follower(follower).followed(owner)
                 .status(FollowStatus.ACCEPTED).createdAt(now).build());

@@ -119,6 +119,12 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
         jdbc.update("UPDATE followers SET status = 'ACCEPTED' WHERE follower_id = ?", other.getId());
         mvc.perform(authenticated(other, HttpMethod.GET, "/picks/" + followersPick.id(), "")).andExpect(status().isOk());
         mvc.perform(authenticated(other, HttpMethod.GET, "/picks/" + privatePick.id(), "")).andExpect(status().isForbidden());
+        mvc.perform(authenticated(owner, HttpMethod.GET, "/picks-templates/" + template.id() + "/picks", ""))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(3));
+        mvc.perform(authenticated(other, HttpMethod.GET, "/picks-templates/" + template.id() + "/picks", ""))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content[*].id").value(
+                        org.hamcrest.Matchers.containsInAnyOrder(publicPick.id().toString(), followersPick.id().toString())));
         mvc.perform(authenticated(other, HttpMethod.GET, "/users/" + owner.getId() + "/picks?templateId=" + template.id(), ""))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
         mvc.perform(authenticated(owner, HttpMethod.GET, "/picks-templates/" + template.id() + "/my-picks", ""))
@@ -199,7 +205,7 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
                 "POST " + template + "/categories", "PATCH " + category, "DELETE " + category,
                 "POST " + category + "/options", "GET " + category + "/options",
                 "DELETE " + category + "/options/" + id,
-                "POST " + template + "/picks", "GET " + template + "/my-picks",
+                "POST " + template + "/picks", "GET " + template + "/picks", "GET " + template + "/my-picks",
                 "GET " + pick, "PATCH " + pick, "DELETE " + pick, "GET /users/" + id + "/picks",
                 "PUT " + pick + "/categories/" + id + "/selection",
                 "DELETE " + pick + "/categories/" + id + "/selection");
