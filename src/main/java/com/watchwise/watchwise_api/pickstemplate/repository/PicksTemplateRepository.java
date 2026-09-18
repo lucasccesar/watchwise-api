@@ -74,6 +74,32 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
             select template from PicksTemplate template
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+              and (
+                  (select count(weeklyLike) from Like weeklyLike
+                   where weeklyLike.picksTemplate = template
+                     and weeklyLike.createdAt >= :since
+                     and weeklyLike.createdAt <= current_timestamp)
+                  +
+                  (select count(weeklyComment) from Comment weeklyComment
+                   where weeklyComment.picksTemplate = template
+                     and weeklyComment.createdAt >= :since
+                     and weeklyComment.createdAt <= current_timestamp)
+                  +
+                  (select count(weeklyPick) from Pick weeklyPick
+                   where weeklyPick.picksTemplate = template
+                     and weeklyPick.createdAt >= :since
+                     and weeklyPick.createdAt <= current_timestamp
+                     and (weeklyPick.user.id = :viewerId
+                       or weeklyPick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
+                       or (weeklyPick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS
+                           and exists (
+                               select weeklyFollower.id from Follower weeklyFollower
+                               where weeklyFollower.follower.id = :viewerId
+                                 and weeklyFollower.followed.id = weeklyPick.user.id
+                                 and weeklyFollower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                           )))
+                  )
+              ) > 0
             order by (
                 (select count(templateLike) from Like templateLike
                  where templateLike.picksTemplate = template
@@ -105,6 +131,32 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
                     select count(template) from PicksTemplate template
                     where (:origin is null or template.origin = :origin)
                       and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+                      and (
+                          (select count(weeklyLike) from Like weeklyLike
+                           where weeklyLike.picksTemplate = template
+                             and weeklyLike.createdAt >= :since
+                             and weeklyLike.createdAt <= current_timestamp)
+                          +
+                          (select count(weeklyComment) from Comment weeklyComment
+                           where weeklyComment.picksTemplate = template
+                             and weeklyComment.createdAt >= :since
+                             and weeklyComment.createdAt <= current_timestamp)
+                          +
+                          (select count(weeklyPick) from Pick weeklyPick
+                           where weeklyPick.picksTemplate = template
+                             and weeklyPick.createdAt >= :since
+                             and weeklyPick.createdAt <= current_timestamp
+                             and (weeklyPick.user.id = :viewerId
+                               or weeklyPick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
+                               or (weeklyPick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS
+                                   and exists (
+                                       select weeklyFollower.id from Follower weeklyFollower
+                                       where weeklyFollower.follower.id = :viewerId
+                                         and weeklyFollower.followed.id = weeklyPick.user.id
+                                         and weeklyFollower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                                   )))
+                          )
+                      ) > 0
                     """)
     Page<PicksTemplate> searchPopularWeek(@Param("viewerId") UUID viewerId,
                                           @Param("since") LocalDateTime since,

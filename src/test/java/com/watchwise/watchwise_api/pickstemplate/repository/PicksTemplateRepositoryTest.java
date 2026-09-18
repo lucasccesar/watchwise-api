@@ -169,8 +169,8 @@ class PicksTemplateRepositoryTest {
                 viewer.getId(), since, PickOrigin.OFFICIAL, null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(PicksTemplate::getName)
-                .containsExactly("Weekly high activity", "Weekly winner", "Weekly runner up", "Weekly tie high", "Weekly tie low", "Weekly third", "Weekly old only");
-        assertThat(result.getTotalElements()).isEqualTo(7);
+                .containsExactly("Weekly high activity", "Weekly winner", "Weekly runner up", "Weekly tie high", "Weekly tie low", "Weekly third");
+        assertThat(result.getTotalElements()).isEqualTo(6);
     }
 
     @Test
