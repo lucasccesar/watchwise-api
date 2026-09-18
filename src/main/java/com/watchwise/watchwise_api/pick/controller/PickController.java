@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.pick.controller;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
@@ -30,10 +31,10 @@ public class PickController {
     }
 
     @GetMapping("/picks-templates/{templateId}/my-picks")
-    public ResponseEntity<PageResponseDTO<PickResponseDTO>> getMyPicks(@PathVariable UUID templateId,
+    public ResponseEntity<PageResponseDTO<PickPreviewDTO>> getMyPicks(@PathVariable UUID templateId,
                                                                        @RequestParam(required = false) Integer page,
                                                                        @RequestParam(required = false) Integer size) {
-        Page<PickResponseDTO> picks = pickService.getMyPicks(currentUserId(), templateId, page, size);
+        Page<PickPreviewDTO> picks = pickService.getMyPicks(currentUserId(), templateId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(picks));
     }
 
@@ -55,11 +56,11 @@ public class PickController {
     }
 
     @GetMapping("/users/{userId}/picks")
-    public ResponseEntity<PageResponseDTO<PickResponseDTO>> getUserPicks(@PathVariable UUID userId,
+    public ResponseEntity<PageResponseDTO<PickPreviewDTO>> getUserPicks(@PathVariable UUID userId,
                                                                          @RequestParam(required = false) UUID templateId,
                                                                          @RequestParam(required = false) Integer page,
                                                                          @RequestParam(required = false) Integer size) {
-        Page<PickResponseDTO> picks = pickService.getUserPicks(currentUserId(), userId, templateId, page, size);
+        Page<PickPreviewDTO> picks = pickService.getUserPicks(currentUserId(), userId, templateId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(picks));
     }
 

@@ -47,6 +47,7 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
     private final PicksTemplateOptionMapper optionMapper;
     private final UserMapper userMapper;
     private final PageRequestFactory pageRequestFactory;
+    private final PicksTemplatePreviewAssembler previewAssembler;
 
     @Override
     @Transactional
@@ -66,20 +67,20 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
             PicksTemplateCategory savedCategory = categoryRepository.save(category);
             saveInitialOptions(actorId, saved, savedCategory, categoryDto.options(), now);
         }
-        return toResponse(saved);
+        return toResponse(saved, actorId);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<PicksTemplatePreviewDTO> listTemplates(UUID viewerId, PickOrigin origin, String name, Integer page, Integer size) {
         PageRequest pageRequest = pageRequestFactory.build(page, size);
-        return templateRepository.search(origin, escapeLike(name), pageRequest).map(templateMapper::picksTemplateToPreviewDto);
+        return previewAssembler.assemblePage(templateRepository.search(origin, escapeLike(name), pageRequest), viewerId);
     }
 
     @Override
     @Transactional(readOnly = true)
     public PicksTemplateResponseDTO getTemplate(UUID viewerId, UUID templateId) {
-        return toResponse(findTemplate(templateId));
+        return toResponse(findTemplate(templateId), viewerId);
     }
 
     @Override
@@ -94,7 +95,7 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
         }
         applyPatch(template, dto);
         template.setUpdatedAt(LocalDateTime.now());
-        return toResponse(template);
+        return toResponse(template, actorId);
     }
 
     @Override
@@ -209,15 +210,25 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
         return PicksTemplate.builder().id(template.getId()).creator(null).origin(template.getOrigin()).name(template.getName())
                 .description(template.getDescription()).coverImage(template.getCoverImage()).instructions(template.getInstructions())
                 .eligibilityStartDate(template.getEligibilityStartDate()).eligibilityEndDate(template.getEligibilityEndDate())
-                .createdAt(template.getCreatedAt()).updatedAt(LocalDateTime.now()).build();
+                .createdAt(template.getCreatedAt()).updatedAt(LocalDateTime.now()).likesCount(template.getLikesCount()).build();
     }
 
-    private PicksTemplateResponseDTO toResponse(PicksTemplate template) {
+    private PicksTemplateResponseDTO toResponse(PicksTemplate template, UUID viewerId) {
         List<PicksTemplateCategoryDTO> categories = categoryRepository
                 .findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId()).stream().map(this::toCategoryDto).toList();
+        var preview = previewAssembler == null
+                ? templateMapper.picksTemplateToPreviewDto(template)
+                : previewAssembler.assembleOne(template, viewerId);
+        if (preview == null) {
+            preview = new PicksTemplatePreviewDTO(template.getId(), null, template.getOrigin(), template.getName(),
+                    template.getDescription(), template.getCoverImage(), template.getCreatedAt(), 0, categories.size(),
+                    categories.stream().map(PicksTemplateCategoryDTO::name).toList(), template.getLikesCount(), 0, false, 0, null);
+        }
         return new PicksTemplateResponseDTO(template.getId(), template.getCreator() == null ? null : userMapper.userToUserPreviewDto(template.getCreator()),
                 template.getOrigin(), template.getName(), template.getDescription(), template.getCoverImage(), template.getInstructions(),
-                template.getEligibilityStartDate(), template.getEligibilityEndDate(), template.getCreatedAt(), template.getUpdatedAt(), categories);
+                template.getEligibilityStartDate(), template.getEligibilityEndDate(), template.getCreatedAt(), template.getUpdatedAt(), categories,
+                preview.picksCount(), preview.categoriesCount(), preview.categoryNames(), preview.likesCount(), preview.commentsCount(),
+                preview.isLikedByViewer(), preview.myPicksCount(), preview.latestMyPickId());
     }
 
     private PicksTemplateCategoryDTO toCategoryDto(PicksTemplateCategory category) {

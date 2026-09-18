@@ -42,5 +42,15 @@ public interface PicksTemplateMapper {
     @Mapping(source = "name", target = "name")
     @Mapping(source = "description", target = "description")
     @Mapping(source = "coverImage", target = "coverImage")
+    @Mapping(target = "creator", ignore = true)
+    @Mapping(target = "createdAt", ignore = true)
+    @Mapping(target = "picksCount", ignore = true)
+    @Mapping(target = "categoriesCount", ignore = true)
+    @Mapping(target = "categoryNames", ignore = true)
+    @Mapping(target = "likesCount", ignore = true)
+    @Mapping(target = "commentsCount", ignore = true)
+    @Mapping(target = "isLikedByViewer", ignore = true)
+    @Mapping(target = "myPicksCount", ignore = true)
+    @Mapping(target = "latestMyPickId", ignore = true)
     PicksTemplatePreviewDTO picksTemplateToPreviewDto(PicksTemplate picksTemplate);
 }

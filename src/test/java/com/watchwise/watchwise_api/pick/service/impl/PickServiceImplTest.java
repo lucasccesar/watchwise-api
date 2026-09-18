@@ -82,7 +82,7 @@ class PickServiceImplTest {
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
         when(targetService.isValid(eq(userId), same(template), same(movie), any())).thenReturn(true);
-        when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
+        lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
 
         PickResponseDTO result = service.createPick(userId, template.getId(), request);
 
@@ -108,7 +108,7 @@ class PickServiceImplTest {
         stubSavedSelectionLookup();
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
         when(targetService.isValid(eq(userId), same(template), same(movie), any())).thenReturn(true);
-        when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
+        lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
 
         PickResponseDTO result = service.createPick(userId, template.getId(),
                 new PickCreationDTO(PickVisibility.PUBLIC, List.of(selectionRequest(movie.getId(), "550"))));
@@ -192,7 +192,7 @@ class PickServiceImplTest {
         when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(List.of(category));
         when(targetService.isValid(eq(userId), same(template), same(category), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
-        when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
+        lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
 
         var result = service.getMyPicks(userId, template.getId(), 1, 10);
 

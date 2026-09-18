@@ -35,6 +35,22 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
         long getCount();
     }
 
+    @Query("SELECT c.pick.id AS pickId, COUNT(c) AS count FROM Comment c WHERE c.pick.id IN :pickIds GROUP BY c.pick.id")
+    List<PickCommentCount> countByPickIdIn(@Param("pickIds") Collection<UUID> pickIds);
+
+    interface PickCommentCount {
+        UUID getPickId();
+        long getCount();
+    }
+
+    @Query("SELECT c.picksTemplate.id AS templateId, COUNT(c) AS count FROM Comment c WHERE c.picksTemplate.id IN :templateIds GROUP BY c.picksTemplate.id")
+    List<TemplateCommentCount> countByPicksTemplateIdIn(@Param("templateIds") Collection<UUID> templateIds);
+
+    interface TemplateCommentCount {
+        UUID getTemplateId();
+        long getCount();
+    }
+
     @Modifying
     @Query("UPDATE Comment c SET c.likesCount = c.likesCount + 1 WHERE c.id = :id")
     void incrementLikesCount(@Param("id") UUID id);

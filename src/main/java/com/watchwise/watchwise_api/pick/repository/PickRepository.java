@@ -10,6 +10,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 public interface PickRepository extends JpaRepository<Pick, UUID> {
@@ -20,6 +22,22 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
     @Query("select pick from Pick pick where pick.id = :id")
     Optional<Pick> findByIdForUpdate(@Param("id") UUID id);
     Page<Pick> findByUserIdAndPicksTemplateId(UUID userId, UUID templateId, Pageable pageable);
+    List<Pick> findByUserIdAndPicksTemplateIdInOrderByCreatedAtDescIdDesc(UUID userId, Collection<UUID> templateIds);
+
+    @Query("select pick.picksTemplate.id as templateId, count(pick) as count from Pick pick "
+            + "where pick.picksTemplate.id in :templateIds and (pick.user.id = :viewerId "
+            + "or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC "
+            + "or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists "
+            + "(select 1 from Follower follower where follower.follower.id = :viewerId "
+            + "and follower.followed.id = pick.user.id and follower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED))) "
+            + "group by pick.picksTemplate.id")
+    List<VisiblePickCount> countVisibleByTemplateIds(@Param("viewerId") UUID viewerId,
+            @Param("templateIds") Collection<UUID> templateIds);
+
+    interface VisiblePickCount {
+        UUID getTemplateId();
+        long getCount();
+    }
     @Query("""
             select pick from Pick pick where pick.user.id = :ownerId
               and (:templateId is null or pick.picksTemplate.id = :templateId)

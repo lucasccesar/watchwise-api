@@ -4,10 +4,13 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
+import com.watchwise.watchwise_api.pick.dto.PickAnsweredCategoryPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickProgress;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionCreationDTO;
@@ -23,12 +26,17 @@ import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
+import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.mapper.UserMapper;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -40,7 +48,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class PickServiceImpl implements PickService {
     private final PickRepository pickRepository;
     private final PickSelectionRepository selectionRepository;
@@ -52,6 +60,19 @@ public class PickServiceImpl implements PickService {
     private final PickMapper pickMapper;
     private final PicksTemplateMapper templateMapper;
     private final PageRequestFactory pageRequestFactory;
+    private final PicksTemplatePreviewAssembler templatePreviewAssembler;
+    private final CommentRepository commentRepository;
+    private final LikeService likeService;
+    private final UserMapper userMapper;
+
+    public PickServiceImpl(PickRepository pickRepository, PickSelectionRepository selectionRepository,
+            PicksTemplateRepository templateRepository, PicksTemplateCategoryRepository categoryRepository,
+            UserRepository userRepository, FollowerRepository followerRepository, PickTargetService targetService,
+            PickMapper pickMapper, PicksTemplateMapper templateMapper, PageRequestFactory pageRequestFactory) {
+        this(pickRepository, selectionRepository, templateRepository, categoryRepository, userRepository,
+                followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
+                null, null, null, null);
+    }
 
     @Override
     @Transactional
@@ -89,13 +110,13 @@ public class PickServiceImpl implements PickService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<PickResponseDTO> getMyPicks(UUID userId, UUID templateId, Integer page, Integer size) {
+    public Page<PickPreviewDTO> getMyPicks(UUID userId, UUID templateId, Integer page, Integer size) {
         if (!templateRepository.existsById(templateId)) {
             throw new NotFoundException("Picks template not found");
         }
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         Page<Pick> picks = pickRepository.findByUserIdAndPicksTemplateId(userId, templateId, pageRequest);
-        return mapPage(picks, userId);
+        return mapPreviewPage(picks, userId);
     }
 
     @Override
@@ -129,12 +150,12 @@ public class PickServiceImpl implements PickService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<PickResponseDTO> getUserPicks(UUID viewerId, UUID ownerId, UUID templateId, Integer page, Integer size) {
+    public Page<PickPreviewDTO> getUserPicks(UUID viewerId, UUID ownerId, UUID templateId, Integer page, Integer size) {
         if (!userRepository.existsById(ownerId)) {
             throw new NotFoundException("User not found");
         }
         PageRequest pageRequest = pageRequestFactory.build(page, size);
-        return mapPage(pickRepository.findVisibleByOwner(viewerId, ownerId, templateId, pageRequest), viewerId);
+        return mapPreviewPage(pickRepository.findVisibleByOwner(viewerId, ownerId, templateId, pageRequest), viewerId);
     }
 
     private Page<PickResponseDTO> mapPage(Page<Pick> picks, UUID viewerId) {
@@ -143,6 +164,38 @@ public class PickServiceImpl implements PickService {
         }
         Map<UUID, PickResponseDTO> responses = assemble(picks.getContent(), viewerId);
         return picks.map(pick -> responses.get(pick.getId()));
+    }
+
+    private Page<PickPreviewDTO> mapPreviewPage(Page<Pick> picks, UUID viewerId) {
+        if (picks.isEmpty()) {
+            return picks.map(pick -> null);
+        }
+        List<Pick> content = picks.getContent();
+        List<UUID> pickIds = content.stream().map(Pick::getId).toList();
+        Map<UUID, List<PickSelection>> selectionsByPickId = selectionRepository.findByPickIdIn(pickIds).stream()
+                .collect(Collectors.groupingBy(selection -> selection.getPick().getId()));
+        Map<UUID, List<PicksTemplateCategory>> categoriesByTemplateId = loadCategoriesByTemplateId(content);
+        Map<UUID, Long> commentsByPickId = commentRepository == null ? Map.of() : commentRepository.countByPickIdIn(pickIds).stream()
+                .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId, CommentRepository.PickCommentCount::getCount));
+        Set<UUID> likedPickIds = likeService == null ? Set.of() : likeService.getLikedPickIds(viewerId, pickIds);
+
+        return picks.map(pick -> {
+            List<PicksTemplateCategory> categories = categoriesByTemplateId.getOrDefault(pick.getPicksTemplate().getId(), List.of());
+            Map<UUID, PickSelection> selectionByCategory = selectionsByPickId.getOrDefault(pick.getId(), List.of()).stream()
+                    .collect(Collectors.toMap(selection -> selection.getCategory().getId(), Function.identity()));
+            List<PickAnsweredCategoryPreviewDTO> answered = categories.stream()
+                    .filter(category -> selectionByCategory.containsKey(category.getId()))
+                    .limit(5)
+                    .map(category -> {
+                        PickSelection selection = selectionByCategory.get(category.getId());
+                        boolean valid = targetService.isValid(viewerId, pick.getPicksTemplate(), category, selection);
+                        return new PickAnsweredCategoryPreviewDTO(category.getId(), category.getName(), category.getGroup(),
+                                category.getDisplayOrder(), pickMapper.pickSelectionToSearchDto(selection), valid);
+                    }).toList();
+            return new PickPreviewDTO(pick.getId(), userMapper == null ? null : userMapper.userToUserPreviewDto(pick.getUser()), pick.getVisibility(),
+                    pick.getCreatedAt(), pick.getLikesCount() == null ? 0 : pick.getLikesCount(),
+                    commentsByPickId.getOrDefault(pick.getId(), 0L), likedPickIds.contains(pick.getId()), answered);
+        });
     }
 
     private PickResponseDTO assemble(Pick pick, UUID viewerId) {
@@ -154,6 +207,14 @@ public class PickServiceImpl implements PickService {
         Map<UUID, List<PickSelection>> selectionsByPickId = selectionRepository.findByPickIdIn(pickIds).stream()
                 .collect(Collectors.groupingBy(selection -> selection.getPick().getId()));
         Map<UUID, List<PicksTemplateCategory>> categoriesByTemplateId = loadCategoriesByTemplateId(picks);
+        Map<UUID, PicksTemplatePreviewDTO> templatePreviews = templatePreviewAssembler == null
+                ? picks.stream().collect(Collectors.toMap(pick -> pick.getPicksTemplate().getId(),
+                        pick -> templateMapper.picksTemplateToPreviewDto(pick.getPicksTemplate()), (first, ignored) -> first))
+                : templatePreviewAssembler.assemble(picks.stream().map(Pick::getPicksTemplate)
+                        .collect(Collectors.toMap(PicksTemplate::getId, Function.identity(), (first, ignored) -> first)).values(), viewerId);
+        Map<UUID, Long> commentsByPickId = commentRepository == null ? Map.of() : commentRepository.countByPickIdIn(pickIds).stream()
+                .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId, CommentRepository.PickCommentCount::getCount));
+        Set<UUID> likedPickIds = likeService == null ? Set.of() : likeService.getLikedPickIds(viewerId, pickIds);
         Map<UUID, PickResponseDTO> responses = new LinkedHashMap<>();
 
         for (Pick pick : picks) {
@@ -175,22 +236,26 @@ public class PickServiceImpl implements PickService {
             }
 
             responses.put(pick.getId(), new PickResponseDTO(pick.getId(),
-                    templateMapper.picksTemplateToPreviewDto(pick.getPicksTemplate()), pick.getUser().getId(),
+                    templatePreviews.get(pick.getPicksTemplate().getId()), pick.getUser().getId(),
                     pick.getVisibility(), pick.getCreatedAt(), pick.getUpdatedAt(),
-                    progress(categories, validCategoryIds), selectionDtos));
+                    progress(categories, validCategoryIds), selectionDtos,
+                    pick.getLikesCount() == null ? 0 : pick.getLikesCount(),
+                    commentsByPickId.getOrDefault(pick.getId(), 0L), likedPickIds.contains(pick.getId())));
         }
 
         return responses;
     }
 
     private Map<UUID, List<PicksTemplateCategory>> loadCategoriesByTemplateId(List<Pick> picks) {
-        return picks.stream()
-                .map(Pick::getPicksTemplate)
-                .collect(Collectors.toMap(PicksTemplate::getId, Function.identity(), (first, ignored) -> first))
-                .values()
-                .stream()
-                .collect(Collectors.toMap(PicksTemplate::getId,
-                        template -> categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())));
+        List<UUID> templateIds = picks.stream().map(pick -> pick.getPicksTemplate().getId()).distinct().toList();
+        List<PicksTemplateCategory> loaded = categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(templateIds);
+        if (loaded.isEmpty()) {
+            loaded = picks.stream().map(Pick::getPicksTemplate).distinct()
+                    .flatMap(template -> categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId()).stream())
+                    .toList();
+        }
+        return loaded.stream()
+                .collect(Collectors.groupingBy(category -> category.getPicksTemplate().getId()));
     }
 
     private PickProgress progress(List<PicksTemplateCategory> categories, Set<UUID> validCategoryIds) {

@@ -11,4 +11,15 @@ public record PicksTemplateResponseDTO(UUID id, UserPreviewDTO creator, PickOrig
                                         String description, String coverImage, String instructions,
                                         LocalDate eligibilityStartDate, LocalDate eligibilityEndDate,
                                         LocalDateTime createdAt, LocalDateTime updatedAt,
-                                        List<PicksTemplateCategoryDTO> categories) { }
+                                        List<PicksTemplateCategoryDTO> categories,
+                                        long picksCount, long categoriesCount, List<String> categoryNames,
+                                        Integer likesCount, long commentsCount, Boolean isLikedByViewer,
+                                        long myPicksCount, UUID latestMyPickId) {
+    public PicksTemplateResponseDTO(UUID id, UserPreviewDTO creator, PickOrigin origin, String name,
+            String description, String coverImage, String instructions, LocalDate eligibilityStartDate,
+            LocalDate eligibilityEndDate, LocalDateTime createdAt, LocalDateTime updatedAt,
+            List<PicksTemplateCategoryDTO> categories) {
+        this(id, creator, origin, name, description, coverImage, instructions, eligibilityStartDate,
+                eligibilityEndDate, createdAt, updatedAt, categories, 0, 0, List.of(), 0, 0, false, 0, null);
+    }
+}

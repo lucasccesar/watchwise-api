@@ -8,11 +8,15 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface PicksTemplateCategoryRepository extends JpaRepository<PicksTemplateCategory, UUID> {
     List<PicksTemplateCategory> findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(UUID picksTemplateId);
+    @Query("select category from PicksTemplateCategory category where category.picksTemplate.id in :templateIds "
+            + "order by category.picksTemplate.id, category.group, category.displayOrder, category.id")
+    List<PicksTemplateCategory> findByPicksTemplateIdInOrderByDisplayOrder(@Param("templateIds") Collection<UUID> templateIds);
     Optional<PicksTemplateCategory> findByIdAndPicksTemplateId(UUID id, UUID picksTemplateId);
     boolean existsByPicksTemplateId(UUID picksTemplateId);
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -161,7 +161,7 @@ class PickControllerIntegrationTest {
                         .content(validPickBody()))
                 .andExpect(status().isForbidden())
                 .andExpect(apiError(403, "Forbidden", "/picks-templates/" + templateId + "/picks"));
-        mockMvc.perform(createPickRequest(csrfUser, templateId).header("X-XSRF-TOKEN", "invalid"))
+        mockMvc.perform(createPickRequest(csrfUser, templateId).headers(headers -> headers.set("X-XSRF-TOKEN", "invalid")))
                 .andExpect(status().isForbidden())
                 .andExpect(apiError(403, "Forbidden", "/picks-templates/" + templateId + "/picks"));
         mockMvc.perform(createPickRequest(csrfUser, templateId))

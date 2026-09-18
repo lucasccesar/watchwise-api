@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.pick.controller;
 
 import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
@@ -66,13 +67,14 @@ class PickControllerTest {
         UUID ownerId = UUID.randomUUID();
         UUID categoryId = UUID.randomUUID();
         PickResponseDTO response = response(pickId, templateId);
+        PickPreviewDTO preview = new PickPreviewDTO(pickId, null, PickVisibility.PUBLIC, LocalDateTime.now(), 0, 0, false, List.of());
         when(pickService.createPick(eq(currentUserId), eq(templateId), any())).thenReturn(response);
         when(pickService.getMyPicks(currentUserId, templateId, 1, 20))
-                .thenReturn(new PageImpl<>(List.of(response), PageRequest.of(0, 20), 1));
+                .thenReturn(new PageImpl<>(List.of(preview), PageRequest.of(0, 20), 1));
         when(pickService.getPick(currentUserId, pickId)).thenReturn(response);
         when(pickService.updatePick(eq(currentUserId), eq(pickId), any())).thenReturn(response);
         when(pickService.getUserPicks(currentUserId, ownerId, templateId, 1, 20))
-                .thenReturn(new PageImpl<>(List.of(response), PageRequest.of(0, 20), 1));
+                .thenReturn(new PageImpl<>(List.of(preview), PageRequest.of(0, 20), 1));
         when(selectionService.upsertSelection(eq(currentUserId), eq(pickId), eq(categoryId), any())).thenReturn(response);
 
         mockMvc.perform(post("/picks-templates/{templateId}/picks", templateId)

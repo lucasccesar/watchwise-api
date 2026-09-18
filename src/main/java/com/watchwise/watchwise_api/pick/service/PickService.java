@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.pick.service;
 
 import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import org.springframework.data.domain.Page;
 
@@ -11,7 +12,7 @@ public interface PickService {
 
     PickResponseDTO createPick(UUID userId, UUID templateId, PickCreationDTO dto);
 
-    Page<PickResponseDTO> getMyPicks(UUID userId, UUID templateId, Integer page, Integer size);
+    Page<PickPreviewDTO> getMyPicks(UUID userId, UUID templateId, Integer page, Integer size);
 
     PickResponseDTO getPick(UUID viewerId, UUID pickId);
 
@@ -19,5 +20,5 @@ public interface PickService {
 
     void deletePick(UUID userId, UUID pickId);
 
-    Page<PickResponseDTO> getUserPicks(UUID viewerId, UUID ownerId, UUID templateId, Integer page, Integer size);
+    Page<PickPreviewDTO> getUserPicks(UUID viewerId, UUID ownerId, UUID templateId, Integer page, Integer size);
 }
