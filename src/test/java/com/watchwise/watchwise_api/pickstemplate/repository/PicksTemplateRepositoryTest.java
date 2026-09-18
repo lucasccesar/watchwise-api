@@ -30,6 +30,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,8 +120,8 @@ class PicksTemplateRepositoryTest {
 
     @Test
     void searchesPopularWeekAtInclusiveBoundaryWithIndependentActivityCountsAndVisibility() {
-        LocalDateTime since = LocalDateTime.of(2026, 9, 11, 12, 0, 0, 1_000);
-        LocalDateTime now = since.plusDays(7);
+        LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
+        LocalDateTime since = now.minusDays(7);
         User viewer = saveUser("weekly-viewer", now);
         User owner = saveUser("weekly-owner", now);
         User acceptedFollowedOwner = saveUser("weekly-followed", now);
@@ -128,8 +129,9 @@ class PicksTemplateRepositoryTest {
         followerRepository.saveAndFlush(Follower.builder()
                 .follower(viewer).followed(acceptedFollowedOwner).status(FollowStatus.ACCEPTED).createdAt(now).build());
 
-        PicksTemplate winner = saveTemplate("Weekly winner", PickOrigin.OFFICIAL, now.minusDays(1));
-        PicksTemplate runnerUp = saveTemplate("Weekly runner up", PickOrigin.OFFICIAL, now.minusDays(2));
+        PicksTemplate highActivity = saveTemplate("Weekly high activity", PickOrigin.OFFICIAL, now.minusDays(6));
+        PicksTemplate winner = saveTemplate("Weekly winner", PickOrigin.OFFICIAL, now.minusDays(2));
+        PicksTemplate runnerUp = saveTemplate("Weekly runner up", PickOrigin.OFFICIAL, now.minusDays(1));
         PicksTemplate tieLowId = saveTemplate(
                 UUID.fromString("00000000-0000-0000-0000-000000000001"), "Weekly tie low", PickOrigin.OFFICIAL, now.minusDays(3));
         PicksTemplate tieHighId = saveTemplate(
@@ -138,20 +140,26 @@ class PicksTemplateRepositoryTest {
         PicksTemplate oldOnly = saveTemplate("Weekly old only", PickOrigin.OFFICIAL, now.minusDays(5));
         saveTemplate("Weekly community", PickOrigin.COMMUNITY, now);
 
+        saveTemplateLike(owner, highActivity, since.plusSeconds(1));
+        saveTemplateLike(viewer, highActivity, since.plusSeconds(2));
+        saveTemplateLike(acceptedFollowedOwner, highActivity, since.plusSeconds(3));
+        saveTemplateComment(owner, highActivity, since.plusSeconds(4));
+        savePick(owner, highActivity, PickVisibility.PUBLIC, since.plusSeconds(5));
+
         saveTemplateLike(owner, winner, since);
-        saveTemplateComment(owner, winner, since.plusNanos(1));
-        savePick(owner, winner, PickVisibility.PUBLIC, since.plusSeconds(1));
+        saveTemplateComment(owner, winner, since.plusSeconds(6));
+        savePick(owner, winner, PickVisibility.PUBLIC, since.plusSeconds(7));
         saveTemplateLike(viewer, winner, since.minusNanos(1_000));
         saveTemplateComment(owner, winner, since.minusNanos(1_000));
         savePick(owner, winner, PickVisibility.PUBLIC, since.minusNanos(1_000));
 
-        saveTemplateLike(owner, runnerUp, since.plusSeconds(2));
-        saveTemplateComment(owner, runnerUp, since.plusSeconds(3));
-        savePick(stranger, runnerUp, PickVisibility.PRIVATE, since.plusSeconds(4));
+        saveTemplateLike(owner, runnerUp, since.plusSeconds(8));
+        saveTemplateComment(owner, runnerUp, since.plusSeconds(9));
+        savePick(stranger, runnerUp, PickVisibility.PRIVATE, since.plusSeconds(10));
 
-        savePick(acceptedFollowedOwner, tieLowId, PickVisibility.FOLLOWERS, since.plusSeconds(5));
-        savePick(owner, tieHighId, PickVisibility.PUBLIC, since.plusSeconds(6));
-        savePick(owner, third, PickVisibility.PUBLIC, since.plusSeconds(7));
+        savePick(acceptedFollowedOwner, tieLowId, PickVisibility.FOLLOWERS, since.plusSeconds(11));
+        savePick(owner, tieHighId, PickVisibility.PUBLIC, since.plusSeconds(12));
+        savePick(owner, third, PickVisibility.PUBLIC, since.plusSeconds(13));
 
         saveTemplateLike(owner, oldOnly, since.minusNanos(1_000));
         saveTemplateComment(owner, oldOnly, since.minusNanos(1_000));
@@ -161,8 +169,8 @@ class PicksTemplateRepositoryTest {
                 viewer.getId(), since, PickOrigin.OFFICIAL, null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(PicksTemplate::getName)
-                .containsExactly("Weekly winner", "Weekly runner up", "Weekly tie high", "Weekly tie low", "Weekly third", "Weekly old only");
-        assertThat(result.getTotalElements()).isEqualTo(6);
+                .containsExactly("Weekly high activity", "Weekly winner", "Weekly runner up", "Weekly tie high", "Weekly tie low", "Weekly third", "Weekly old only");
+        assertThat(result.getTotalElements()).isEqualTo(7);
     }
 
     @Test
