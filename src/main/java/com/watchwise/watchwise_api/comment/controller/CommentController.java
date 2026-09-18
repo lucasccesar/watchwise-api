@@ -77,6 +77,38 @@ public class CommentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
+    @GetMapping("/picks/{pickId}/comments")
+    public ResponseEntity<PageResponseDTO<CommentResponseDTO>> getCommentsForPick(
+            @PathVariable UUID pickId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        return ResponseEntity.ok(PageResponseDTO.of(commentService.getCommentsForPick(getCurrentUserId(), pickId, page, size)));
+    }
+
+    @PostMapping("/picks/{pickId}/comments")
+    public ResponseEntity<CommentResponseDTO> createCommentOnPick(
+            @PathVariable UUID pickId,
+            @Valid @RequestBody CommentCreationDTO commentCreationDTO) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(commentService.createCommentOnPick(getCurrentUserId(), pickId, commentCreationDTO));
+    }
+
+    @GetMapping("/picks-templates/{templateId}/comments")
+    public ResponseEntity<PageResponseDTO<CommentResponseDTO>> getCommentsForPicksTemplate(
+            @PathVariable UUID templateId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        return ResponseEntity.ok(PageResponseDTO.of(commentService.getCommentsForPicksTemplate(getCurrentUserId(), templateId, page, size)));
+    }
+
+    @PostMapping("/picks-templates/{templateId}/comments")
+    public ResponseEntity<CommentResponseDTO> createCommentOnPicksTemplate(
+            @PathVariable UUID templateId,
+            @Valid @RequestBody CommentCreationDTO commentCreationDTO) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(commentService.createCommentOnPicksTemplate(getCurrentUserId(), templateId, commentCreationDTO));
+    }
+
     @DeleteMapping("/comments/{commentId}")
     public ResponseEntity<Void> deleteComment(@PathVariable UUID commentId) {
         commentService.deleteComment(getCurrentUserId(), commentId);

@@ -13,6 +13,8 @@ public interface CommentMapper {
     @Mapping(source = "comment.content.id", target = "contentId")
     @Mapping(source = "comment.list.id", target = "listId")
     @Mapping(source = "comment.diaryEntry.id", target = "diaryEntryId")
+    @Mapping(source = "comment.pick.id", target = "pickId")
+    @Mapping(source = "comment.picksTemplate.id", target = "picksTemplateId")
     @Mapping(source = "comment.parentComment.id", target = "parentCommentId")
     CommentResponseDTO commentToResponseDto(Comment comment, boolean likedByMe);
 

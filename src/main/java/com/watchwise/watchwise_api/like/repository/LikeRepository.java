@@ -27,11 +27,23 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
     @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.list.id = :listId")
     int deleteByUserIdAndListId(@Param("userId") UUID userId, @Param("listId") UUID listId);
 
+    @Modifying
+    @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.pick.id = :pickId")
+    int deleteByUserIdAndPickId(@Param("userId") UUID userId, @Param("pickId") UUID pickId);
+
+    @Modifying
+    @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.picksTemplate.id = :templateId")
+    int deleteByUserIdAndPicksTemplateId(@Param("userId") UUID userId, @Param("templateId") UUID templateId);
+
     boolean existsByUserIdAndCommentId(UUID userId, UUID commentId);
 
     boolean existsByUserIdAndDiaryEntryId(UUID userId, UUID diaryEntryId);
 
     boolean existsByUserIdAndListId(UUID userId, UUID listId);
+
+    boolean existsByUserIdAndPickId(UUID userId, UUID pickId);
+
+    boolean existsByUserIdAndPicksTemplateId(UUID userId, UUID templateId);
 
     @Query("SELECT l.comment.id FROM Like l WHERE l.user.id = :userId AND l.comment.id IN :commentIds")
     Set<UUID> findLikedCommentIds(@Param("userId") UUID userId, @Param("commentIds") Collection<UUID> commentIds);
@@ -41,6 +53,12 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
 
     @Query("SELECT l.list.id FROM Like l WHERE l.user.id = :userId AND l.list.id IN :listIds")
     Set<UUID> findLikedListIds(@Param("userId") UUID userId, @Param("listIds") Collection<UUID> listIds);
+
+    @Query("SELECT l.pick.id FROM Like l WHERE l.user.id = :userId AND l.pick.id IN :pickIds")
+    Set<UUID> findLikedPickIds(@Param("userId") UUID userId, @Param("pickIds") Collection<UUID> pickIds);
+
+    @Query("SELECT l.picksTemplate.id FROM Like l WHERE l.user.id = :userId AND l.picksTemplate.id IN :templateIds")
+    Set<UUID> findLikedPicksTemplateIds(@Param("userId") UUID userId, @Param("templateIds") Collection<UUID> templateIds);
 
     @Query("SELECT l.list FROM Like l WHERE l.user.id = :userId AND l.list IS NOT NULL ORDER BY l.createdAt DESC, l.id DESC")
     Page<UserList> findLikedListsByUserId(@Param("userId") UUID userId, Pageable pageable);

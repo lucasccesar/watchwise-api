@@ -17,6 +17,11 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
@@ -43,6 +48,8 @@ public class CommentServiceImpl implements CommentService {
     private final UserListRepository userListRepository;
     private final UserListItemRepository userListItemRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final PickRepository pickRepository;
+    private final PicksTemplateRepository picksTemplateRepository;
     private final FollowerRepository followerRepository;
     private final CommentMapper commentMapper;
     private final LikeService likeService;
@@ -83,6 +90,26 @@ public class CommentServiceImpl implements CommentService {
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         Page<Comment> comments = commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(diaryEntryId, pageRequest);
+        return mapToResponseDtos(comments, viewerId);
+    }
+
+    @Override
+    public Page<CommentResponseDTO> getCommentsForPick(UUID viewerId, UUID pickId, Integer pageNumber, Integer pageSize) {
+        Pick pick = pickRepository.findById(pickId)
+                .orElseThrow(() -> new NotFoundException("Pick not found"));
+        assertPickIsVisibleTo(viewerId, pick);
+        Page<Comment> comments = commentRepository.findByPickIdOrderByCreatedAtAsc(pickId,
+                pageRequestFactory.build(pageNumber, pageSize));
+        return mapToResponseDtos(comments, viewerId);
+    }
+
+    @Override
+    public Page<CommentResponseDTO> getCommentsForPicksTemplate(UUID viewerId, UUID templateId, Integer pageNumber, Integer pageSize) {
+        if (!picksTemplateRepository.existsById(templateId)) {
+            throw new NotFoundException("Picks template not found");
+        }
+        Page<Comment> comments = commentRepository.findByPicksTemplateIdOrderByCreatedAtAsc(templateId,
+                pageRequestFactory.build(pageNumber, pageSize));
         return mapToResponseDtos(comments, viewerId);
     }
 
@@ -140,6 +167,31 @@ public class CommentServiceImpl implements CommentService {
                 .diaryEntry(diaryEntry)
                 .build();
 
+        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+    }
+
+    @Override
+    @Transactional
+    public CommentResponseDTO createCommentOnPick(UUID userId, UUID pickId, CommentCreationDTO commentCreationDTO) {
+        Pick pick = pickRepository.findById(pickId)
+                .orElseThrow(() -> new NotFoundException("Pick not found"));
+        assertPickIsVisibleTo(userId, pick);
+        Comment parentComment = resolveParentCommentOnPick(commentCreationDTO.parentCommentId(), pickId);
+        Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
+                .pick(pick)
+                .build();
+        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+    }
+
+    @Override
+    @Transactional
+    public CommentResponseDTO createCommentOnPicksTemplate(UUID userId, UUID templateId, CommentCreationDTO commentCreationDTO) {
+        PicksTemplate template = picksTemplateRepository.findById(templateId)
+                .orElseThrow(() -> new NotFoundException("Picks template not found"));
+        Comment parentComment = resolveParentCommentOnPicksTemplate(commentCreationDTO.parentCommentId(), templateId);
+        Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
+                .picksTemplate(template)
+                .build();
         return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
     }
 
@@ -212,6 +264,28 @@ public class CommentServiceImpl implements CommentService {
         return parent;
     }
 
+    private Comment resolveParentCommentOnPick(UUID parentCommentId, UUID pickId) {
+        if (parentCommentId == null) {
+            return null;
+        }
+        Comment parent = findParentComment(parentCommentId);
+        if (parent.getPick() == null || !parent.getPick().getId().equals(pickId)) {
+            throw new BadRequestException("Parent comment must target the same Pick");
+        }
+        return parent;
+    }
+
+    private Comment resolveParentCommentOnPicksTemplate(UUID parentCommentId, UUID templateId) {
+        if (parentCommentId == null) {
+            return null;
+        }
+        Comment parent = findParentComment(parentCommentId);
+        if (parent.getPicksTemplate() == null || !parent.getPicksTemplate().getId().equals(templateId)) {
+            throw new BadRequestException("Parent comment must target the same picks template");
+        }
+        return parent;
+    }
+
     private Comment findParentComment(UUID parentCommentId) {
         return commentRepository.findById(parentCommentId)
                 .orElseThrow(() -> new NotFoundException("Parent comment not found"));
@@ -250,5 +324,17 @@ public class CommentServiceImpl implements CommentService {
         }
 
         throw new ForbiddenException("This diary entry is private");
+    }
+
+    private void assertPickIsVisibleTo(UUID viewerId, Pick pick) {
+        UUID ownerId = pick.getUser().getId();
+        if (viewerId.equals(ownerId) || pick.getVisibility() == PickVisibility.PUBLIC) {
+            return;
+        }
+        if (pick.getVisibility() == PickVisibility.FOLLOWERS
+                && followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, ownerId, FollowStatus.ACCEPTED)) {
+            return;
+        }
+        throw new ForbiddenException("This Pick is private");
     }
 }

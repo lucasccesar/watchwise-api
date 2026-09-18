@@ -50,6 +50,30 @@ public class LikeController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/picks/{pickId}/like")
+    public ResponseEntity<Void> likePick(@PathVariable UUID pickId) {
+        likeService.likePick(getCurrentUserId(), pickId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/picks/{pickId}/like")
+    public ResponseEntity<Void> unlikePick(@PathVariable UUID pickId) {
+        likeService.unlikePick(getCurrentUserId(), pickId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/picks-templates/{templateId}/like")
+    public ResponseEntity<Void> likePicksTemplate(@PathVariable UUID templateId) {
+        likeService.likePicksTemplate(getCurrentUserId(), templateId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/picks-templates/{templateId}/like")
+    public ResponseEntity<Void> unlikePicksTemplate(@PathVariable UUID templateId) {
+        likeService.unlikePicksTemplate(getCurrentUserId(), templateId);
+        return ResponseEntity.noContent().build();
+    }
+
     private UUID getCurrentUserId() {
         return (UUID) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }

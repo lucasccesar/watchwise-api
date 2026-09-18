@@ -14,6 +14,12 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -64,6 +70,12 @@ class LikeServiceImplTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Mock
+    private PickRepository pickRepository;
+
+    @Mock
+    private PicksTemplateRepository picksTemplateRepository;
+
+    @Mock
     private UserListRepository userListRepository;
 
     @Mock
@@ -91,6 +103,10 @@ class LikeServiceImplTest {
     private UUID diaryEntryId;
     private DiaryEntry diaryEntry;
     private UUID commentId;
+    private UUID pickId;
+    private Pick pick;
+    private UUID templateId;
+    private PicksTemplate template;
 
     @BeforeEach
     void setUp() {
@@ -146,6 +162,26 @@ class LikeServiceImplTest {
                 .build();
 
         commentId = UUID.randomUUID();
+
+        templateId = UUID.randomUUID();
+        template = PicksTemplate.builder()
+                .id(templateId)
+                .creator(marina)
+                .origin(PickOrigin.COMMUNITY)
+                .name("Awards")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        pickId = UUID.randomUUID();
+        pick = Pick.builder()
+                .id(pickId)
+                .picksTemplate(template)
+                .user(marina)
+                .visibility(PickVisibility.PUBLIC)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
 
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
@@ -832,6 +868,134 @@ class LikeServiceImplTest {
     }
 
     // ---------- getLikedCommentIds / getLikedDiaryEntryIds / getLikedListIds ----------
+
+    // ---------- likePick / unlikePick / likePicksTemplate ----------
+
+    @Test
+    @DisplayName("[likePick] Should Save Like And Increment Counter - When Pick Is Public")
+    void shouldSaveLikeAndIncrementCounterForPublicPick() {
+        when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
+        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        likeService.likePick(lucasId, pickId);
+
+        verify(likeRepository).saveAndFlush(likeCaptor.capture());
+        assertThat(likeCaptor.getValue().getPick()).isEqualTo(pick);
+        assertThat(pick.getLikesCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[likePick] Should Resolve Duplicate Race Without Incrementing - When Row Exists After Save Failure")
+    void shouldResolveDuplicatePickLikeRaceWithoutIncrementingCounter() {
+        when(likeRepository.existsByUserIdAndPickId(lucasId, pickId))
+                .thenReturn(false)
+                .thenReturn(true);
+        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(likeRepository.saveAndFlush(any(Like.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate"));
+
+        likeService.likePick(lucasId, pickId);
+
+        assertThat(pick.getLikesCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("[likePick] Should Allow Owner To Like A Private Pick")
+    void shouldAllowOwnerToLikePrivatePick() {
+        pick.setVisibility(PickVisibility.PRIVATE);
+        pick = Pick.builder().id(pickId).picksTemplate(template).user(lucas).visibility(PickVisibility.PRIVATE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
+        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        likeService.likePick(lucasId, pickId);
+
+        verify(likeRepository).saveAndFlush(any(Like.class));
+    }
+
+    @Test
+    @DisplayName("[likePick] Should Allow Accepted Follower To Like Followers Pick")
+    void shouldAllowAcceptedFollowerToLikeFollowersPick() {
+        pick.setVisibility(PickVisibility.FOLLOWERS);
+        when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
+        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        likeService.likePick(lucasId, pickId);
+
+        verify(likeRepository).saveAndFlush(any(Like.class));
+    }
+
+    @Test
+    @DisplayName("[likePick] Should Reject Stranger - When Pick Is Private")
+    void shouldRejectStrangerWhenPickIsPrivate() {
+        pick.setVisibility(PickVisibility.PRIVATE);
+        when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
+        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+
+        assertThatThrownBy(() -> likeService.likePick(lucasId, pickId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This Pick is private");
+
+        verify(likeRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("[unlikePick] Should Decrement Counter Only When Row Was Deleted And Never Below Zero")
+    void shouldDecrementPickCounterOnlyWhenRowWasDeletedAndNeverBelowZero() {
+        pick.setLikesCount(0);
+        when(likeRepository.deleteByUserIdAndPickId(lucasId, pickId)).thenReturn(1);
+        when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
+
+        likeService.unlikePick(lucasId, pickId);
+
+        assertThat(pick.getLikesCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("[likePicksTemplate] Should Like Template Without Checking Pick Ownership")
+    void shouldLikePicksTemplateWithoutCheckingPickOwnership() {
+        when(likeRepository.existsByUserIdAndPicksTemplateId(lucasId, templateId)).thenReturn(false);
+        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(template));
+        when(picksTemplateRepository.findByIdForUpdate(templateId)).thenReturn(Optional.of(template));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        likeService.likePicksTemplate(lucasId, templateId);
+
+        verify(likeRepository).saveAndFlush(likeCaptor.capture());
+        assertThat(likeCaptor.getValue().getPicksTemplate()).isEqualTo(template);
+        assertThat(template.getLikesCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[unlikePicksTemplate] Should Not Decrement Counter When No Row Was Deleted")
+    void shouldNotDecrementTemplateCounterWhenNoRowWasDeleted() {
+        when(likeRepository.deleteByUserIdAndPicksTemplateId(lucasId, templateId)).thenReturn(0);
+
+        likeService.unlikePicksTemplate(lucasId, templateId);
+
+        verify(picksTemplateRepository, never()).findByIdForUpdate(any());
+    }
+
+    @Test
+    @DisplayName("[getLikedPickIds] Should Return Empty Set Without Querying - When Collection Is Empty")
+    void shouldReturnEmptySetWithoutQueryingForPicks() {
+        assertThat(likeService.getLikedPickIds(lucasId, List.of())).isEmpty();
+        verifyNoInteractions(likeRepository);
+    }
 
     @Test
     @DisplayName("[getLikedCommentIds] Should Return Ids From The Repository - When The Id Collection Is Not Empty")
