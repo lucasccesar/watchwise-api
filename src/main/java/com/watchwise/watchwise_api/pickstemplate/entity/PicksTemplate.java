@@ -19,4 +19,5 @@ public class PicksTemplate {
     @Column(name = "eligibility_end_date") @Setter private LocalDate eligibilityEndDate;
     @Column(name = "created_at", nullable = false) @Setter private LocalDateTime createdAt;
     @Column(name = "updated_at", nullable = false) @Setter private LocalDateTime updatedAt;
+    @Column(name = "likes_count", nullable = false) @Setter @Builder.Default private Integer likesCount = 0;
 }

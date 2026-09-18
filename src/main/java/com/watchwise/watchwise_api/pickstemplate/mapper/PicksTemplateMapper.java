@@ -16,6 +16,7 @@ public interface PicksTemplateMapper {
     @Mapping(target = "origin", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "likesCount", ignore = true)
     @Mapping(source = "name", target = "name")
     @Mapping(source = "description", target = "description")
     @Mapping(source = "coverImage", target = "coverImage")

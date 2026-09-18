@@ -15,4 +15,5 @@ public class Pick {
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20) @Setter private PickVisibility visibility;
     @Column(name = "created_at", nullable = false) @Setter private LocalDateTime createdAt;
     @Column(name = "updated_at", nullable = false) @Setter private LocalDateTime updatedAt;
+    @Column(name = "likes_count", nullable = false) @Setter @Builder.Default private Integer likesCount = 0;
 }

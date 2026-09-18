@@ -65,6 +65,97 @@ class PicksDatabaseIntegrityRepositoryTest {
     }
 
     @Test
+    @DisplayName("[picks] Should Initialize Like Counters To Zero")
+    void shouldInitializePickAndTemplateLikeCountersToZero() {
+        PickFixture fixture = insertPickFixture();
+
+        assertThat(likesCount("picks", fixture.pickId())).isZero();
+        assertThat(likesCount("picks_templates", fixture.templateId())).isZero();
+    }
+
+    @Test
+    @DisplayName("[likes] Should Accept A Pick Target")
+    void shouldAcceptLikeTargetingPick() {
+        PickFixture fixture = insertPickFixture();
+
+        UUID likeId = insertLike(fixture.userId(), null, null, null, fixture.pickId(), null);
+
+        assertThat(count("likes", likeId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[likes] Should Accept A Picks Template Target")
+    void shouldAcceptLikeTargetingPicksTemplate() {
+        PickFixture fixture = insertPickFixture();
+
+        UUID likeId = insertLike(fixture.userId(), null, null, null, null, fixture.templateId());
+
+        assertThat(count("likes", likeId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[comments] Should Accept A Pick Target")
+    void shouldAcceptCommentTargetingPick() {
+        PickFixture fixture = insertPickFixture();
+
+        UUID commentId = insertComment(fixture.userId(), null, null, null, fixture.pickId(), null);
+
+        assertThat(count("comments", commentId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[comments] Should Accept A Picks Template Target")
+    void shouldAcceptCommentTargetingPicksTemplate() {
+        PickFixture fixture = insertPickFixture();
+
+        UUID commentId = insertComment(fixture.userId(), null, null, null, null, fixture.templateId());
+
+        assertThat(count("comments", commentId)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[likes] Should Reject Multiple Targets")
+    void shouldRejectLikeWithPickAndPicksTemplateTargets() {
+        PickFixture fixture = insertPickFixture();
+
+        assertThatThrownBy(() -> insertLike(fixture.userId(), null, null, null, fixture.pickId(), fixture.templateId()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_likes_target");
+    }
+
+    @Test
+    @DisplayName("[comments] Should Reject Multiple Targets")
+    void shouldRejectCommentWithPickAndPicksTemplateTargets() {
+        PickFixture fixture = insertPickFixture();
+
+        assertThatThrownBy(() -> insertComment(fixture.userId(), null, null, null, fixture.pickId(), fixture.templateId()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_comments_target");
+    }
+
+    @Test
+    @DisplayName("[likes] Should Reject Duplicate Likes For A Pick")
+    void shouldRejectDuplicateLikeForPickAndUser() {
+        PickFixture fixture = insertPickFixture();
+        insertLike(fixture.userId(), null, null, null, fixture.pickId(), null);
+
+        assertThatThrownBy(() -> insertLike(fixture.userId(), null, null, null, fixture.pickId(), null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_likes_user_id_pick_id");
+    }
+
+    @Test
+    @DisplayName("[likes] Should Reject Duplicate Likes For A Picks Template")
+    void shouldRejectDuplicateLikeForPicksTemplateAndUser() {
+        PickFixture fixture = insertPickFixture();
+        insertLike(fixture.userId(), null, null, null, null, fixture.templateId());
+
+        assertThatThrownBy(() -> insertLike(fixture.userId(), null, null, null, null, fixture.templateId()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_likes_user_id_picks_template_id");
+    }
+
+    @Test
     @DisplayName("[picks_template_options] Should Reject Missing Target")
     void shouldRejectOptionWithoutTarget() {
         UUID categoryId = insertCategory(insertTemplate(null, null, null));
@@ -314,6 +405,25 @@ class PicksDatabaseIntegrityRepositoryTest {
         return id;
     }
 
+    private UUID insertLike(UUID userId, UUID commentId, UUID diaryEntryId, UUID listId, UUID pickId, UUID picksTemplateId) {
+        UUID id = UUID.randomUUID();
+        jdbcTemplate.update("""
+                INSERT INTO likes (id, user_id, comment_id, diary_entry_id, list_id, pick_id, picks_template_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, id, userId, commentId, diaryEntryId, listId, pickId, picksTemplateId, LocalDateTime.now());
+        return id;
+    }
+
+    private UUID insertComment(UUID userId, UUID contentId, UUID listId, UUID diaryEntryId, UUID pickId, UUID picksTemplateId) {
+        UUID id = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update("""
+                INSERT INTO comments (id, user_id, content_id, list_id, diary_entry_id, pick_id, picks_template_id, text, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, id, userId, contentId, listId, diaryEntryId, pickId, picksTemplateId, "Comment " + id, now, now);
+        return id;
+    }
+
     private UUID insertUser() {
         UUID id = UUID.randomUUID();
         LocalDateTime now = LocalDateTime.now();
@@ -337,6 +447,10 @@ class PicksDatabaseIntegrityRepositoryTest {
 
     private int count(String tableName, UUID id) {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + tableName + " WHERE id = ?", Integer.class, id);
+    }
+
+    private int likesCount(String tableName, UUID id) {
+        return jdbcTemplate.queryForObject("SELECT likes_count FROM " + tableName + " WHERE id = ?", Integer.class, id);
     }
 
     private record PickFixture(UUID userId, UUID templateId, UUID categoryId, UUID pickId) {

@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.like.entity;
 
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import jakarta.persistence.*;
@@ -38,6 +40,14 @@ public class Like {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "list_id")
     private UserList list;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pick_id")
+    private Pick pick;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "picks_template_id")
+    private PicksTemplate picksTemplate;
 
     @Column(name = "created_at", nullable = false)
     @Setter
