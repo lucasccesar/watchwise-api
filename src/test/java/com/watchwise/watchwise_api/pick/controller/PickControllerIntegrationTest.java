@@ -5,7 +5,10 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
+import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickService;
@@ -20,6 +23,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -189,8 +194,62 @@ class PickControllerIntegrationTest {
         mockMvc.perform(get("/picks/not-a-uuid").cookie(user.accessToken()))
                 .andExpect(status().isBadRequest())
                 .andExpect(apiError(400, "Bad Request", "/picks/not-a-uuid"));
+        mockMvc.perform(get("/picks-templates/{templateId}/picks", templateId)
+                        .param("sort", "UNKNOWN").cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values: POPULAR, RECENT")))
+                .andExpect(apiError(400, "Bad Request", "/picks-templates/" + templateId + "/picks"));
 
         verifyNoInteractions(picksTemplateService, picksTemplateCategoryService, pickService);
+    }
+
+    @Test
+    void shouldReturnPagedVisibleTemplatePicksForDefaultRecentAndPopularSorts() throws Exception {
+        RegisteredUser viewer = registerUser("templatereads");
+        UUID templateId = UUID.randomUUID();
+        UUID publicPickId = UUID.randomUUID();
+        UUID followerPickId = UUID.randomUUID();
+        UUID privatePickId = UUID.randomUUID();
+        PickPreviewDTO publicPick = preview(publicPickId);
+        PickPreviewDTO followerPick = preview(followerPickId);
+        PickPreviewDTO privatePick = preview(privatePickId);
+
+        when(pickService.getTemplatePicks(viewer.id(), templateId, null, null, null))
+                .thenReturn(new PageImpl<>(List.of(publicPick, followerPick), PageRequest.of(0, 20), 2));
+        when(pickService.getTemplatePicks(viewer.id(), templateId, PickSort.POPULAR, 1, 1))
+                .thenReturn(new PageImpl<>(List.of(followerPick), PageRequest.of(0, 1), 2));
+
+        mockMvc.perform(get("/picks-templates/{templateId}/picks", templateId).cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].id").value(publicPickId.toString()))
+                .andExpect(jsonPath("$.content[1].id").value(followerPickId.toString()))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(2));
+
+        String visibleBody = mockMvc.perform(get("/picks-templates/{templateId}/picks", templateId)
+                        .param("sort", "POPULAR").param("page", "1").param("size", "1")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(followerPickId.toString()))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(visibleBody).doesNotContain(privatePick.id().toString());
+
+        verify(pickService).getTemplatePicks(viewer.id(), templateId, null, null, null);
+        verify(pickService).getTemplatePicks(viewer.id(), templateId, PickSort.POPULAR, 1, 1);
+    }
+
+    @Test
+    void shouldReturnNotFoundForUnknownTemplatePicks() throws Exception {
+        RegisteredUser viewer = registerUser("unknownpicktemplate");
+        UUID templateId = UUID.randomUUID();
+        when(pickService.getTemplatePicks(viewer.id(), templateId, null, null, null))
+                .thenThrow(new NotFoundException("Picks template not found"));
+
+        mockMvc.perform(get("/picks-templates/{templateId}/picks", templateId).cookie(viewer.accessToken()))
+                .andExpect(status().isNotFound())
+                .andExpect(apiError(404, "Not Found", "/picks-templates/" + templateId + "/picks"));
     }
 
     private RegisteredUser registerUser(String username) throws Exception {
@@ -237,6 +296,10 @@ class PickControllerIntegrationTest {
     private PickResponseDTO response(UUID userId) {
         LocalDateTime now = LocalDateTime.now();
         return new PickResponseDTO(UUID.randomUUID(), null, userId, PickVisibility.PUBLIC, now, now, null, List.of());
+    }
+
+    private PickPreviewDTO preview(UUID pickId) {
+        return new PickPreviewDTO(pickId, null, PickVisibility.PUBLIC, LocalDateTime.now(), 0, 0, false, List.of());
     }
 
     private org.springframework.test.web.servlet.ResultMatcher apiError(int status, String error, String path) {

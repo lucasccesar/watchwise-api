@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
+import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickService;
@@ -105,6 +106,25 @@ class PickControllerTest {
 
         verify(pickService).deletePick(currentUserId, pickId);
         verify(selectionService).deleteSelection(currentUserId, pickId, categoryId);
+    }
+
+    @Test
+    void shouldExposeTemplatePicksWithSortAndPaginationContract() throws Exception {
+        UUID templateId = UUID.randomUUID();
+        UUID pickId = UUID.randomUUID();
+        PickPreviewDTO preview = new PickPreviewDTO(pickId, null, PickVisibility.PUBLIC, LocalDateTime.now(), 3, 1, false, List.of());
+        when(pickService.getTemplatePicks(currentUserId, templateId, PickSort.POPULAR, 2, 5))
+                .thenReturn(new PageImpl<>(List.of(preview), PageRequest.of(1, 5), 6));
+
+        mockMvc.perform(get("/picks-templates/{templateId}/picks", templateId)
+                        .param("sort", "POPULAR").param("page", "2").param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(pickId.toString()))
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(5))
+                .andExpect(jsonPath("$.totalElements").value(6));
+
+        verify(pickService).getTemplatePicks(currentUserId, templateId, PickSort.POPULAR, 2, 5);
     }
 
     private PickResponseDTO response(UUID pickId, UUID templateId) {

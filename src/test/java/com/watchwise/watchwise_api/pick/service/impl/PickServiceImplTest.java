@@ -32,6 +32,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -198,6 +199,59 @@ class PickServiceImplTest {
 
         assertThat(result.getContent()).hasSize(2);
         verify(selectionRepository).findByPickIdIn(List.of(first.getId(), second.getId()));
+    }
+
+    @Test
+    void shouldDefaultTemplatePicksToRecentAndBatchMapPreviewData() {
+        UUID viewerId = UUID.randomUUID();
+        PicksTemplate template = template();
+        PicksTemplateCategory category = category(template, PickAllowedType.MOVIE, 1);
+        Pick pick = pick(UUID.randomUUID(), template, PickVisibility.PUBLIC);
+        PickSelection selection = persistedSelection(pick, category, content("550"));
+        PageRequest pageRequest = PageRequest.of(0, 10);
+        when(templateRepository.existsById(template.getId())).thenReturn(true);
+        when(pickRepository.findVisibleByTemplateRecent(viewerId, template.getId(), pageRequest))
+                .thenReturn(new PageImpl<>(List.of(pick), pageRequest, 1));
+        when(selectionRepository.findByPickIdIn(List.of(pick.getId()))).thenReturn(List.of(selection));
+        when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId()))
+                .thenReturn(List.of(category));
+        when(targetService.isStructurallyValid(same(category), same(selection), anyList())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(selection))
+                .thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
+
+        Page<PickPreviewDTO> result = service.getTemplatePicks(viewerId, template.getId(), null, 1, 10);
+
+        assertThat(result.getContent()).extracting(PickPreviewDTO::id).containsExactly(pick.getId());
+        assertThat(result.getContent().getFirst().answeredCategories()).hasSize(1);
+        verify(pickRepository).findVisibleByTemplateRecent(viewerId, template.getId(), pageRequest);
+        verify(pickRepository, never()).findVisibleByTemplatePopular(any(), any(), any());
+        verify(selectionRepository).findByPickIdIn(List.of(pick.getId()));
+    }
+
+    @Test
+    void shouldDispatchPopularTemplatePicksToPopularRepositoryQuery() {
+        UUID viewerId = UUID.randomUUID();
+        UUID templateId = UUID.randomUUID();
+        PageRequest pageRequest = PageRequest.of(0, 10);
+        when(templateRepository.existsById(templateId)).thenReturn(true);
+        when(pickRepository.findVisibleByTemplatePopular(viewerId, templateId, pageRequest))
+                .thenReturn(new PageImpl<>(List.of(), pageRequest, 0));
+
+        assertThat(service.getTemplatePicks(viewerId, templateId, PickSort.POPULAR, 1, 10)).isEmpty();
+
+        verify(pickRepository).findVisibleByTemplatePopular(viewerId, templateId, pageRequest);
+        verify(pickRepository, never()).findVisibleByTemplateRecent(any(), any(), any());
+    }
+
+    @Test
+    void shouldRejectTemplatePicksWhenTemplateDoesNotExist() {
+        UUID templateId = UUID.randomUUID();
+        when(templateRepository.existsById(templateId)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.getTemplatePicks(UUID.randomUUID(), templateId, null, 1, 10))
+                .isInstanceOf(NotFoundException.class);
+
+        verifyNoInteractions(pickRepository, selectionRepository, categoryRepository);
     }
 
     @Test

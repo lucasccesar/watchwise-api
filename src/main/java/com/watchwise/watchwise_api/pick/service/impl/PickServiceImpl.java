@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.pick.dto.PickProgress;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
+import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickSelection;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
@@ -121,6 +122,19 @@ public class PickServiceImpl implements PickService {
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         Page<Pick> picks = pickRepository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(userId, templateId, pageRequest);
         return mapPreviewPage(picks, userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<PickPreviewDTO> getTemplatePicks(UUID viewerId, UUID templateId, PickSort sort, Integer page, Integer size) {
+        if (!templateRepository.existsById(templateId)) {
+            throw new NotFoundException("Picks template not found");
+        }
+        PageRequest pageRequest = pageRequestFactory.build(page, size);
+        Page<Pick> picks = sort == PickSort.POPULAR
+                ? pickRepository.findVisibleByTemplatePopular(viewerId, templateId, pageRequest)
+                : pickRepository.findVisibleByTemplateRecent(viewerId, templateId, pageRequest);
+        return mapPreviewPage(picks, viewerId);
     }
 
     @Override

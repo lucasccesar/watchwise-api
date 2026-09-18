@@ -48,7 +48,54 @@ class PickRepositoryTest {
         assertThat(repository.findVisibleByOwner(stranger.getId(), owner.getId(), template.getId(), PageRequest.of(0, 10)).getContent()).extracting(Pick::getId).containsExactly(publicPick.getId());
     }
     private User user(String value, LocalDateTime now) { return userRepository.save(User.builder().username(value).email(value + "@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build()); }
-    private Pick save(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime now) { return repository.save(Pick.builder().user(user).picksTemplate(template).visibility(visibility).createdAt(now).updatedAt(now).build()); }
+    private Pick save(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime now) {
+        return save(user, template, visibility, now, 0);
+    }
+
+    private Pick save(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime createdAt, int likesCount) {
+        return repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(visibility)
+                .createdAt(createdAt).updatedAt(createdAt).likesCount(likesCount).build());
+    }
+
+    @Test
+    void findsVisibleTemplatePicksByRecentAndPopularOrder() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 18, 12, 0);
+        User owner = user("template-rank-owner", now);
+        User follower = user("template-rank-follower", now);
+        User stranger = user("template-rank-stranger", now);
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder()
+                .origin(PickOrigin.OFFICIAL).name("Template ranking").createdAt(now).updatedAt(now).build());
+
+        Pick publicPick = save(owner, template, PickVisibility.PUBLIC, now.plusHours(2), 1);
+        Pick followersPick = save(owner, template, PickVisibility.FOLLOWERS, now.plusHours(2), 1);
+        Pick privatePick = save(owner, template, PickVisibility.PRIVATE, now.plusHours(3), 10);
+
+        followerRepository.saveAndFlush(Follower.builder().follower(follower).followed(owner)
+                .status(FollowStatus.ACCEPTED).createdAt(now).build());
+        followerRepository.saveAndFlush(Follower.builder().follower(stranger).followed(owner)
+                .status(FollowStatus.PENDING).createdAt(now).build());
+
+        PageRequest page = PageRequest.of(0, 10);
+        assertThat(repository.findVisibleByTemplateRecent(owner.getId(), template.getId(), page).getContent())
+                .extracting(Pick::getId)
+                .containsExactly(privatePick.getId(), followersPick.getId(), publicPick.getId());
+        assertThat(repository.findVisibleByTemplateRecent(follower.getId(), template.getId(), page).getContent())
+                .extracting(Pick::getId)
+                .containsExactly(followersPick.getId(), publicPick.getId());
+        assertThat(repository.findVisibleByTemplateRecent(stranger.getId(), template.getId(), page).getContent())
+                .extracting(Pick::getId)
+                .containsExactly(publicPick.getId());
+
+        assertThat(repository.findVisibleByTemplatePopular(owner.getId(), template.getId(), page).getContent())
+                .extracting(Pick::getId)
+                .containsExactly(privatePick.getId(), followersPick.getId(), publicPick.getId());
+        assertThat(repository.findVisibleByTemplatePopular(follower.getId(), template.getId(), page).getContent())
+                .extracting(Pick::getId)
+                .containsExactly(followersPick.getId(), publicPick.getId());
+        assertThat(repository.findVisibleByTemplatePopular(stranger.getId(), template.getId(), page).getContent())
+                .extracting(Pick::getId)
+                .containsExactly(publicPick.getId());
+    }
 
     @Test
     void supportsOwnerTemplatePaginationAndVisibleQueryWithoutTemplateFilterAcrossTwoOwners() {

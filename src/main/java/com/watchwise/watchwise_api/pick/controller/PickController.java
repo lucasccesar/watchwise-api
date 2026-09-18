@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickService;
@@ -28,6 +29,15 @@ public class PickController {
     public ResponseEntity<PickResponseDTO> createPick(@PathVariable UUID templateId,
                                                       @Valid @RequestBody PickCreationDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(pickService.createPick(currentUserId(), templateId, dto));
+    }
+
+    @GetMapping("/picks-templates/{templateId}/picks")
+    public ResponseEntity<PageResponseDTO<PickPreviewDTO>> getTemplatePicks(@PathVariable UUID templateId,
+                                                                              @RequestParam(required = false) PickSort sort,
+                                                                              @RequestParam(required = false) Integer page,
+                                                                              @RequestParam(required = false) Integer size) {
+        Page<PickPreviewDTO> picks = pickService.getTemplatePicks(currentUserId(), templateId, sort, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(picks));
     }
 
     @GetMapping("/picks-templates/{templateId}/my-picks")

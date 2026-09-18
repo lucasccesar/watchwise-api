@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
+import com.watchwise.watchwise_api.pick.dto.PickSort;
 import org.springframework.data.domain.Page;
 
 import java.util.UUID;
@@ -13,6 +14,8 @@ public interface PickService {
     PickResponseDTO createPick(UUID userId, UUID templateId, PickCreationDTO dto);
 
     Page<PickPreviewDTO> getMyPicks(UUID userId, UUID templateId, Integer page, Integer size);
+
+    Page<PickPreviewDTO> getTemplatePicks(UUID viewerId, UUID templateId, PickSort sort, Integer page, Integer size);
 
     PickResponseDTO getPick(UUID viewerId, UUID pickId);
 
