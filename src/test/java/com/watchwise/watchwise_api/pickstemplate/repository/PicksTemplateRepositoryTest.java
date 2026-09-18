@@ -1,9 +1,21 @@
 package com.watchwise.watchwise_api.pickstemplate.repository;
 
+import com.watchwise.watchwise_api.comment.entity.Comment;
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.entity.Like;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -18,6 +30,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -31,6 +44,11 @@ class PicksTemplateRepositoryTest {
     }
     @Autowired PicksTemplateRepository repository;
     @Autowired UserRepository userRepository;
+    @Autowired PickRepository pickRepository;
+    @Autowired CommentRepository commentRepository;
+    @Autowired LikeRepository likeRepository;
+    @Autowired FollowerRepository followerRepository;
+    @PersistenceContext EntityManager entityManager;
 
     @Test
     void savesTemplateWithNullableCreator() {
@@ -55,11 +73,150 @@ class PicksTemplateRepositoryTest {
     }
 
     @Test
+    void searchesRecentTemplatesInCreationOrderWithOriginAndEscapedNameFilters() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 18, 12, 0);
+        saveTemplate("Rank% older", PickOrigin.OFFICIAL, now.minusDays(1));
+        saveTemplate("Rank% newer", PickOrigin.OFFICIAL, now);
+        saveTemplate("Rank% community", PickOrigin.COMMUNITY, now.plusDays(1));
+
+        Page<PicksTemplate> result = repository.searchRecent(
+                PickOrigin.OFFICIAL, "rank\\%", PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Rank% newer", "Rank% older");
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void searchesMostPickedUsingOnlyPicksVisibleToViewer() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 18, 12, 0);
+        User viewer = saveUser("ranking-viewer", now);
+        User owner = saveUser("ranking-owner", now);
+        User acceptedFollowedOwner = saveUser("ranking-followed", now);
+        User stranger = saveUser("ranking-stranger", now);
+        followerRepository.saveAndFlush(Follower.builder()
+                .follower(viewer).followed(acceptedFollowedOwner).status(FollowStatus.ACCEPTED).createdAt(now).build());
+
+        PicksTemplate mostPicked = saveTemplate("Most picked", PickOrigin.OFFICIAL, now);
+        PicksTemplate lessPicked = saveTemplate("Less picked", PickOrigin.OFFICIAL, now.minusDays(1));
+        PicksTemplate excludedOrigin = saveTemplate("Community picks", PickOrigin.COMMUNITY, now.plusDays(1));
+
+        savePick(viewer, mostPicked, PickVisibility.PRIVATE, now);
+        savePick(owner, mostPicked, PickVisibility.PUBLIC, now);
+        savePick(acceptedFollowedOwner, mostPicked, PickVisibility.FOLLOWERS, now);
+        savePick(stranger, mostPicked, PickVisibility.PRIVATE, now);
+        savePick(owner, lessPicked, PickVisibility.PUBLIC, now);
+        savePick(acceptedFollowedOwner, lessPicked, PickVisibility.FOLLOWERS, now);
+        savePick(stranger, excludedOrigin, PickVisibility.PRIVATE, now);
+
+        Page<PicksTemplate> result = repository.searchMostPicked(
+                viewer.getId(), PickOrigin.OFFICIAL, null, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Most picked", "Less picked");
+        assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void searchesPopularWeekAtInclusiveBoundaryWithIndependentActivityCountsAndVisibility() {
+        LocalDateTime since = LocalDateTime.of(2026, 9, 11, 12, 0, 0, 1_000);
+        LocalDateTime now = since.plusDays(7);
+        User viewer = saveUser("weekly-viewer", now);
+        User owner = saveUser("weekly-owner", now);
+        User acceptedFollowedOwner = saveUser("weekly-followed", now);
+        User stranger = saveUser("weekly-stranger", now);
+        followerRepository.saveAndFlush(Follower.builder()
+                .follower(viewer).followed(acceptedFollowedOwner).status(FollowStatus.ACCEPTED).createdAt(now).build());
+
+        PicksTemplate winner = saveTemplate("Weekly winner", PickOrigin.OFFICIAL, now.minusDays(1));
+        PicksTemplate runnerUp = saveTemplate("Weekly runner up", PickOrigin.OFFICIAL, now.minusDays(2));
+        PicksTemplate tieLowId = saveTemplate(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"), "Weekly tie low", PickOrigin.OFFICIAL, now.minusDays(3));
+        PicksTemplate tieHighId = saveTemplate(
+                UUID.fromString("00000000-0000-0000-0000-000000000002"), "Weekly tie high", PickOrigin.OFFICIAL, now.minusDays(3));
+        PicksTemplate third = saveTemplate("Weekly third", PickOrigin.OFFICIAL, now.minusDays(4));
+        PicksTemplate oldOnly = saveTemplate("Weekly old only", PickOrigin.OFFICIAL, now.minusDays(5));
+        saveTemplate("Weekly community", PickOrigin.COMMUNITY, now);
+
+        saveTemplateLike(owner, winner, since);
+        saveTemplateComment(owner, winner, since.plusNanos(1));
+        savePick(owner, winner, PickVisibility.PUBLIC, since.plusSeconds(1));
+        saveTemplateLike(viewer, winner, since.minusNanos(1_000));
+        saveTemplateComment(owner, winner, since.minusNanos(1_000));
+        savePick(owner, winner, PickVisibility.PUBLIC, since.minusNanos(1_000));
+
+        saveTemplateLike(owner, runnerUp, since.plusSeconds(2));
+        saveTemplateComment(owner, runnerUp, since.plusSeconds(3));
+        savePick(stranger, runnerUp, PickVisibility.PRIVATE, since.plusSeconds(4));
+
+        savePick(acceptedFollowedOwner, tieLowId, PickVisibility.FOLLOWERS, since.plusSeconds(5));
+        savePick(owner, tieHighId, PickVisibility.PUBLIC, since.plusSeconds(6));
+        savePick(owner, third, PickVisibility.PUBLIC, since.plusSeconds(7));
+
+        saveTemplateLike(owner, oldOnly, since.minusNanos(1_000));
+        saveTemplateComment(owner, oldOnly, since.minusNanos(1_000));
+        savePick(owner, oldOnly, PickVisibility.PUBLIC, since.minusNanos(1_000));
+
+        Page<PicksTemplate> result = repository.searchPopularWeek(
+                viewer.getId(), since, PickOrigin.OFFICIAL, null, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Weekly winner", "Weekly runner up", "Weekly tie high", "Weekly tie low", "Weekly third", "Weekly old only");
+        assertThat(result.getTotalElements()).isEqualTo(6);
+    }
+
+    @Test
     @Transactional
     void findsTemplateByIdWhileHoldingPessimisticWriteLock() {
         LocalDateTime now = LocalDateTime.now();
         PicksTemplate template = repository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
 
         assertThat(repository.findByIdForUpdate(template.getId())).contains(template);
+    }
+
+    private User saveUser(String username, LocalDateTime now) {
+        return userRepository.saveAndFlush(User.builder()
+                .username(username)
+                .email(username + "@example.com")
+                .password("hash")
+                .profilePicture("https://example.com/profile.png")
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private PicksTemplate saveTemplate(String name, PickOrigin origin, LocalDateTime createdAt) {
+        return repository.saveAndFlush(PicksTemplate.builder()
+                .origin(origin).name(name).createdAt(createdAt).updatedAt(createdAt).build());
+    }
+
+    private PicksTemplate saveTemplate(UUID id, String name, PickOrigin origin, LocalDateTime createdAt) {
+        entityManager.createNativeQuery("""
+                        insert into picks_templates (id, origin, name, created_at, updated_at)
+                        values (:id, :origin, :name, :createdAt, :updatedAt)
+                        """)
+                .setParameter("id", id)
+                .setParameter("origin", origin.name())
+                .setParameter("name", name)
+                .setParameter("createdAt", createdAt)
+                .setParameter("updatedAt", createdAt)
+                .executeUpdate();
+        return repository.findById(id).orElseThrow();
+    }
+
+    private Pick savePick(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime createdAt) {
+        return pickRepository.saveAndFlush(Pick.builder()
+                .user(user).picksTemplate(template).visibility(visibility)
+                .createdAt(createdAt).updatedAt(createdAt).build());
+    }
+
+    private void saveTemplateLike(User user, PicksTemplate template, LocalDateTime createdAt) {
+        likeRepository.saveAndFlush(Like.builder().user(user).picksTemplate(template).createdAt(createdAt).build());
+    }
+
+    private void saveTemplateComment(User user, PicksTemplate template, LocalDateTime createdAt) {
+        commentRepository.saveAndFlush(Comment.builder()
+                .user(user).picksTemplate(template).text("Weekly comment")
+                .containsSpoiler(false).createdAt(createdAt).updatedAt(createdAt).build());
     }
 }
