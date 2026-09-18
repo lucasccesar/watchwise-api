@@ -59,8 +59,8 @@ class PickRepositoryTest {
         Pick firstPick = save(owner, first, PickVisibility.PUBLIC, now); Pick secondPick = save(owner, first, PickVisibility.PUBLIC, now); Pick thirdPick = save(owner, first, PickVisibility.PUBLIC, now);
         Pick secondTemplatePick = save(owner, second, PickVisibility.PUBLIC, now); save(otherOwner, first, PickVisibility.PUBLIC, now);
 
-        Page<Pick> firstPage = repository.findByUserIdAndPicksTemplateId(owner.getId(), first.getId(), PageRequest.of(0, 2));
-        Page<Pick> secondPage = repository.findByUserIdAndPicksTemplateId(owner.getId(), first.getId(), PageRequest.of(1, 2));
+        Page<Pick> firstPage = repository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(owner.getId(), first.getId(), PageRequest.of(0, 2));
+        Page<Pick> secondPage = repository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(owner.getId(), first.getId(), PageRequest.of(1, 2));
         assertThat(firstPage.getTotalElements()).isEqualTo(3); assertThat(firstPage.getTotalPages()).isEqualTo(2); assertThat(firstPage.getContent()).hasSize(2);
         assertThat(secondPage.getTotalElements()).isEqualTo(3); assertThat(secondPage.getTotalPages()).isEqualTo(2); assertThat(secondPage.getContent()).hasSize(1);
         assertThat(Stream.concat(firstPage.getContent().stream(), secondPage.getContent().stream()).map(Pick::getId).toList())

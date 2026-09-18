@@ -31,6 +31,9 @@ import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateOption;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryOptionMode;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -64,6 +67,7 @@ public class PickServiceImpl implements PickService {
     private final CommentRepository commentRepository;
     private final LikeService likeService;
     private final UserMapper userMapper;
+    private final PicksTemplateOptionRepository optionRepository;
 
     public PickServiceImpl(PickRepository pickRepository, PickSelectionRepository selectionRepository,
             PicksTemplateRepository templateRepository, PicksTemplateCategoryRepository categoryRepository,
@@ -71,7 +75,7 @@ public class PickServiceImpl implements PickService {
             PickMapper pickMapper, PicksTemplateMapper templateMapper, PageRequestFactory pageRequestFactory) {
         this(pickRepository, selectionRepository, templateRepository, categoryRepository, userRepository,
                 followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     @Override
@@ -115,7 +119,7 @@ public class PickServiceImpl implements PickService {
             throw new NotFoundException("Picks template not found");
         }
         PageRequest pageRequest = pageRequestFactory.build(page, size);
-        Page<Pick> picks = pickRepository.findByUserIdAndPicksTemplateId(userId, templateId, pageRequest);
+        Page<Pick> picks = pickRepository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(userId, templateId, pageRequest);
         return mapPreviewPage(picks, userId);
     }
 
@@ -175,6 +179,12 @@ public class PickServiceImpl implements PickService {
         Map<UUID, List<PickSelection>> selectionsByPickId = selectionRepository.findByPickIdIn(pickIds).stream()
                 .collect(Collectors.groupingBy(selection -> selection.getPick().getId()));
         Map<UUID, List<PicksTemplateCategory>> categoriesByTemplateId = loadCategoriesByTemplateId(content);
+        List<UUID> fixedCategoryIds = categoriesByTemplateId.values().stream().flatMap(Collection::stream)
+                .filter(category -> category.getOptionMode() == PickCategoryOptionMode.FIXED)
+                .map(PicksTemplateCategory::getId).toList();
+        Map<UUID, List<PicksTemplateOption>> optionsByCategory = optionRepository == null || fixedCategoryIds.isEmpty() ? Map.of()
+                : optionRepository.findByCategoryIdIn(fixedCategoryIds).stream()
+                .collect(Collectors.groupingBy(option -> option.getCategory().getId()));
         Map<UUID, Long> commentsByPickId = commentRepository == null ? Map.of() : commentRepository.countByPickIdIn(pickIds).stream()
                 .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId, CommentRepository.PickCommentCount::getCount));
         Set<UUID> likedPickIds = likeService == null ? Set.of() : likeService.getLikedPickIds(viewerId, pickIds);
@@ -188,7 +198,8 @@ public class PickServiceImpl implements PickService {
                     .limit(5)
                     .map(category -> {
                         PickSelection selection = selectionByCategory.get(category.getId());
-                        boolean valid = targetService.isValid(viewerId, pick.getPicksTemplate(), category, selection);
+                        boolean valid = targetService.isStructurallyValid(category, selection,
+                                optionsByCategory.getOrDefault(category.getId(), List.of()));
                         return new PickAnsweredCategoryPreviewDTO(category.getId(), category.getName(), category.getGroup(),
                                 category.getDisplayOrder(), pickMapper.pickSelectionToSearchDto(selection), valid);
                     }).toList();

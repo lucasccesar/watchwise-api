@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.UUID;
+import java.util.Collection;
 
 @Service
 @RequiredArgsConstructor
@@ -101,6 +102,20 @@ public class PickTargetServiceImpl implements PickTargetService {
             return false;
         }
         return true;
+    }
+
+    @Override
+    public boolean isStructurallyValid(PicksTemplateCategory category, PickSelection selection,
+            Collection<PicksTemplateOption> fixedOptions) {
+        if (category == null || selection == null || category.getAllowedType() == null || category.getOptionMode() == null) {
+            return false;
+        }
+        ResolvedPickTarget target = fromSelection(selection);
+        if (!matchesCategory(category, target.key())) {
+            return false;
+        }
+        return category.getOptionMode() != PickCategoryOptionMode.FIXED
+                || fixedOptions.stream().anyMatch(option -> matches(option, target));
     }
 
     private boolean isCurrentTargetValid(PicksTemplate template, ResolvedPickTarget target) {

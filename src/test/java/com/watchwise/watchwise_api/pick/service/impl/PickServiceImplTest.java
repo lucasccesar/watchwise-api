@@ -185,12 +185,12 @@ class PickServiceImplTest {
         PickSelection secondSelection = persistedSelection(second, category, content("551"));
         PageRequest pageRequest = PageRequest.of(0, 10);
         when(templateRepository.existsById(template.getId())).thenReturn(true);
-        when(pickRepository.findByUserIdAndPicksTemplateId(userId, template.getId(), pageRequest))
+        when(pickRepository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(userId, template.getId(), pageRequest))
                 .thenReturn(new PageImpl<>(List.of(first, second), pageRequest, 2));
         when(selectionRepository.findByPickIdIn(List.of(first.getId(), second.getId())))
                 .thenReturn(List.of(firstSelection, secondSelection));
         when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(List.of(category));
-        when(targetService.isValid(eq(userId), same(template), same(category), any())).thenReturn(true);
+        lenient().when(targetService.isStructurallyValid(same(category), any(), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
         lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
 

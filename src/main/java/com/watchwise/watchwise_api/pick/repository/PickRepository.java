@@ -21,8 +21,31 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select pick from Pick pick where pick.id = :id")
     Optional<Pick> findByIdForUpdate(@Param("id") UUID id);
-    Page<Pick> findByUserIdAndPicksTemplateId(UUID userId, UUID templateId, Pageable pageable);
+    Page<Pick> findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(UUID userId, UUID templateId, Pageable pageable);
     List<Pick> findByUserIdAndPicksTemplateIdInOrderByCreatedAtDescIdDesc(UUID userId, Collection<UUID> templateIds);
+
+    @Query("select pick.picksTemplate.id as templateId, count(pick) as count from Pick pick "
+            + "where pick.user.id = :userId and pick.picksTemplate.id in :templateIds group by pick.picksTemplate.id")
+    List<OwnPickCount> countByUserIdAndTemplateIds(@Param("userId") UUID userId,
+            @Param("templateIds") Collection<UUID> templateIds);
+
+    @Query(value = "select ranked.picks_template_id as templateId, ranked.id as pickId "
+            + "from (select p.id, p.picks_template_id, row_number() over "
+            + "(partition by p.picks_template_id order by p.created_at desc, p.id desc) as row_number "
+            + "from picks p where p.user_id = :userId and p.picks_template_id in (:templateIds)) ranked "
+            + "where ranked.row_number = 1", nativeQuery = true)
+    List<LatestOwnPick> findLatestByUserIdAndTemplateIds(@Param("userId") UUID userId,
+            @Param("templateIds") Collection<UUID> templateIds);
+
+    interface OwnPickCount {
+        UUID getTemplateId();
+        long getCount();
+    }
+
+    interface LatestOwnPick {
+        UUID getTemplateId();
+        UUID getPickId();
+    }
 
     @Query("select pick.picksTemplate.id as templateId, count(pick) as count from Pick pick "
             + "where pick.picksTemplate.id in :templateIds and (pick.user.id = :viewerId "

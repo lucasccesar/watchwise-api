@@ -53,14 +53,13 @@ public class PicksTemplatePreviewAssembler {
         Map<UUID, Long> commentsCounts = commentRepository.countByPicksTemplateIdIn(templateIds).stream()
                 .collect(Collectors.toMap(CommentRepository.TemplateCommentCount::getTemplateId, CommentRepository.TemplateCommentCount::getCount));
         Set<UUID> likedTemplateIds = likeService.getLikedPicksTemplateIds(viewerId, templateIds);
-        List<Pick> ownPicks = pickRepository.findByUserIdAndPicksTemplateIdInOrderByCreatedAtDescIdDesc(viewerId, templateIds);
-        Map<UUID, List<Pick>> ownPicksByTemplate = ownPicks.stream()
-                .collect(Collectors.groupingBy(pick -> pick.getPicksTemplate().getId()));
+        Map<UUID, Long> ownPickCounts = pickRepository.countByUserIdAndTemplateIds(viewerId, templateIds).stream()
+                .collect(Collectors.toMap(PickRepository.OwnPickCount::getTemplateId, PickRepository.OwnPickCount::getCount));
+        Map<UUID, UUID> latestOwnPickIds = pickRepository.findLatestByUserIdAndTemplateIds(viewerId, templateIds).stream()
+                .collect(Collectors.toMap(PickRepository.LatestOwnPick::getTemplateId, PickRepository.LatestOwnPick::getPickId));
 
         return templates.stream().collect(Collectors.toMap(PicksTemplate::getId, template -> {
             List<PicksTemplateCategory> categories = categoriesByTemplate.getOrDefault(template.getId(), List.of());
-            List<Pick> viewerPicks = ownPicksByTemplate.getOrDefault(template.getId(), List.of());
-            UUID latestPickId = viewerPicks.isEmpty() ? null : viewerPicks.get(0).getId();
             return new PicksTemplatePreviewDTO(
                     template.getId(),
                     template.getCreator() == null ? null : userMapper.userToUserPreviewDto(template.getCreator()),
@@ -75,8 +74,8 @@ public class PicksTemplatePreviewAssembler {
                     template.getLikesCount() == null ? 0 : template.getLikesCount(),
                     commentsCounts.getOrDefault(template.getId(), 0L),
                     likedTemplateIds.contains(template.getId()),
-                    viewerPicks.size(),
-                    latestPickId);
+                    ownPickCounts.getOrDefault(template.getId(), 0L),
+                    latestOwnPickIds.get(template.getId()));
         }, (first, ignored) -> first));
     }
 }

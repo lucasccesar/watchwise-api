@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateOption;
 
 import java.util.UUID;
+import java.util.Collection;
 
 public interface PickTargetService {
 
@@ -29,4 +30,7 @@ public interface PickTargetService {
             PicksTemplate template,
             PicksTemplateCategory category,
             PickSelection selection);
+
+    boolean isStructurallyValid(PicksTemplateCategory category, PickSelection selection,
+            Collection<PicksTemplateOption> fixedOptions);
 }
