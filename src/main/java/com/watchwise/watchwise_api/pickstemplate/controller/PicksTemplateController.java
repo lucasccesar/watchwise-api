@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateCreationDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePatchDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateResponseDTO;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateSort;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateService;
 import jakarta.validation.Valid;
@@ -31,8 +32,9 @@ public class PicksTemplateController {
     @GetMapping
     public ResponseEntity<PageResponseDTO<PicksTemplatePreviewDTO>> listTemplates(
             @RequestParam(required = false) PickOrigin origin, @RequestParam(required = false) String name,
-            @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
-        Page<PicksTemplatePreviewDTO> templates = picksTemplateService.listTemplates(currentUserId(), origin, name, page, size);
+            @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) PicksTemplateSort sort) {
+        Page<PicksTemplatePreviewDTO> templates = picksTemplateService.listTemplates(currentUserId(), origin, name, page, size, sort);
         return ResponseEntity.ok(PageResponseDTO.of(templates));
     }
 

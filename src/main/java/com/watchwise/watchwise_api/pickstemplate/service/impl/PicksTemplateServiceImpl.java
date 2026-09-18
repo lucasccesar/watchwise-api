@@ -72,9 +72,22 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<PicksTemplatePreviewDTO> listTemplates(UUID viewerId, PickOrigin origin, String name, Integer page, Integer size) {
+    public Page<PicksTemplatePreviewDTO> listTemplates(UUID viewerId, PickOrigin origin, String name,
+                                                       Integer page, Integer size, PicksTemplateSort sort) {
         PageRequest pageRequest = pageRequestFactory.build(page, size);
-        return previewAssembler.assemblePage(templateRepository.search(origin, escapeLike(name), pageRequest), viewerId);
+        String escapedName = escapeLike(name);
+        Page<PicksTemplate> templates;
+        if (sort == null) {
+            templates = templateRepository.search(origin, escapedName, pageRequest);
+        } else {
+            templates = switch (sort) {
+                case RECENT -> templateRepository.searchRecent(origin, escapedName, pageRequest);
+                case MOST_PICKED -> templateRepository.searchMostPicked(viewerId, origin, escapedName, pageRequest);
+                case POPULAR_WEEK -> templateRepository.searchPopularWeek(viewerId, LocalDateTime.now().minusDays(7),
+                        origin, escapedName, pageRequest);
+            };
+        }
+        return previewAssembler.assemblePage(templates, viewerId);
     }
 
     @Override

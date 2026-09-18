@@ -23,6 +23,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.time.LocalDate;
@@ -48,7 +51,82 @@ class PicksTemplateServiceImplTest {
     @Mock PicksTemplateOptionMapper optionMapper;
     @Mock UserMapper userMapper;
     @Mock PageRequestFactory pageRequestFactory;
+    @Mock PicksTemplatePreviewAssembler previewAssembler;
     @InjectMocks PicksTemplateServiceImpl service;
+
+    @Test
+    void shouldUseAlphabeticalSearchForDefaultSortAndAssembleReturnedPage() {
+        UUID viewerId = UUID.randomUUID();
+        PageRequest pageRequest = PageRequest.of(0, 20);
+        Page<PicksTemplate> repositoryPage = new PageImpl<>(List.of(template(null, PickOrigin.COMMUNITY)), pageRequest, 1);
+        Page<PicksTemplatePreviewDTO> assembledPage = new PageImpl<>(List.of(), pageRequest, 1);
+        when(pageRequestFactory.build(1, 20)).thenReturn(pageRequest);
+        when(templateRepository.search(PickOrigin.COMMUNITY, "A\\%", pageRequest)).thenReturn(repositoryPage);
+        when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
+
+        Page<PicksTemplatePreviewDTO> result = service.listTemplates(viewerId, PickOrigin.COMMUNITY, "A%", 1, 20, null);
+
+        assertThat(result).isSameAs(assembledPage);
+        verify(templateRepository).search(PickOrigin.COMMUNITY, "A\\%", pageRequest);
+        verify(previewAssembler).assemblePage(repositoryPage, viewerId);
+        verifyNoMoreInteractions(templateRepository, previewAssembler);
+    }
+
+    @Test
+    void shouldDispatchRecentSortToRecentSearch() {
+        UUID viewerId = UUID.randomUUID();
+        PageRequest pageRequest = PageRequest.of(0, 20);
+        Page<PicksTemplate> repositoryPage = Page.empty(pageRequest);
+        Page<PicksTemplatePreviewDTO> assembledPage = Page.empty(pageRequest);
+        when(pageRequestFactory.build(1, 20)).thenReturn(pageRequest);
+        when(templateRepository.searchRecent(null, null, pageRequest)).thenReturn(repositoryPage);
+        when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
+
+        Page<PicksTemplatePreviewDTO> result = service.listTemplates(viewerId, null, null, 1, 20, PicksTemplateSort.RECENT);
+
+        assertThat(result).isSameAs(assembledPage);
+        verify(templateRepository).searchRecent(null, null, pageRequest);
+        verify(previewAssembler).assemblePage(repositoryPage, viewerId);
+    }
+
+    @Test
+    void shouldDispatchMostPickedSortWithAuthenticatedViewerId() {
+        UUID viewerId = UUID.randomUUID();
+        PageRequest pageRequest = PageRequest.of(0, 20);
+        Page<PicksTemplate> repositoryPage = Page.empty(pageRequest);
+        Page<PicksTemplatePreviewDTO> assembledPage = Page.empty(pageRequest);
+        when(pageRequestFactory.build(1, 20)).thenReturn(pageRequest);
+        when(templateRepository.searchMostPicked(viewerId, PickOrigin.OFFICIAL, "Awards", pageRequest)).thenReturn(repositoryPage);
+        when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
+
+        Page<PicksTemplatePreviewDTO> result = service.listTemplates(viewerId, PickOrigin.OFFICIAL, "Awards", 1, 20, PicksTemplateSort.MOST_PICKED);
+
+        assertThat(result).isSameAs(assembledPage);
+        verify(templateRepository).searchMostPicked(viewerId, PickOrigin.OFFICIAL, "Awards", pageRequest);
+        verify(previewAssembler).assemblePage(repositoryPage, viewerId);
+    }
+
+    @Test
+    void shouldDispatchPopularWeekSortWithRollingSevenDaySince() {
+        UUID viewerId = UUID.randomUUID();
+        PageRequest pageRequest = PageRequest.of(0, 20);
+        Page<PicksTemplate> repositoryPage = Page.empty(pageRequest);
+        Page<PicksTemplatePreviewDTO> assembledPage = Page.empty(pageRequest);
+        when(pageRequestFactory.build(1, 20)).thenReturn(pageRequest);
+        when(templateRepository.searchPopularWeek(eq(viewerId), any(LocalDateTime.class), isNull(), eq("Awards"), eq(pageRequest)))
+                .thenReturn(repositoryPage);
+        when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
+        LocalDateTime before = LocalDateTime.now().minusDays(7);
+
+        Page<PicksTemplatePreviewDTO> result = service.listTemplates(viewerId, null, "Awards", 1, 20, PicksTemplateSort.POPULAR_WEEK);
+
+        LocalDateTime after = LocalDateTime.now().minusDays(7);
+        ArgumentCaptor<LocalDateTime> sinceCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
+        assertThat(result).isSameAs(assembledPage);
+        verify(templateRepository).searchPopularWeek(eq(viewerId), sinceCaptor.capture(), isNull(), eq("Awards"), eq(pageRequest));
+        assertThat(sinceCaptor.getValue()).isBetween(before, after);
+        verify(previewAssembler).assemblePage(repositoryPage, viewerId);
+    }
 
     @Test
     void shouldDeriveOfficialOriginFromPersistedAdminRole() {

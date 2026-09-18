@@ -99,4 +99,15 @@ class PicksTemplateControllerIntegrationTest extends PicksDomainIntegrationSuppo
 
         assertThat(templates.findById(template.id()).orElseThrow().getEligibilityStartDate()).isNull();
     }
+
+    @Test
+    @DisplayName("[listTemplates] Should Return ApiError - When Sort Is Unsupported")
+    void shouldReturnApiErrorWhenSortIsUnsupported() throws Exception {
+        mvc.perform(authenticated(owner, HttpMethod.GET, "/picks-templates?sort=UNSUPPORTED", ""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Invalid value 'UNSUPPORTED' for parameter 'sort'. Expected type: PicksTemplateSort. Accepted values: POPULAR_WEEK, MOST_PICKED, RECENT"))
+                .andExpect(jsonPath("$.path").value("/picks-templates"));
+    }
 }
