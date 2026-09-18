@@ -100,6 +100,7 @@ class PicksTemplateRepositoryTest {
 
         PicksTemplate mostPicked = saveTemplate("Most picked", PickOrigin.OFFICIAL, now);
         PicksTemplate lessPicked = saveTemplate("Less picked", PickOrigin.OFFICIAL, now.minusDays(1));
+        PicksTemplate privateHeavy = saveTemplate("Private heavy", PickOrigin.OFFICIAL, now.plusDays(1));
         PicksTemplate excludedOrigin = saveTemplate("Community picks", PickOrigin.COMMUNITY, now.plusDays(1));
 
         savePick(viewer, mostPicked, PickVisibility.PRIVATE, now);
@@ -108,14 +109,25 @@ class PicksTemplateRepositoryTest {
         savePick(stranger, mostPicked, PickVisibility.PRIVATE, now);
         savePick(owner, lessPicked, PickVisibility.PUBLIC, now);
         savePick(acceptedFollowedOwner, lessPicked, PickVisibility.FOLLOWERS, now);
+        savePick(stranger, privateHeavy, PickVisibility.PRIVATE, now);
+        savePick(stranger, privateHeavy, PickVisibility.PRIVATE, now.plusSeconds(1));
+        savePick(stranger, privateHeavy, PickVisibility.PRIVATE, now.plusSeconds(2));
+        savePick(stranger, privateHeavy, PickVisibility.PRIVATE, now.plusSeconds(3));
         savePick(stranger, excludedOrigin, PickVisibility.PRIVATE, now);
 
         Page<PicksTemplate> result = repository.searchMostPicked(
-                viewer.getId(), PickOrigin.OFFICIAL, null, PageRequest.of(0, 10));
+                viewer.getId(), PickOrigin.OFFICIAL, null, PageRequest.of(0, 2));
+        Page<PicksTemplate> nextPage = repository.searchMostPicked(
+                viewer.getId(), PickOrigin.OFFICIAL, null, PageRequest.of(1, 2));
 
         assertThat(result.getContent()).extracting(PicksTemplate::getName)
                 .containsExactly("Most picked", "Less picked");
-        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(result.getTotalElements()).isEqualTo(3);
+        assertThat(result.getTotalPages()).isEqualTo(2);
+        assertThat(nextPage.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Private heavy");
+        assertThat(nextPage.getTotalElements()).isEqualTo(3);
+        assertThat(nextPage.getTotalPages()).isEqualTo(2);
     }
 
     @Test
@@ -126,6 +138,7 @@ class PicksTemplateRepositoryTest {
         User owner = saveUser("weekly-owner", now);
         User acceptedFollowedOwner = saveUser("weekly-followed", now);
         User stranger = saveUser("weekly-stranger", now);
+        User extraLike = saveUser("weekly-extra-like", now);
         followerRepository.saveAndFlush(Follower.builder()
                 .follower(viewer).followed(acceptedFollowedOwner).status(FollowStatus.ACCEPTED).createdAt(now).build());
 
@@ -138,20 +151,23 @@ class PicksTemplateRepositoryTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000002"), "Weekly tie high", PickOrigin.OFFICIAL, now.minusDays(3));
         PicksTemplate third = saveTemplate("Weekly third", PickOrigin.OFFICIAL, now.minusDays(4));
         PicksTemplate oldOnly = saveTemplate("Weekly old only", PickOrigin.OFFICIAL, now.minusDays(5));
+        saveTemplate("Weekly score zero", PickOrigin.OFFICIAL, now.minusDays(5));
         saveTemplate("Weekly community", PickOrigin.COMMUNITY, now);
 
         saveTemplateLike(owner, highActivity, since.plusSeconds(1));
         saveTemplateLike(viewer, highActivity, since.plusSeconds(2));
         saveTemplateLike(acceptedFollowedOwner, highActivity, since.plusSeconds(3));
-        saveTemplateComment(owner, highActivity, since.plusSeconds(4));
-        savePick(owner, highActivity, PickVisibility.PUBLIC, since.plusSeconds(5));
+        saveTemplateLike(stranger, highActivity, since.plusSeconds(4));
+        saveTemplateLike(extraLike, highActivity, since.plusSeconds(5));
+        saveTemplateComment(owner, highActivity, since.plusSeconds(6));
+        savePick(owner, highActivity, PickVisibility.PUBLIC, since.plusSeconds(7));
 
         saveTemplateLike(owner, winner, since);
-        saveTemplateComment(owner, winner, since.plusSeconds(6));
-        savePick(owner, winner, PickVisibility.PUBLIC, since.plusSeconds(7));
-        saveTemplateLike(viewer, winner, since.minusNanos(1_000));
-        saveTemplateComment(owner, winner, since.minusNanos(1_000));
-        savePick(owner, winner, PickVisibility.PUBLIC, since.minusNanos(1_000));
+        saveTemplateLike(viewer, winner, since.plusSeconds(1));
+        saveTemplateComment(owner, winner, since.plusSeconds(2));
+        saveTemplateComment(stranger, winner, since.plusSeconds(3));
+        savePick(owner, winner, PickVisibility.PUBLIC, since.plusSeconds(4));
+        savePick(acceptedFollowedOwner, winner, PickVisibility.FOLLOWERS, since.plusSeconds(5));
 
         saveTemplateLike(owner, runnerUp, since.plusSeconds(8));
         saveTemplateComment(owner, runnerUp, since.plusSeconds(9));
@@ -165,12 +181,25 @@ class PicksTemplateRepositoryTest {
         saveTemplateComment(owner, oldOnly, since.minusNanos(1_000));
         savePick(owner, oldOnly, PickVisibility.PUBLIC, since.minusNanos(1_000));
 
-        Page<PicksTemplate> result = repository.searchPopularWeek(
-                viewer.getId(), since, PickOrigin.OFFICIAL, null, PageRequest.of(0, 10));
+        Page<PicksTemplate> firstPage = repository.searchPopularWeek(
+                viewer.getId(), since, PickOrigin.OFFICIAL, null, PageRequest.of(0, 2));
+        Page<PicksTemplate> secondPage = repository.searchPopularWeek(
+                viewer.getId(), since, PickOrigin.OFFICIAL, null, PageRequest.of(1, 2));
+        Page<PicksTemplate> thirdPage = repository.searchPopularWeek(
+                viewer.getId(), since, PickOrigin.OFFICIAL, null, PageRequest.of(2, 2));
 
-        assertThat(result.getContent()).extracting(PicksTemplate::getName)
-                .containsExactly("Weekly high activity", "Weekly winner", "Weekly runner up", "Weekly tie high", "Weekly tie low", "Weekly third");
-        assertThat(result.getTotalElements()).isEqualTo(6);
+        assertThat(firstPage.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Weekly high activity", "Weekly winner");
+        assertThat(secondPage.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Weekly runner up", "Weekly tie high");
+        assertThat(thirdPage.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Weekly tie low", "Weekly third");
+        assertThat(firstPage.getTotalElements()).isEqualTo(6);
+        assertThat(firstPage.getTotalPages()).isEqualTo(3);
+        assertThat(secondPage.getTotalElements()).isEqualTo(6);
+        assertThat(secondPage.getTotalPages()).isEqualTo(3);
+        assertThat(thirdPage.getTotalElements()).isEqualTo(6);
+        assertThat(thirdPage.getTotalPages()).isEqualTo(3);
     }
 
     @Test

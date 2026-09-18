@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -30,6 +32,7 @@ class PickRepositoryTest {
     @Container static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
     @DynamicPropertySource static void properties(DynamicPropertyRegistry r) { r.add("spring.datasource.url", postgres::getJdbcUrl); r.add("spring.datasource.username", postgres::getUsername); r.add("spring.datasource.password", postgres::getPassword); }
     @Autowired PickRepository repository; @Autowired PicksTemplateRepository templateRepository; @Autowired UserRepository userRepository; @Autowired FollowerRepository followerRepository;
+    @PersistenceContext EntityManager entityManager;
     @Test void acceptsTwoPicksForSameUserAndTemplate() {
         LocalDateTime now = LocalDateTime.now(); User user = userRepository.saveAndFlush(User.builder().username("lucas").email("lucas@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build());
         PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
@@ -59,8 +62,24 @@ class PickRepositoryTest {
 
     private Pick save(UUID id, User user, PicksTemplate template, PickVisibility visibility,
                       LocalDateTime createdAt, int likesCount) {
-        return repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(visibility)
-                .id(id).createdAt(createdAt).updatedAt(createdAt).likesCount(likesCount).build());
+        if (id == null) {
+            return repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(visibility)
+                    .createdAt(createdAt).updatedAt(createdAt).likesCount(likesCount).build());
+        }
+        entityManager.createNativeQuery("""
+                        insert into picks (id, picks_template_id, user_id, visibility, created_at, updated_at, likes_count)
+                        values (:id, :templateId, :userId, :visibility, :createdAt, :updatedAt, :likesCount)
+                        """)
+                .setParameter("id", id)
+                .setParameter("templateId", template.getId())
+                .setParameter("userId", user.getId())
+                .setParameter("visibility", visibility.name())
+                .setParameter("createdAt", createdAt)
+                .setParameter("updatedAt", createdAt)
+                .setParameter("likesCount", likesCount)
+                .executeUpdate();
+        entityManager.flush();
+        return repository.findById(id).orElseThrow();
     }
 
     @Test
@@ -77,7 +96,7 @@ class PickRepositoryTest {
         Pick followersPick = save(UUID.fromString("00000000-0000-0000-0000-000000000002"), owner, template,
                 PickVisibility.FOLLOWERS, now.plusHours(2), 1);
         Pick privatePick = save(UUID.fromString("00000000-0000-0000-0000-000000000003"), owner, template,
-                PickVisibility.PRIVATE, now.plusHours(3), 10);
+                PickVisibility.PRIVATE, now.plusHours(1), 10);
 
         followerRepository.saveAndFlush(Follower.builder().follower(follower).followed(owner)
                 .status(FollowStatus.ACCEPTED).createdAt(now).build());
@@ -87,7 +106,7 @@ class PickRepositoryTest {
         PageRequest page = PageRequest.of(0, 10);
         assertThat(repository.findVisibleByTemplateRecent(owner.getId(), template.getId(), page).getContent())
                 .extracting(Pick::getId)
-                .containsExactly(privatePick.getId(), followersPick.getId(), publicPick.getId());
+                .containsExactly(followersPick.getId(), publicPick.getId(), privatePick.getId());
         assertThat(repository.findVisibleByTemplateRecent(follower.getId(), template.getId(), page).getContent())
                 .extracting(Pick::getId)
                 .containsExactly(followersPick.getId(), publicPick.getId());

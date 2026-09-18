@@ -103,7 +103,7 @@ class PickDomainIntegrationTest extends PicksDomainIntegrationSupport {
     }
 
     @Test
-    @DisplayName("[getPick] Should Apply Pick Visibility And Accepted Followers - When Owner Profile Is Private")
+    @DisplayName("[getPick] Should Apply Pick Visibility And Accepted Followers - When Reading An Individual Pick And The Template Collection")
     void shouldApplyPickVisibilityAndAcceptedFollowers() throws Exception {
         owner.setIsProfilePublic(false);
         users.saveAndFlush(owner);
