@@ -78,6 +78,21 @@ class PageRequestFactoryTest {
     }
 
     @Test
+    @DisplayName("[build] Should Clamp Page Size To Call Specific Maximum - When Page Size Exceeds It")
+    void shouldClampPageSizeToCallSpecificMaximum() {
+        PageRequest pageRequest = pageRequestFactory.build(2, 50, 20);
+
+        assertThat(pageRequest.getPageNumber()).isEqualTo(1);
+        assertThat(pageRequest.getPageSize()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("[build] Should Cap Default Page Size To Call Specific Maximum - When Page Size Is Null")
+    void shouldCapDefaultPageSizeToCallSpecificMaximum() {
+        assertThat(pageRequestFactory.build(1, null, 10).getPageSize()).isEqualTo(10);
+    }
+
+    @Test
     @DisplayName("[build] Should Throw BadRequestException - When Page Size Is Negative")
     void shouldThrowBadRequestExceptionWhenPageSizeIsNegative() {
         assertThatThrownBy(() -> pageRequestFactory.build(1, -5))

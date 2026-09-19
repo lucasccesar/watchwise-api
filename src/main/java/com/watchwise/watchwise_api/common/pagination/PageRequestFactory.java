@@ -16,7 +16,16 @@ public class PageRequestFactory {
         return build(pageNumber, pageSize, null, null);
     }
 
+    public PageRequest build(Integer pageNumber, Integer pageSize, int maxPageSize) {
+        validateMaxPageSize(maxPageSize);
+        return build(pageNumber, pageSize, maxPageSize, null, null);
+    }
+
     public PageRequest build(Integer pageNumber, Integer pageSize, String sortBy, String sortDirection) {
+        return build(pageNumber, pageSize, MAX_PAGE_SIZE, sortBy, sortDirection);
+    }
+
+    private PageRequest build(Integer pageNumber, Integer pageSize, int maxPageSize, String sortBy, String sortDirection) {
         int queryPageNumber;
         int queryPageSize;
 
@@ -29,9 +38,9 @@ public class PageRequestFactory {
         }
 
         if (pageSize == null) {
-            queryPageSize = DEFAULT_PAGE_SIZE;
-        } else if (pageSize > MAX_PAGE_SIZE) {
-            queryPageSize = MAX_PAGE_SIZE;
+            queryPageSize = Math.min(DEFAULT_PAGE_SIZE, maxPageSize);
+        } else if (pageSize > maxPageSize) {
+            queryPageSize = maxPageSize;
         } else if (pageSize <= 0) {
             throw new BadRequestException("Page size must be greater than 0");
         } else {
@@ -50,5 +59,11 @@ public class PageRequestFactory {
                 ? Sort.by(Sort.Order.desc(sortBy))
                 : Sort.by(Sort.Order.asc(sortBy));
         return PageRequest.of(queryPageNumber, queryPageSize, sort);
+    }
+
+    private void validateMaxPageSize(int maxPageSize) {
+        if (maxPageSize <= 0 || maxPageSize > MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("maxPageSize must be between 1 and " + MAX_PAGE_SIZE);
+        }
     }
 }
