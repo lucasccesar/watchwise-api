@@ -334,6 +334,7 @@ class SearchServiceImplTest {
         assertThat(result.lists()).containsExactly(new SearchUserListDTO(
                 listId, new UserPreviewDTO(matchedUser.getId(), "alienfan", "alien.png", true), "Alien favorites", List.of(), 0L));
         assertThat(result.templates()).isEmpty();
+        verifyNoInteractions(picksTemplateService);
     }
 
     @Test

@@ -173,6 +173,7 @@ class SearchControllerIntegrationTest {
         when(searchService.search(user.id(), "Alien", SearchType.SERIES, null, null)).thenReturn(expected);
         when(searchService.search(user.id(), "Alien", SearchType.LIST, null, null)).thenReturn(expected);
         when(searchService.search(user.id(), "Alien", SearchType.PERSON, null, null)).thenReturn(expected);
+        when(searchService.search(user.id(), "Alien", SearchType.PICKS_TEMPLATE, null, null)).thenReturn(expected);
         when(searchService.search(user.id(), "Alien", null, null, null)).thenReturn(expected);
 
         SearchType[] searchTypes = {
@@ -181,6 +182,7 @@ class SearchControllerIntegrationTest {
                 SearchType.SERIES,
                 SearchType.LIST,
                 SearchType.PERSON,
+                SearchType.PICKS_TEMPLATE,
                 null
         };
 
@@ -210,11 +212,17 @@ class SearchControllerIntegrationTest {
                 eq(user.id()), eq("Alien"), nullable(SearchType.class), isNull(), isNull());
 
         for (SearchType searchType : searchTypes) {
+            int expectedCalls = 0;
+            for (int i = 0; i < 30; i++) {
+                if (searchTypes[i % searchTypes.length] == searchType) {
+                    expectedCalls++;
+                }
+            }
             if (searchType == null) {
-                verify(searchService, times(5)).search(
+                verify(searchService, times(expectedCalls)).search(
                         eq(user.id()), eq("Alien"), isNull(), isNull(), isNull());
             } else {
-                verify(searchService, times(5)).search(
+                verify(searchService, times(expectedCalls)).search(
                         eq(user.id()), eq("Alien"), eq(searchType), isNull(), isNull());
             }
         }
