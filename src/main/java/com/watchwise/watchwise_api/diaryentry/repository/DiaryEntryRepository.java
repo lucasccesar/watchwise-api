@@ -9,12 +9,14 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.projection.TargetAware;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -203,6 +205,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             ),
             series_agg AS (
                 SELECT series_tmdb_id,
+                       COUNT(DISTINCT (season_number, episode_number)) AS watched_episode_count,
                        MAX(season_number) AS max_season_number,
                        MAX(effective_date) AS last_watched_date
                 FROM episode_entries
@@ -216,6 +219,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                 GROUP BY ee.series_tmdb_id
             )
             SELECT sa.series_tmdb_id AS seriesTmdbId,
+                   sa.watched_episode_count AS watchedEpisodeCount,
                    sa.max_season_number AS maxSeasonNumber,
                    me.max_episode_number AS maxEpisodeNumber,
                    sa.last_watched_date AS lastWatchedDate
@@ -272,6 +276,14 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
 
     interface SeriesInProgress {
         String getSeriesTmdbId();
+        default Long getWatchedEpisodeCount() {
+            if (!(this instanceof TargetAware targetAware)
+                    || !(targetAware.getTarget() instanceof Map<?, ?> target)) {
+                return null;
+            }
+            Object value = target.get("watchedEpisodeCount");
+            return value instanceof Number number ? number.longValue() : null;
+        }
         Integer getMaxSeasonNumber();
         Integer getMaxEpisodeNumber();
         LocalDate getLastWatchedDate();

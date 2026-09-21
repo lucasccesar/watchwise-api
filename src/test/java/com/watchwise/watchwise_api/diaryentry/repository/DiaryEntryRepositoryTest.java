@@ -386,6 +386,25 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Count Each Episode Once - When The User Rewatches An Episode")
+    void shouldCountEachEpisodeOnceWhenTheUserRewatchesAnEpisode() {
+        Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content secondEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 2));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondEpisode, 1));
+
+        DiaryEntryRepository.SeriesInProgress row = diaryEntryRepository
+                .findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10))
+                .getContent().getFirst();
+
+        assertThat(row.getWatchedEpisodeCount()).isEqualTo(2L);
+        assertThat(row.getSeriesTmdbId()).isEqualTo("1399");
+        assertThat(row.getMaxSeasonNumber()).isEqualTo(1);
+        assertThat(row.getMaxEpisodeNumber()).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("[findDistinctInProgressSeriesTmdbIdsByUserId] Should Return Only The User's Uncompleted Episode Series")
     void shouldReturnOnlyUsersUncompletedEpisodeSeries() {
         Content lucasEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
