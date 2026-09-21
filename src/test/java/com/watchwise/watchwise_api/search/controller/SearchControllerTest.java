@@ -135,6 +135,20 @@ class SearchControllerTest {
     }
 
     @Test
+    @DisplayName("[search] Should Allow Page Above TMDB Limit - When Searching Picks Templates")
+    void shouldAllowPageAboveTmdbLimitWhenSearchingPicksTemplates() {
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
+        when(searchService.search(viewerId, "Awards", SearchType.PICKS_TEMPLATE, 501, 20)).thenReturn(expected);
+
+        ResponseEntity<SearchResultDTO> result = searchController.search(
+                new SearchRequestDTO("Awards", SearchType.PICKS_TEMPLATE, 501, 20));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(expected);
+        verify(searchService).search(viewerId, "Awards", SearchType.PICKS_TEMPLATE, 501, 20);
+    }
+
+    @Test
     @DisplayName("[search] Should Resolve Viewer From Security Context - When Request Is Valid")
     void shouldResolveViewerFromSecurityContextWhenRequestIsValid() {
         SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
