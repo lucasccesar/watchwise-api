@@ -333,6 +333,7 @@ class SearchServiceImplTest {
         assertThat(result.users()).containsExactly(new UserPreviewDTO(matchedUser.getId(), "alienfan", "alien.png", true));
         assertThat(result.lists()).containsExactly(new SearchUserListDTO(
                 listId, new UserPreviewDTO(matchedUser.getId(), "alienfan", "alien.png", true), "Alien favorites", List.of(), 0L));
+        assertThat(result.templates()).isEmpty();
     }
 
     @Test
