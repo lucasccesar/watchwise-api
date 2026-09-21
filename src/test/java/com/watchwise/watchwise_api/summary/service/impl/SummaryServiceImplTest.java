@@ -441,6 +441,11 @@ class SummaryServiceImplTest {
             }
 
             @Override
+            public Long getWatchedEpisodeCount() {
+                return null;
+            }
+
+            @Override
             public Integer getMaxSeasonNumber() {
                 return maxSeasonNumber;
             }
