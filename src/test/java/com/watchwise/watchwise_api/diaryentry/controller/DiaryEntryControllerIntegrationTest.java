@@ -462,17 +462,49 @@ class DiaryEntryControllerIntegrationTest {
     void shouldReturnTheSeriesWhenUserWatchedAnEpisodeButHasNotCompletedIt() throws Exception {
         RegisteredUser user = registerUser("seriesinprogressok");
         User entity = userRepository.findById(user.id()).orElseThrow();
+        Content firstEpisode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(1).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content secondEpisode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(2).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
         Content episode = contentRepository.save(Content.builder()
                 .seriesTmdbId("1399").seasonNumber(1).episodeNumber(3).type(ContentType.EPISODE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        persistEntry(entity, firstEpisode);
+        persistEntry(entity, secondEpisode);
         persistEntry(entity, episode);
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(), null, null, null, null, null, 10, null, null, null)));
 
         mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.content[0].seriesTmdbId").value("1399"))
                 .andExpect(jsonPath("$.content[0].maxSeasonNumber").value(1))
-                .andExpect(jsonPath("$.content[0].maxEpisodeNumber").value(3));
+                .andExpect(jsonPath("$.content[0].maxEpisodeNumber").value(3))
+                .andExpect(jsonPath("$.content[0].watchedEpisodeCount").value(3))
+                .andExpect(jsonPath("$.content[0].totalEpisodeCount").value(10))
+                .andExpect(jsonPath("$.content[0].watchedPercentage").value(30.0));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return BadGateway - When TMDB Is Unavailable")
+    void shouldReturnBadGatewayWhenTmdbIsUnavailableForSeriesInProgress() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogresstmdbunavailable");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(1).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        persistEntry(entity, episode);
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
     }
 
     @Test
