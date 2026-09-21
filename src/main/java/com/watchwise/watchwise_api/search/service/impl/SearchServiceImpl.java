@@ -10,6 +10,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMultiSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateService;
 import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
 import com.watchwise.watchwise_api.search.dto.SearchPersonDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
@@ -40,6 +42,7 @@ public class SearchServiceImpl implements SearchService {
     private final UserRepository userRepository;
     private final UserListRepository userListRepository;
     private final UserListItemService userListItemService;
+    private final PicksTemplateService picksTemplateService;
     private final TmdbClient tmdbClient;
     private final PageRequestFactory pageRequestFactory;
 
@@ -61,15 +64,20 @@ public class SearchServiceImpl implements SearchService {
                     externalResults.contents(),
                     externalResults.people(),
                     searchLists(viewerId, trimmedQuery, pageRequest),
-                    searchUsers(trimmedQuery, pageRequest));
+                    searchUsers(trimmedQuery, pageRequest),
+                    List.of());
         }
 
         return switch (type) {
             case MOVIE -> searchMovies(trimmedQuery, viewer.getPreferredLanguage(), page, resultLimit);
             case SERIES -> searchSeries(trimmedQuery, viewer.getPreferredLanguage(), page, resultLimit);
             case PERSON -> searchPeople(trimmedQuery, viewer.getPreferredLanguage(), page, resultLimit);
-            case LIST -> new SearchResultDTO(List.of(), List.of(), searchLists(viewerId, trimmedQuery, pageRequest), List.of());
-            case USER -> new SearchResultDTO(List.of(), List.of(), List.of(), searchUsers(trimmedQuery, pageRequest));
+            case LIST -> new SearchResultDTO(
+                    List.of(), List.of(), searchLists(viewerId, trimmedQuery, pageRequest), List.of(), List.of());
+            case USER -> new SearchResultDTO(
+                    List.of(), List.of(), List.of(), searchUsers(trimmedQuery, pageRequest), List.of());
+            case PICKS_TEMPLATE -> new SearchResultDTO(
+                    List.of(), List.of(), List.of(), List.of(), searchTemplates(viewerId, trimmedQuery, page, resultLimit));
         };
     }
 
@@ -80,7 +88,7 @@ public class SearchServiceImpl implements SearchService {
                         TmdbImageUrlBuilder.posterUrl(movie.posterPath()), releaseYear(movie.releaseDate())))
                 .limit(resultLimit)
                 .toList();
-        return new SearchResultDTO(contents, List.of(), List.of(), List.of());
+        return new SearchResultDTO(contents, List.of(), List.of(), List.of(), List.of());
     }
 
     private SearchResultDTO searchSeries(String query, String language, int page, int resultLimit) {
@@ -90,7 +98,7 @@ public class SearchServiceImpl implements SearchService {
                         TmdbImageUrlBuilder.posterUrl(series.posterPath()), releaseYear(series.firstAirDate())))
                 .limit(resultLimit)
                 .toList();
-        return new SearchResultDTO(contents, List.of(), List.of(), List.of());
+        return new SearchResultDTO(contents, List.of(), List.of(), List.of(), List.of());
     }
 
     private SearchResultDTO searchPeople(String query, String language, int page, int resultLimit) {
@@ -99,7 +107,7 @@ public class SearchServiceImpl implements SearchService {
                         TmdbImageUrlBuilder.profileUrl(person.profilePath())))
                 .limit(resultLimit)
                 .toList();
-        return new SearchResultDTO(List.of(), people, List.of(), List.of());
+        return new SearchResultDTO(List.of(), people, List.of(), List.of(), List.of());
     }
 
     private SearchResultDTO searchMulti(String query, String language, int page, int resultLimit) {
@@ -115,7 +123,11 @@ public class SearchServiceImpl implements SearchService {
                         TmdbImageUrlBuilder.profileUrl(result.profilePath())))
                 .limit(resultLimit)
                 .toList();
-        return new SearchResultDTO(contents, people, List.of(), List.of());
+        return new SearchResultDTO(contents, people, List.of(), List.of(), List.of());
+    }
+
+    private List<PicksTemplatePreviewDTO> searchTemplates(UUID viewerId, String query, int page, int resultLimit) {
+        return picksTemplateService.listTemplates(viewerId, null, query, page, resultLimit, null).getContent();
     }
 
     private SearchContentDTO toSearchContentDto(TmdbMultiSearchResult result) {

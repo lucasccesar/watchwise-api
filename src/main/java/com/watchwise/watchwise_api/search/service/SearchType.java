@@ -5,5 +5,6 @@ public enum SearchType {
     SERIES,
     PERSON,
     LIST,
-    USER
+    USER,
+    PICKS_TEMPLATE
 }

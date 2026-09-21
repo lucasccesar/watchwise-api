@@ -13,6 +13,9 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateService;
 import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
 import com.watchwise.watchwise_api.search.dto.SearchPersonDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
@@ -65,12 +68,17 @@ class SearchServiceImplTest {
     @Mock
     private UserListItemService userListItemService;
 
+    @Mock
+    private PicksTemplateService picksTemplateService;
+
     private SearchServiceImpl service;
     private UUID viewerId;
 
     @BeforeEach
     void setUp() {
-        service = new SearchServiceImpl(userRepository, userListRepository, userListItemService, tmdbClient, new PageRequestFactory());
+        service = new SearchServiceImpl(
+                userRepository, userListRepository, userListItemService, picksTemplateService, tmdbClient,
+                new PageRequestFactory());
         viewerId = UUID.randomUUID();
     }
 
@@ -260,6 +268,26 @@ class SearchServiceImplTest {
         verify(userListItemService).getPreviewItemsByListIds(List.of(listId));
         verify(userListItemService).countNestedListsByListIds(List.of(listId));
         verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[search] Should Return Template Previews From Local Service - When Type Is Picks Template")
+    void shouldReturnTemplatePreviewsFromLocalServiceWhenTypeIsPicksTemplate() {
+        stubViewer();
+        PicksTemplatePreviewDTO template = new PicksTemplatePreviewDTO(
+                UUID.randomUUID(), PickOrigin.COMMUNITY, "Awards", null, null);
+        when(picksTemplateService.listTemplates(viewerId, null, "Awards", 2, 20, null))
+                .thenReturn(new PageImpl<>(List.of(template)));
+
+        SearchResultDTO result = service.search(viewerId, " Awards ", SearchType.PICKS_TEMPLATE, 2, 7);
+
+        assertThat(result.templates()).containsExactly(template);
+        assertThat(result.contents()).isEmpty();
+        assertThat(result.people()).isEmpty();
+        assertThat(result.lists()).isEmpty();
+        assertThat(result.users()).isEmpty();
+        verify(picksTemplateService).listTemplates(viewerId, null, "Awards", 2, 20, null);
+        verifyNoInteractions(tmdbClient, userListRepository, userListItemService);
     }
 
     @Test

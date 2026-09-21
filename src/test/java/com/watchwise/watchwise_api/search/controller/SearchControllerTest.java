@@ -121,6 +121,20 @@ class SearchControllerTest {
     }
 
     @Test
+    @DisplayName("[search] Should Accept Picks Template Search Type - When Request Is Valid")
+    void shouldAcceptPicksTemplateSearchTypeWhenRequestIsValid() {
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
+        when(searchService.search(viewerId, "Awards", SearchType.PICKS_TEMPLATE, 1, 20)).thenReturn(expected);
+
+        ResponseEntity<SearchResultDTO> result = searchController.search(
+                new SearchRequestDTO("Awards", SearchType.PICKS_TEMPLATE, 1, 20));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(expected);
+        verify(searchService).search(viewerId, "Awards", SearchType.PICKS_TEMPLATE, 1, 20);
+    }
+
+    @Test
     @DisplayName("[search] Should Resolve Viewer From Security Context - When Request Is Valid")
     void shouldResolveViewerFromSecurityContextWhenRequestIsValid() {
         SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());

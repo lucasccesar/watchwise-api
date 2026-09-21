@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.search.dto;
 
+import com.watchwise.watchwise_api.search.service.SearchType;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SearchRequestDTOTest {
 
     private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+    @Test
+    void shouldExposePicksTemplateSearchType() {
+        assertThat(SearchType.valueOf("PICKS_TEMPLATE").name()).isEqualTo("PICKS_TEMPLATE");
+    }
 
     @Test
     void shouldAcceptQueryAtMaximumLength() {

@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.search.dto;
 
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import org.junit.jupiter.api.Test;
 
@@ -10,6 +13,14 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SearchResultDTOTest {
+
+    @Test
+    void shouldSerializeEmptyTemplateResults() throws Exception {
+        String json = new ObjectMapper().writeValueAsString(
+                new SearchResultDTO(List.of(), List.of(), List.of(), List.of()));
+
+        assertThat(json).contains("\"templates\":[]");
+    }
 
     @Test
     void shouldKeepSearchCardsGroupedByTheirSource() {
@@ -26,5 +37,14 @@ class SearchResultDTOTest {
         assertThat(result.users()).containsExactly(owner);
         assertThat(result.lists().getFirst().user()).isEqualTo(owner);
         assertThat(result.lists().getFirst().previewItems()).isEmpty();
+    }
+
+    @Test
+    void shouldExposeTemplateResults() {
+        PicksTemplatePreviewDTO template = new PicksTemplatePreviewDTO(
+                UUID.randomUUID(), PickOrigin.COMMUNITY, "Awards", null, null);
+        SearchResultDTO result = new SearchResultDTO(List.of(), List.of(), List.of(), List.of(), List.of(template));
+
+        assertThat(result.templates()).containsExactly(template);
     }
 }

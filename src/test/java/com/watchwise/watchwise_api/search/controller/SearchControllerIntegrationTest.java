@@ -7,6 +7,8 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.search.service.SearchService;
 import com.watchwise.watchwise_api.search.service.SearchType;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
@@ -135,9 +137,30 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.contents[0].tmdbId").value("603"))
                 .andExpect(jsonPath("$.people").isArray())
                 .andExpect(jsonPath("$.lists").isArray())
-                .andExpect(jsonPath("$.users").isArray());
+                .andExpect(jsonPath("$.users").isArray())
+                .andExpect(jsonPath("$.templates").isArray());
 
         verify(searchService).search(user.id(), "Alien", SearchType.MOVIE, 2, 10);
+    }
+
+    @Test
+    @DisplayName("[search] Should Accept Picks Template Search Type - When Type Is Explicit")
+    void shouldAcceptPicksTemplateSearchTypeWhenTypeIsExplicit() throws Exception {
+        RegisteredUser user = registerUser("searchpickstemplate");
+        PicksTemplatePreviewDTO template = new PicksTemplatePreviewDTO(
+                UUID.randomUUID(), PickOrigin.COMMUNITY, "Awards", null, null);
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of(), List.of(template));
+        when(searchService.search(user.id(), "Awards", SearchType.PICKS_TEMPLATE, null, null)).thenReturn(expected);
+
+        mockMvc.perform(get("/search")
+                        .param("q", "Awards")
+                        .param("type", SearchType.PICKS_TEMPLATE.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.templates.length()").value(1))
+                .andExpect(jsonPath("$.templates[0].name").value("Awards"));
+
+        verify(searchService).search(user.id(), "Awards", SearchType.PICKS_TEMPLATE, null, null);
     }
 
     @Test
