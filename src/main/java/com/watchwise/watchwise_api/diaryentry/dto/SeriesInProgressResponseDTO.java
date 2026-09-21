@@ -6,5 +6,8 @@ public record SeriesInProgressResponseDTO(
         String seriesTmdbId,
         Integer maxSeasonNumber,
         Integer maxEpisodeNumber,
-        LocalDate lastWatchedDate) {
+        LocalDate lastWatchedDate,
+        Long watchedEpisodeCount,
+        Integer totalEpisodeCount,
+        Double watchedPercentage) {
 }

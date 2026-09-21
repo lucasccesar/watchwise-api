@@ -104,7 +104,8 @@ class DiaryEntryControllerTest {
     @DisplayName("[getSeriesInProgress] Should Return Page Envelope With Content And Metadata - When Called")
     void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingSeriesInProgress() {
         UUID targetUserId = UUID.randomUUID();
-        SeriesInProgressResponseDTO dto = new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1));
+        SeriesInProgressResponseDTO dto = new SeriesInProgressResponseDTO(
+                "1399", 8, 6, LocalDate.of(2024, 5, 1), null, null, null);
         when(diaryEntryService.getSeriesInProgress(currentUserId, targetUserId, 1, 10))
                 .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
 

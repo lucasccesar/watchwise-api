@@ -124,8 +124,23 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
         return diaryEntryRepository.findSeriesInProgressByUserId(userId, pageRequest)
-                .map(row -> new SeriesInProgressResponseDTO(
-                        row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate()));
+                .map(this::toSeriesInProgressResponse);
+    }
+
+    private SeriesInProgressResponseDTO toSeriesInProgressResponse(DiaryEntryRepository.SeriesInProgress row) {
+        TmdbTvFullDetails details = tmdbClient
+                .getTvFullDetails(row.getSeriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
+                .toOptional()
+                .orElseThrow(this::tmdbUnavailable);
+
+        Integer totalEpisodeCount = details.numberOfEpisodes();
+        Double watchedPercentage = totalEpisodeCount == null || totalEpisodeCount <= 0
+                ? null
+                : row.getWatchedEpisodeCount() * 100.0 / totalEpisodeCount;
+
+        return new SeriesInProgressResponseDTO(
+                row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),
+                row.getWatchedEpisodeCount(), totalEpisodeCount, watchedPercentage);
     }
 
     @Override

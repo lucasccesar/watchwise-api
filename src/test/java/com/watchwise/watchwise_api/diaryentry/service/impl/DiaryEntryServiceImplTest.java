@@ -503,11 +503,55 @@ class DiaryEntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(row)));
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(), null, null, null, null, null, null, null, null, null)));
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
         assertThat(result.getContent())
-                .containsExactly(new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1)));
+                .containsExactly(new SeriesInProgressResponseDTO(
+                        "1399", 8, 6, LocalDate.of(2024, 5, 1), null, null, null));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Calculate Watched Percentage - When TMDB Provides Total Episode Count")
+    void shouldCalculateWatchedPercentageForSeriesInProgress() {
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
+                "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(), null, null, null, null, null, 10, null, null, null)));
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
+
+        assertThat(result.getContent().getFirst())
+                .extracting(SeriesInProgressResponseDTO::watchedEpisodeCount,
+                        SeriesInProgressResponseDTO::totalEpisodeCount,
+                        SeriesInProgressResponseDTO::watchedPercentage)
+                .containsExactly(3L, 10, 30.0);
+        verify(tmdbClient).getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Throw TmdbUnavailableException - When TMDB Is Unavailable")
+    void shouldThrowTmdbUnavailableExceptionWhenTmdbIsUnavailableForSeriesInProgress() {
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
+                "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10))
+                .isInstanceOf(TmdbUnavailableException.class)
+                .hasMessage("TMDB is currently unavailable");
     }
 
     @Test
@@ -650,10 +694,21 @@ class DiaryEntryServiceImplTest {
 
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
             String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
+        return seriesInProgress(seriesTmdbId, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate);
+    }
+
+    private DiaryEntryRepository.SeriesInProgress seriesInProgress(
+            String seriesTmdbId, Long watchedEpisodeCount, Integer maxSeasonNumber,
+            Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
         return new DiaryEntryRepository.SeriesInProgress() {
             @Override
             public String getSeriesTmdbId() {
                 return seriesTmdbId;
+            }
+
+            @Override
+            public Long getWatchedEpisodeCount() {
+                return watchedEpisodeCount;
             }
 
             @Override

@@ -396,7 +396,8 @@ class SummaryServiceImplTest {
         assertThat(result.totalMinutesWatchedEpisodes()).isEqualTo(3000L);
         assertThat(result.totalMoviesWatched()).isEqualTo(42L);
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
-        assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressResponseDTO("1399", 8, 6, LocalDate.of(2024, 5, 1)));
+        assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressResponseDTO(
+                "1399", 8, 6, LocalDate.of(2024, 5, 1), null, null, null));
         assertThat(result.watchCountByDayLast30Days()).containsExactly(new DailyWatchCountDTO(LocalDate.of(2024, 5, 1), 3));
         assertThat(result.genreCountsMoviesLast30Days()).containsExactly(new GenreCountDTO("Action", 2));
         assertThat(result.genreCountsSeriesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));
