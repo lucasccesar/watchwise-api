@@ -132,7 +132,7 @@ public class TmdbClient {
         return cachedLookup(tmdbMovieFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/movie/{id}")
-                                .queryParam("append_to_response", "credits,watch/providers,alternative_titles,videos")
+                                .queryParam("append_to_response", "credits,watch/providers,alternative_titles,videos,external_ids")
                                 .queryParam("language", language)
                                 .build(tmdbId))
                         .retrieve()
@@ -144,7 +144,7 @@ public class TmdbClient {
         return cachedLookup(tmdbTvFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/tv/{id}")
-                                .queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos")
+                                .queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos,external_ids")
                                 .queryParam("language", language)
                                 .build(tmdbId))
                         .retrieve()
@@ -195,6 +195,7 @@ public class TmdbClient {
                 () -> callWithRetry(() -> tmdbRestClient.get()
                                 .uri(uriBuilder -> uriBuilder
                                         .path("/tv/{seriesId}/season/{seasonNumber}/episode/{episodeNumber}")
+                                        .queryParam("append_to_response", "external_ids")
                                         .queryParam("language", language)
                                         .build(seriesTmdbId, seasonNumber, episodeNumber))
                                 .retrieve()

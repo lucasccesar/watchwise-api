@@ -15,5 +15,19 @@ public record TmdbEpisodeFullDetails(
         @JsonProperty("season_number") Integer seasonNumber,
         Integer runtime,
         @JsonProperty("still_path") String stillPath,
-        @JsonProperty("guest_stars") List<TmdbGuestStar> guestStars) {
+        @JsonProperty("guest_stars") List<TmdbGuestStar> guestStars,
+        @JsonProperty("external_ids") TmdbExternalIds externalIds) {
+
+    public TmdbEpisodeFullDetails(
+            Integer id,
+            String name,
+            String overview,
+            String airDate,
+            Integer episodeNumber,
+            Integer seasonNumber,
+            Integer runtime,
+            String stillPath,
+            List<TmdbGuestStar> guestStars) {
+        this(id, name, overview, airDate, episodeNumber, seasonNumber, runtime, stillPath, guestStars, null);
+    }
 }

@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
@@ -164,6 +165,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbMovieFullDetails> lookup = tmdbClient.getMovieFullDetails(content.getTmdbId(), language);
         TmdbMovieFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
+        TmdbExternalIds externalIds = details.externalIds();
         persistUnitRuntime(content, details.runtime());
         TmdbLookupResult<TmdbMovieReleaseDates> releaseDatesLookup = lookup instanceof TmdbLookupResult.Found<TmdbMovieFullDetails> found
                 && found.origin() == TmdbLookupOrigin.REMOTE
@@ -196,13 +198,18 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 nullIfZero(details.revenue()),
                 productionCompanies(details.productionCompanies()),
                 crewFromCredits(details.credits()),
-                videos(details.videos()));
+                videos(details.videos()),
+                externalIds == null ? null : externalIds.imdbId(),
+                externalIds == null ? null : externalIds.facebookId(),
+                externalIds == null ? null : externalIds.instagramId(),
+                externalIds == null ? null : externalIds.twitterId());
     }
 
     private ContentDetailsDTO buildSeriesDetails(Content content, String language, String region) {
         Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbTvFullDetails> lookup = tmdbClient.getTvFullDetails(content.getTmdbId(), language);
         TmdbTvFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
+        TmdbExternalIds externalIds = details.externalIds();
 
         SeriesRuntimeResolution runtimeResolution = seriesRuntimeAggregateService.resolve(content, details, language);
         SeriesRuntimeAggregate runtime = runtimeResolution.aggregate();
@@ -247,7 +254,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 productionCompanies(details.productionCompanies()),
                 crewFromAggregateCredits(details.aggregateCredits()),
-                videos(details.videos()));
+                videos(details.videos()),
+                externalIds == null ? null : externalIds.imdbId(),
+                externalIds == null ? null : externalIds.facebookId(),
+                externalIds == null ? null : externalIds.instagramId(),
+                externalIds == null ? null : externalIds.twitterId());
     }
 
     private ContentDetailsDTO buildSeasonDetails(Content content, String language, String region) {
@@ -285,7 +296,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 productionCompanies(series.productionCompanies()),
                 crewFromAggregateCredits(series.aggregateCredits()),
-                videos(series.videos()));
+                videos(series.videos()),
+                null,
+                null,
+                null,
+                null);
     }
 
     private ContentDetailsDTO buildEpisodeDetails(Content content, String language, String region) {
@@ -321,7 +336,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 productionCompanies(series.productionCompanies()),
                 crewFromAggregateCredits(series.aggregateCredits()),
-                videos(series.videos()));
+                videos(series.videos()),
+                episode.externalIds() == null ? null : episode.externalIds().imdbId(),
+                null,
+                null,
+                null);
     }
 
     private String resolveMovieTitle(TmdbMovieFullDetails details, String region) {

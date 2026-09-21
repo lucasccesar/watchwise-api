@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbCreator;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
 import com.watchwise.watchwise_api.common.tmdb.TmdbGuestStar;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -133,7 +134,8 @@ class ContentDetailsServiceImplTest {
                 "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
                 "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
                 List.of(), List.of(), null, null, null,
-                null, null, null, null)));
+                null, null, null, null,
+                new TmdbExternalIds("tt0133093", "thematrixmovie", "thematrixmovie", "thematrixmovie"))));
 
         ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
 
@@ -142,6 +144,10 @@ class ContentDetailsServiceImplTest {
         assertThat(result.title()).isEqualTo("The Matrix");
         assertThat(result.releaseDate()).isEqualTo(LocalDate.of(1999, 3, 31));
         assertThat(result.runtimeMinutes()).isEqualTo(136);
+        assertThat(result.imdbId()).isEqualTo("tt0133093");
+        assertThat(result.facebookId()).isEqualTo("thematrixmovie");
+        assertThat(result.instagramId()).isEqualTo("thematrixmovie");
+        assertThat(result.twitterId()).isEqualTo("thematrixmovie");
         ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
         verify(contentRepository).save(captor.capture());
         assertThat(captor.getValue().getRuntimeMinutes()).isEqualTo(136);
@@ -250,7 +256,8 @@ class ContentDetailsServiceImplTest {
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null),
                         new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 2, null),
                         new TmdbSeasonSummary(3, "Season 3", null, "2010-01-01", 1, null)),
-                null, null, null, null, 3, 5, null, null, null)));
+                null, null, null, null, 3, 5, null, null, null,
+                new TmdbExternalIds("tt0903747", "breakingbad", "breakingbad", "breakingbad"))));
         when(tmdbClient.getSeasonFullDetails("1396", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                 101, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 58, null, null),
@@ -271,6 +278,10 @@ class ContentDetailsServiceImplTest {
 
         assertThat(result.totalRuntimeMinutes()).isEqualTo(58 + 48 + 47 + 45 + 50);
         assertThat(result.runtimeMinutes()).isEqualTo(Math.round((58 + 48 + 47 + 45 + 50) / 5.0));
+        assertThat(result.imdbId()).isEqualTo("tt0903747");
+        assertThat(result.facebookId()).isEqualTo("breakingbad");
+        assertThat(result.instagramId()).isEqualTo("breakingbad");
+        assertThat(result.twitterId()).isEqualTo("breakingbad");
         assertThat(result.numberOfSeasons()).isEqualTo(3);
         assertThat(result.numberOfEpisodes()).isEqualTo(5);
         assertThat(result.seasons()).extracting("seasonNumber", "episodeCount", "airedEpisodeCount")
@@ -691,7 +702,8 @@ class ContentDetailsServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(episode));
         when(tmdbClient.getEpisodeFullDetails("1396", 1, 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
                 62085, "Pilot", "First episode", "2008-01-20", 1, 1, 58, "/still.jpg",
-                List.of(new TmdbGuestStar(17420, "John Doe", "Neighbor", "/doe.jpg")))));
+                List.of(new TmdbGuestStar(17420, "John Doe", "Neighbor", "/doe.jpg")),
+                new TmdbExternalIds("tt0959621", null, null, null))));
         when(tmdbClient.getTvFullDetails("1396", "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
                 List.of(), List.of(), null, List.of(), null, null, null, null, null, null, null, null, null)));
@@ -700,6 +712,10 @@ class ContentDetailsServiceImplTest {
 
         assertThat(result.type()).isEqualTo(ContentType.EPISODE);
         assertThat(result.title()).isEqualTo("Pilot");
+        assertThat(result.imdbId()).isEqualTo("tt0959621");
+        assertThat(result.facebookId()).isNull();
+        assertThat(result.instagramId()).isNull();
+        assertThat(result.twitterId()).isNull();
         ArgumentCaptor<Content> captor = ArgumentCaptor.forClass(Content.class);
         verify(contentRepository).save(captor.capture());
         assertThat(captor.getValue().getRuntimeMinutes()).isEqualTo(58);

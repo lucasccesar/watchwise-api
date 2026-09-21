@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
@@ -486,7 +487,8 @@ class ContentControllerIntegrationTest {
                 "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
                 "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
                 List.of(), List.of(), null, null, null,
-                null, null, null, null)));
+                null, null, null, null,
+                new TmdbExternalIds("tt0133093", "thematrixmovie", "thematrixmovie", "thematrixmovie"))));
 
         mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
                 .andExpect(status().isOk())
@@ -494,7 +496,11 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.type").value("MOVIE"))
                 .andExpect(jsonPath("$.title").value("The Matrix"))
                 .andExpect(jsonPath("$.releaseDate").value("1999-03-31"))
-                .andExpect(jsonPath("$.runtimeMinutes").value(136));
+                .andExpect(jsonPath("$.runtimeMinutes").value(136))
+                .andExpect(jsonPath("$.imdb_id").value("tt0133093"))
+                .andExpect(jsonPath("$.facebook_id").value("thematrixmovie"))
+                .andExpect(jsonPath("$.instagram_id").value("thematrixmovie"))
+                .andExpect(jsonPath("$.twitter_id").value("thematrixmovie"));
     }
 
     @Test

@@ -27,5 +27,34 @@ public record TmdbTvFullDetails(
         @JsonProperty("number_of_episodes") Integer numberOfEpisodes,
         @JsonProperty("production_companies") List<TmdbProductionCompany> productionCompanies,
         TmdbVideos videos,
-        String status) {
+        String status,
+        @JsonProperty("external_ids") TmdbExternalIds externalIds) {
+
+    public TmdbTvFullDetails(
+            String id,
+            String name,
+            String originalName,
+            String overview,
+            String posterPath,
+            String backdropPath,
+            String firstAirDate,
+            List<Integer> episodeRunTime,
+            List<TmdbGenre> genres,
+            List<TmdbProductionCountry> productionCountries,
+            List<TmdbCreator> createdBy,
+            List<TmdbSeasonSummary> seasons,
+            TmdbNextEpisode nextEpisodeToAir,
+            TmdbAggregateCredits aggregateCredits,
+            TmdbWatchProviders watchProviders,
+            TmdbTvAlternativeTitles alternativeTitles,
+            Integer numberOfSeasons,
+            Integer numberOfEpisodes,
+            List<TmdbProductionCompany> productionCompanies,
+            TmdbVideos videos,
+            String status) {
+        this(id, name, originalName, overview, posterPath, backdropPath, firstAirDate, episodeRunTime,
+                genres, productionCountries, createdBy, seasons, nextEpisodeToAir, aggregateCredits,
+                watchProviders, alternativeTitles, numberOfSeasons, numberOfEpisodes, productionCompanies,
+                videos, status, null);
+    }
 }
