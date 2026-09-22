@@ -672,6 +672,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
     }
 
+    private record BulkCompletionBoundary(int seasonFinaleEpisodeNumber, Integer seriesFinaleSeasonNumber) {
+    }
+
     private void bulkLogSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, Boolean isSeriesFinale,
             Integer explicitFinaleEpisodeNumber, LocalDate watchedDate, LocalDate cutoff, List<DiaryEntry> created, ContentType requestedType,
             List<UUID> companionIds, String language) {
@@ -691,7 +694,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         for (int episodeNumber : episodeNumbers) {
             DiaryEntry entry = bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
                     episodeNumber == finaleEpisodeNumber, isSeriesFinale, watchedDate, created, requestedType, companionIds,
-                    episodeRuntimeMinutes.get(episodeNumber), true, passPlan);
+                    episodeRuntimeMinutes.get(episodeNumber), true, passPlan,
+                    new BulkCompletionBoundary(finaleEpisodeNumber, null));
             if (entry != null) {
                 created.add(entry);
             }
@@ -699,17 +703,18 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private BulkPassPlan buildBulkPassPlan(List<EpisodeKey> eligibleEpisodes, List<DiaryEntry> history) {
-        Map<EpisodeKey, Long> entryCountsByEpisode = history.stream()
-                .collect(Collectors.groupingBy(this::episodeKey, Collectors.counting()));
-        int minimumExistingEntryCount = eligibleEpisodes.stream()
-                .mapToInt(episode -> entryCountsByEpisode.getOrDefault(episode, 0L).intValue())
-                .min()
-                .orElse(0);
-        int targetWatchNumber = minimumExistingEntryCount + 1;
-        Set<EpisodeKey> existingTargetEpisodes = history.stream()
-                .filter(entry -> entry.getWatchNumber() != null && entry.getWatchNumber() == targetWatchNumber)
-                .map(this::episodeKey)
-                .collect(Collectors.toSet());
+        Set<EpisodeKey> eligibleEpisodeSet = Set.copyOf(eligibleEpisodes);
+        Map<Integer, Set<EpisodeKey>> episodesByWatchNumber = history.stream()
+                .filter(entry -> entry.getWatchNumber() != null && entry.getWatchNumber() > 0)
+                .collect(Collectors.groupingBy(DiaryEntry::getWatchNumber,
+                        Collectors.mapping(this::episodeKey, Collectors.toSet())));
+        int maximumWatchNumber = episodesByWatchNumber.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+        int targetWatchNumber = 1;
+        while (targetWatchNumber <= maximumWatchNumber
+                && episodesByWatchNumber.getOrDefault(targetWatchNumber, Set.of()).containsAll(eligibleEpisodeSet)) {
+            targetWatchNumber++;
+        }
+        Set<EpisodeKey> existingTargetEpisodes = episodesByWatchNumber.getOrDefault(targetWatchNumber, Set.of());
         return new BulkPassPlan(targetWatchNumber, existingTargetEpisodes);
     }
 
@@ -848,20 +853,39 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private DiaryEntry bulkLogEpisode(UUID userId, String seriesTmdbId, Integer seasonNumber, int episodeNumber,
             boolean isSeasonFinale, Boolean isSeriesFinale, LocalDate watchedDate, List<DiaryEntry> created,
             ContentType requestedType, List<UUID> companionIds, Integer runtimeMinutes, boolean trustedRuntimeMinutes,
-            BulkPassPlan passPlan) {
+            BulkPassPlan passPlan, BulkCompletionBoundary completionBoundary) {
         EpisodeKey episodeKey = new EpisodeKey(seasonNumber, episodeNumber);
-        if (!passPlan.needsEpisode(episodeKey)) {
+        if (!passPlan.needsEpisode(episodeKey) && !isSeasonFinale) {
             return null;
         }
-
-        Boolean seasonFinaleFlag = isSeasonFinale ? Boolean.TRUE : null;
-        Boolean seriesFinaleFlag = isSeasonFinale && Boolean.TRUE.equals(isSeriesFinale) ? Boolean.TRUE : null;
+        boolean matchesKnownGlobalSeasonFinale = !isSeasonFinale || contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE)
+                .map(Content::getEpisodeNumber)
+                .map(existingEpisodeNumber -> existingEpisodeNumber == episodeNumber)
+                .orElse(true);
+        boolean requiresHistoricalCompletionBoundary = isSeasonFinale && !matchesKnownGlobalSeasonFinale;
+        Boolean seasonFinaleFlag = isSeasonFinale && matchesKnownGlobalSeasonFinale ? Boolean.TRUE : null;
+        Boolean seriesFinaleFlag = isSeasonFinale && matchesKnownGlobalSeasonFinale && Boolean.TRUE.equals(isSeriesFinale)
+                ? Boolean.TRUE : null;
         ContentRefDTO episodeRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
                 null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber,
                 seasonFinaleFlag, seriesFinaleFlag, runtimeMinutes, null), trustedRuntimeMinutes);
 
         User user = userRepository.getReferenceById(userId);
         Content episodeContent = contentRepository.getReferenceById(episodeRef.id());
+
+        if (!passPlan.needsEpisode(episodeKey)) {
+            CompletionSignal completion = requiresHistoricalCompletionBoundary
+                    ? triggerBulkCompletionCascade(userId, episodeContent, watchedDate, requestedType, completionBoundary)
+                    : triggerCompletionCascade(userId, episodeContent, watchedDate, requestedType);
+            if (completion.completedSeason() != null) {
+                created.add(completion.completedSeason());
+            }
+            if (completion.completedSeries() != null) {
+                created.add(completion.completedSeries());
+            }
+            return null;
+        }
 
         DiaryEntry entry;
         try {
@@ -872,7 +896,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
         saveCompanions(entry, companionIds);
 
-        CompletionSignal completion = triggerCompletionCascade(userId, episodeContent, watchedDate, requestedType);
+        CompletionSignal completion = requiresHistoricalCompletionBoundary
+                ? triggerBulkCompletionCascade(userId, episodeContent, watchedDate, requestedType, completionBoundary)
+                : triggerCompletionCascade(userId, episodeContent, watchedDate, requestedType);
         if (completion.completedSeason() != null) {
             created.add(completion.completedSeason());
         }
@@ -929,7 +955,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             for (int episodeNumber : episodeNumbersBySeason.get(seasonNumber)) {
                 DiaryEntry entry = bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
                         episodeNumber == finaleEpisodeNumber, isSeriesFinaleSeason, watchedDate, created,
-                        ContentType.SERIES, companionIds, episodeRuntimeMinutes.get(episodeNumber), true, passPlan);
+                        ContentType.SERIES, companionIds, episodeRuntimeMinutes.get(episodeNumber), true, passPlan,
+                        new BulkCompletionBoundary(finaleEpisodeNumber, finaleSeasonNumber));
                 if (entry != null) {
                     created.add(entry);
                 }
@@ -1073,6 +1100,22 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return CompletionSignal.NONE;
     }
 
+    private CompletionSignal triggerBulkCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate,
+            ContentType requestedType, BulkCompletionBoundary boundary) {
+        if (loggedContent.getType() != ContentType.EPISODE) {
+            return CompletionSignal.NONE;
+        }
+
+        DiaryEntry completedSeason = maybeCompleteSeason(userId, loggedContent.getSeriesTmdbId(),
+                loggedContent.getSeasonNumber(), boundary.seasonFinaleEpisodeNumber(), watchedDate, requestedType);
+        if (completedSeason == null || boundary.seriesFinaleSeasonNumber() == null) {
+            return new CompletionSignal(completedSeason, null);
+        }
+        DiaryEntry completedSeries = maybeCompleteSeries(userId, loggedContent.getSeriesTmdbId(),
+                boundary.seriesFinaleSeasonNumber(), watchedDate, requestedType);
+        return new CompletionSignal(completedSeason, completedSeries);
+    }
+
     private DiaryEntry persistAutoGeneratedEntry(UUID userId, User user, Content content, LocalDate watchedDate,
             int expectedWatchNumber, boolean ignore, List<UUID> unanimousCompanionIds) {
         try {
@@ -1148,6 +1191,32 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return lastCreated;
     }
 
+    private DiaryEntry maybeCompleteSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, int finaleEpisodeNumber,
+            LocalDate watchedDate, ContentType requestedType) {
+        int minCount = minEpisodeWatchCount(userId, seriesTmdbId, seasonNumber, finaleEpisodeNumber);
+        if (minCount == 0) {
+            return null;
+        }
+
+        ContentRefDTO seasonRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
+                null, ContentType.SEASON, seriesTmdbId, seasonNumber, null, null, null));
+        int currentMax = diaryEntryRepository.findMaxWatchNumber(userId, seasonRef.id());
+        DiaryEntry lastCreated = null;
+        boolean ignore = isBelowRequestedLevel(ContentType.SEASON, requestedType);
+        while (currentMax < minCount) {
+            User user = userRepository.getReferenceById(userId);
+            Content seasonContent = contentRepository.getReferenceById(seasonRef.id());
+            int nextWatchNumber = currentMax + 1;
+            List<UUID> childEntryIds = diaryEntryRepository
+                    .findEpisodeEntriesInSeasonByWatchNumber(userId, seriesTmdbId, seasonNumber, nextWatchNumber).stream()
+                    .map(DiaryEntry::getId).toList();
+            lastCreated = persistAutoGeneratedEntry(userId, user, seasonContent, watchedDate, nextWatchNumber, ignore,
+                    computeUnanimousCompanions(childEntryIds));
+            currentMax = nextWatchNumber;
+        }
+        return lastCreated;
+    }
+
     private int minEpisodeWatchCount(UUID userId, String seriesTmdbId, Integer seasonNumber, int finaleEpisodeNumber) {
         if (finaleEpisodeNumber < 1) {
             return 0;
@@ -1200,6 +1269,31 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             currentMax = nextWatchNumber;
         }
 
+        return lastCreated;
+    }
+
+    private DiaryEntry maybeCompleteSeries(UUID userId, String seriesTmdbId, int finaleSeasonNumber,
+            LocalDate watchedDate, ContentType requestedType) {
+        int minMax = minSeasonWatchMax(userId, seriesTmdbId, finaleSeasonNumber);
+        if (minMax == 0) {
+            return null;
+        }
+
+        ContentRefDTO seriesRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
+                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
+        int currentMax = diaryEntryRepository.findMaxWatchNumber(userId, seriesRef.id());
+        DiaryEntry lastCreated = null;
+        boolean ignore = isBelowRequestedLevel(ContentType.SERIES, requestedType);
+        while (currentMax < minMax) {
+            User user = userRepository.getReferenceById(userId);
+            Content seriesContent = contentRepository.getReferenceById(seriesRef.id());
+            int nextWatchNumber = currentMax + 1;
+            List<UUID> childEntryIds = diaryEntryRepository.findSeasonEntriesInSeriesByWatchNumber(userId, seriesTmdbId,
+                    nextWatchNumber).stream().map(DiaryEntry::getId).toList();
+            lastCreated = persistAutoGeneratedEntry(userId, user, seriesContent, watchedDate, nextWatchNumber, ignore,
+                    computeUnanimousCompanions(childEntryIds));
+            currentMax = nextWatchNumber;
+        }
         return lastCreated;
     }
 
