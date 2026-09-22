@@ -487,7 +487,7 @@ class ContentControllerIntegrationTest {
                 "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
                 "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
                 List.of(), List.of(), null, null, null,
-                null, null, null, null,
+                null, null, null, null, null,
                 new TmdbExternalIds("tt0133093", "thematrixmovie", "thematrixmovie", "thematrixmovie"))));
 
         mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))

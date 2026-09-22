@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
@@ -23,6 +24,9 @@ import com.watchwise.watchwise_api.userlist.mapper.UserListItemMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.UserListContentStateResult;
+import com.watchwise.watchwise_api.userlist.service.UserListContentStateService;
+import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -51,6 +55,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final ContentService contentService;
     private final FollowerRepository followerRepository;
     private final UserListItemMapper userListItemMapper;
+    private final UserListContentStateService userListContentStateService;
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
@@ -68,21 +73,36 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     @Override
     public List<UserListItemResponseDTO> getItems(UUID viewerId, UUID listId) {
-        return userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId).stream()
-                .map(item -> toVisibilityScopedResponseDto(viewerId, item))
-                .toList();
+        return getItemsWithState(viewerId, listId).items();
     }
 
-    private UserListItemResponseDTO toVisibilityScopedResponseDto(UUID viewerId, UserListItem item) {
+    @Override
+    public UserListItemsWithState getItemsWithState(UUID viewerId, UUID listId) {
+        List<UserListItem> entities = userListItemRepository
+                .findByUserListIdWithContentAndChildListOrderByPositionAsc(listId);
+        UserListContentStateResult stateResult = userListContentStateService.resolve(viewerId, entities);
+        List<UserListItemResponseDTO> items = entities.stream()
+                .map(item -> toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId()))
+                .toList();
+        return new UserListItemsWithState(
+                items,
+                stateResult.watchedPercentageByListId().getOrDefault(listId, 0.0));
+    }
+
+    private UserListItemResponseDTO toVisibilityScopedResponseDto(
+            UUID viewerId, UserListItem item, Map<UUID, ContentStateDTO> stateByItemId) {
         UserListItemResponseDTO dto = userListItemMapper.userListItemToResponseDto(item);
+        ContentStateDTO contentState = item.getId() == null ? null : stateByItemId.get(item.getId());
 
         if (item.getChildList() != null && !isVisibleTo(viewerId, item.getChildList())) {
             return new UserListItemResponseDTO(
                     dto.id(), dto.content(), null, dto.position(), dto.description(), dto.createdAt(), dto.updatedAt(),
-                    dto.customPosterUrl());
+                    dto.customPosterUrl(), null);
         }
 
-        return dto;
+        return new UserListItemResponseDTO(
+                dto.id(), dto.content(), dto.childList(), dto.position(), dto.description(), dto.createdAt(), dto.updatedAt(),
+                dto.customPosterUrl(), contentState);
     }
 
     @Override
@@ -96,8 +116,8 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     @Override
-    public double getWatchedPercentage(UUID listId, UUID ownerId) {
-        return getWatchedPercentagesByListIds(List.of(listId), ownerId).getOrDefault(listId, 0.0);
+    public double getWatchedPercentage(UUID listId, UUID viewerId) {
+        return getItemsWithState(viewerId, listId).watchedPercentage();
     }
 
     @Override
@@ -130,30 +150,14 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     @Override
-    public Map<UUID, Double> getWatchedPercentagesByListIds(Collection<UUID> listIds, UUID ownerId) {
+    public Map<UUID, Double> getWatchedPercentagesByListIds(Collection<UUID> listIds, UUID viewerId) {
         if (listIds.isEmpty()) {
             return Map.of();
         }
 
-        Map<UUID, Long> totalCountsByListId = userListItemRepository.countContentItemsByUserListIdIn(listIds).stream()
-                .collect(Collectors.toMap(
-                        UserListItemRepository.UserListCount::getUserListId,
-                        UserListItemRepository.UserListCount::getCount));
-        if (totalCountsByListId.isEmpty()) {
-            return Map.of();
-        }
-
-        Map<UUID, Long> watchedCountsByListId = userListItemRepository.countWatchedContentItemsByUserListIdIn(listIds, ownerId).stream()
-                .collect(Collectors.toMap(
-                        UserListItemRepository.UserListCount::getUserListId,
-                        UserListItemRepository.UserListCount::getCount));
-
-        Map<UUID, Double> percentagesByListId = new LinkedHashMap<>();
-        totalCountsByListId.forEach((listId, totalCount) -> {
-            long watchedCount = watchedCountsByListId.getOrDefault(listId, 0L);
-            percentagesByListId.put(listId, (watchedCount * 100.0) / totalCount);
-        });
-        return percentagesByListId;
+        List<UserListItem> allItems = userListItemRepository
+                .findAllContentItemsByUserListIdInOrderByPosition(listIds);
+        return userListContentStateService.resolve(viewerId, allItems).watchedPercentageByListId();
     }
 
     @Override
@@ -264,7 +268,7 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         try {
             UserListItem saved = insertAtPosition(listId, newItem, userListItemCreationDTO.position());
-            return userListItemMapper.userListItemToResponseDto(saved);
+            return toResponseDto(userId, saved);
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -273,6 +277,13 @@ public class UserListItemServiceImpl implements UserListItemService {
     @Override
     @Transactional
     public List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
+        return addItemsWithState(userId, listId, userListItemBulkCreationDTO).items();
+    }
+
+    @Override
+    @Transactional
+    public UserListItemsWithState addItemsWithState(
+            UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO) {
         UserList userList = findOwnedListForUpdate(userId, listId);
         assertListIsNotLockedAsListOfLists(listId);
         UserListItemScope lockedScope = resolveExistingContentScope(listId);
@@ -299,7 +310,13 @@ public class UserListItemServiceImpl implements UserListItemService {
         try {
             List<UserListItem> saved = userListItemRepository.saveAll(newItems);
             userListItemRepository.flush();
-            return saved.stream().map(userListItemMapper::userListItemToResponseDto).toList();
+            UserListContentStateResult stateResult = userListContentStateService.resolve(userId, saved);
+            List<UserListItemResponseDTO> items = saved.stream()
+                    .map(item -> toVisibilityScopedResponseDto(userId, item, stateResult.stateByItemId()))
+                    .toList();
+            return new UserListItemsWithState(
+                    items,
+                    stateResult.watchedPercentageByListId().getOrDefault(listId, 0.0));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -323,7 +340,7 @@ public class UserListItemServiceImpl implements UserListItemService {
                 && !userListItemPatchDTO.customPosterUrl().equals(item.getCustomPosterUrl());
 
         if (!descriptionChanged && !positionChanged && !customPosterUrlChanged) {
-            return userListItemMapper.userListItemToResponseDto(item);
+            return toResponseDto(userId, item);
         }
 
         long currentCount = positionChanged ? userListItemRepository.countByUserListId(listId) : 0;
@@ -350,7 +367,12 @@ public class UserListItemServiceImpl implements UserListItemService {
             userListItemRepository.flush();
         }
 
-        return userListItemMapper.userListItemToResponseDto(item);
+        return toResponseDto(userId, item);
+    }
+
+    private UserListItemResponseDTO toResponseDto(UUID viewerId, UserListItem item) {
+        UserListContentStateResult stateResult = userListContentStateService.resolve(viewerId, List.of(item));
+        return toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId());
     }
 
     private UserListItem performMove(UserListItem item, int oldPosition, int newPosition, long currentCount) {

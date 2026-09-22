@@ -1,5 +1,9 @@
 package com.watchwise.watchwise_api.userlist.mapper;
 
+import com.watchwise.watchwise_api.content.dto.ContentProductionStatus;
+import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
+import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
@@ -67,6 +71,22 @@ class UserListItemMapperTest {
         assertThat(result.customPosterUrl()).isEqualTo("https://example.com/poster.png");
         assertThat(result.createdAt()).isEqualTo(now);
         assertThat(result.updatedAt()).isEqualTo(now);
+    }
+
+    @Test
+    @DisplayName("[constructor] Should Preserve Content State - When Provided")
+    void shouldPreserveContentStateWhenProvided() {
+        ContentStateDTO contentState = new ContentStateDTO(
+                WatchStatus.PARTIALLY_WATCHED,
+                ReleaseStatus.RELEASED,
+                ContentProductionStatus.IN_PROGRESS,
+                3,
+                5);
+
+        UserListItemResponseDTO result = new UserListItemResponseDTO(
+                UUID.randomUUID(), null, null, 1, null, null, null, null, contentState);
+
+        assertThat(result.contentState()).isEqualTo(contentState);
     }
 
     @Test

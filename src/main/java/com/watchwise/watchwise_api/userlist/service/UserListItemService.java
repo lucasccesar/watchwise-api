@@ -17,6 +17,8 @@ public interface UserListItemService {
 
     List<UserListItemResponseDTO> getItems(UUID viewerId, UUID listId);
 
+    UserListItemsWithState getItemsWithState(UUID viewerId, UUID listId);
+
     List<ContentRefDTO> getPreviewItems(UUID listId);
 
     long countNestedLists(UUID listId);
@@ -48,6 +50,9 @@ public interface UserListItemService {
     UserListItemResponseDTO addItem(UUID userId, UUID listId, UserListItemCreationDTO userListItemCreationDTO);
 
     List<UserListItemResponseDTO> addItems(UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);
+
+    UserListItemsWithState addItemsWithState(
+            UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);
 
     UserListItemResponseDTO updateItem(UUID userId, UUID listId, UUID itemId, UserListItemPatchDTO userListItemPatchDTO);
 

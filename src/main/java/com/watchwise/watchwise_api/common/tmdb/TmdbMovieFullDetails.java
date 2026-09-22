@@ -24,6 +24,7 @@ public record TmdbMovieFullDetails(
         Long revenue,
         @JsonProperty("production_companies") List<TmdbProductionCompany> productionCompanies,
         TmdbVideos videos,
+        String status,
         @JsonProperty("external_ids") TmdbExternalIds externalIds) {
 
     public TmdbMovieFullDetails(
@@ -46,6 +47,6 @@ public record TmdbMovieFullDetails(
             TmdbVideos videos) {
         this(id, title, originalTitle, overview, posterPath, backdropPath, releaseDate, runtime,
                 genres, productionCountries, credits, watchProviders, alternativeTitles, budget,
-                revenue, productionCompanies, videos, null);
+                revenue, productionCompanies, videos, null, null);
     }
 }

@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -27,6 +28,9 @@ import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.mapper.UserListItemMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userlist.service.UserListContentStateResult;
+import com.watchwise.watchwise_api.userlist.service.UserListContentStateService;
+import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -73,6 +77,9 @@ class UserListItemServiceImplTest {
     @Mock
     private UserListItemMapper userListItemMapper;
 
+    @Mock
+    private UserListContentStateService userListContentStateService;
+
     @InjectMocks
     private UserListItemServiceImpl userListItemService;
 
@@ -115,6 +122,16 @@ class UserListItemServiceImplTest {
         listId = UUID.randomUUID();
         scifi = buildUserList(listId, lucas, "Best sci-fi of the 90s", UserListVisibility.PUBLIC);
         fightClub = buildContent("550", ContentType.MOVIE);
+
+        lenient().when(userListContentStateService.resolve(any(), any()))
+                .thenReturn(new UserListContentStateResult(Map.of(), Map.of()));
+        lenient().when(userListItemMapper.userListItemToResponseDto(any(UserListItem.class)))
+                .thenAnswer(invocation -> {
+                    UserListItem item = invocation.getArgument(0);
+                    return new UserListItemResponseDTO(
+                            item.getId(), null, null, item.getPosition(), item.getDescription(),
+                            item.getCreatedAt(), item.getUpdatedAt(), item.getCustomPosterUrl(), null);
+                });
     }
 
     // ---------- getItems ----------
@@ -187,6 +204,37 @@ class UserListItemServiceImplTest {
 
         assertThat(result.get(0)).isEqualTo(mapped);
         verifyNoInteractions(followerRepository);
+    }
+
+    @Test
+    @DisplayName("[getItemsWithState] Should Resolve Every Content State In One Batch - When A List Has Multiple Items")
+    void shouldResolveEveryContentStateInOneBatchWhenAListHasMultipleItems() {
+        Content theMatrix = buildContent("603", ContentType.MOVIE);
+        UserListItem firstItem = buildContentItem(scifi, fightClub, 1);
+        UserListItem secondItem = buildContentItem(scifi, theMatrix, 2);
+        UserListItemResponseDTO firstMapped = new UserListItemResponseDTO(
+                firstItem.getId(), buildContentRefDto(fightClub), null, 1, null, LocalDateTime.now(), LocalDateTime.now());
+        UserListItemResponseDTO secondMapped = new UserListItemResponseDTO(
+                secondItem.getId(), buildContentRefDto(theMatrix), null, 2, null, LocalDateTime.now(), LocalDateTime.now());
+        ContentStateDTO watched = new ContentStateDTO(
+                com.watchwise.watchwise_api.content.dto.WatchStatus.WATCHED, null, null, null, null);
+        ContentStateDTO unwatched = new ContentStateDTO(
+                com.watchwise.watchwise_api.content.dto.WatchStatus.UNWATCHED, null, null, null, null);
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(firstItem, secondItem));
+        when(userListItemMapper.userListItemToResponseDto(firstItem)).thenReturn(firstMapped);
+        when(userListItemMapper.userListItemToResponseDto(secondItem)).thenReturn(secondMapped);
+        when(userListContentStateService.resolve(lucasId, List.of(firstItem, secondItem)))
+                .thenReturn(new UserListContentStateResult(
+                        Map.of(firstItem.getId(), watched, secondItem.getId(), unwatched),
+                        Map.of(listId, 50.0)));
+
+        UserListItemsWithState result = userListItemService.getItemsWithState(lucasId, listId);
+
+        assertThat(result.items()).extracting(UserListItemResponseDTO::contentState)
+                .containsExactly(watched, unwatched);
+        assertThat(result.watchedPercentage()).isEqualTo(50.0);
+        verify(userListContentStateService).resolve(lucasId, List.of(firstItem, secondItem));
     }
 
     // ---------- getPreviewItems / getPreviewItemsByListIds ----------
@@ -383,66 +431,108 @@ class UserListItemServiceImplTest {
     @Test
     @DisplayName("[getWatchedPercentage] Should Return Zero - When List Has No Content Items")
     void shouldReturnZeroWhenListHasNoContentItems() {
-        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId))).thenReturn(List.of());
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of());
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
         assertThat(result).isEqualTo(0.0);
+        verify(userListContentStateService).resolve(lucasId, List.of());
+        verify(userListItemRepository, never()).countWatchedContentItemsByUserListIdIn(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getWatchedPercentage] Should Use Batched Content State - When List Has Content Items")
+    void shouldUseBatchedContentStateWhenListHasContentItems() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(item));
+        when(userListContentStateService.resolve(lucasId, List.of(item)))
+                .thenReturn(new UserListContentStateResult(Map.of(), Map.of(listId, 25.0)));
+
+        double result = userListItemService.getWatchedPercentage(listId, lucasId);
+
+        assertThat(result).isEqualTo(25.0);
+        verify(userListContentStateService).resolve(lucasId, List.of(item));
+        verify(userListItemRepository, never()).countContentItemsByUserListIdIn(any());
         verify(userListItemRepository, never()).countWatchedContentItemsByUserListIdIn(any(), any());
     }
 
     @Test
     @DisplayName("[getWatchedPercentage] Should Return The Proportion Watched - When Some Items Are Watched")
     void shouldReturnTheProportionWatchedWhenSomeItemsAreWatched() {
-        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId)))
-                .thenReturn(List.of(buildUserListCount(listId, 4L)));
-        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId), lucasId))
-                .thenReturn(List.of(buildUserListCount(listId, 1L)));
+        List<UserListItem> items = List.of(
+                buildContentItem(scifi, buildContent("1", ContentType.MOVIE), 1),
+                buildContentItem(scifi, buildContent("2", ContentType.MOVIE), 2),
+                buildContentItem(scifi, buildContent("3", ContentType.MOVIE), 3),
+                buildContentItem(scifi, buildContent("4", ContentType.MOVIE), 4));
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(items);
+        when(userListContentStateService.resolve(lucasId, items))
+                .thenReturn(new UserListContentStateResult(Map.of(), Map.of(listId, 25.0)));
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
         assertThat(result).isEqualTo(25.0);
+        verify(userListContentStateService).resolve(lucasId, items);
     }
 
     @Test
     @DisplayName("[getWatchedPercentage] Should Return One Hundred - When All Items Are Watched")
     void shouldReturnOneHundredWhenAllItemsAreWatched() {
-        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId)))
-                .thenReturn(List.of(buildUserListCount(listId, 2L)));
-        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId), lucasId))
-                .thenReturn(List.of(buildUserListCount(listId, 2L)));
+        List<UserListItem> items = List.of(
+                buildContentItem(scifi, buildContent("1", ContentType.MOVIE), 1),
+                buildContentItem(scifi, buildContent("2", ContentType.MOVIE), 2));
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(items);
+        when(userListContentStateService.resolve(lucasId, items))
+                .thenReturn(new UserListContentStateResult(Map.of(), Map.of(listId, 100.0)));
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
         assertThat(result).isEqualTo(100.0);
+        verify(userListContentStateService).resolve(lucasId, items);
     }
 
     @Test
     @DisplayName("[getWatchedPercentage] Should Return Zero - When No Items Are Watched")
     void shouldReturnZeroWhenNoItemsAreWatched() {
-        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId)))
-                .thenReturn(List.of(buildUserListCount(listId, 3L)));
-        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId), lucasId))
-                .thenReturn(List.of());
+        List<UserListItem> items = List.of(
+                buildContentItem(scifi, buildContent("1", ContentType.MOVIE), 1),
+                buildContentItem(scifi, buildContent("2", ContentType.MOVIE), 2),
+                buildContentItem(scifi, buildContent("3", ContentType.MOVIE), 3));
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(items);
+        when(userListContentStateService.resolve(lucasId, items))
+                .thenReturn(new UserListContentStateResult(Map.of(), Map.of(listId, 0.0)));
 
         double result = userListItemService.getWatchedPercentage(listId, lucasId);
 
         assertThat(result).isEqualTo(0.0);
+        verify(userListContentStateService).resolve(lucasId, items);
     }
 
     @Test
     @DisplayName("[getWatchedPercentagesByListIds] Should Compute Percentage Independently Per List - When Multiple Lists Are Requested")
     void shouldComputePercentageIndependentlyPerListWhenMultipleListsAreRequested() {
         UUID otherListId = UUID.randomUUID();
-        when(userListItemRepository.countContentItemsByUserListIdIn(List.of(listId, otherListId)))
-                .thenReturn(List.of(buildUserListCount(listId, 4L), buildUserListCount(otherListId, 2L)));
-        when(userListItemRepository.countWatchedContentItemsByUserListIdIn(List.of(listId, otherListId), lucasId))
-                .thenReturn(List.of(buildUserListCount(listId, 1L), buildUserListCount(otherListId, 2L)));
+        List<UserListItem> items = List.of(
+                buildContentItem(scifi, buildContent("1", ContentType.MOVIE), 1),
+                buildContentItem(scifi, buildContent("2", ContentType.MOVIE), 2),
+                buildContentItem(scifi, buildContent("3", ContentType.MOVIE), 3),
+                buildContentItem(scifi, buildContent("4", ContentType.MOVIE), 4),
+                buildContentItem(buildUserList(otherListId, lucas, "Other", UserListVisibility.PUBLIC), buildContent("5", ContentType.MOVIE), 1),
+                buildContentItem(buildUserList(otherListId, lucas, "Other", UserListVisibility.PUBLIC), buildContent("6", ContentType.MOVIE), 2));
+        when(userListItemRepository.findAllContentItemsByUserListIdInOrderByPosition(List.of(listId, otherListId)))
+                .thenReturn(items);
+        when(userListContentStateService.resolve(lucasId, items))
+                .thenReturn(new UserListContentStateResult(Map.of(), Map.of(listId, 25.0, otherListId, 100.0)));
 
         Map<UUID, Double> result = userListItemService.getWatchedPercentagesByListIds(List.of(listId, otherListId), lucasId);
 
         assertThat(result.get(listId)).isEqualTo(25.0);
         assertThat(result.get(otherListId)).isEqualTo(100.0);
+        verify(userListContentStateService).resolve(lucasId, items);
     }
 
     @Test

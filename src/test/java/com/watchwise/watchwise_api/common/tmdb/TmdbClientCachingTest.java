@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
 import com.github.benmanes.caffeine.cache.Cache;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
+import com.watchwise.watchwise_api.calendar.service.impl.CalendarScheduleProviderImpl;
+import com.watchwise.watchwise_api.content.service.impl.ContentScheduleReaderImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -194,6 +197,40 @@ class TmdbClientCachingTest {
 
         assertThat(english.name()).isEqualTo("Season 1");
         assertThat(portuguese.name()).isEqualTo("Temporada 1");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[calendar schedule] Should Reload A Season From The Schedule Cache - When That Cache Is Invalidated")
+    void shouldReloadASeasonFromTheScheduleCacheWhenThatCacheIsInvalidated() {
+        CalendarScheduleProviderImpl provider = new CalendarScheduleProviderImpl(
+                new ContentScheduleReaderImpl(tmdbClient, Runnable::run));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":3572,"name":"Season 1","season_number":1,"air_date":"2026-09-01","episodes":[]}
+                        """, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/1396?")))
+                .andExpect(queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos"))
+                .andExpect(queryParam("language", "en-US"))
+                .andRespond(withSuccess("""
+                        {"id":1396,"name":"Breaking Bad","status":"Ended"}
+                        """, MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":3572,"name":"Season 1","season_number":1,"air_date":"2026-09-01","episodes":[]}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertThat(provider.loadSeason("1396", 1, "BR", "en-US"))
+                .isInstanceOf(CalendarScheduleLookup.Found.class);
+        assertThat(tmdbCalendarSeasonDetailsCache.getIfPresent("1396|1|en-US")).isNotNull();
+        assertThat(tmdbSeasonFullDetailsCache.getIfPresent("1396|1|en-US")).isNull();
+
+        tmdbCalendarSeasonDetailsCache.invalidateAll();
+
+        assertThat(provider.loadSeason("1396", 1, "BR", "en-US"))
+                .isInstanceOf(CalendarScheduleLookup.Found.class);
+        assertThat(tmdbCalendarSeasonDetailsCache.getIfPresent("1396|1|en-US")).isNotNull();
+        assertThat(tmdbSeasonFullDetailsCache.getIfPresent("1396|1|en-US")).isNull();
         mockServer.verify();
     }
 

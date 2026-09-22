@@ -31,6 +31,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -986,6 +987,54 @@ class DiaryEntryRepositoryTest {
         assertThat(result).extracting(DiaryEntry::getWatchNumber)
                 .containsExactlyInAnyOrder(1, 2, 1, 2);
         assertThat(result).allSatisfy(entry -> assertThat(entry.getContent().getSeasonNumber()).isEqualTo(1));
+    }
+
+    @Test
+    @DisplayName("[findWatchedDirectContentIds] Should Return Only Requested Content IDs Watched By User")
+    void shouldReturnOnlyRequestedContentIdsWatchedByUser() {
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        Content season = contentRepository.save(buildSeason("1399", 1));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1));
+
+        diaryEntryRepository.save(buildEntry(lucas, fightClub));
+        diaryEntryRepository.save(buildEntry(lucas, series));
+        diaryEntryRepository.save(buildEntry(lucas, season));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
+        diaryEntryRepository.saveAndFlush(buildEntry(marina, pulpFiction));
+        entityManager.clear();
+
+        Set<UUID> result = diaryEntryRepository.findWatchedDirectContentIds(
+                lucas.getId(), List.of(fightClub.getId(), series.getId(), pulpFiction.getId()));
+
+        assertThat(result).containsExactlyInAnyOrder(fightClub.getId(), series.getId());
+    }
+
+    @Test
+    @DisplayName("[findWatchedEpisodeCoordinates] Should Return Distinct Episodes Of Requested Series Watched By User")
+    void shouldReturnDistinctEpisodesOfRequestedSeriesWatchedByUser() {
+        Content targetEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content secondTargetEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
+        Content targetSeason = contentRepository.save(buildSeason("1399", 1));
+        Content targetSeries = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        Content marinaOnlyEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
+
+        diaryEntryRepository.save(buildEntry(lucas, fightClub));
+        diaryEntryRepository.save(buildEntry(lucas, targetSeason));
+        diaryEntryRepository.save(buildEntry(lucas, targetSeries));
+        diaryEntryRepository.save(buildEntry(lucas, targetEpisode, 1));
+        diaryEntryRepository.save(buildEntry(lucas, targetEpisode, 2));
+        diaryEntryRepository.save(buildEntry(lucas, secondTargetEpisode));
+        diaryEntryRepository.save(buildEntry(lucas, otherSeriesEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(marina, marinaOnlyEpisode));
+        entityManager.clear();
+
+        Set<WatchedEpisodeCoordinate> result = diaryEntryRepository.findWatchedEpisodeCoordinates(
+                lucas.getId(), List.of("1399"));
+
+        assertThat(result).containsExactlyInAnyOrder(
+                new WatchedEpisodeCoordinate("1399", 1, 1),
+                new WatchedEpisodeCoordinate("1399", 1, 2));
     }
 
     private DiaryEntry withWatchedDate(DiaryEntry entry, LocalDate watchedDate) {

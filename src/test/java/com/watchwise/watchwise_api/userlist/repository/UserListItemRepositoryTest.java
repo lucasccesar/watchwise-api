@@ -363,6 +363,36 @@ class UserListItemRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findAllContentItemsByUserListIdInOrderByPosition] Should Return Every Content Item Ordered By List Then Position - When Multiple Lists Have More Than Five Items")
+    void shouldReturnEveryContentItemOrderedByListThenPositionWhenMultipleListsHaveMoreThanFiveItems() {
+        UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
+        for (int position = 1; position <= 6; position++) {
+            Content scifiContent = contentRepository.save(buildContent("scifi-" + position, ContentType.MOVIE));
+            Content horrorContent = contentRepository.save(buildContent("horror-" + position, ContentType.MOVIE));
+            userListItemRepository.save(buildContentItem(scifi, scifiContent, position));
+            userListItemRepository.save(buildContentItem(horror, horrorContent, position));
+        }
+        userListItemRepository.saveAndFlush(buildChildListItem(nestedList, scifi, 1));
+        entityManager.clear();
+
+        List<UserListItem> result = userListItemRepository.findAllContentItemsByUserListIdInOrderByPosition(
+                List.of(scifi.getId(), horror.getId(), nestedList.getId()));
+
+        assertThat(result).hasSize(12);
+        List<java.util.UUID> listIdSequence = result.stream().map(item -> item.getUserList().getId()).toList();
+        assertThat(new java.util.LinkedHashSet<>(listIdSequence)).hasSize(2);
+        long groupTransitions = java.util.stream.IntStream.range(1, listIdSequence.size())
+                .filter(index -> !listIdSequence.get(index).equals(listIdSequence.get(index - 1)))
+                .count();
+        assertThat(groupTransitions).as("items must stay grouped by userList, one contiguous run per list").isEqualTo(1);
+        assertThat(result).filteredOn(item -> item.getUserList().getId().equals(scifi.getId()))
+                .extracting(UserListItem::getPosition).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(result).filteredOn(item -> item.getUserList().getId().equals(horror.getId()))
+                .extracting(UserListItem::getPosition).containsExactly(1, 2, 3, 4, 5, 6);
+        assertThat(result).noneMatch(item -> item.getChildList() != null);
+    }
+
+    @Test
     @DisplayName("[countNestedListsByUserListIdIn] Should Count Only Nested List Items Per List - When Several Lists Are Requested")
     void shouldCountOnlyNestedListItemsPerListWhenSeveralListsAreRequested() {
         UserList anotherNestedList = userListRepository.save(buildList(lucas, "Another list of lists"));

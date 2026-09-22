@@ -5,14 +5,14 @@ import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.calendar.dto.EpisodeCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
-import com.watchwise.watchwise_api.calendar.dto.ReleaseStatus;
 import com.watchwise.watchwise_api.calendar.dto.SeasonCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.SeriesCalendarContentDTO;
-import com.watchwise.watchwise_api.calendar.dto.WatchStatus;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
+import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import org.junit.jupiter.api.Test;
 

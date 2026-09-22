@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
@@ -31,6 +33,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.mapper.UserListMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -687,7 +690,8 @@ class UserListServiceImplTest {
         List<UserListItemResponseDTO> items = List.of(buildItemResponseDto(buildContentRef("100", ContentType.MOVIE)));
         UserListDetailedResponseDTO dto = buildDetailedResponseDto(list, items);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(items);
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(items, 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
         when(userListMapper.userListToDetailedResponseDto(list, items, 0.0, false, 1L, 0L, 0L, UserListItemScope.MOVIE_OR_SERIES)).thenReturn(dto);
 
@@ -697,13 +701,41 @@ class UserListServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUserListById] Should Keep Full-List Watched Percentage - When Items Are Filtered")
+    void shouldKeepFullListWatchedPercentageWhenItemsAreFiltered() {
+        UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
+        ContentStateDTO watched = new ContentStateDTO(WatchStatus.WATCHED, null, null, null, null);
+        ContentStateDTO unwatched = new ContentStateDTO(WatchStatus.UNWATCHED, null, null, null, null);
+        UserListItemResponseDTO watchedMovieBase = buildItemResponseDto(buildContentRef("100", ContentType.MOVIE));
+        UserListItemResponseDTO watchedMovie = new UserListItemResponseDTO(
+                watchedMovieBase.id(), watchedMovieBase.content(), null, 1, null, null, null, null, watched);
+        UserListItemResponseDTO unwatchedSeriesBase = buildItemResponseDto(buildContentRef("200", ContentType.SERIES));
+        UserListItemResponseDTO unwatchedSeries = new UserListItemResponseDTO(
+                unwatchedSeriesBase.id(), unwatchedSeriesBase.content(), null, 2, null, null, null, null, unwatched);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(watchedMovie, unwatchedSeries), 50.0));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+
+        userListService.getUserListById(lucasId, list.getId(), ContentType.MOVIE, null, null, null);
+
+        ArgumentCaptor<Double> watchedPercentageCaptor = ArgumentCaptor.forClass(Double.class);
+        verify(userListMapper).userListToDetailedResponseDto(eq(list), anyList(), watchedPercentageCaptor.capture(), anyBoolean(),
+                eq(2L), anyLong(), anyLong(), any());
+        assertThat(watchedPercentageCaptor.getValue()).isEqualTo(50.0);
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Filter Items By Type")
     void shouldFilterItemsByType() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO movieItem = buildItemResponseDtoWithContent(ContentType.MOVIE, null, null, 1);
         UserListItemResponseDTO seriesItem = buildItemResponseDtoWithContent(ContentType.SERIES, null, null, 2);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(movieItem, seriesItem));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(movieItem, seriesItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
 
@@ -719,7 +751,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO dramaItem = buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), 1);
         UserListItemResponseDTO comedyItem = buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Comedy"), 2);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(dramaItem, comedyItem));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(dramaItem, comedyItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
 
@@ -735,7 +768,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO shortItem = buildItemResponseDtoWithContent(ContentType.MOVIE, 90, null, 1);
         UserListItemResponseDTO longItem = buildItemResponseDtoWithContent(ContentType.MOVIE, 180, null, 2);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(shortItem, longItem));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(shortItem, longItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
 
@@ -751,7 +785,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO seriesItem = buildItemResponseDtoWithContent(ContentType.SERIES, 48, null, 1);
         UserListItemResponseDTO movieItem = buildItemResponseDtoWithContent(ContentType.MOVIE, 120, null, 2);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(seriesItem, movieItem));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(seriesItem, movieItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
 
@@ -769,7 +804,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO seriesWithoutAverage = buildItemResponseDtoWithContent(ContentType.SERIES, null, null, 1);
         UserListItemResponseDTO shortMovie = buildItemResponseDtoWithContent(ContentType.MOVIE, 1, null, 2);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(shortMovie, seriesWithoutAverage));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(shortMovie, seriesWithoutAverage), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
 
@@ -813,7 +849,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO lowRatedSeries = buildItemResponseDto(buildContentRef("100", ContentType.SERIES));
         UserListItemResponseDTO highRatedSeries = buildItemResponseDto(buildContentRef("200", ContentType.SERIES));
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(lowRatedSeries, highRatedSeries));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(lowRatedSeries, highRatedSeries), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
         when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(eq(lucasId), eq(Set.of("100", "200"))))
@@ -836,7 +873,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO unratedMovie = buildItemResponseDto(buildContentRef("100", ContentType.MOVIE));
         UserListItemResponseDTO ratedSeries = buildItemResponseDto(buildContentRef("200", ContentType.SERIES));
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(unratedMovie, ratedSeries));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(unratedMovie, ratedSeries), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
         when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(eq(lucasId), eq(Set.of("200"))))
@@ -857,7 +895,8 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "Public list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO seriesItem = buildItemResponseDto(buildContentRef("100", ContentType.SERIES));
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(marinaId, list.getId())).thenReturn(List.of(seriesItem));
+        when(userListItemService.getItemsWithState(marinaId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(seriesItem), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(1L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
 
@@ -901,15 +940,15 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         List<UserListItemResponseDTO> items = List.of(buildItemResponseDto(buildContentRef("100", ContentType.MOVIE)));
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(marinaId, list.getId())).thenReturn(items);
-        when(userListItemService.getWatchedPercentage(list.getId(), marinaId)).thenReturn(50.0);
+        when(userListItemService.getItemsWithState(marinaId, list.getId()))
+                .thenReturn(new UserListItemsWithState(items, 50.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
         when(userListMapper.userListToDetailedResponseDto(list, items, 50.0, false, 1L, 0L, 0L, UserListItemScope.MOVIE_OR_SERIES)).thenReturn(buildDetailedResponseDto(list, items));
 
         userListService.getUserListById(marinaId, list.getId(), null, null, null, null);
 
-        verify(userListItemService).getWatchedPercentage(list.getId(), marinaId);
-        verify(userListItemService, never()).getWatchedPercentage(list.getId(), lucasId);
+        verify(userListItemService).getItemsWithState(marinaId, list.getId());
+        verify(userListItemService, never()).getWatchedPercentage(any(), any());
     }
 
     @Test
@@ -917,7 +956,8 @@ class UserListServiceImplTest {
     void shouldReturnDetailedListWhenListIsPublicAndViewerIsADifferentUser() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(marinaId, list.getId())).thenReturn(List.of());
+        when(userListItemService.getItemsWithState(marinaId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any())).thenReturn(buildDetailedResponseDto(list, List.of()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(marinaId, list.getId(), null, null, null, null);
@@ -932,7 +972,8 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.FOLLOWERS);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(true);
-        when(userListItemService.getItems(marinaId, list.getId())).thenReturn(List.of());
+        when(userListItemService.getItemsWithState(marinaId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any())).thenReturn(buildDetailedResponseDto(list, List.of()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(marinaId, list.getId(), null, null, null, null);
@@ -984,7 +1025,8 @@ class UserListServiceImplTest {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
         UserListItemResponseDTO movieItem = buildItemResponseDto(buildContentRef("550", ContentType.MOVIE));
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
-        when(userListItemService.getItems(lucasId, list.getId())).thenReturn(List.of(movieItem));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(List.of(movieItem), 0.0));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(),
                 eq(UserListItemScope.MOVIE_OR_SERIES))).thenReturn(buildDetailedResponseDto(list, List.of(movieItem)));
@@ -1088,8 +1130,8 @@ class UserListServiceImplTest {
         UserListItemResponseDTO movieItem = buildItemResponseDto(movieRef);
         UserListItemResponseDTO seriesItem = buildItemResponseDto(seriesRef);
 
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
-                .thenReturn(List.of(movieItem, seriesItem));
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(new UserListItemsWithState(List.of(movieItem, seriesItem), 0.0));
         when(userListItemService.getTotalRuntimeMinutes(any(UUID.class))).thenReturn(270L);
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
@@ -1103,15 +1145,15 @@ class UserListServiceImplTest {
         verify(userListRepository).save(listCaptor.capture());
         assertThat(listCaptor.getValue().getVisibility()).isEqualTo(UserListVisibility.PRIVATE);
 
-        verify(userListItemService).addItems(eq(lucasId), any(UUID.class), itemsCaptor.capture());
+        verify(userListItemService).addItemsWithState(eq(lucasId), any(UUID.class), itemsCaptor.capture());
         assertThat(itemsCaptor.getValue().items()).containsExactly(movieRef, seriesRef);
         verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(),
                 eq(2L), eq(0L), eq(270L), any());
     }
 
     @Test
-    @DisplayName("[createUserListWithItems] Should Populate Watched Percentage - From The Owner's Watch History")
-    void shouldPopulateWatchedPercentageFromTheOwnersWatchHistoryOnBulkCreate() {
+    @DisplayName("[createUserListWithItems] Should Not Resolve State Again - When Batch Items Are Already Resolved")
+    void shouldNotResolveStateAgainWhenBatchItemsAreAlreadyResolved() {
         UUID savedListId = UUID.randomUUID();
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> {
@@ -1120,16 +1162,15 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
-                .thenReturn(List.of(buildItemResponseDto(movieRef)));
-        when(userListItemService.getWatchedPercentage(savedListId, lucasId)).thenReturn(100.0);
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(new UserListItemsWithState(List.of(buildItemResponseDto(movieRef)), 100.0));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
         userListService.createUserListWithItems(
                 lucasId, new UserListBulkCreationDTO("My list", null, null, List.of(movieRef)));
 
-        verify(userListItemService).getWatchedPercentage(savedListId, lucasId);
+        verify(userListItemService, never()).getWatchedPercentage(any(UUID.class), any(UUID.class));
         verify(userListMapper).userListToDetailedResponseDto(any(UserList.class), anyList(), eq(100.0), anyBoolean(), anyLong(), anyLong(), anyLong(), any());
     }
 
@@ -1143,8 +1184,8 @@ class UserListServiceImplTest {
             return list;
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
-                .thenReturn(List.of(buildItemResponseDto(movieRef)));
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+                .thenReturn(new UserListItemsWithState(List.of(buildItemResponseDto(movieRef)), 0.0));
         when(userListMapper.userListToDetailedResponseDto(any(UserList.class), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(invocation.getArgument(0), invocation.getArgument(1)));
 
@@ -1165,7 +1206,7 @@ class UserListServiceImplTest {
         });
         ContentRefCreationDTO movieRef = buildContentRef("100", ContentType.MOVIE);
         ContentRefCreationDTO duplicateRef = buildContentRef("100", ContentType.MOVIE);
-        when(userListItemService.addItems(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
+        when(userListItemService.addItemsWithState(eq(lucasId), any(UUID.class), any(UserListItemBulkCreationDTO.class)))
                 .thenThrow(new ConflictException("This content is already in the list"));
 
         assertThatThrownBy(() -> userListService.createUserListWithItems(
