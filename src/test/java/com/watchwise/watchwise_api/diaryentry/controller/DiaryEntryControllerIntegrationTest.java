@@ -295,6 +295,33 @@ class DiaryEntryControllerIntegrationTest {
                 .build());
     }
 
+    private Content persistEpisode(String seriesTmdbId, int seasonNumber, int episodeNumber,
+            Boolean isSeasonFinale, Boolean isSeriesFinale) {
+        LocalDateTime now = LocalDateTime.now();
+        return contentRepository.save(Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .isSeasonFinale(isSeasonFinale)
+                .isSeriesFinale(isSeriesFinale)
+                .type(ContentType.EPISODE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private Content persistSeason(String seriesTmdbId, int seasonNumber, Boolean isSeriesFinale) {
+        LocalDateTime now = LocalDateTime.now();
+        return contentRepository.save(Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .isSeriesFinale(isSeriesFinale)
+                .type(ContentType.SEASON)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
     // ---------- GET /users/{userId}/diary ----------
 
     @Test
@@ -1556,9 +1583,77 @@ class DiaryEntryControllerIntegrationTest {
                 }
                 """;
 
-        mockMvc.perform(bulkRequest(user, bulkBody))
+        MvcResult bulkResult = mockMvc.perform(bulkRequest(user, bulkBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andReturn();
+
+        List<Integer> createdEpisodeNumbers = JsonPath.read(
+                bulkResult.getResponse().getContentAsString(), "$[?(@.content.type == 'EPISODE')].content.episodeNumber");
+        assertThat(createdEpisodeNumbers).containsExactlyInAnyOrder(2, 3);
+        assertThat(diaryEntryRepository.findAll()).hasSize(4);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Create A New Pass At Watch Number Two - When Bulk-Logging A Complete Season Again")
+    void shouldCreateANewPassAtWatchNumberTwoWhenBulkLoggingACompleteSeasonAgain() throws Exception {
+        RegisteredUser user = registerUser("bulkseasonpass2");
+        String body = """
+                {
+                    "content": { "type": "SEASON", "seriesTmdbId": "903", "seasonNumber": 1 },
+                    "watchedDate": "2025-03-12",
+                    "finaleEpisodeNumber": 3
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.length()").value(4));
+
+        MvcResult secondPass = mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(4))
+                .andReturn();
+
+        List<Integer> watchNumbers = JsonPath.read(secondPass.getResponse().getContentAsString(), "$[*].watchNumber");
+        assertThat(watchNumbers).containsOnly(2);
+        assertThat(diaryEntryRepository.findAll()).hasSize(8);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Resume The Missing First-Pass Episode Across Seasons - When Bulk-Logging A SERIES")
+    void shouldResumeTheMissingFirstPassEpisodeAcrossSeasonsWhenBulkLoggingASeries() throws Exception {
+        RegisteredUser user = registerUser("bulkseriescontinuation");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content seasonOneEpisodeOne = persistEpisode("904", 1, 1, null, null);
+        Content seasonTwoEpisodeOne = persistEpisode("904", 2, 1, null, null);
+        Content seasonTwoEpisodeTwo = persistEpisode("904", 2, 2, true, true);
+        Content seasonTwo = persistSeason("904", 2, true);
+        persistEntry(entity, seasonOneEpisodeOne);
+        persistEntry(entity, seasonTwoEpisodeOne);
+        persistEntry(entity, seasonTwoEpisodeTwo);
+        persistEntry(entity, seasonTwo);
+
+        String body = """
+                {
+                    "content": { "type": "SERIES", "tmdbId": "904" },
+                    "watchedDate": "2025-03-12",
+                    "finaleSeasonNumber": 2,
+                    "seasonFinaleEpisodeNumbers": { "1": 2, "2": 2 }
+                }
+                """;
+
+        MvcResult bulkResult = mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andReturn();
+
+        List<Integer> createdEpisodeNumbers = JsonPath.read(
+                bulkResult.getResponse().getContentAsString(), "$[?(@.content.type == 'EPISODE')].content.episodeNumber");
+        assertThat(createdEpisodeNumbers).containsExactly(2);
+        List<Integer> createdWatchNumbers = JsonPath.read(bulkResult.getResponse().getContentAsString(), "$[*].watchNumber");
+        assertThat(createdWatchNumbers).containsOnly(1);
+        assertThat(diaryEntryRepository.findAll()).hasSize(7);
     }
 
     @Test
@@ -1786,7 +1881,27 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When WatchedDate Predates The Finale Episode's Release Date")
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When A SERIES Bulk WatchedDate Is In The Future")
+    void shouldReturnBadRequestAndNotPersistWhenSeriesBulkWatchedDateIsInTheFuture() throws Exception {
+        RegisteredUser user = registerUser("bulkserieswatcheddatefuture");
+        String body = """
+                {
+                    "content": { "type": "SERIES", "tmdbId": "9181" },
+                    "finaleSeasonNumber": 1,
+                    "seasonFinaleEpisodeNumbers": { "1": 2 },
+                    "watchedDate": "2099-01-01"
+                }
+                """;
+
+        mockMvc.perform(bulkRequest(user, body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("watchedDate cannot be in the future"));
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When WatchedDate Predates Every Episode's Release Date")
     void shouldReturnBadRequestAndNotPersistWhenWatchedDatePredatesTheFinaleEpisodesReleaseDateOnBulk() throws Exception {
         RegisteredUser user = registerUser("bulkwatcheddatebeforerelease");
         when(tmdbClient.getSeasonFullDetails("919", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
@@ -1805,7 +1920,7 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(bulkRequest(user, body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("watchedDate cannot predate the content's release date (2020-01-08)"));
+                .andExpect(jsonPath("$.message").value("No episodes in season 1 have been released by 2019-12-31"));
 
         assertThat(diaryEntryRepository.findAll()).isEmpty();
     }
