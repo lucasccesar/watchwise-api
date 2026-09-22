@@ -2698,6 +2698,90 @@ class DiaryEntryServiceImplTest {
         assertThat(result).allMatch(entry -> entry.watchNumber() == 1);
     }
 
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Resume The Incomplete First Pass Across Series Seasons")
+    void shouldResumeTheIncompletePassAcrossSeriesSeasons() {
+        Content s1e1 = buildEpisode("900", 1, 1);
+        Content s1e2 = buildFinaleEpisode("900", 1, 2);
+        Content s2e1 = buildEpisode("900", 2, 1);
+        Content s2e2 = buildFinaleEpisode("900", 2, 2);
+        Content s1 = buildSeason("900", 1);
+        Content s2 = buildFinaleSeason("900", 2);
+        Content series = buildContent("900", ContentType.SERIES);
+
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.of(s2));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(s1e2));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 2, ContentType.EPISODE))
+                .thenReturn(Optional.of(s2e2));
+        when(diaryEntryRepository.findEpisodeEntriesBySeriesForUser(lucasId, "900"))
+                .thenReturn(List.of(
+                        buildDiaryEntry(lucas, s1e1, 1),
+                        buildDiaryEntry(lucas, s2e1, 1),
+                        buildDiaryEntry(lucas, s2e2, 1)));
+        when(diaryEntryRepository.countEntriesByEpisodeNumberInSeason(lucasId, "900", 1))
+                .thenReturn(List.of(episodeWatchCount(1, 1L), episodeWatchCount(2, 1L)));
+        when(diaryEntryRepository.maxWatchNumberBySeasonInSeries(lucasId, "900"))
+                .thenReturn(List.of(seasonWatchMax(1, 1), seasonWatchMax(2, 1)));
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, s1.getId())).thenReturn(0);
+        when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(0);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        stubNewTransactionPassthrough();
+
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
+                .thenAnswer(invocation -> {
+                    ContentRefCreationDTO ref = invocation.getArgument(0);
+                    Content content = switch (ref.type()) {
+                        case SERIES -> series;
+                        case SEASON -> ref.seasonNumber() == 1 ? s1 : s2;
+                        default -> throw new AssertionError("Unexpected content type: " + ref.type());
+                    };
+                    return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(),
+                            content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(),
+                            content.getIsSeasonFinale(), content.getIsSeriesFinale(), null, null);
+                });
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), eq(true)))
+                .thenAnswer(invocation -> {
+                    ContentRefCreationDTO ref = invocation.getArgument(0);
+                    Content content = switch (ref.seasonNumber()) {
+                        case 1 -> ref.episodeNumber() == 1 ? s1e1 : s1e2;
+                        case 2 -> ref.episodeNumber() == 1 ? s2e1 : s2e2;
+                        default -> throw new AssertionError("Unexpected season: " + ref.seasonNumber());
+                    };
+                    return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(),
+                            content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(),
+                            content.getIsSeasonFinale(), content.getIsSeriesFinale(), null, null);
+                });
+        when(contentRepository.getReferenceById(any(UUID.class)))
+                .thenAnswer(invocation -> {
+                    UUID id = invocation.getArgument(0);
+                    return List.of(s1e1, s1e2, s2e1, s2e2, s1, s2, series).stream()
+                            .filter(content -> content.getId().equals(id))
+                            .findFirst()
+                            .orElseThrow();
+                });
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
+                LocalDate.of(2024, 5, 1), null, 2, Map.of(1, 2, 2, 2));
+
+        List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
+
+        assertThat(result).hasSize(3);
+        verify(diaryEntryRepository, times(3)).saveAndFlush(entryCaptor.capture());
+        assertThat(entryCaptor.getAllValues())
+                .extracting(entry -> entry.getContent().getType(), DiaryEntry::getWatchNumber)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple(ContentType.EPISODE, 1),
+                        org.assertj.core.groups.Tuple.tuple(ContentType.SEASON, 1),
+                        org.assertj.core.groups.Tuple.tuple(ContentType.SERIES, 1));
+    }
+
     // ---------- createDiaryEntriesInBulk: watchlist/dropped removal side effect ----------
 
     @Test
