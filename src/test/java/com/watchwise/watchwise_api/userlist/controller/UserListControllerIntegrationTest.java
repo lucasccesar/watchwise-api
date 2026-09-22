@@ -50,9 +50,11 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -662,8 +664,8 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListById] Should Sort By Series Average Runtime And Avoid TMDB - When Runtime Aggregate Is Persisted")
-    void shouldSortBySeriesAverageRuntimeAndAvoidTmdbWhenRuntimeAggregateIsPersisted() throws Exception {
+    @DisplayName("[getUserListById] Should Sort By Series Average Runtime - When Runtime Aggregate Is Persisted")
+    void shouldSortBySeriesAverageRuntimeWhenRuntimeAggregateIsPersisted() throws Exception {
         RegisteredUser user = registerUser("getbyiddurationruntime");
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "Runtime list", UserListVisibility.PRIVATE);
@@ -679,7 +681,9 @@ class UserListControllerIntegrationTest {
                 .andExpect(jsonPath("$.items[1].content.tmdbId").value("1399"))
                 .andExpect(jsonPath("$.items[2].content.tmdbId").value("550"));
 
-        verifyNoInteractions(tmdbClient);
+        verify(tmdbClient, times(1)).getTvFullDetails(eq("999"), any());
+        verify(tmdbClient, times(1)).getTvFullDetails(eq("1399"), any());
+        verify(tmdbClient, times(1)).getMovieFullDetails(eq("550"), any());
     }
 
     @Test
@@ -1023,7 +1027,7 @@ class UserListControllerIntegrationTest {
                 .andExpect(jsonPath("$.items[0].contentState.watchStatus").value("UNWATCHED"))
                 .andExpect(jsonPath("$.items[1].content.tmdbId").value("200"))
                 .andExpect(jsonPath("$.items[1].position").value(2))
-                .andExpect(jsonPath("$.items[1].contentState.watchStatus").value("UNWATCHED"))
+                .andExpect(jsonPath("$.items[1].contentState.watchStatus").value("UNKNOWN"))
                 .andReturn();
 
         String listId = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.id");

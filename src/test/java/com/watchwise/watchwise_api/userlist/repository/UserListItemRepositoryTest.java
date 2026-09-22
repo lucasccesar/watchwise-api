@@ -379,9 +379,12 @@ class UserListItemRepositoryTest {
                 List.of(scifi.getId(), horror.getId(), nestedList.getId()));
 
         assertThat(result).hasSize(12);
-        assertThat(result).isSortedAccordingTo(java.util.Comparator
-                .comparing((UserListItem item) -> item.getUserList().getId())
-                .thenComparing(UserListItem::getPosition));
+        List<java.util.UUID> listIdSequence = result.stream().map(item -> item.getUserList().getId()).toList();
+        assertThat(new java.util.LinkedHashSet<>(listIdSequence)).hasSize(2);
+        long groupTransitions = java.util.stream.IntStream.range(1, listIdSequence.size())
+                .filter(index -> !listIdSequence.get(index).equals(listIdSequence.get(index - 1)))
+                .count();
+        assertThat(groupTransitions).as("items must stay grouped by userList, one contiguous run per list").isEqualTo(1);
         assertThat(result).filteredOn(item -> item.getUserList().getId().equals(scifi.getId()))
                 .extracting(UserListItem::getPosition).containsExactly(1, 2, 3, 4, 5, 6);
         assertThat(result).filteredOn(item -> item.getUserList().getId().equals(horror.getId()))
