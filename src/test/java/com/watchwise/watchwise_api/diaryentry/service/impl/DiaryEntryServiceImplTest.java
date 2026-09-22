@@ -2389,8 +2389,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When WatchedDate Predates The Finale Episode's Release Date")
-    void shouldThrowBadRequestExceptionWhenWatchedDatePredatesTheFinaleEpisodesReleaseDateOnSeasonBulk() {
+    @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When WatchedDate Predates All Season Episodes")
+    void shouldThrowBadRequestExceptionWhenWatchedDatePredatesAllSeasonEpisodes() {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
                 .thenReturn(Optional.empty());
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
@@ -2404,7 +2404,7 @@ class DiaryEntryServiceImplTest {
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("watchedDate cannot predate the content's release date (2020-01-08)");
+                .hasMessage("No episodes in season 1 have been released by 2019-12-31");
 
         verify(contentService, never()).getOrCreateReference(any());
     }
@@ -2854,8 +2854,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Derive FinaleEpisodeNumber From TMDB Aired Episodes - When Omitted And No Existing Finale Content")
-    void shouldDeriveFinaleEpisodeNumberFromTmdbAiredEpisodesWhenOmittedAndNoExistingFinaleContent() {
+    @DisplayName("[createDiaryEntriesInBulk] Should Log Only Episodes Released By WatchedDate - On Season Bulk")
+    void shouldLogOnlyEpisodesReleasedByWatchedDateOnSeasonBulk() {
         Content e1 = buildEpisode("900", 1, 1);
         Content e2 = buildEpisode("900", 1, 2);
         Content e3 = buildEpisode("900", 1, 3);
@@ -2864,10 +2864,9 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
         when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
-                        new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null),
-                        new TmdbEpisodeSummary(2, null, null, "2020-01-08", 45, null, null),
-                        new TmdbEpisodeSummary(3, null, null, "2020-01-15", 45, null, null),
-                        new TmdbEpisodeSummary(4, null, null, "2099-01-01", 45, null, null)),
+                        new TmdbEpisodeSummary(1, null, null, "2026-09-20", 45, null, null),
+                        new TmdbEpisodeSummary(2, null, null, "2026-09-21", 45, null, null),
+                        new TmdbEpisodeSummary(3, null, null, "2026-09-22", 45, null, null)),
                         null, null)));
         when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class))).thenReturn(0);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -2893,12 +2892,15 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
-        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.of(2026, 9, 21), null, null, null);
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        assertThat(result).hasSize(3);
-        verify(contentService, times(3)).getOrCreateReference(any(ContentRefCreationDTO.class), eq(true));
+        assertThat(result).hasSize(2);
+        verify(contentService, times(2)).getOrCreateReference(contentRefCreationCaptor.capture(), eq(true));
+        assertThat(contentRefCreationCaptor.getAllValues())
+                .extracting(ContentRefCreationDTO::episodeNumber)
+                .containsExactly(1, 2);
     }
 
     @Test
@@ -3053,8 +3055,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty());
         when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null, List.of(
-                        new TmdbSeasonSummary(1, null, null, "2099-01-01", 1, null),
-                        new TmdbSeasonSummary(2, null, null, "2099-06-01", 1, null)),
+                        new TmdbSeasonSummary(1, null, null, null, 1, null),
+                        new TmdbSeasonSummary(2, null, null, null, 1, null)),
                         null, null, null, null, null, null, null, null, null)));
 
         ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
