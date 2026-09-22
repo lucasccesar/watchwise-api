@@ -1901,7 +1901,7 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When WatchedDate Predates The Finale Episode's Release Date")
+    @DisplayName("[createDiaryEntriesInBulk] Should Return BadRequest And Not Persist - When WatchedDate Predates Every Episode's Release Date")
     void shouldReturnBadRequestAndNotPersistWhenWatchedDatePredatesTheFinaleEpisodesReleaseDateOnBulk() throws Exception {
         RegisteredUser user = registerUser("bulkwatcheddatebeforerelease");
         when(tmdbClient.getSeasonFullDetails("919", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
@@ -1920,7 +1920,7 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(bulkRequest(user, body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("watchedDate cannot predate the content's release date (2020-01-08)"));
+                .andExpect(jsonPath("$.message").value("No episodes in season 1 have been released by 2019-12-31"));
 
         assertThat(diaryEntryRepository.findAll()).isEmpty();
     }
