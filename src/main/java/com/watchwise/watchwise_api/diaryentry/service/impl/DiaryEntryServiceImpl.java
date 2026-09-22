@@ -137,7 +137,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         totalEpisodeCount = totalEpisodeCount != null && totalEpisodeCount > 0 ? totalEpisodeCount : null;
         Double watchedPercentage = totalEpisodeCount == null
                 ? null
-                : row.getWatchedEpisodeCount() * 100.0 / totalEpisodeCount;
+                : Math.min(100.0, row.getWatchedEpisodeCount() * 100.0 / totalEpisodeCount);
 
         return new SeriesInProgressResponseDTO(
                 row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),

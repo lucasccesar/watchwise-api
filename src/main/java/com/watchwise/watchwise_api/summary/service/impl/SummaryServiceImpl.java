@@ -140,7 +140,7 @@ public class SummaryServiceImpl implements SummaryService {
                 .findSeriesInProgressByUserId(userId, PageRequest.of(0, HOME_NEXT_EPISODES_LIMIT))
                 .map(row -> new SeriesInProgressResponseDTO(
                         row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),
-                        null, null, null))
+                        row.getWatchedEpisodeCount(), null, null))
                 .getContent();
 
         LocalDate windowEnd = LocalDate.now();

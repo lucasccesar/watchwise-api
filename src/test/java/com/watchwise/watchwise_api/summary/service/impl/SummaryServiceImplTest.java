@@ -378,7 +378,7 @@ class SummaryServiceImplTest {
         when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(3000L);
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(42L);
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(128L);
-        DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 8, 6, LocalDate.of(2024, 5, 1));
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
         when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(row)));
         when(diaryEntryRepository.countByUserIdAndWatchedDateBetween(eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
@@ -397,7 +397,7 @@ class SummaryServiceImplTest {
         assertThat(result.totalMoviesWatched()).isEqualTo(42L);
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
         assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressResponseDTO(
-                "1399", 8, 6, LocalDate.of(2024, 5, 1), null, null, null));
+                "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, null, null));
         assertThat(result.watchCountByDayLast30Days()).containsExactly(new DailyWatchCountDTO(LocalDate.of(2024, 5, 1), 3));
         assertThat(result.genreCountsMoviesLast30Days()).containsExactly(new GenreCountDTO("Action", 2));
         assertThat(result.genreCountsSeriesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));
@@ -434,6 +434,12 @@ class SummaryServiceImplTest {
 
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
             String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
+        return seriesInProgress(seriesTmdbId, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate);
+    }
+
+    private DiaryEntryRepository.SeriesInProgress seriesInProgress(
+            String seriesTmdbId, Long watchedEpisodeCount, Integer maxSeasonNumber,
+            Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
         return new DiaryEntryRepository.SeriesInProgress() {
             @Override
             public String getSeriesTmdbId() {
@@ -442,7 +448,7 @@ class SummaryServiceImplTest {
 
             @Override
             public Long getWatchedEpisodeCount() {
-                return null;
+                return watchedEpisodeCount;
             }
 
             @Override

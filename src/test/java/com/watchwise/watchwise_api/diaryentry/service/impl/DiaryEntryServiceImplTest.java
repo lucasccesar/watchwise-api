@@ -560,6 +560,45 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getSeriesInProgress] Should Return Null Progress Fields - When TMDB Does Not Provide Total Episodes")
+    void shouldReturnNullProgressFieldsWhenTmdbDoesNotProvideTotalEpisodesForSeriesInProgress() {
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
+                "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(), null, null, null, null, null, null, null, null, null)));
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
+
+        assertThat(result.getContent().getFirst())
+                .extracting(SeriesInProgressResponseDTO::totalEpisodeCount,
+                        SeriesInProgressResponseDTO::watchedPercentage)
+                .containsExactly(null, null);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Cap Watched Percentage At One Hundred - When Watched Episodes Exceed TMDB Total")
+    void shouldCapWatchedPercentageAtOneHundredWhenWatchedEpisodesExceedTmdbTotalForSeriesInProgress() {
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
+                "1399", 12L, 8, 6, LocalDate.of(2024, 5, 1));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(), null, null, null, null, null, 10, null, null, null)));
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
+
+        assertThat(result.getContent().getFirst().watchedPercentage()).isEqualTo(100.0);
+    }
+
+    @Test
     @DisplayName("[getSeriesInProgress] Should Throw TmdbUnavailableException - When TMDB Is Unavailable")
     void shouldThrowTmdbUnavailableExceptionWhenTmdbIsUnavailableForSeriesInProgress() {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
