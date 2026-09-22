@@ -738,7 +738,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             return false;
         }
         LocalDate airDate = episodeAirDate(season, episodeNumber);
-        return airDate == null || !airDate.isAfter(cutoff);
+        return airDate != null && !airDate.isAfter(cutoff);
     }
 
     private LocalDate parseTmdbDate(String value) {
@@ -760,16 +760,22 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             TmdbSeasonFullDetails seasonDetails, LocalDate cutoff) {
         Optional<Content> existingFinale = contentRepository
                 .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
-        if (existingFinale.isPresent()
-                && isEpisodeReleasedByCutoff(seasonDetails, existingFinale.get().getEpisodeNumber(), cutoff)) {
-            return existingFinale.get().getEpisodeNumber();
+        boolean hasParseableEpisodeDates = hasParseableEpisodeAirDates(seasonDetails);
+        if (existingFinale.isPresent()) {
+            Integer existingEpisodeNumber = existingFinale.get().getEpisodeNumber();
+            LocalDate existingAirDate = episodeAirDate(seasonDetails, existingEpisodeNumber);
+            if (existingEpisodeNumber != null
+                    && (isEpisodeReleasedByCutoff(seasonDetails, existingEpisodeNumber, cutoff)
+                    || (!hasParseableEpisodeDates && existingAirDate == null))) {
+                return existingEpisodeNumber;
+            }
         }
 
         List<Integer> airedEpisodeNumbers = airedEpisodeNumbers(seasonDetails, cutoff);
         if (!airedEpisodeNumbers.isEmpty()) {
             return airedEpisodeNumbers.get(airedEpisodeNumbers.size() - 1);
         }
-        if (hasParseableEpisodeAirDates(seasonDetails)) {
+        if (hasParseableEpisodeDates) {
             throw new BadRequestException("No episodes in season " + seasonNumber + " have been released by " + cutoff);
         }
 
@@ -822,9 +828,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber,
             Map<Integer, Integer> seasonFinaleEpisodeNumbers, LocalDate watchedDate, LocalDate cutoff, List<DiaryEntry> created,
             List<UUID> companionIds, String language) {
-        contentService.getOrCreateReference(new ContentRefCreationDTO(
-                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
-
         int finaleSeasonNumber = resolveSeriesFinaleSeasonNumber(seriesTmdbId, explicitFinaleSeasonNumber, cutoff, language);
 
         Map<Integer, TmdbSeasonFullDetails> seasonDetailsByNumber = new LinkedHashMap<>();
@@ -850,6 +853,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             }
         }
 
+        contentService.getOrCreateReference(new ContentRefCreationDTO(
+                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
+
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
             boolean isSeriesFinaleSeason = seasonNumber == finaleSeasonNumber;
             TmdbSeasonFullDetails seasonDetails = seasonDetailsByNumber.get(seasonNumber);
@@ -870,9 +876,17 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private int resolveSeriesFinaleSeasonNumber(String seriesTmdbId, Integer explicitFinaleSeasonNumber, LocalDate cutoff, String language) {
         Optional<TmdbTvFullDetails> series = tmdbClient.getTvFullDetails(seriesTmdbId, language).toOptional();
         Optional<Content> existingFinale = contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON);
+        boolean hasParseableSeasonDates = series.map(TmdbTvFullDetails::seasons)
+                .map(this::hasParseableSeasonAirDates)
+                .orElse(false);
         if (existingFinale.isPresent()
-                && (series.isEmpty() || isSeasonReleasedByCutoff(series.get().seasons(), existingFinale.get().getSeasonNumber(), cutoff))) {
-            return existingFinale.get().getSeasonNumber();
+                && (series.isEmpty()
+                || isSeasonReleasedByCutoff(series.get().seasons(), existingFinale.get().getSeasonNumber(), cutoff)
+                || !hasParseableSeasonDates)) {
+            Integer existingSeasonNumber = existingFinale.get().getSeasonNumber();
+            if (existingSeasonNumber != null) {
+                return existingSeasonNumber;
+            }
         }
 
         if (series.isPresent()) {
@@ -880,7 +894,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             if (latestAiredSeasonNumber >= 1) {
                 return latestAiredSeasonNumber;
             }
-            if (hasParseableSeasonAirDates(series.get().seasons())) {
+            if (hasParseableSeasonDates) {
                 throw new BadRequestException("No seasons in the series have been released by " + cutoff);
             }
         }
@@ -913,7 +927,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private boolean isSeasonReleasedByCutoff(List<TmdbSeasonSummary> seasons, Integer seasonNumber, LocalDate cutoff) {
         LocalDate airDate = seasonAirDate(seasons, seasonNumber);
-        return airDate == null || !airDate.isAfter(cutoff);
+        return airDate != null && !airDate.isAfter(cutoff);
     }
 
     private boolean hasParseableSeasonAirDates(List<TmdbSeasonSummary> seasons) {

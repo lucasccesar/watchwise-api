@@ -2410,6 +2410,29 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Reject A SEASON Bulk - When Existing Finale Date Is Unknown And Other Episodes Are Future")
+    void shouldRejectSeasonBulkWhenExistingFinaleDateIsUnknownAndOtherEpisodesAreFuture() {
+        Content existingFinale = buildFinaleEpisode("900", 1, 1);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(existingFinale));
+        when(tmdbClient.getSeasonFullDetails("900", 1, lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(null, null, null, null, null, null, List.of(
+                        new TmdbEpisodeSummary(1, null, null, null, 45, null, null),
+                        new TmdbEpisodeSummary(2, null, null, "2026-09-22", 45, null, null)),
+                        null, null)));
+
+        ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seasonRef, LocalDate.of(2026, 9, 21), 2, null, null);
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("No episodes in season 1 have been released by 2026-09-21");
+
+        verifyNoInteractions(contentService);
+    }
+
+    @Test
     @DisplayName("[createDiaryEntriesInBulk] Should Throw BadRequestException - When The Season Exceeds The Bulk Episode Limit And TMDB Cannot Verify It")
     void shouldThrowBadRequestExceptionWhenTheSeasonExceedsTheBulkEpisodeLimit() {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
@@ -3065,6 +3088,31 @@ class DiaryEntryServiceImplTest {
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("exceeds the 2 seasons known by TMDB");
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntriesInBulk] Should Reject A SERIES Bulk - When Existing Finale Season Date Is Unknown And Other Seasons Are Future")
+    void shouldRejectSeriesBulkWhenExistingFinaleSeasonDateIsUnknownAndOtherSeasonsAreFuture() {
+        Content existingFinaleSeason = buildFinaleSeason("900", 1);
+
+        when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
+                .thenReturn(Optional.of(existingFinaleSeason));
+        when(tmdbClient.getTvFullDetails("900", lucas.getPreferredLanguage())).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(
+                                new TmdbSeasonSummary(1, null, null, "not-a-date", 1, null),
+                                new TmdbSeasonSummary(2, null, null, "2026-09-22", 1, null)),
+                        null, null, null, null, null, null, null, null, null, null)));
+
+        ContentRefCreationDTO seriesRef = new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null);
+        DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
+                seriesRef, LocalDate.of(2026, 9, 21), null, null, Map.of(1, 1));
+
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntriesInBulk(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("No seasons in the series have been released by 2026-09-21");
+
+        verifyNoInteractions(contentService);
     }
 
     @Test
