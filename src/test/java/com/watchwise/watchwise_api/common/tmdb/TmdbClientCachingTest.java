@@ -210,7 +210,7 @@ class TmdbClientCachingTest {
                         {"id":3572,"name":"Season 1","season_number":1,"air_date":"2026-09-01","episodes":[]}
                         """, MediaType.APPLICATION_JSON));
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/1396?")))
-                .andExpect(queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos"))
+                .andExpect(queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos,external_ids"))
                 .andExpect(queryParam("language", "en-US"))
                 .andRespond(withSuccess("""
                         {"id":1396,"name":"Breaking Bad","status":"Ended"}
