@@ -539,6 +539,27 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getSeriesInProgress] Should Return Null Progress Fields - When TMDB Provides Zero Total Episodes")
+    void shouldReturnNullProgressFieldsWhenTmdbProvidesZeroTotalEpisodesForSeriesInProgress() {
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
+                "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(), null, null, null, null, null, 0, null, null, null)));
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
+
+        assertThat(result.getContent().getFirst())
+                .extracting(SeriesInProgressResponseDTO::totalEpisodeCount,
+                        SeriesInProgressResponseDTO::watchedPercentage)
+                .containsExactly(null, null);
+    }
+
+    @Test
     @DisplayName("[getSeriesInProgress] Should Throw TmdbUnavailableException - When TMDB Is Unavailable")
     void shouldThrowTmdbUnavailableExceptionWhenTmdbIsUnavailableForSeriesInProgress() {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(

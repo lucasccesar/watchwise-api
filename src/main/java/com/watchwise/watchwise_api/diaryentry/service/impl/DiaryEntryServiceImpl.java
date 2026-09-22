@@ -134,7 +134,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .orElseThrow(this::tmdbUnavailable);
 
         Integer totalEpisodeCount = details.numberOfEpisodes();
-        Double watchedPercentage = totalEpisodeCount == null || totalEpisodeCount <= 0
+        totalEpisodeCount = totalEpisodeCount != null && totalEpisodeCount > 0 ? totalEpisodeCount : null;
+        Double watchedPercentage = totalEpisodeCount == null
                 ? null
                 : row.getWatchedEpisodeCount() * 100.0 / totalEpisodeCount;
 
