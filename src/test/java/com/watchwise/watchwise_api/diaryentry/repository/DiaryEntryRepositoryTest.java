@@ -964,6 +964,30 @@ class DiaryEntryRepositoryTest {
         assertThat(result.getFirst().getContent().getSeriesTmdbId()).isEqualTo("1399");
     }
 
+    @Test
+    @DisplayName("[findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber] Should Return Every Pass For Episodes In The Requested Season")
+    void shouldFindAllEpisodeEntriesForUserAndSeason() {
+        contentRepository.deleteAll();
+        Content seasonOneEpisodeOne = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content seasonOneEpisodeTwo = contentRepository.save(buildEpisode("1399", 1, 2));
+        Content seasonTwoEpisodeOne = contentRepository.save(buildEpisode("1399", 2, 1));
+        diaryEntryRepository.save(buildEntry(lucas, seasonOneEpisodeOne, 1));
+        diaryEntryRepository.save(buildEntry(lucas, seasonOneEpisodeOne, 2));
+        diaryEntryRepository.save(buildEntry(lucas, seasonOneEpisodeTwo, 1));
+        diaryEntryRepository.save(buildEntry(lucas, seasonOneEpisodeTwo, 2));
+        diaryEntryRepository.save(buildEntry(lucas, seasonTwoEpisodeOne, 1));
+
+        List<DiaryEntry> result = diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(
+                lucas.getId(), "1399", 1);
+
+        assertThat(result).hasSize(4);
+        assertThat(result).extracting(entry -> entry.getContent().getEpisodeNumber())
+                .containsExactlyInAnyOrder(1, 1, 2, 2);
+        assertThat(result).extracting(DiaryEntry::getWatchNumber)
+                .containsExactlyInAnyOrder(1, 2, 1, 2);
+        assertThat(result).allSatisfy(entry -> assertThat(entry.getContent().getSeasonNumber()).isEqualTo(1));
+    }
+
     private DiaryEntry withWatchedDate(DiaryEntry entry, LocalDate watchedDate) {
         entry.setWatchedDate(watchedDate);
         return entry;
