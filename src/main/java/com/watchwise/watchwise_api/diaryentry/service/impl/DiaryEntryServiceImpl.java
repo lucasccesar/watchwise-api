@@ -138,8 +138,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .toOptional()
                 .orElseThrow(this::tmdbUnavailable);
 
-        Integer totalEpisodeCount = details.numberOfEpisodes();
-        totalEpisodeCount = totalEpisodeCount != null && totalEpisodeCount > 0 ? totalEpisodeCount : null;
+        Integer totalEpisodeCount = releasedEpisodeCount(row.getSeriesTmdbId(), details);
         Double watchedPercentage = totalEpisodeCount == null
                 ? null
                 : Math.min(100.0, row.getWatchedEpisodeCount() * 100.0 / totalEpisodeCount);
@@ -147,6 +146,23 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return new SeriesInProgressResponseDTO(
                 row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),
                 row.getWatchedEpisodeCount(), totalEpisodeCount, watchedPercentage);
+    }
+
+    private Integer releasedEpisodeCount(String seriesTmdbId, TmdbTvFullDetails details) {
+        if (details.seasons() == null) {
+            return null;
+        }
+
+        int releasedEpisodeCount = details.seasons().stream()
+                .filter(Objects::nonNull)
+                .map(TmdbSeasonSummary::seasonNumber)
+                .filter(seasonNumber -> seasonNumber != null && seasonNumber >= 0)
+                .distinct()
+                .mapToInt(seasonNumber -> airedEpisodeCount(fetchSeasonDetails(
+                        seriesTmdbId, seasonNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
+                .sum();
+
+        return releasedEpisodeCount > 0 ? releasedEpisodeCount : null;
     }
 
     @Override

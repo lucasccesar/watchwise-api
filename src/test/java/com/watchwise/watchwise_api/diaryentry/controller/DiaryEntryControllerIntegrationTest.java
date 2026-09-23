@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -56,6 +57,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -504,7 +506,16 @@ class DiaryEntryControllerIntegrationTest {
         when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                         null, null, null, null, null, null, null, null, null, null, null,
-                        List.of(), null, null, null, null, null, 10, null, null, null)));
+                        List.of(new TmdbSeasonSummary(1, "Season 1", null, null, 10, null)),
+                        null, null, null, null, 1, 10, null, null, null, null)));
+        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
+                        null, null, null, null, null, 1,
+                        IntStream.rangeClosed(1, 10)
+                                .mapToObj(episodeNumber -> new TmdbEpisodeSummary(
+                                        episodeNumber, null, null, "2020-01-01", null, null, null))
+                                .toList(),
+                        null, null)));
 
         mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
                 .andExpect(status().isOk())
