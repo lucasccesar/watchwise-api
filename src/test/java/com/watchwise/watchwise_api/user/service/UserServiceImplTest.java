@@ -308,7 +308,7 @@ class UserServiceImplTest {
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
         when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L)).thenReturn(publicUserDTO);
 
-        PublicUserProfileDTO result = userService.getUserById(id);
+        PublicUserProfileDTO result = userService.getUserById(UUID.randomUUID(), id);
 
         assertThat(result).isEqualTo(publicUserDTO);
         verify(userRepository).findById(id);
@@ -321,7 +321,7 @@ class UserServiceImplTest {
         UUID id = UUID.randomUUID();
         when(userRepository.findById(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.getUserById(id))
+        assertThatThrownBy(() -> userService.getUserById(UUID.randomUUID(), id))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("User not found");
 
@@ -331,15 +331,50 @@ class UserServiceImplTest {
     @Test
     @DisplayName("[getUserById] Should Throw ForbiddenException - When Profile Is Private")
     void shouldThrowForbiddenExceptionWhenProfileIsPrivate() {
+        UUID viewerId = UUID.randomUUID();
         UUID id = savedUser.getId();
         savedUser.setIsProfilePublic(false);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, id, FollowStatus.ACCEPTED))
+                .thenReturn(false);
 
-        assertThatThrownBy(() -> userService.getUserById(id))
+        assertThatThrownBy(() -> userService.getUserById(viewerId, id))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
         verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return Private Profile - When Requester Is The Profile Owner")
+    void shouldReturnPrivateProfileWhenRequesterIsTheProfileOwner() {
+        UUID id = savedUser.getId();
+        savedUser.setIsProfilePublic(false);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L))
+                .thenReturn(publicUserDTO);
+
+        PublicUserProfileDTO result = userService.getUserById(id, id);
+
+        assertThat(result).isEqualTo(publicUserDTO);
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return Private Profile - When Requester Is An Accepted Follower")
+    void shouldReturnPrivateProfileWhenRequesterIsAnAcceptedFollower() {
+        UUID viewerId = UUID.randomUUID();
+        UUID id = savedUser.getId();
+        savedUser.setIsProfilePublic(false);
+        when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, id, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L))
+                .thenReturn(publicUserDTO);
+
+        PublicUserProfileDTO result = userService.getUserById(viewerId, id);
+
+        assertThat(result).isEqualTo(publicUserDTO);
+        verify(followerRepository).existsByFollowerIdAndFollowedIdAndStatus(viewerId, id, FollowStatus.ACCEPTED);
     }
 
     @Test

@@ -241,18 +241,30 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public PublicUserProfileDTO getUserById(UUID id) {
-    User foundUser = userRepository.findById(id).orElseThrow(()->new NotFoundException("User not found"));
+    public PublicUserProfileDTO getUserById(UUID viewerId, UUID targetUserId) {
+        User foundUser = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
 
-        if (!Boolean.TRUE.equals(foundUser.getIsProfilePublic())) {
-            throw new ForbiddenException("This user profile is private");
-        }
+        assertCanViewProfile(viewerId, targetUserId, foundUser);
 
-        ProfileStats stats = computeProfileStats(id);
+        ProfileStats stats = computeProfileStats(targetUserId);
         return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatchedMovies(),
                 stats.totalMinutesWatchedEpisodes(), stats.minutesWatchedMoviesLast30Days(),
                 stats.minutesWatchedEpisodesLast30Days(), stats.totalTheaterVisits(), stats.genreCountsMovies(),
                 stats.genreCountsSeries(), stats.followersCount(), stats.followingCount());
+    }
+
+    private void assertCanViewProfile(UUID viewerId, UUID targetUserId, User targetUser) {
+        if (Boolean.TRUE.equals(targetUser.getIsProfilePublic()) || targetUserId.equals(viewerId)) {
+            return;
+        }
+
+        boolean viewerFollowsTarget = followerRepository
+                .existsByFollowerIdAndFollowedIdAndStatus(viewerId, targetUserId, FollowStatus.ACCEPTED);
+
+        if (!viewerFollowsTarget) {
+            throw new ForbiddenException("This user profile is private");
+        }
     }
 
     @Override

@@ -108,7 +108,7 @@ public class UserController {
     public ResponseEntity<PublicUserProfileDTO> getUserById(@PathVariable UUID userId) {
         requestThrottler.checkAllowed(profileScanKey(), profileScanMaxRequests, Duration.ofMinutes(profileScanWindowMinutes));
 
-        PublicUserProfileDTO user = userService.getUserById(userId);
+        PublicUserProfileDTO user = userService.getUserById(getCurrentUserId(), userId);
         return ResponseEntity.ok(user);
     }
 

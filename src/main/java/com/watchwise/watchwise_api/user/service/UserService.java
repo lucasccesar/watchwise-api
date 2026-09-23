@@ -17,7 +17,7 @@ public interface UserService {
 
     UserResponseDTO saveNewUser(PostUserDTO postUserDTO);
 
-    PublicUserProfileDTO getUserById(UUID id);
+    PublicUserProfileDTO getUserById(UUID viewerId, UUID targetUserId);
 
     UserResponseDTO getCurrentUser(UUID id);
 

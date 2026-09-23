@@ -795,6 +795,64 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getUserById] Should Return Private Profile - When Requester Is The Profile Owner")
+    void shouldReturnPrivateProfileWhenRequesterIsTheProfileOwner() throws Exception {
+        MvcResult registerResult = mockMvc.perform(registerRequest("ownerprivate", "ownerprivate@email.com", false))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Cookie ownerAccessToken = registerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        User owner = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("ownerprivate", "ownerprivate")
+                .orElseThrow();
+
+        mockMvc.perform(get("/users/" + owner.getId()).cookie(ownerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("ownerprivate"))
+                .andExpect(jsonPath("$.isProfilePublic").value(false))
+                .andExpect(jsonPath("$.email").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return Private Profile - When Requester Is An Accepted Follower")
+    void shouldReturnPrivateProfileWhenRequesterIsAnAcceptedFollower() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("acceptedviewer", "acceptedviewer@email.com");
+        mockMvc.perform(registerRequest("acceptedtarget", "acceptedtarget@email.com", false))
+                .andExpect(status().isCreated());
+        User viewer = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("acceptedviewer", "acceptedviewer")
+                .orElseThrow();
+        User target = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("acceptedtarget", "acceptedtarget")
+                .orElseThrow();
+        persistFollow(viewer, target, FollowStatus.ACCEPTED);
+
+        mockMvc.perform(get("/users/" + target.getId()).cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("acceptedtarget"))
+                .andExpect(jsonPath("$.isProfilePublic").value(false))
+                .andExpect(jsonPath("$.email").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return Forbidden - When Requester Has A Pending Follow Request")
+    void shouldReturnForbiddenWhenRequesterHasAPendingFollowRequest() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("pendingviewer", "pendingviewer@email.com");
+        mockMvc.perform(registerRequest("pendingtarget", "pendingtarget@email.com", false))
+                .andExpect(status().isCreated());
+        User viewer = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("pendingviewer", "pendingviewer")
+                .orElseThrow();
+        User target = userRepository
+                .findByUsernameIgnoreCaseOrEmailIgnoreCase("pendingtarget", "pendingtarget")
+                .orElseThrow();
+        persistFollow(viewer, target, FollowStatus.PENDING);
+
+        mockMvc.perform(get("/users/" + target.getId()).cookie(viewerAccessToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
+
+    @Test
     @DisplayName("[getUserById] Should Return NotFound - When User Does Not Exist")
     void shouldReturnNotFoundWhenUserDoesNotExist() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("viewernotfound", "viewernotfound@email.com");

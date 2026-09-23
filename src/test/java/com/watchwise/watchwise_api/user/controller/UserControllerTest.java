@@ -334,26 +334,26 @@ class UserControllerTest {
                 0L,
                 0L
         );
-        when(userService.getUserById(id)).thenReturn(publicUserDTO);
+        when(userService.getUserById(currentUserId, id)).thenReturn(publicUserDTO);
 
         ResponseEntity<PublicUserProfileDTO> result = userController.getUserById(id);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(publicUserDTO);
-        verify(userService).getUserById(id);
+        verify(userService).getUserById(currentUserId, id);
     }
 
     @Test
     @DisplayName("[getUserById] Should Check Rate Limit Before Querying - When Called")
     void shouldCheckRateLimitBeforeQueryingWhenGetUserByIdCalled() {
         UUID id = UUID.randomUUID();
-        when(userService.getUserById(id)).thenReturn(mock(PublicUserProfileDTO.class));
+        when(userService.getUserById(currentUserId, id)).thenReturn(mock(PublicUserProfileDTO.class));
 
         userController.getUserById(id);
 
         InOrder order = inOrder(requestThrottler, userService);
         order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
-        order.verify(userService).getUserById(id);
+        order.verify(userService).getUserById(currentUserId, id);
     }
 
     @Test
@@ -366,7 +366,7 @@ class UserControllerTest {
         assertThatThrownBy(() -> userController.getUserById(id))
                 .isInstanceOf(TooManyRequestsException.class);
 
-        verify(userService, never()).getUserById(any());
+        verify(userService, never()).getUserById(any(UUID.class), any(UUID.class));
     }
 
     @Test
@@ -374,7 +374,7 @@ class UserControllerTest {
     void shouldShareTheSameThrottleKeyWhenCalledByTheSameUser() {
         UUID targetId = UUID.randomUUID();
         when(userService.getUsersByUsername(any(), any(), any())).thenReturn(Page.empty());
-        when(userService.getUserById(targetId)).thenReturn(mock(PublicUserProfileDTO.class));
+        when(userService.getUserById(currentUserId, targetId)).thenReturn(mock(PublicUserProfileDTO.class));
 
         userController.getUsersByUsername("jane", null, null);
         userController.getUserById(targetId);
