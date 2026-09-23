@@ -207,6 +207,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                 JOIN contents c ON c.id = d.content_id
                 WHERE d.user_id = :userId
                 AND c.type = 'EPISODE'
+                AND c.season_number > 0
             ),
             series_agg AS (
                 SELECT series_tmdb_id,
@@ -253,6 +254,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                 JOIN contents c ON c.id = d.content_id
                 WHERE d.user_id = :userId
                 AND c.type = 'EPISODE'
+                AND c.season_number > 0
             ),
             series_agg AS (
                 SELECT series_tmdb_id
@@ -279,12 +281,34 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             nativeQuery = true)
     Page<SeriesInProgress> findSeriesInProgressByUserId(@Param("userId") UUID userId, Pageable pageable);
 
+    @Query(value = """
+            SELECT c.series_tmdb_id AS seriesTmdbId,
+                   c.season_number AS seasonNumber,
+                   COUNT(DISTINCT c.episode_number) AS watchedEpisodeCount
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            AND c.season_number > 0
+            AND c.series_tmdb_id IN (:seriesTmdbIds)
+            GROUP BY c.series_tmdb_id, c.season_number
+            ORDER BY c.series_tmdb_id, c.season_number
+            """, nativeQuery = true)
+    List<SeasonProgressCount> findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(
+            @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
     interface SeriesInProgress {
         String getSeriesTmdbId();
         Long getWatchedEpisodeCount();
         Integer getMaxSeasonNumber();
         Integer getMaxEpisodeNumber();
         LocalDate getLastWatchedDate();
+    }
+
+    interface SeasonProgressCount {
+        String getSeriesTmdbId();
+        Integer getSeasonNumber();
+        Long getWatchedEpisodeCount();
     }
 
     @Query("""

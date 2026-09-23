@@ -500,14 +500,20 @@ class DiaryEntryControllerIntegrationTest {
         Content episode = contentRepository.save(Content.builder()
                 .seriesTmdbId("1399").seasonNumber(1).episodeNumber(3).type(ContentType.EPISODE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content specialEpisode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(0).episodeNumber(1).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
         persistEntry(entity, firstEpisode);
         persistEntry(entity, secondEpisode);
         persistEntry(entity, episode);
+        persistEntry(entity, specialEpisode);
         when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                         null, null, null, null, null, null, null, null, null, null, null,
-                        List.of(new TmdbSeasonSummary(1, "Season 1", null, null, 10, null)),
-                        null, null, null, null, 1, 10, null, null, null, null)));
+                        List.of(
+                                new TmdbSeasonSummary(0, "Specials", null, null, 1, null),
+                                new TmdbSeasonSummary(1, "Season 1", null, null, 10, null)),
+                        null, null, null, null, 2, 11, null, null, null, null)));
         when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
                         null, null, null, null, null, 1,
@@ -525,7 +531,12 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].maxEpisodeNumber").value(3))
                 .andExpect(jsonPath("$.content[0].watchedEpisodeCount").value(3))
                 .andExpect(jsonPath("$.content[0].totalEpisodeCount").value(10))
-                .andExpect(jsonPath("$.content[0].watchedPercentage").value(30.0));
+                .andExpect(jsonPath("$.content[0].watchedPercentage").value(30.0))
+                .andExpect(jsonPath("$.content[0].seasonProgress.length()").value(1))
+                .andExpect(jsonPath("$.content[0].seasonProgress[0].seasonNumber").value(1))
+                .andExpect(jsonPath("$.content[0].seasonProgress[0].watchedEpisodeCount").value(3))
+                .andExpect(jsonPath("$.content[0].seasonProgress[0].totalEpisodeCount").value(10))
+                .andExpect(jsonPath("$.content[0].seasonProgress[0].watchedPercentage").value(30.0));
     }
 
     @Test

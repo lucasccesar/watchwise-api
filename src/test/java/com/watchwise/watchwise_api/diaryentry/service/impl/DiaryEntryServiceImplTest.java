@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
@@ -221,12 +222,21 @@ class DiaryEntryServiceImplTest {
                 null, null, null, null, 1, episodeCount, null, null, null, null);
     }
 
+    private TmdbTvFullDetails seriesDetailsWithSeasons(TmdbSeasonSummary... seasons) {
+        return new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
+                List.of(seasons), null, null, null, null, seasons.length, null, null, null, null, null);
+    }
+
     private TmdbSeasonFullDetails seasonDetailsWithAiredEpisodes(int episodeCount) {
+        return seasonDetailsWithAiredEpisodes(1, episodeCount);
+    }
+
+    private TmdbSeasonFullDetails seasonDetailsWithAiredEpisodes(int seasonNumber, int episodeCount) {
         List<TmdbEpisodeSummary> episodes = IntStream.rangeClosed(1, episodeCount)
                 .mapToObj(episodeNumber -> new TmdbEpisodeSummary(
                         episodeNumber, null, null, "2020-01-01", null, null, null))
                 .toList();
-        return new TmdbSeasonFullDetails(null, null, null, null, null, 1, episodes, null, null);
+        return new TmdbSeasonFullDetails(null, null, null, null, null, seasonNumber, episodes, null, null);
     }
 
     private TmdbMovieFullDetails emptyMovieDetails() {
@@ -546,6 +556,8 @@ class DiaryEntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(row)));
+        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
+                .thenReturn(List.of(seasonProgressCount("1399", 1, 2L)));
         when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithEpisodeCount(10)));
         when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
@@ -562,6 +574,45 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getSeriesInProgress] Should Return Progress For Each Released Positive Season And Ignore Specials")
+    void shouldReturnProgressForEachReleasedPositiveSeasonAndIgnoreSpecials() {
+        DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
+                "1399", 4L, 2, 2, LocalDate.of(2024, 5, 1));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
+                .thenReturn(List.of(
+                        seasonProgressCount("1399", 1, 2L),
+                        seasonProgressCount("1399", 2, 2L)));
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithSeasons(
+                        new TmdbSeasonSummary(0, "Specials", null, null, 1, null),
+                        new TmdbSeasonSummary(1, "Season 1", null, null, 4, null),
+                        new TmdbSeasonSummary(2, "Season 2", null, null, 2, null))));
+        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithAiredEpisodes(1, 4)));
+        when(tmdbClient.getSeasonFullDetails("1399", 2, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithAiredEpisodes(2, 2)));
+
+        Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
+
+        assertThat(result.getContent().getFirst().seasonProgress())
+                .extracting(SeasonProgressDTO::seasonNumber,
+                        SeasonProgressDTO::watchedEpisodeCount,
+                        SeasonProgressDTO::totalEpisodeCount,
+                        SeasonProgressDTO::watchedPercentage)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(1, 2L, 4, 50.0),
+                        org.assertj.core.groups.Tuple.tuple(2, 2L, 2, 100.0));
+        assertThat(result.getContent().getFirst())
+                .extracting(SeriesInProgressResponseDTO::totalEpisodeCount,
+                        SeriesInProgressResponseDTO::watchedPercentage)
+                .containsExactly(6, 66.66666666666667);
+        verify(tmdbClient, never()).getSeasonFullDetails("1399", 0, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
     @DisplayName("[getSeriesInProgress] Should Exclude Future Episodes From Progress Total")
     void shouldExcludeFutureEpisodesFromSeriesProgressTotal() {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
@@ -569,6 +620,8 @@ class DiaryEntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(row)));
+        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
+                .thenReturn(List.of(seasonProgressCount("1399", 1, 2L)));
         when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
                         null, null, null, null, null, null, null, null, null, null, null,
@@ -590,6 +643,10 @@ class DiaryEntryServiceImplTest {
                         SeriesInProgressResponseDTO::totalEpisodeCount,
                         SeriesInProgressResponseDTO::watchedPercentage)
                 .containsExactly(2L, 2, 100.0);
+        assertThat(result.getContent().getFirst().seasonProgress().getFirst())
+                .extracting(SeasonProgressDTO::totalEpisodeCount,
+                        SeasonProgressDTO::watchedPercentage)
+                .containsExactly(2, 100.0);
     }
 
     @Test
@@ -642,6 +699,8 @@ class DiaryEntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(row)));
+        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
+                .thenReturn(List.of(seasonProgressCount("1399", 1, 12L)));
         when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithEpisodeCount(10)));
         when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
@@ -650,6 +709,7 @@ class DiaryEntryServiceImplTest {
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
         assertThat(result.getContent().getFirst().watchedPercentage()).isEqualTo(100.0);
+        assertThat(result.getContent().getFirst().seasonProgress().getFirst().watchedPercentage()).isEqualTo(100.0);
     }
 
     @Test
@@ -678,6 +738,7 @@ class DiaryEntryServiceImplTest {
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
         assertThat(result.getContent()).isEmpty();
+        verify(diaryEntryRepository, never()).findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(any(), any());
     }
 
     @Test
@@ -838,6 +899,26 @@ class DiaryEntryServiceImplTest {
             @Override
             public LocalDate getLastWatchedDate() {
                 return lastWatchedDate;
+            }
+        };
+    }
+
+    private DiaryEntryRepository.SeasonProgressCount seasonProgressCount(
+            String seriesTmdbId, Integer seasonNumber, Long watchedEpisodeCount) {
+        return new DiaryEntryRepository.SeasonProgressCount() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Integer getSeasonNumber() {
+                return seasonNumber;
+            }
+
+            @Override
+            public Long getWatchedEpisodeCount() {
+                return watchedEpisodeCount;
             }
         };
     }

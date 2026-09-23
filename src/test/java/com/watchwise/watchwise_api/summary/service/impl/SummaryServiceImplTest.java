@@ -10,7 +10,6 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
-import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -28,6 +27,7 @@ import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
+import com.watchwise.watchwise_api.summary.dto.SeriesInProgressPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
@@ -396,7 +396,7 @@ class SummaryServiceImplTest {
         assertThat(result.totalMinutesWatchedEpisodes()).isEqualTo(3000L);
         assertThat(result.totalMoviesWatched()).isEqualTo(42L);
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
-        assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressResponseDTO(
+        assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressPreviewDTO(
                 "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, null, null));
         assertThat(result.watchCountByDayLast30Days()).containsExactly(new DailyWatchCountDTO(LocalDate.of(2024, 5, 1), 3));
         assertThat(result.genreCountsMoviesLast30Days()).containsExactly(new GenreCountDTO("Action", 2));

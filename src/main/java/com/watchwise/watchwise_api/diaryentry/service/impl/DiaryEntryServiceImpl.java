@@ -27,6 +27,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
@@ -128,41 +129,94 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         assertCanViewDiary(viewerId, userId, target);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        return diaryEntryRepository.findSeriesInProgressByUserId(userId, pageRequest)
-                .map(this::toSeriesInProgressResponse);
+        Page<DiaryEntryRepository.SeriesInProgress> seriesInProgress =
+                diaryEntryRepository.findSeriesInProgressByUserId(userId, pageRequest);
+        List<String> seriesTmdbIds = seriesInProgress.getContent().stream()
+                .map(DiaryEntryRepository.SeriesInProgress::getSeriesTmdbId)
+                .distinct()
+                .toList();
+        Map<String, Map<Integer, Long>> watchedEpisodeCountsBySeriesAndSeason =
+                loadWatchedEpisodeCountsBySeriesAndSeason(userId, seriesTmdbIds);
+
+        return seriesInProgress.map(row -> toSeriesInProgressResponse(
+                row, watchedEpisodeCountsBySeriesAndSeason.getOrDefault(row.getSeriesTmdbId(), Map.of())));
     }
 
-    private SeriesInProgressResponseDTO toSeriesInProgressResponse(DiaryEntryRepository.SeriesInProgress row) {
+    private Map<String, Map<Integer, Long>> loadWatchedEpisodeCountsBySeriesAndSeason(
+            UUID userId, List<String> seriesTmdbIds) {
+        if (seriesTmdbIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<DiaryEntryRepository.SeasonProgressCount> counts = Optional.ofNullable(
+                diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(userId, seriesTmdbIds))
+                .orElseGet(List::of);
+        return counts.stream().collect(Collectors.groupingBy(
+                DiaryEntryRepository.SeasonProgressCount::getSeriesTmdbId,
+                LinkedHashMap::new,
+                Collectors.toMap(
+                        DiaryEntryRepository.SeasonProgressCount::getSeasonNumber,
+                        DiaryEntryRepository.SeasonProgressCount::getWatchedEpisodeCount,
+                        Long::sum,
+                        LinkedHashMap::new)));
+    }
+
+    private SeriesInProgressResponseDTO toSeriesInProgressResponse(
+            DiaryEntryRepository.SeriesInProgress row, Map<Integer, Long> watchedEpisodeCountsBySeason) {
         TmdbTvFullDetails details = tmdbClient
                 .getTvFullDetails(row.getSeriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
                 .toOptional()
                 .orElseThrow(this::tmdbUnavailable);
 
-        Integer totalEpisodeCount = releasedEpisodeCount(row.getSeriesTmdbId(), details);
+        SeriesProgressDetails progress = calculateSeriesProgress(
+                row.getSeriesTmdbId(), details, watchedEpisodeCountsBySeason);
+        Integer totalEpisodeCount = progress.totalEpisodeCount();
         Double watchedPercentage = totalEpisodeCount == null
                 ? null
                 : Math.min(100.0, row.getWatchedEpisodeCount() * 100.0 / totalEpisodeCount);
 
         return new SeriesInProgressResponseDTO(
                 row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),
-                row.getWatchedEpisodeCount(), totalEpisodeCount, watchedPercentage);
+                row.getWatchedEpisodeCount(), totalEpisodeCount, watchedPercentage, progress.seasonProgress());
     }
 
-    private Integer releasedEpisodeCount(String seriesTmdbId, TmdbTvFullDetails details) {
+    private SeriesProgressDetails calculateSeriesProgress(
+            String seriesTmdbId, TmdbTvFullDetails details, Map<Integer, Long> watchedEpisodeCountsBySeason) {
         if (details.seasons() == null) {
+            return new SeriesProgressDetails(List.of(), null);
+        }
+
+        List<SeasonProgressDTO> seasonProgress = details.seasons().stream()
+                .filter(Objects::nonNull)
+                .map(TmdbSeasonSummary::seasonNumber)
+                .filter(seasonNumber -> seasonNumber != null && seasonNumber > 0)
+                .distinct()
+                .sorted()
+                .map(seasonNumber -> toSeasonProgress(
+                        seriesTmdbId, seasonNumber, watchedEpisodeCountsBySeason.getOrDefault(seasonNumber, 0L)))
+                .filter(Objects::nonNull)
+                .toList();
+
+        int totalEpisodeCount = seasonProgress.stream()
+                .mapToInt(SeasonProgressDTO::totalEpisodeCount)
+                .sum();
+        return totalEpisodeCount > 0
+                ? new SeriesProgressDetails(seasonProgress, totalEpisodeCount)
+                : new SeriesProgressDetails(List.of(), null);
+    }
+
+    private SeasonProgressDTO toSeasonProgress(String seriesTmdbId, Integer seasonNumber, long watchedEpisodeCount) {
+        int totalEpisodeCount = airedEpisodeCount(fetchSeasonDetails(
+                seriesTmdbId, seasonNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+        if (totalEpisodeCount == 0) {
             return null;
         }
 
-        int releasedEpisodeCount = details.seasons().stream()
-                .filter(Objects::nonNull)
-                .map(TmdbSeasonSummary::seasonNumber)
-                .filter(seasonNumber -> seasonNumber != null && seasonNumber >= 0)
-                .distinct()
-                .mapToInt(seasonNumber -> airedEpisodeCount(fetchSeasonDetails(
-                        seriesTmdbId, seasonNumber, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
-                .sum();
+        double watchedPercentage = Math.min(100.0, watchedEpisodeCount * 100.0 / totalEpisodeCount);
+        return new SeasonProgressDTO(seasonNumber, watchedEpisodeCount, totalEpisodeCount, watchedPercentage);
+    }
 
-        return releasedEpisodeCount > 0 ? releasedEpisodeCount : null;
+    private record SeriesProgressDetails(List<SeasonProgressDTO> seasonProgress, Integer totalEpisodeCount) {
     }
 
     @Override

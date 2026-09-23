@@ -387,6 +387,18 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Exclude Series - When User Has Only Specials Episodes")
+    void shouldExcludeSeriesWhenUserHasOnlySpecialsEpisodes() {
+        Content specialEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, specialEpisode));
+
+        Page<DiaryEntryRepository.SeriesInProgress> result =
+                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
     @DisplayName("[findSeriesInProgressByUserId] Should Count Each Episode Once - When The User Rewatches An Episode")
     void shouldCountEachEpisodeOnceWhenTheUserRewatchesAnEpisode() {
         Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
@@ -403,6 +415,30 @@ class DiaryEntryRepositoryTest {
         assertThat(row.getSeriesTmdbId()).isEqualTo("1399");
         assertThat(row.getMaxSeasonNumber()).isEqualTo(1);
         assertThat(row.getMaxEpisodeNumber()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds] Should Count Watched Episodes By Positive Season In One Batch")
+    void shouldCountWatchedEpisodesByPositiveSeasonInOneBatch() {
+        Content firstSeasonEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content secondSeasonEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
+        Content specialEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
+        Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstSeasonEpisode, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstSeasonEpisode, 2));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondSeasonEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, specialEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeriesEpisode));
+
+        var result = diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(
+                lucas.getId(), List.of("1399", "1396"));
+
+        assertThat(result)
+                .extracting("seriesTmdbId", "seasonNumber", "watchedEpisodeCount")
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("1399", 1, 1L),
+                        org.assertj.core.groups.Tuple.tuple("1399", 2, 1L),
+                        org.assertj.core.groups.Tuple.tuple("1396", 1, 1L));
     }
 
     @Test

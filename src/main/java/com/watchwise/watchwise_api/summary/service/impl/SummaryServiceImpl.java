@@ -9,7 +9,6 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
-import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -36,6 +35,7 @@ import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.SeriesWatchTimeDTO;
+import com.watchwise.watchwise_api.summary.dto.SeriesInProgressPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
@@ -136,9 +136,9 @@ public class SummaryServiceImpl implements SummaryService {
         long totalMoviesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.MOVIE);
         long totalEpisodesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.EPISODE);
 
-        List<SeriesInProgressResponseDTO> nextEpisodes = diaryEntryRepository
+        List<SeriesInProgressPreviewDTO> nextEpisodes = diaryEntryRepository
                 .findSeriesInProgressByUserId(userId, PageRequest.of(0, HOME_NEXT_EPISODES_LIMIT))
-                .map(row -> new SeriesInProgressResponseDTO(
+                .map(row -> new SeriesInProgressPreviewDTO(
                         row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),
                         row.getWatchedEpisodeCount(), null, null))
                 .getContent();
