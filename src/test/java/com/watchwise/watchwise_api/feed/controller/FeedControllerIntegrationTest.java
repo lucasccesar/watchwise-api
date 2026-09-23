@@ -16,6 +16,12 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -45,6 +51,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -84,6 +91,12 @@ class FeedControllerIntegrationTest {
     private Top5EntryRepository top5EntryRepository;
 
     @Autowired
+    private PickRepository pickRepository;
+
+    @Autowired
+    private PicksTemplateRepository picksTemplateRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -94,6 +107,8 @@ class FeedControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        pickRepository.deleteAll();
+        picksTemplateRepository.deleteAll();
         top5EntryRepository.deleteAll();
         droppedEntryRepository.deleteAll();
         diaryEntryRepository.deleteAll();
@@ -216,6 +231,42 @@ class FeedControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].watchedWith.length()").value(1))
                 .andExpect(jsonPath("$.content[0].watchedWith[0].username").value("feedwatchedwithcompanion"));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Include Pick And Template Creation Events - When Followed User Creates Them")
+    void shouldIncludePickAndTemplateCreationEventsWhenFollowedUserCreatesThem() throws Exception {
+        RegisteredUser viewer = registerUser("feedpickviewer");
+        RegisteredUser followed = registerUser("feedpickfollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplate template = picksTemplateRepository.saveAndFlush(PicksTemplate.builder()
+                .creator(followedEntity)
+                .origin(PickOrigin.COMMUNITY)
+                .name("Weekend Picks")
+                .createdAt(now.minusMinutes(1))
+                .updatedAt(now.minusMinutes(1))
+                .build());
+        Pick pick = pickRepository.saveAndFlush(Pick.builder()
+                .picksTemplate(template)
+                .user(followedEntity)
+                .visibility(PickVisibility.PUBLIC)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].eventType").value("PICK_CREATED"))
+                .andExpect(jsonPath("$.content[0].id").value(pick.getId().toString()))
+                .andExpect(jsonPath("$.content[0].pick.id").value(pick.getId().toString()))
+                .andExpect(jsonPath("$.content[0].picksTemplate.id").value(template.getId().toString()))
+                .andExpect(jsonPath("$.content[0].picksTemplate.name").value("Weekend Picks"))
+                .andExpect(jsonPath("$.content[1].eventType").value("PICKS_TEMPLATE_CREATED"))
+                .andExpect(jsonPath("$.content[1].picksTemplate.id").value(template.getId().toString()))
+                .andExpect(jsonPath("$.content[1].pick").value(nullValue()));
     }
 
     @Test

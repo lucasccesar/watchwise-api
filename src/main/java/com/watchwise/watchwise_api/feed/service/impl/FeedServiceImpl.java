@@ -15,6 +15,14 @@ import com.watchwise.watchwise_api.feed.service.FeedService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pick.service.impl.PickPreviewAssembler;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
+import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
@@ -22,6 +30,7 @@ import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -29,6 +38,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,12 +57,17 @@ public class FeedServiceImpl implements FeedService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final DroppedEntryRepository droppedEntryRepository;
     private final Top5EntryRepository top5EntryRepository;
+    private final PickRepository pickRepository;
+    private final PicksTemplateRepository picksTemplateRepository;
     private final WatchCompanionRepository watchCompanionRepository;
     private final LikeService likeService;
     private final ContentMapper contentMapper;
     private final UserMapper userMapper;
+    private final PickPreviewAssembler pickPreviewAssembler;
+    private final PicksTemplatePreviewAssembler picksTemplatePreviewAssembler;
 
     @Override
+    @Transactional(readOnly = true)
     public CursorPageResponseDTO<FeedItemDTO> getFeed(UUID userId, String cursor, Integer size) {
         int effectiveSize = resolveSize(size);
         FeedCursor decodedCursor = decodeCursor(cursor);
@@ -69,14 +84,21 @@ public class FeedServiceImpl implements FeedService {
         List<DiaryEntry> diaryRaw = diaryEntryRepository.findFeedCandidates(followedIds, cursorCreatedAt, cursorId, fetchLimit);
         List<DroppedEntry> droppedRaw = droppedEntryRepository.findFeedCandidates(followedIds, cursorCreatedAt, cursorId, fetchLimit);
         List<Top5Entry> top5Raw = top5EntryRepository.findFeedCandidates(followedIds, cursorCreatedAt, cursorId, fetchLimit);
+        List<Pick> pickRaw = pickRepository.findFeedCandidates(followedIds, userId, cursorCreatedAt, cursorId, fetchLimit);
+        List<PicksTemplate> picksTemplateRaw = picksTemplateRepository.findFeedCandidates(
+                followedIds, cursorCreatedAt, cursorId, fetchLimit);
 
         boolean diaryHasMore = diaryRaw.size() > effectiveSize;
         boolean droppedHasMore = droppedRaw.size() > effectiveSize;
         boolean top5HasMore = top5Raw.size() > effectiveSize;
+        boolean pickHasMore = pickRaw.size() > effectiveSize;
+        boolean picksTemplateHasMore = picksTemplateRaw.size() > effectiveSize;
 
         List<DiaryEntry> diaryEntries = trim(diaryRaw, effectiveSize);
         List<DroppedEntry> droppedEntries = trim(droppedRaw, effectiveSize);
         List<Top5Entry> top5Entries = trim(top5Raw, effectiveSize);
+        List<Pick> pickEntries = trim(pickRaw, effectiveSize);
+        List<PicksTemplate> picksTemplateEntries = trim(picksTemplateRaw, effectiveSize);
 
         Set<UUID> likedDiaryEntryIds = likeService.getLikedDiaryEntryIds(
                 userId, diaryEntries.stream().map(DiaryEntry::getId).toList());
@@ -84,6 +106,12 @@ public class FeedServiceImpl implements FeedService {
                 .findByDiaryEntryIdIn(diaryEntries.stream().map(DiaryEntry::getId).toList()).stream()
                 .collect(Collectors.groupingBy(wc -> wc.getDiaryEntry().getId(),
                         Collectors.mapping(wc -> userMapper.userToUserPreviewDto(wc.getUser()), Collectors.toList())));
+        Map<UUID, PickPreviewDTO> pickPreviews = pickPreviewAssembler.assemble(pickEntries, userId);
+        Map<UUID, PicksTemplate> templatesById = new LinkedHashMap<>();
+        pickEntries.forEach(pick -> templatesById.put(pick.getPicksTemplate().getId(), pick.getPicksTemplate()));
+        picksTemplateEntries.forEach(template -> templatesById.put(template.getId(), template));
+        Map<UUID, PicksTemplatePreviewDTO> picksTemplatePreviews = picksTemplatePreviewAssembler
+                .assemble(templatesById.values(), userId);
 
         List<FeedCandidate> candidates = new ArrayList<>();
         for (DiaryEntry entry : diaryEntries) {
@@ -97,13 +125,23 @@ public class FeedServiceImpl implements FeedService {
         for (Top5Entry entry : top5Entries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(), toTop5FeedItem(entry)));
         }
+        for (Pick entry : pickEntries) {
+            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
+                    toPickFeedItem(entry, pickPreviews.get(entry.getId()),
+                            picksTemplatePreviews.get(entry.getPicksTemplate().getId()))));
+        }
+        for (PicksTemplate entry : picksTemplateEntries) {
+            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
+                    toPicksTemplateFeedItem(entry, picksTemplatePreviews.get(entry.getId()))));
+        }
 
         candidates.sort(Comparator.comparing(FeedCandidate::createdAt).reversed()
                 .thenComparing(c -> c.id().toString(), Comparator.reverseOrder()));
 
         boolean hasMoreBeyondPage = candidates.size() > effectiveSize;
         List<FeedCandidate> page = hasMoreBeyondPage ? candidates.subList(0, effectiveSize) : candidates;
-        boolean hasNext = hasMoreBeyondPage || diaryHasMore || droppedHasMore || top5HasMore;
+        boolean hasNext = hasMoreBeyondPage || diaryHasMore || droppedHasMore || top5HasMore
+                || pickHasMore || picksTemplateHasMore;
 
         String nextCursor = hasNext && !page.isEmpty() ? encodeCursor(page.get(page.size() - 1)) : null;
         List<FeedItemDTO> content = page.stream().map(FeedCandidate::item).toList();
@@ -137,6 +175,8 @@ public class FeedServiceImpl implements FeedService {
                 entry.getLikesCount(),
                 likedByMe,
                 watchedWith,
+                null,
+                null,
                 entry.getCreatedAt());
     }
 
@@ -149,6 +189,8 @@ public class FeedServiceImpl implements FeedService {
                 null,
                 null,
                 entry.getComment(),
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -167,6 +209,42 @@ public class FeedServiceImpl implements FeedService {
                 null,
                 null,
                 null,
+                null,
+                null,
+                entry.getCreatedAt());
+    }
+
+    private FeedItemDTO toPickFeedItem(Pick entry, PickPreviewDTO pick, PicksTemplatePreviewDTO picksTemplate) {
+        return new FeedItemDTO(
+                FeedEventType.PICK_CREATED,
+                entry.getId(),
+                userMapper.userToUserPreviewDto(entry.getUser()),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                pick,
+                picksTemplate,
+                entry.getCreatedAt());
+    }
+
+    private FeedItemDTO toPicksTemplateFeedItem(PicksTemplate entry, PicksTemplatePreviewDTO picksTemplate) {
+        return new FeedItemDTO(
+                FeedEventType.PICKS_TEMPLATE_CREATED,
+                entry.getId(),
+                userMapper.userToUserPreviewDto(entry.getCreator()),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                picksTemplate,
                 entry.getCreatedAt());
     }
 

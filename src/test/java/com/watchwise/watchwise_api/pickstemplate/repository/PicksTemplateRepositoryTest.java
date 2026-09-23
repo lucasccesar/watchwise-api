@@ -31,6 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -86,6 +87,33 @@ class PicksTemplateRepositoryTest {
         assertThat(result.getContent()).extracting(PicksTemplate::getName)
                 .containsExactly("Rank% newer", "Rank% older");
         assertThat(result.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void findsFeedCandidatesOnlyForFollowedCreatorsAndHonorsCursor() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 23, 12, 0);
+        User followedCreator = saveUser("feed-template-followed", now);
+        User otherCreator = saveUser("feed-template-other", now);
+
+        PicksTemplate newest = repository.saveAndFlush(PicksTemplate.builder()
+                .creator(followedCreator).origin(PickOrigin.COMMUNITY).name("Newest")
+                .createdAt(now.plusMinutes(3)).updatedAt(now.plusMinutes(3)).build());
+        PicksTemplate older = repository.saveAndFlush(PicksTemplate.builder()
+                .creator(followedCreator).origin(PickOrigin.COMMUNITY).name("Older")
+                .createdAt(now.plusMinutes(1)).updatedAt(now.plusMinutes(1)).build());
+        repository.saveAndFlush(PicksTemplate.builder()
+                .creator(otherCreator).origin(PickOrigin.COMMUNITY).name("Other")
+                .createdAt(now.plusMinutes(2)).updatedAt(now.plusMinutes(2)).build());
+        repository.saveAndFlush(PicksTemplate.builder()
+                .origin(PickOrigin.OFFICIAL).name("Detached")
+                .createdAt(now.plusMinutes(4)).updatedAt(now.plusMinutes(4)).build());
+
+        List<PicksTemplate> candidates = repository.findFeedCandidates(
+                java.util.List.of(followedCreator.getId()), now.plusMinutes(3), null, PageRequest.of(0, 10));
+
+        assertThat(candidates).extracting(PicksTemplate::getId)
+                .containsExactly(older.getId());
+        assertThat(candidates).doesNotContain(newest);
     }
 
     @Test

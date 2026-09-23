@@ -8,7 +8,6 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.pick.dto.PickCreationDTO;
-import com.watchwise.watchwise_api.pick.dto.PickAnsweredCategoryPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPatchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickProgress;
@@ -32,12 +31,8 @@ import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
-import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateOption;
-import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryOptionMode;
-import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
-import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,16 +62,16 @@ public class PickServiceImpl implements PickService {
     private final PicksTemplatePreviewAssembler templatePreviewAssembler;
     private final CommentRepository commentRepository;
     private final LikeService likeService;
-    private final UserMapper userMapper;
-    private final PicksTemplateOptionRepository optionRepository;
+    private final PickPreviewAssembler pickPreviewAssembler;
 
     public PickServiceImpl(PickRepository pickRepository, PickSelectionRepository selectionRepository,
             PicksTemplateRepository templateRepository, PicksTemplateCategoryRepository categoryRepository,
             UserRepository userRepository, FollowerRepository followerRepository, PickTargetService targetService,
-            PickMapper pickMapper, PicksTemplateMapper templateMapper, PageRequestFactory pageRequestFactory) {
+            PickMapper pickMapper, PicksTemplateMapper templateMapper, PageRequestFactory pageRequestFactory,
+            PickPreviewAssembler pickPreviewAssembler) {
         this(pickRepository, selectionRepository, templateRepository, categoryRepository, userRepository,
                 followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
-                null, null, null, null, null);
+                null, null, null, pickPreviewAssembler);
     }
 
     @Override
@@ -185,42 +180,7 @@ public class PickServiceImpl implements PickService {
     }
 
     private Page<PickPreviewDTO> mapPreviewPage(Page<Pick> picks, UUID viewerId) {
-        if (picks.isEmpty()) {
-            return picks.map(pick -> null);
-        }
-        List<Pick> content = picks.getContent();
-        List<UUID> pickIds = content.stream().map(Pick::getId).toList();
-        Map<UUID, List<PickSelection>> selectionsByPickId = selectionRepository.findByPickIdIn(pickIds).stream()
-                .collect(Collectors.groupingBy(selection -> selection.getPick().getId()));
-        Map<UUID, List<PicksTemplateCategory>> categoriesByTemplateId = loadCategoriesByTemplateId(content);
-        List<UUID> fixedCategoryIds = categoriesByTemplateId.values().stream().flatMap(Collection::stream)
-                .filter(category -> category.getOptionMode() == PickCategoryOptionMode.FIXED)
-                .map(PicksTemplateCategory::getId).toList();
-        Map<UUID, List<PicksTemplateOption>> optionsByCategory = optionRepository == null || fixedCategoryIds.isEmpty() ? Map.of()
-                : optionRepository.findByCategoryIdIn(fixedCategoryIds).stream()
-                .collect(Collectors.groupingBy(option -> option.getCategory().getId()));
-        Map<UUID, Long> commentsByPickId = commentRepository == null ? Map.of() : commentRepository.countByPickIdIn(pickIds).stream()
-                .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId, CommentRepository.PickCommentCount::getCount));
-        Set<UUID> likedPickIds = likeService == null ? Set.of() : likeService.getLikedPickIds(viewerId, pickIds);
-
-        return picks.map(pick -> {
-            List<PicksTemplateCategory> categories = categoriesByTemplateId.getOrDefault(pick.getPicksTemplate().getId(), List.of());
-            Map<UUID, PickSelection> selectionByCategory = selectionsByPickId.getOrDefault(pick.getId(), List.of()).stream()
-                    .collect(Collectors.toMap(selection -> selection.getCategory().getId(), Function.identity()));
-            List<PickAnsweredCategoryPreviewDTO> answered = categories.stream()
-                    .filter(category -> selectionByCategory.containsKey(category.getId()))
-                    .limit(5)
-                    .map(category -> {
-                        PickSelection selection = selectionByCategory.get(category.getId());
-                        boolean valid = targetService.isStructurallyValid(category, selection,
-                                optionsByCategory.getOrDefault(category.getId(), List.of()));
-                        return new PickAnsweredCategoryPreviewDTO(category.getId(), category.getName(), category.getGroup(),
-                                category.getDisplayOrder(), pickMapper.pickSelectionToSearchDto(selection), valid);
-                    }).toList();
-            return new PickPreviewDTO(pick.getId(), userMapper == null ? null : userMapper.userToUserPreviewDto(pick.getUser()), pick.getVisibility(),
-                    pick.getCreatedAt(), pick.getLikesCount() == null ? 0 : pick.getLikesCount(),
-                    commentsByPickId.getOrDefault(pick.getId(), 0L), likedPickIds.contains(pick.getId()), answered);
-        });
+        return pickPreviewAssembler.assemblePage(picks, viewerId);
     }
 
     private PickResponseDTO assemble(Pick pick, UUID viewerId) {

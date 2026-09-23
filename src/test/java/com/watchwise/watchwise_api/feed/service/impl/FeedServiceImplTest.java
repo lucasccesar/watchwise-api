@@ -16,6 +16,16 @@ import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pick.service.impl.PickPreviewAssembler;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
+import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
@@ -32,6 +42,7 @@ import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -48,6 +59,118 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class FeedServiceImplTest {
 
+    @Test
+    @DisplayName("[FeedItemDTO] Should Carry Pick And Template Previews - When A Pick Event Is Created")
+    void shouldCarryPickAndTemplatePreviewsWhenAPickEventIsCreated() {
+        UUID pickId = UUID.randomUUID();
+        UUID templateId = UUID.randomUUID();
+        LocalDateTime createdAt = LocalDateTime.now();
+        PickPreviewDTO pickPreview = new PickPreviewDTO(
+                pickId, null, PickVisibility.PUBLIC, createdAt, 2, 3, false, List.of());
+        PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(
+                templateId, PickOrigin.COMMUNITY, "Weekend Picks", null, null);
+
+        FeedItemDTO item = new FeedItemDTO(
+                FeedEventType.PICK_CREATED, pickId, null, null, null, null, null, null, null, null,
+                pickPreview, templatePreview, createdAt);
+
+        assertThat(item.pick()).isEqualTo(pickPreview);
+        assertThat(item.picksTemplate()).isEqualTo(templatePreview);
+    }
+
+    @Test
+    @DisplayName("[FeedItemDTO] Should Carry Only Template Preview - When A Template Event Is Created")
+    void shouldCarryOnlyTemplatePreviewWhenATemplateEventIsCreated() {
+        UUID templateId = UUID.randomUUID();
+        PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(
+                templateId, PickOrigin.COMMUNITY, "Weekend Picks", null, null);
+
+        FeedItemDTO item = new FeedItemDTO(
+                FeedEventType.PICKS_TEMPLATE_CREATED, templateId, null, null, null, null, null, null, null, null,
+                null, templatePreview, LocalDateTime.now());
+
+        assertThat(item.pick()).isNull();
+        assertThat(item.picksTemplate()).isEqualTo(templatePreview);
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Merge Five Sources And Map Pick Previews - When All Have Activity")
+    void shouldMergeFiveSourcesAndMapPickPreviewsWhenAllHaveActivity() {
+        stubFollowedIds();
+
+        LocalDateTime now = LocalDateTime.now();
+        DiaryEntry diaryEntry = buildDiaryEntry(now.minusMinutes(1));
+        DroppedEntry droppedEntry = buildDroppedEntry(now.minusMinutes(2));
+        Top5Entry top5Entry = buildTop5Entry(now.minusMinutes(3));
+        PicksTemplate template = buildTemplate(now.minusMinutes(5));
+        Pick pick = buildPick(template, now.minusMinutes(4));
+        PickPreviewDTO pickPreview = new PickPreviewDTO(pick.getId(), null, PickVisibility.PUBLIC,
+                pick.getCreatedAt(), 0, 0, false, List.of());
+        PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(template.getId(),
+                PickOrigin.COMMUNITY, template.getName(), null, null);
+
+        when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(diaryEntry));
+        when(droppedEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(droppedEntry));
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(top5Entry));
+        when(pickRepository.findFeedCandidates(eq(List.of(followedId)), eq(viewerId), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(pick));
+        when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(template));
+        when(pickPreviewAssembler.assemble(eq(List.of(pick)), eq(viewerId)))
+                .thenReturn(Map.of(pick.getId(), pickPreview));
+        when(picksTemplatePreviewAssembler.assemble(any(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), templatePreview));
+        when(likeService.getLikedDiaryEntryIds(eq(viewerId), any())).thenReturn(Set.of());
+
+        CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, null);
+
+        assertThat(result.content()).extracting(FeedItemDTO::eventType)
+                .containsExactly(
+                        FeedEventType.DIARY_ENTRY,
+                        FeedEventType.DROPPED,
+                        FeedEventType.TOP5_UPDATE,
+                        FeedEventType.PICK_CREATED,
+                        FeedEventType.PICKS_TEMPLATE_CREATED);
+        FeedItemDTO pickItem = result.content().stream()
+                .filter(item -> item.eventType() == FeedEventType.PICK_CREATED).findFirst().orElseThrow();
+        assertThat(pickItem.pick()).isEqualTo(pickPreview);
+        assertThat(pickItem.picksTemplate()).isEqualTo(templatePreview);
+        FeedItemDTO templateItem = result.content().stream()
+                .filter(item -> item.eventType() == FeedEventType.PICKS_TEMPLATE_CREATED).findFirst().orElseThrow();
+        assertThat(templateItem.pick()).isNull();
+        assertThat(templateItem.picksTemplate()).isEqualTo(templatePreview);
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Report HasNext - When Pick Source Has More Candidates")
+    void shouldReportHasNextWhenPickSourceHasMoreCandidates() {
+        stubFollowedIds();
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplate template = buildTemplate(now);
+        Pick first = buildPick(template, now);
+        Pick beyondLimit = buildPick(template, now.minusMinutes(1));
+        when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 2))))
+                .thenReturn(List.of());
+        stubEmptyDroppedAndTop5(2);
+        when(pickRepository.findFeedCandidates(eq(List.of(followedId)), eq(viewerId), isNull(), isNull(), eq(PageRequest.of(0, 2))))
+                .thenReturn(List.of(first, beyondLimit));
+        when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 2))))
+                .thenReturn(List.of());
+        when(pickPreviewAssembler.assemble(eq(List.of(first)), eq(viewerId)))
+                .thenReturn(Map.of(first.getId(), new PickPreviewDTO(first.getId(), null, PickVisibility.PUBLIC,
+                        first.getCreatedAt(), 0, 0, false, List.of())));
+        when(picksTemplatePreviewAssembler.assemble(any(), eq(viewerId))).thenReturn(Map.of());
+
+        CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, 1);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.hasNext()).isTrue();
+        assertThat(result.nextCursor()).isNotNull();
+    }
+
     @Mock
     private FollowerRepository followerRepository;
 
@@ -61,6 +184,12 @@ class FeedServiceImplTest {
     private Top5EntryRepository top5EntryRepository;
 
     @Mock
+    private PickRepository pickRepository;
+
+    @Mock
+    private PicksTemplateRepository picksTemplateRepository;
+
+    @Mock
     private WatchCompanionRepository watchCompanionRepository;
 
     @Mock
@@ -71,6 +200,12 @@ class FeedServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private PickPreviewAssembler pickPreviewAssembler;
+
+    @Mock
+    private PicksTemplatePreviewAssembler picksTemplatePreviewAssembler;
 
     @InjectMocks
     private FeedServiceImpl feedService;
@@ -344,6 +479,10 @@ class FeedServiceImplTest {
                 .thenReturn(List.of());
         when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
                 .thenReturn(List.of());
+        when(pickRepository.findFeedCandidates(eq(List.of(followedId)), eq(viewerId), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+                .thenReturn(List.of());
+        when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+                .thenReturn(List.of());
     }
 
     private void stubEmptyDroppedAndTop5(int expectedFetchLimit) {
@@ -408,6 +547,29 @@ class FeedServiceImplTest {
                 .position(1)
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
+                .build();
+    }
+
+    private PicksTemplate buildTemplate(LocalDateTime createdAt) {
+        return PicksTemplate.builder()
+                .id(UUID.randomUUID())
+                .creator(followedUser)
+                .origin(PickOrigin.COMMUNITY)
+                .name("Feed template")
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .build();
+    }
+
+    private Pick buildPick(PicksTemplate template, LocalDateTime createdAt) {
+        return Pick.builder()
+                .id(UUID.randomUUID())
+                .user(followedUser)
+                .picksTemplate(template)
+                .visibility(PickVisibility.PUBLIC)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .likesCount(0)
                 .build();
     }
 }

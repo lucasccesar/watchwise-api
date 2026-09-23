@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,6 +20,23 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select template from PicksTemplate template where template.id = :id")
     Optional<PicksTemplate> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query("""
+            select template from PicksTemplate template
+            join fetch template.creator
+            where template.creator.id in :creatorIds
+              and (
+                  cast(:cursorCreatedAt as timestamp) is null
+                  or template.createdAt < :cursorCreatedAt
+                  or (template.createdAt = :cursorCreatedAt and (:cursorId is null or template.id < :cursorId))
+              )
+            order by template.createdAt desc, template.id desc
+            """)
+    List<PicksTemplate> findFeedCandidates(
+            @Param("creatorIds") Collection<UUID> creatorIds,
+            @Param("cursorCreatedAt") LocalDateTime cursorCreatedAt,
+            @Param("cursorId") UUID cursorId,
+            Pageable pageable);
 
     @Query("""
             select template from PicksTemplate template

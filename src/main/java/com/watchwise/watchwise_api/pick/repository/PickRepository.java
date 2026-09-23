@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.Collection;
 import java.util.List;
@@ -21,6 +22,35 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select pick from Pick pick where pick.id = :id")
     Optional<Pick> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query("""
+            select pick from Pick pick
+            join fetch pick.user
+            join fetch pick.picksTemplate
+            where pick.user.id in :followedUserIds
+              and (
+                  pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
+                  or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists (
+                      select follower.id from Follower follower
+                      where follower.follower.id = :viewerId
+                        and follower.followed.id = pick.user.id
+                        and follower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                  ))
+              )
+              and (
+                  cast(:cursorCreatedAt as timestamp) is null
+                  or pick.createdAt < :cursorCreatedAt
+                  or (pick.createdAt = :cursorCreatedAt and (:cursorId is null or pick.id < :cursorId))
+              )
+            order by pick.createdAt desc, pick.id desc
+            """)
+    List<Pick> findFeedCandidates(
+            @Param("followedUserIds") Collection<UUID> followedUserIds,
+            @Param("viewerId") UUID viewerId,
+            @Param("cursorCreatedAt") LocalDateTime cursorCreatedAt,
+            @Param("cursorId") UUID cursorId,
+            Pageable pageable);
+
     Page<Pick> findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(UUID userId, UUID templateId, Pageable pageable);
     List<Pick> findByUserIdAndPicksTemplateIdInOrderByCreatedAtDescIdDesc(UUID userId, Collection<UUID> templateIds);
 

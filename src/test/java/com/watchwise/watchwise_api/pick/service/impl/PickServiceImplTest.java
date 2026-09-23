@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -23,8 +24,11 @@ import com.watchwise.watchwise_api.pickstemplate.entity.*;
 import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,6 +60,10 @@ class PickServiceImplTest {
     @Mock PickTargetService targetService;
     @Mock PickMapper pickMapper;
     @Mock PicksTemplateMapper templateMapper;
+    @Mock CommentRepository commentRepository;
+    @Mock LikeService likeService;
+    @Mock UserMapper userMapper;
+    @Mock PicksTemplateOptionRepository optionRepository;
 
     PickService service;
     PageRequestFactory pageRequestFactory;
@@ -64,8 +72,11 @@ class PickServiceImplTest {
     @BeforeEach
     void setUp() {
         pageRequestFactory = new PageRequestFactory();
+        PickPreviewAssembler pickPreviewAssembler = new PickPreviewAssembler(selectionRepository, categoryRepository,
+                optionRepository, commentRepository, likeService, pickMapper, targetService, userMapper);
         service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
-                userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory);
+                userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
+                pickPreviewAssembler);
         savedSelections = new ArrayList<>();
     }
 

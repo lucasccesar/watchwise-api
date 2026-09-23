@@ -23,6 +23,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,6 +51,29 @@ class PickRepositoryTest {
         assertThat(repository.findVisibleByOwner(owner.getId(), owner.getId(), template.getId(), PageRequest.of(0, 10)).getTotalElements()).isEqualTo(3);
         assertThat(repository.findVisibleByOwner(follower.getId(), owner.getId(), template.getId(), PageRequest.of(0, 10)).getContent()).extracting(Pick::getId).containsExactlyInAnyOrder(publicPick.getId(), followersPick.getId());
         assertThat(repository.findVisibleByOwner(stranger.getId(), owner.getId(), template.getId(), PageRequest.of(0, 10)).getContent()).extracting(Pick::getId).containsExactly(publicPick.getId());
+    }
+
+    @Test
+    void findsFeedCandidatesByFollowerVisibilityAndCursor() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 23, 12, 0);
+        User owner = user("feed-owner", now);
+        User viewer = user("feed-viewer", now);
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder()
+                .creator(owner).origin(PickOrigin.COMMUNITY).name("Feed template")
+                .createdAt(now).updatedAt(now).build());
+
+        Pick newerPublic = save(owner, template, PickVisibility.PUBLIC, now.plusMinutes(3));
+        Pick followersPick = save(owner, template, PickVisibility.FOLLOWERS, now.plusMinutes(2));
+        Pick olderPublic = save(owner, template, PickVisibility.PUBLIC, now.plusMinutes(1));
+        save(owner, template, PickVisibility.PRIVATE, now.plusMinutes(4));
+        followerRepository.saveAndFlush(Follower.builder().follower(viewer).followed(owner)
+                .status(FollowStatus.ACCEPTED).createdAt(now).build());
+
+        List<Pick> candidates = repository.findFeedCandidates(
+                List.of(owner.getId()), viewer.getId(), now.plusMinutes(4), null, PageRequest.of(0, 10));
+
+        assertThat(candidates).extracting(Pick::getId)
+                .containsExactly(newerPublic.getId(), followersPick.getId(), olderPublic.getId());
     }
     private User user(String value, LocalDateTime now) { return userRepository.save(User.builder().username(value).email(value + "@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build()); }
     private Pick save(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime now) {

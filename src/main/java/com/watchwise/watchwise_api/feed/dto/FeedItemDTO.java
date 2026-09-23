@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.feed.dto;
 
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 
 import java.time.LocalDateTime;
@@ -19,6 +21,8 @@ public record FeedItemDTO(
         Integer likesCount,
         Boolean likedByMe,
         List<UserPreviewDTO> watchedWith,
+        PickPreviewDTO pick,
+        PicksTemplatePreviewDTO picksTemplate,
         LocalDateTime createdAt
 ) {
 }
