@@ -67,6 +67,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
             if (!(lookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> found)) {
                 return current == null ? unavailable() : current;
             }
+            validateTvDetailsId(seriesTmdbId, found.value());
             return refreshLoaded(seriesTmdbId, found.value(), today, current);
         });
     }
@@ -75,9 +76,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     public Snapshot refresh(String seriesTmdbId, TmdbTvFullDetails tvDetails, LocalDate today) {
         requireArguments(seriesTmdbId, today);
         Objects.requireNonNull(tvDetails, "tvDetails must not be null");
-        if (!seriesTmdbId.equals(tvDetails.id())) {
-            throw new IllegalArgumentException("tvDetails.id() does not match seriesTmdbId");
-        }
+        validateTvDetailsId(seriesTmdbId, tvDetails);
         return singleFlight(seriesTmdbId,
                 () -> refreshLoaded(seriesTmdbId, tvDetails, today, readSnapshot(seriesTmdbId)));
     }
@@ -214,7 +213,14 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     private boolean isFresh(Snapshot snapshot, LocalDate today) {
         return snapshot != null
                 && snapshot.series().refreshedAt() != null
-                && snapshot.series().refreshedAt().toLocalDate().equals(today);
+                && snapshot.series().refreshedAt().toLocalDate().equals(today)
+                && snapshot.series().runtimeVerifiedAt() != null;
+    }
+
+    private void validateTvDetailsId(String seriesTmdbId, TmdbTvFullDetails tvDetails) {
+        if (tvDetails == null || !seriesTmdbId.equals(tvDetails.id())) {
+            throw new IllegalArgumentException("tvDetails.id() does not match seriesTmdbId");
+        }
     }
 
     private Snapshot singleFlight(String seriesTmdbId, Supplier<Snapshot> action) {

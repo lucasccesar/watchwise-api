@@ -29,8 +29,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -129,6 +132,19 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     }
 
     @Test
+    @DisplayName("[refreshIfMissingOrExpired] Rejects TV Details For A Different Series")
+    void shouldRejectMismatchedTvDetailsFromLookup() {
+        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(tv("different", summary(1))));
+
+        assertThatThrownBy(() -> service.refreshIfMissingOrExpired(SERIES_ID, TODAY))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not match");
+        verifyNoSeasonFetches();
+        verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+    }
+
+    @Test
     @DisplayName("[refresh] Fetches Regular Seasons Concurrently Through The Bounded Executor")
     void shouldFetchRegularSeasonsConcurrentlyThroughBoundedExecutor() throws Exception {
         CountDownLatch seasonsStarted = new CountDownLatch(2);
@@ -215,6 +231,38 @@ class SeriesProgressMetadataRefreshServiceImplTest {
                 .containsExactly(1);
         verify(tmdbClient, never()).getTvFullDetails(anyString(), anyString());
         verifyNoSeasonFetches();
+    }
+
+    @Test
+    @DisplayName("[refreshIfMissingOrExpired] Revalidates A Same-Day Runtime-Incomplete Snapshot")
+    void shouldRevalidateSameDayRuntimeIncompleteSnapshot() {
+        SeriesProgressMetadata incomplete = storedMetadata(TODAY.atTime(8, 0)).toBuilder()
+                .totalKnownRuntime(null)
+                .knownRuntimeEpisodeCount(1)
+                .runtimeVerifiedAt(null)
+                .build();
+        when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.of(incomplete));
+        when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(seasonProjection(1, incomplete.getRefreshedAt())));
+        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(tv(summary(1))));
+        when(tmdbClient.getSeasonFullDetails(SERIES_ID, 1, "en-US"))
+                .thenReturn(found(season(1,
+                        episode(1, "2026-09-01", null),
+                        episode(2, "2026-09-02", 40))));
+
+        SeriesProgressMetadataRefreshService.Snapshot result =
+                service.refreshIfMissingOrExpired(SERIES_ID, TODAY);
+
+        assertThat(result.series().regularReleasedEpisodeCount()).isEqualTo(2);
+        assertThat(result.series().knownRuntimeEpisodeCount()).isEqualTo(1);
+        assertThat(result.series().totalKnownRuntime()).isNull();
+        verify(tmdbClient).getTvFullDetails(SERIES_ID, "en-US");
+        verify(metadataRepository).save(argThat(metadata ->
+                metadata.getRegularReleasedEpisodeCount() == 2
+                        && metadata.getKnownRuntimeEpisodeCount() == 1
+                        && metadata.getTotalKnownRuntime() == null
+                        && metadata.getRuntimeVerifiedAt() == null));
     }
 
     @Test
@@ -334,6 +382,57 @@ class SeriesProgressMetadataRefreshServiceImplTest {
         assertThatThrownBy(() -> service.refreshIfMissingOrExpired(SERIES_ID, TODAY))
                 .isInstanceOf(TmdbUnavailableException.class);
         verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+    }
+
+    @Test
+    @DisplayName("[refreshIfMissingOrExpired] Shares A Cold TMDB Failure Between Concurrent Callers")
+    void shouldShareColdTmdbFailureConcurrently() throws Exception {
+        CountDownLatch tvLookupStarted = new CountDownLatch(1);
+        CountDownLatch releaseTvLookup = new CountDownLatch(1);
+        TmdbUnavailableException unavailable = new TmdbUnavailableException("TMDB is currently unavailable");
+        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
+                .thenAnswer(invocation -> {
+                    tvLookupStarted.countDown();
+                    releaseTvLookup.await(5, TimeUnit.SECONDS);
+                    throw unavailable;
+                });
+
+        ExecutorService callers = Executors.newFixedThreadPool(2);
+        CyclicBarrier start = new CyclicBarrier(2);
+        try {
+            Future<SeriesProgressMetadataRefreshService.Snapshot> first =
+                    callers.submit(() -> {
+                        start.await();
+                        return service.refreshIfMissingOrExpired(SERIES_ID, TODAY);
+                    });
+            Future<SeriesProgressMetadataRefreshService.Snapshot> second =
+                    callers.submit(() -> {
+                        start.await();
+                        return service.refreshIfMissingOrExpired(SERIES_ID, TODAY);
+                    });
+            assertThat(tvLookupStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            releaseTvLookup.countDown();
+
+            Throwable firstFailure = failureOf(first);
+            Throwable secondFailure = failureOf(second);
+            assertThat(firstFailure).isSameAs(unavailable);
+            assertThat(secondFailure).isSameAs(unavailable);
+        } finally {
+            releaseTvLookup.countDown();
+            callers.shutdownNow();
+        }
+
+        verify(tmdbClient, times(1)).getTvFullDetails(SERIES_ID, "en-US");
+        verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+    }
+
+    private static Throwable failureOf(Future<?> future) throws Exception {
+        try {
+            future.get(5, TimeUnit.SECONDS);
+            throw new AssertionError("Expected the future to fail");
+        } catch (ExecutionException exception) {
+            return exception.getCause();
+        }
     }
 
     private void verifyNoSeasonFetches() {
