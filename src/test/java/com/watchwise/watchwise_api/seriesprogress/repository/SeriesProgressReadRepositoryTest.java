@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -108,7 +109,7 @@ class SeriesProgressReadRepositoryTest {
         var row = page.getContent().getFirst();
         assertThat(row.getSeriesTmdbId()).isEqualTo("1399");
         assertThat(row.getWatchedEpisodeCount()).isEqualTo(3L);
-        assertThat(row.getWatchedRuntimeMinutes()).isEqualTo(90L);
+        assertThat(row.getWatchedRuntimeMinutes()).isNull();
         assertThat(row.getMaxSeasonNumber()).isEqualTo(2);
         assertThat(row.getMaxEpisodeNumber()).isEqualTo(1);
         assertThat(row.getLastWatchedDate()).isEqualTo(LocalDate.of(2024, 3, 1));
@@ -118,7 +119,7 @@ class SeriesProgressReadRepositoryTest {
         assertThat(row.getTotalKnownRuntime()).isEqualTo(400);
         assertThat(row.getLastReleasedEpisodeDate()).isEqualTo(LocalDate.of(2025, 1, 1));
         assertThat(row.getRemainingEpisodeCount()).isEqualTo(5L);
-        assertThat(row.getRemainingRuntimeMinutes()).isEqualTo(310L);
+        assertThat(row.getRemainingRuntimeMinutes()).isNull();
     }
 
     @Test
@@ -171,7 +172,8 @@ class SeriesProgressReadRepositoryTest {
         entityManager.clear();
 
         var page = seriesProgressReadRepository.findCandidatesByUserId(
-                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.REMAINING_EPISODES, PageRequest.of(0, 10));
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.REMAINING_EPISODES,
+                Sort.Direction.ASC, PageRequest.of(0, 10));
 
         assertThat(page.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
                 .containsExactly("1400", "1399", "1396");
@@ -219,13 +221,14 @@ class SeriesProgressReadRepositoryTest {
     @DisplayName("[findCandidatesByUserId] Should Execute One Data Query And One Count Query")
     void shouldExecuteOneDataQueryAndOneCountQuery() {
         saveProgressSeries("1399", 1, 2, 100, LocalDate.of(2024, 1, 1));
+        saveProgressSeries("1396", 1, 3, 100, LocalDate.of(2024, 2, 1));
         entityManager.flush();
         entityManager.clear();
         Statistics statistics = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
         statistics.clear();
 
         seriesProgressReadRepository.findCandidatesByUserId(
-                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 10));
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 1));
 
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(2);
         assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);

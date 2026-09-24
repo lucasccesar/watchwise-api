@@ -126,10 +126,15 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                            metadata.regular_released_episode_count::bigint - sa.watched_episode_count,
                            0::bigint
                        ) AS remaining_episode_count,
-                       GREATEST(
-                           metadata.total_known_runtime::bigint - sa.watched_runtime_minutes,
-                           0::bigint
-                       ) AS remaining_runtime_minutes
+                       CASE
+                           WHEN metadata.total_known_runtime IS NULL
+                                OR sa.watched_runtime_complete = FALSE
+                           THEN NULL
+                           ELSE GREATEST(
+                               metadata.total_known_runtime::bigint - sa.watched_runtime_minutes,
+                               0::bigint
+                           )
+                       END AS remaining_runtime_minutes
                 FROM series_aggregates sa
                 JOIN max_progress mp ON mp.series_tmdb_id = sa.series_tmdb_id
                 JOIN max_progress_episode mpe ON mpe.series_tmdb_id = sa.series_tmdb_id
