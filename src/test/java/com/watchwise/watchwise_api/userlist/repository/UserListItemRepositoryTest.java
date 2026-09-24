@@ -113,11 +113,14 @@ class UserListItemRepositoryTest {
         User otherUser = userRepository.save(buildUser("marina", "marina@email.com"));
         UserList child = userListRepository.save(buildList(otherUser, "Nested child"));
         UserList unrelatedList = userListRepository.save(buildList(lucas, "Unrelated list"));
+        UserList anotherViewerList = userListRepository.save(buildList(lucas, "Another viewer list"));
         UserList otherUsersList = userListRepository.save(buildList(otherUser, "Other user's list"));
         userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
         userListItemRepository.save(buildContentItem(scifi, series, 2));
         userListItemRepository.save(buildChildListItem(scifi, child, 3));
         userListItemRepository.save(buildContentItem(child, pulpFiction, 1));
+        userListItemRepository.save(buildContentItem(anotherViewerList, fightClub, 1));
+        userListItemRepository.save(buildContentItem(anotherViewerList, series, 2));
         userListItemRepository.saveAndFlush(buildContentItem(unrelatedList, unrelated, 1));
         userListItemRepository.saveAndFlush(buildContentItem(otherUsersList, pulpFiction, 1));
         entityManager.clear();
