@@ -62,13 +62,29 @@ class SeriesProgressMetadataRepositoryTest {
                 buildSeasonMetadata("1396", 2)));
         entityManager.clear();
 
-        SeriesProgressMetadata series = metadataRepository.findById("1396").orElseThrow();
-        List<SeriesProgressSeasonMetadata> seasons = seasonMetadataRepository
+        SeriesProgressMetadataRepository.SeriesProgressMetadataProjection series = metadataRepository
+                .findAllBySeriesTmdbIdIn(List.of("1396"))
+                .get(0);
+        List<SeriesProgressSeasonMetadataRepository.SeriesProgressSeasonMetadataProjection> seasons = seasonMetadataRepository
                 .findAllBySeriesTmdbIdIn(List.of("1396"));
 
         assertThat(series.getSeriesTmdbId()).isEqualTo("1396");
-        assertThat(seasons).extracting(SeriesProgressSeasonMetadata::getSeasonNumber)
+        assertThat(series.getRegularReleasedEpisodeCount()).isEqualTo(20);
+        assertThat(series.getTotalKnownRuntime()).isEqualTo(1_000);
+        assertThat(series.getKnownRuntimeEpisodeCount()).isEqualTo(18);
+        assertThat(series.getLastReleasedEpisodeDate()).isEqualTo(LocalDate.of(2026, 9, 20));
+        assertThat(series.getRefreshedAt()).isEqualTo(LocalDateTime.of(2026, 9, 23, 10, 0));
+        assertThat(series.getRuntimeVerifiedAt()).isEqualTo(LocalDateTime.of(2026, 9, 23, 10, 1));
+        assertThat(seasons).extracting(SeriesProgressSeasonMetadataRepository.SeriesProgressSeasonMetadataProjection::getSeasonNumber)
                 .containsExactlyInAnyOrder(1, 2);
+        assertThat(seasons).allSatisfy(season -> {
+            assertThat(season.getSeriesTmdbId()).isEqualTo("1396");
+            assertThat(season.getRegularReleasedEpisodeCount()).isEqualTo(10);
+            assertThat(season.getTotalKnownRuntime()).isEqualTo(500);
+            assertThat(season.getKnownRuntimeEpisodeCount()).isEqualTo(9);
+            assertThat(season.getLastReleasedEpisodeDate()).isEqualTo(LocalDate.of(2026, 9, 20));
+            assertThat(season.getRefreshedAt()).isEqualTo(LocalDateTime.of(2026, 9, 23, 10, 0));
+        });
         assertThat(seasonMetadataRepository.findBySeriesTmdbIdAndSeasonNumber("1396", 2))
                 .isPresent();
     }
