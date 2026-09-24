@@ -12,6 +12,8 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -44,6 +47,7 @@ class SeriesProgressReadRepositoryTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
     }
 
     @Autowired
@@ -68,6 +72,7 @@ class SeriesProgressReadRepositoryTest {
     private EntityManager entityManager;
 
     private User lucas;
+    private User marina;
 
     @BeforeEach
     void setUp() {
@@ -77,6 +82,7 @@ class SeriesProgressReadRepositoryTest {
         contentRepository.deleteAll();
         userRepository.deleteAll();
         lucas = userRepository.save(buildUser("lucas", "lucas-series-progress@email.com"));
+        marina = userRepository.save(buildUser("marina", "marina-series-progress@email.com"));
     }
 
     @Test
@@ -116,7 +122,7 @@ class SeriesProgressReadRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findCandidatesByUserId] Should Tie Break By Series Id And Put Missing Runtime Last")
+    @DisplayName("[findCandidatesByUserId] Should Tie Break By Series Id And Put Missing Runtime Last For Runtime Sort")
     void shouldTieBreakBySeriesIdAndPutMissingRuntimeLast() {
         Content firstSeriesEpisode = saveEpisode("1399", 1, 1, null);
         Content secondSeriesEpisode = saveEpisode("1396", 1, 1, 10);
@@ -139,6 +145,98 @@ class SeriesProgressReadRepositoryTest {
                 lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.REMAINING_RUNTIME, PageRequest.of(0, 10));
         assertThat(runtimePage.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
                 .containsExactly("1396", "1399", "1400");
+    }
+
+    @Test
+    @DisplayName("[findCandidatesByUserId] Should Sort By Last Released Date Descending")
+    void shouldSortByLastReleasedDateDescending() {
+        saveProgressSeries("1399", 1, 3, 100, LocalDate.of(2024, 1, 1));
+        saveProgressSeries("1396", 1, 4, 100, LocalDate.of(2024, 3, 1));
+        saveProgressSeries("1400", 1, 2, 100, LocalDate.of(2024, 2, 1));
+        entityManager.clear();
+
+        var page = seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_RELEASED, PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .containsExactly("1396", "1400", "1399");
+    }
+
+    @Test
+    @DisplayName("[findCandidatesByUserId] Should Sort By Remaining Episodes Ascending")
+    void shouldSortByRemainingEpisodesAscending() {
+        saveProgressSeries("1399", 1, 3, 100, LocalDate.of(2024, 1, 1));
+        saveProgressSeries("1396", 1, 4, 100, LocalDate.of(2024, 2, 1));
+        saveProgressSeries("1400", 1, 2, 100, LocalDate.of(2024, 3, 1));
+        entityManager.clear();
+
+        var page = seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.REMAINING_EPISODES, PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .containsExactly("1400", "1399", "1396");
+    }
+
+    @Test
+    @DisplayName("[findCandidatesByUserId] Should Isolate Candidates By User")
+    void shouldIsolateCandidatesByUser() {
+        Content lucasEpisode = saveEpisode("1399", 1, 1, 40);
+        Content marinaEpisode = saveEpisode("1400", 1, 1, 40);
+        saveEntry(lucas, lucasEpisode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
+        saveEntry(marina, marinaEpisode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
+        saveMetadata("1399", 2, 100, LocalDate.of(2024, 2, 1));
+        saveMetadata("1400", 2, 100, LocalDate.of(2024, 2, 1));
+        entityManager.clear();
+
+        var lucasPage = seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 10));
+        var marinaPage = seriesProgressReadRepository.findCandidatesByUserId(
+                marina.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 10));
+
+        assertThat(lucasPage.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .containsExactly("1399");
+        assertThat(marinaPage.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .containsExactly("1400");
+    }
+
+    @Test
+    @DisplayName("[findCandidatesByUserId] Should Preserve Null Total Known Runtime")
+    void shouldPreserveNullTotalKnownRuntime() {
+        Content episode = saveEpisode("1399", 1, 1, 40);
+        saveEntry(lucas, episode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
+        saveMetadata("1399", 2, null, LocalDate.of(2024, 2, 1));
+        entityManager.clear();
+
+        var row = seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.REMAINING_RUNTIME, PageRequest.of(0, 10))
+                .getContent().getFirst();
+
+        assertThat(row.getTotalKnownRuntime()).isNull();
+        assertThat(row.getRemainingRuntimeMinutes()).isNull();
+    }
+
+    @Test
+    @DisplayName("[findCandidatesByUserId] Should Execute One Data Query And One Count Query")
+    void shouldExecuteOneDataQueryAndOneCountQuery() {
+        saveProgressSeries("1399", 1, 2, 100, LocalDate.of(2024, 1, 1));
+        entityManager.flush();
+        entityManager.clear();
+        Statistics statistics = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 10));
+
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(2);
+        assertThat(statistics.getQueryExecutionCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[findCandidatesByUserId] Should Reject A Null Sort")
+    void shouldRejectNullSort() {
+        assertThatThrownBy(() -> seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), null, PageRequest.of(0, 10)))
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test
@@ -200,14 +298,25 @@ class SeriesProgressReadRepositoryTest {
     }
 
     private void saveEntry(Content content, int watchNumber, LocalDate watchedDate, LocalDateTime createdAt) {
+        saveEntry(lucas, content, watchNumber, watchedDate, createdAt);
+    }
+
+    private void saveEntry(User user, Content content, int watchNumber, LocalDate watchedDate, LocalDateTime createdAt) {
         diaryEntryRepository.saveAndFlush(DiaryEntry.builder()
-                .user(lucas)
+                .user(user)
                 .content(content)
                 .watchNumber(watchNumber)
                 .watchedDate(watchedDate)
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
                 .build());
+    }
+
+    private void saveProgressSeries(String seriesTmdbId, int watchedEpisode, int releasedEpisodes,
+            Integer totalRuntime, LocalDate lastRelease) {
+        Content episode = saveEpisode(seriesTmdbId, 1, watchedEpisode, 40);
+        saveEntry(episode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
+        saveMetadata(seriesTmdbId, releasedEpisodes, totalRuntime, lastRelease);
     }
 
     private void saveMetadata(String seriesTmdbId, int releasedEpisodes, Integer totalRuntime, LocalDate lastRelease) {
