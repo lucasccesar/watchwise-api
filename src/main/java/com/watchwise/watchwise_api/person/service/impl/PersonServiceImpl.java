@@ -36,6 +36,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.function.Function;
 
 @Service
@@ -73,10 +76,7 @@ public class PersonServiceImpl implements PersonService {
                 .map(credit -> toDto(credit, watched.contains(credit.key()), inList.contains(credit.key())))
                 .toList();
         PageRequest request = pageRequest(pageNumber, pageSize);
-        int fromIndex = Math.min((int) request.getOffset(), filtered.size());
-        int toIndex = Math.min(fromIndex + request.getPageSize(), filtered.size());
-        PageResponseDTO<PersonCreditDTO> page = PageResponseDTO.of(new PageImpl<>(filtered.subList(fromIndex, toIndex), request,
-                filtered.size()));
+        PageResponseDTO<PersonCreditDTO> page = page(filtered, request);
         PersonDetailsDTO person = new PersonDetailsDTO(aggregate.id(), aggregate.name(), aggregate.biography(), aggregate.birthday(),
                 aggregate.deathday(), aggregate.placeOfBirth(), aggregate.gender(), TmdbImageUrlBuilder.profileUrl(aggregate.profilePath()),
                 aggregate.knownForDepartment(), safeList(aggregate.alsoKnownAs()), followedPersonService.isFollowing(viewerId, personTmdbId));
@@ -107,7 +107,7 @@ public class PersonServiceImpl implements PersonService {
                 continue;
             }
             CreditKey key = new CreditKey(type, credit.id());
-            MutableCredit target = merged.computeIfAbsent(key, ignored -> new MutableCredit(key, credit));
+            MutableCredit target = merged.computeIfAbsent(key, ignored -> new MutableCredit(key));
             target.add(credit, cast);
         }
     }
@@ -125,7 +125,18 @@ public class PersonServiceImpl implements PersonService {
 
     private PersonCreditDTO toDto(NormalizedCredit credit, boolean watched, boolean inList) {
         return new PersonCreditDTO(credit.key().tmdbId(), credit.key().type(), credit.title(), TmdbImageUrlBuilder.posterUrl(credit.posterPath()),
-                credit.releaseDate(), credit.characters(), credit.jobs(), credit.participation(), watched, inList);
+                credit.releaseDate() == null ? null : credit.releaseDate().toString(), credit.characters(), credit.jobs(),
+                credit.participation(), watched, inList);
+    }
+
+    private PageResponseDTO<PersonCreditDTO> page(List<PersonCreditDTO> content, PageRequest request) {
+        long offset = request.getOffset();
+        if (offset >= content.size()) {
+            return PageResponseDTO.of(new PageImpl<>(List.of(), request, content.size()));
+        }
+        int fromIndex = (int) offset;
+        int toIndex = (int) Math.min((long) content.size(), offset + request.getPageSize());
+        return PageResponseDTO.of(new PageImpl<>(content.subList(fromIndex, toIndex), request, content.size()));
     }
 
     private double percentage(List<NormalizedCredit> credits, Set<CreditKey> watched) {
@@ -149,12 +160,19 @@ public class PersonServiceImpl implements PersonService {
     }
 
     private CreditKey localKey(ContentType type, String tmdbId, String seriesTmdbId) {
+        if (type == null) {
+            return null;
+        }
         return switch (type) {
-            case MOVIE -> new CreditKey(MovieOrSeriesType.MOVIE, tmdbId);
-            case SERIES, SEASON, EPISODE -> new CreditKey(MovieOrSeriesType.SERIES,
-                    type == ContentType.SERIES ? tmdbId : seriesTmdbId);
+            case MOVIE -> validKey(MovieOrSeriesType.MOVIE, tmdbId);
+            case SERIES -> validKey(MovieOrSeriesType.SERIES, tmdbId);
+            case SEASON, EPISODE -> validKey(MovieOrSeriesType.SERIES, seriesTmdbId);
             default -> null;
         };
+    }
+
+    private CreditKey validKey(MovieOrSeriesType type, String tmdbId) {
+        return tmdbId == null || tmdbId.isBlank() ? null : new CreditKey(type, tmdbId);
     }
 
     private PageRequest pageRequest(Integer pageNumber, Integer pageSize) {
@@ -180,34 +198,59 @@ public class PersonServiceImpl implements PersonService {
     private record CreditKey(MovieOrSeriesType type, String tmdbId) {
     }
 
-    private record NormalizedCredit(CreditKey key, String title, String posterPath, String releaseDate, List<String> characters,
+    private record NormalizedCredit(CreditKey key, String title, String posterPath, LocalDate releaseDate, List<String> characters,
                                     List<String> jobs, PersonParticipation participation) {
     }
 
     private static final class MutableCredit {
         private final CreditKey key;
-        private final String title;
-        private final String posterPath;
-        private final String releaseDate;
+        private String title;
+        private String posterPath;
+        private LocalDate releaseDate;
         private final Set<String> characters = new LinkedHashSet<>();
         private final Set<String> jobs = new LinkedHashSet<>();
+        private boolean hasCast;
+        private boolean hasCrew;
 
-        private MutableCredit(CreditKey key, TmdbPersonAggregateCredit credit) {
+        private MutableCredit(CreditKey key) {
             this.key = key;
-            this.title = key.type() == MovieOrSeriesType.MOVIE ? credit.title() : credit.name();
-            this.posterPath = credit.posterPath();
-            this.releaseDate = key.type() == MovieOrSeriesType.MOVIE ? credit.releaseDate() : credit.firstAirDate();
         }
 
         private void add(TmdbPersonAggregateCredit credit, boolean cast) {
-            if (cast && credit.character() != null && !credit.character().isBlank()) characters.add(credit.character());
-            if (!cast && credit.job() != null && !credit.job().isBlank()) jobs.add(credit.job());
+            if (cast) {
+                hasCast = true;
+                if (credit.character() != null && !credit.character().isBlank()) characters.add(credit.character());
+            } else {
+                hasCrew = true;
+                if (credit.job() != null && !credit.job().isBlank()) jobs.add(credit.job());
+            }
+            String candidateTitle = key.type() == MovieOrSeriesType.MOVIE ? credit.title() : credit.name();
+            if (isBlank(title) && !isBlank(candidateTitle)) title = candidateTitle;
+            if (isBlank(posterPath) && !isBlank(credit.posterPath())) posterPath = credit.posterPath();
+            LocalDate candidateDate = parseDate(key.type() == MovieOrSeriesType.MOVIE
+                    ? credit.releaseDate() : credit.firstAirDate());
+            if (releaseDate == null && candidateDate != null) releaseDate = candidateDate;
         }
 
         private NormalizedCredit toNormalized() {
-            PersonParticipation participation = !characters.isEmpty() && !jobs.isEmpty() ? PersonParticipation.ALL
-                    : !characters.isEmpty() ? PersonParticipation.CAST : PersonParticipation.CREW;
+            PersonParticipation participation = hasCast && hasCrew ? PersonParticipation.ALL
+                    : hasCast ? PersonParticipation.CAST : PersonParticipation.CREW;
             return new NormalizedCredit(key, title, posterPath, releaseDate, List.copyOf(characters), List.copyOf(jobs), participation);
+        }
+
+        private static boolean isBlank(String value) {
+            return value == null || value.isBlank();
+        }
+    }
+
+    private static LocalDate parseDate(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value.trim(), DateTimeFormatter.ISO_LOCAL_DATE);
+        } catch (DateTimeParseException ignored) {
+            return null;
         }
     }
 }

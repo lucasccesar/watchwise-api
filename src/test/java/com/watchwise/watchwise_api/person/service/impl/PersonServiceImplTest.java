@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.followedperson.service.FollowedPersonService;
 import com.watchwise.watchwise_api.person.dto.PersonResponseDTO;
+import com.watchwise.watchwise_api.person.dto.PersonCreditDTO;
 import com.watchwise.watchwise_api.person.entity.PersonParticipation;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -25,11 +26,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -117,6 +123,109 @@ class PersonServiceImplTest {
                 .containsExactly(1, 1, 1L, 1, false);
         assertThat(result.credits().content()).singleElement().extracting("tmdbId", "participation", "jobs")
                 .containsExactly("1", PersonParticipation.ALL, List.of("Director"));
+    }
+
+    @Test
+    void shouldKeepCastParticipationWhenCharacterIsMissing() {
+        stubAggregate(List.of(
+                credit("1", "movie", "No character", null, null, "2020-01-01", null, null)), List.of());
+
+        PersonResponseDTO castResult = service.getPerson(viewerId, "287", PersonParticipation.CAST, 1, 20);
+        PersonResponseDTO crewResult = service.getPerson(viewerId, "287", PersonParticipation.CREW, 1, 20);
+
+        assertThat(castResult.credits().content()).singleElement()
+                .extracting(PersonCreditDTO::participation, PersonCreditDTO::characters, PersonCreditDTO::jobs)
+                .containsExactly(PersonParticipation.CAST, List.of(), List.of());
+        assertThat(crewResult.credits().content()).isEmpty();
+    }
+
+    @Test
+    void shouldUseParsedDatesAndPlaceInvalidDatesLast() {
+        stubAggregate(List.of(
+                credit("1", "movie", "Current", null, null, "2024-01-01", null, null),
+                credit("2", "movie", "Old", null, null, "1999-01-01", null, null),
+                credit("3", "movie", "Malformed", null, null, "2024-13-40", null, null),
+                credit("4", "movie", "Partial", null, null, "2024-01", null, null),
+                credit("5", "movie", "Blank", null, null, "   ", null, null),
+                credit("6", "movie", "Missing", null, null, null, null, null)), List.of());
+
+        PersonResponseDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20);
+
+        assertThat(result.credits().content()).extracting(PersonCreditDTO::tmdbId, PersonCreditDTO::releaseDate)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("1", "2024-01-01"),
+                        org.assertj.core.groups.Tuple.tuple("2", "1999-01-01"),
+                        org.assertj.core.groups.Tuple.tuple("3", null),
+                        org.assertj.core.groups.Tuple.tuple("4", null),
+                        org.assertj.core.groups.Tuple.tuple("5", null),
+                        org.assertj.core.groups.Tuple.tuple("6", null));
+    }
+
+    @Test
+    void shouldUseLaterDuplicateMetadataWhenFirstCreditOmitsIt() {
+        stubAggregate(List.of(
+                credit("1", "movie", null, null, null, null, null, null)), List.of(
+                credit("1", "movie", "Recovered title", null, "/recovered.jpg", "2001-02-03", null, "Director")));
+
+        PersonCreditDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20)
+                .credits().content().getFirst();
+
+        assertThat(result).extracting(PersonCreditDTO::title, PersonCreditDTO::posterUrl,
+                        PersonCreditDTO::releaseDate, PersonCreditDTO::participation)
+                .containsExactly("Recovered title", "https://image.tmdb.org/t/p/w500/recovered.jpg",
+                        "2001-02-03", PersonParticipation.ALL);
+    }
+
+    @Test
+    void shouldReturnEmptyPageWhenPageOffsetExceedsIntegerRange() {
+        stubAggregate(List.of(credit("1", "movie", "Movie", null, null, "2020-01-01", null, null)), List.of());
+
+        PersonResponseDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, Integer.MAX_VALUE, 1000);
+
+        assertThat(result.credits().content()).isEmpty();
+        assertThat(result.credits().page()).isEqualTo(Integer.MAX_VALUE);
+    }
+
+    @Test
+    void shouldBatchLocalStateQueriesBeyondFiveHundredCredits() {
+        List<TmdbPersonAggregateCredit> credits = IntStream.rangeClosed(1, 501)
+                .mapToObj(id -> credit(String.valueOf(id), "movie", "Movie " + id, null, null,
+                        "2020-01-01", null, null))
+                .toList();
+        stubAggregate(credits, List.of());
+
+        service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20);
+
+        verify(diaryEntryRepository, times(2)).findWatchedMediaForPersonCredits(eq(viewerId),
+                argThat(ids -> ids.size() <= 500));
+        verify(userListItemRepository, times(2)).findViewerMediaForPersonCredits(eq(viewerId),
+                argThat(ids -> ids.size() <= 500));
+    }
+
+    @Test
+    void shouldSkipLocalStateQueriesForEmptyFilmography() {
+        stubAggregate(List.of(), List.of());
+
+        PersonResponseDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20);
+
+        assertThat(result.progress()).extracting("totalCredits", "watchedCredits", "watchedPercentage")
+                .containsExactly(0, 0, 0.0d);
+        verifyNoInteractions(diaryEntryRepository, userListItemRepository);
+    }
+
+    @Test
+    void shouldMapSeasonAndEpisodeStatesToTheirParentSeries() {
+        stubAggregate(List.of(credit("2", "tv", null, "Series", null, "2020-01-01", null, null)), List.of());
+        when(diaryEntryRepository.findWatchedMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of(
+                media(DiaryEntryRepository.PersonCreditMedia.class, ContentType.SEASON, null, "2")));
+        when(userListItemRepository.findViewerMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of(
+                media(UserListItemRepository.PersonCreditMedia.class, ContentType.EPISODE, null, "2")));
+
+        PersonCreditDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20)
+                .credits().content().getFirst();
+
+        assertThat(result).extracting(PersonCreditDTO::isWatched, PersonCreditDTO::isInList)
+                .containsExactly(true, true);
     }
 
     @Test
