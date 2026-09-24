@@ -93,6 +93,40 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);
 
     @Query("""
+            SELECT DISTINCT
+                CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
+                     THEN com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
+                     ELSE com.watchwise.watchwise_api.content.entity.ContentType.SERIES END AS type,
+                CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
+                     THEN d.content.tmdbId
+                     WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                     THEN d.content.tmdbId
+                     ELSE d.content.seriesTmdbId END AS tmdbId,
+                CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
+                     THEN NULL
+                     WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                     THEN d.content.tmdbId
+                     ELSE d.content.seriesTmdbId END AS seriesTmdbId
+            FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND ((d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
+                  AND d.content.tmdbId IN :tmdbIds)
+                 OR (d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.SERIES,
+                                        com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
+                                        com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
+                     AND (CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                               THEN d.content.tmdbId ELSE d.content.seriesTmdbId END) IN :tmdbIds))
+            """)
+    List<PersonCreditMedia> findWatchedMediaForPersonCredits(
+            @Param("userId") UUID userId, @Param("tmdbIds") Collection<String> tmdbIds);
+
+    interface PersonCreditMedia {
+        ContentType getType();
+        String getTmdbId();
+        String getSeriesTmdbId();
+    }
+
+    @Query("""
             SELECT DISTINCT new com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate(
                 d.content.seriesTmdbId, d.content.seasonNumber, d.content.episodeNumber)
             FROM DiaryEntry d

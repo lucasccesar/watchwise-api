@@ -35,6 +35,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -104,6 +105,32 @@ class DiaryEntryRepositoryTest {
         Page<DiaryEntry> result = diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(lucas.getId(), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findWatchedMediaForPersonCredits] Should Return Viewer Movie And Started Series Keys - When Diary Contains Movie, Season, And Episode Entries")
+    void shouldFindWatchedMoviesAndStartedSeriesForPersonCredits() {
+        Content season = contentRepository.save(buildSeason("1399", 1));
+        Content episode = contentRepository.save(buildEpisode("1396", 1, 1));
+        Content seriesEntry = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        diaryEntryRepository.save(buildEntry(lucas, fightClub));
+        diaryEntryRepository.save(buildEntry(lucas, seriesEntry));
+        diaryEntryRepository.save(buildEntry(lucas, season));
+        diaryEntryRepository.save(buildEntry(lucas, episode));
+        diaryEntryRepository.saveAndFlush(buildEntry(marina, pulpFiction));
+        entityManager.clear();
+
+        List<DiaryEntryRepository.PersonCreditMedia> result = diaryEntryRepository
+                .findWatchedMediaForPersonCredits(lucas.getId(), List.of("550", "680", "1396", "1399", "999"));
+
+        assertThat(result)
+                .extracting(DiaryEntryRepository.PersonCreditMedia::getType,
+                        DiaryEntryRepository.PersonCreditMedia::getTmdbId,
+                        DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId)
+                .containsExactlyInAnyOrder(
+                        tuple(ContentType.MOVIE, "550", null),
+                        tuple(ContentType.SERIES, "1396", "1396"),
+                        tuple(ContentType.SERIES, "1399", "1399"));
     }
 
     @Test

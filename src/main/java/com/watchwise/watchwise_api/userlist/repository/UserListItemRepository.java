@@ -148,6 +148,22 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     Set<UUID> findUserListIdsContainingContent(
             @Param("userListIds") Collection<UUID> userListIds, @Param("contentId") UUID contentId);
 
+    @Query("""
+            SELECT DISTINCT c.type AS type, c.tmdbId AS tmdbId, c.seriesTmdbId AS seriesTmdbId
+            FROM UserListItem item
+            JOIN item.content c
+            WHERE c.type IN (com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
+                             com.watchwise.watchwise_api.content.entity.ContentType.SERIES)
+            AND (c.tmdbId IN :tmdbIds)
+            AND (item.userList.user.id = :userId OR EXISTS (
+                SELECT 1 FROM UserListItem parentItem
+                WHERE parentItem.childList.id = item.userList.id
+                AND parentItem.userList.user.id = :userId
+            ))
+            """)
+    List<PersonCreditMedia> findViewerMediaForPersonCredits(
+            @Param("userId") UUID userId, @Param("tmdbIds") Collection<String> tmdbIds);
+
     interface UserListCount {
         UUID getUserListId();
         long getCount();
@@ -161,6 +177,12 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     interface UserListContentType {
         UUID getUserListId();
         ContentType getType();
+    }
+
+    interface PersonCreditMedia {
+        ContentType getType();
+        String getTmdbId();
+        String getSeriesTmdbId();
     }
 
 }

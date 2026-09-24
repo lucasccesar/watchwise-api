@@ -106,6 +106,36 @@ class UserListItemRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findViewerMediaForPersonCredits] Should Return Viewer Movie And Series Membership Across Nested Lists")
+    void shouldFindViewerMovieAndSeriesMembershipAcrossNestedLists() {
+        Content series = contentRepository.save(buildContent("1396", ContentType.SERIES));
+        Content unrelated = contentRepository.save(buildContent("777", ContentType.MOVIE));
+        User otherUser = userRepository.save(buildUser("marina", "marina@email.com"));
+        UserList child = userListRepository.save(buildList(otherUser, "Nested child"));
+        UserList unrelatedList = userListRepository.save(buildList(lucas, "Unrelated list"));
+        UserList otherUsersList = userListRepository.save(buildList(otherUser, "Other user's list"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.save(buildContentItem(scifi, series, 2));
+        userListItemRepository.save(buildChildListItem(scifi, child, 3));
+        userListItemRepository.save(buildContentItem(child, pulpFiction, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(unrelatedList, unrelated, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(otherUsersList, pulpFiction, 1));
+        entityManager.clear();
+
+        List<UserListItemRepository.PersonCreditMedia> result = userListItemRepository
+                .findViewerMediaForPersonCredits(lucas.getId(), List.of("550", "680", "1396", "999"));
+
+        assertThat(result)
+                .extracting(UserListItemRepository.PersonCreditMedia::getType,
+                        UserListItemRepository.PersonCreditMedia::getTmdbId,
+                        UserListItemRepository.PersonCreditMedia::getSeriesTmdbId)
+                .containsExactlyInAnyOrder(
+                        tuple(ContentType.MOVIE, "550", null),
+                        tuple(ContentType.MOVIE, "680", null),
+                        tuple(ContentType.SERIES, "1396", null));
+    }
+
+    @Test
     @DisplayName("[findByUserListIdOrderByPositionAsc] Should Not Include Items Of A Different List - When Filtering")
     void shouldNotIncludeItemsOfADifferentListWhenFiltering() {
         UserList horror = userListRepository.save(buildList(lucas, "Underrated horror"));
