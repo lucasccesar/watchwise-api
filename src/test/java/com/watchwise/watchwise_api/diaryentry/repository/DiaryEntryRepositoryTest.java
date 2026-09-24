@@ -442,8 +442,8 @@ class DiaryEntryRepositoryTest {
         assertThat(result).extracting("seriesTmdbId", "seasonNumber", "watchedRuntimeMinutes")
                 .containsExactlyInAnyOrder(
                         org.assertj.core.groups.Tuple.tuple("1399", 1, 55L),
-                        org.assertj.core.groups.Tuple.tuple("1399", 2, 0L),
-                        org.assertj.core.groups.Tuple.tuple("1396", 1, 0L));
+                        org.assertj.core.groups.Tuple.tuple("1399", 2, null),
+                        org.assertj.core.groups.Tuple.tuple("1396", 1, null));
     }
 
     @Test
