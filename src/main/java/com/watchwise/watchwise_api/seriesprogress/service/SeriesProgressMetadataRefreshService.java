@@ -4,11 +4,15 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 public interface SeriesProgressMetadataRefreshService {
 
     Snapshot refreshIfMissingOrExpired(String seriesTmdbId, LocalDate today);
+
+    Map<String, Snapshot> getSnapshotsForRead(Collection<String> seriesTmdbIds, LocalDate today);
 
     Snapshot refresh(String seriesTmdbId, TmdbTvFullDetails tvDetails, LocalDate today);
 

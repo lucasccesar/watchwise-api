@@ -76,7 +76,10 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
             series_aggregates AS (
                 SELECT dec.series_tmdb_id,
                        COUNT(*) AS watched_episode_count,
-                       COALESCE(SUM(dec.runtime_minutes), 0) AS watched_runtime_minutes
+                       CASE WHEN COUNT(dec.runtime_minutes) = COUNT(*)
+                            THEN COALESCE(SUM(dec.runtime_minutes), 0)
+                            ELSE NULL END AS watched_runtime_minutes,
+                       COUNT(dec.runtime_minutes) = COUNT(*) AS watched_runtime_complete
                 FROM distinct_episode_coordinates dec
                 GROUP BY dec.series_tmdb_id
             ),
@@ -110,6 +113,7 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                 SELECT sa.series_tmdb_id,
                        sa.watched_episode_count,
                        sa.watched_runtime_minutes,
+                       sa.watched_runtime_complete,
                        mp.max_season_number,
                        mpe.max_episode_number,
                        lw.effective_date AS last_watched_date,
@@ -137,6 +141,7 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
             SELECT series_tmdb_id AS seriesTmdbId,
                    watched_episode_count AS watchedEpisodeCount,
                    watched_runtime_minutes AS watchedRuntimeMinutes,
+                   watched_runtime_complete AS watchedRuntimeComplete,
                    max_season_number AS maxSeasonNumber,
                    max_episode_number AS maxEpisodeNumber,
                    last_watched_date AS lastWatchedDate,
@@ -240,7 +245,10 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                 JOIN candidate_series cs ON cs.series_tmdb_id = ee.series_tmdb_id
             )
             SELECT COALESCE(COUNT(*), 0) AS watchedEpisodeCount,
-                   COALESCE(SUM(dec.runtime_minutes), 0) AS watchedRuntimeMinutes
+                   CASE WHEN COUNT(dec.runtime_minutes) = COUNT(*)
+                        THEN COALESCE(SUM(dec.runtime_minutes), 0)
+                        ELSE NULL END AS watchedRuntimeMinutes,
+                   COUNT(dec.runtime_minutes) = COUNT(*) AS watchedRuntimeComplete
             FROM distinct_episode_coordinates dec
             """, nativeQuery = true)
     SeriesProgressTotals findGlobalTotalsByUserId(@Param("userId") UUID userId);
@@ -258,6 +266,10 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
         Long getWatchedEpisodeCount();
 
         Long getWatchedRuntimeMinutes();
+
+        default Boolean getWatchedRuntimeComplete() {
+            return true;
+        }
 
         Integer getMaxSeasonNumber();
 
@@ -284,5 +296,9 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
         Long getWatchedEpisodeCount();
 
         Long getWatchedRuntimeMinutes();
+
+        default Boolean getWatchedRuntimeComplete() {
+            return true;
+        }
     }
 }

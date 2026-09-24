@@ -566,8 +566,9 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), any(List.class)))
                 .thenReturn(List.of(progressA, progressB));
-        when(seriesProgressMetadataRefreshService.refreshIfMissingOrExpired(any(), any()))
-                .thenAnswer(invocation -> snapshot(invocation.getArgument(0)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(any(), any()))
+                .thenAnswer(invocation -> ((List<String>) invocation.getArgument(0)).stream()
+                        .collect(Collectors.toMap(id -> id, this::snapshot)));
 
         SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
                 lucasId, lucasId, 1, 2,
@@ -608,6 +609,42 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getSeriesInProgress] Should Keep Remaining Runtime Null When A Watched Runtime Is Unknown")
+    void shouldKeepRemainingRuntimeNullWhenWatchedRuntimeIsUnknown() {
+        String seriesTmdbId = "unknown-runtime";
+        SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
+                seriesTmdbId, 1L, null, 1, 1, LocalDate.of(2026, 9, 20), 1, 1,
+                2, 100, LocalDate.of(2026, 9, 21), 1L, null, false);
+        SeriesProgressMetadataRefreshService.Snapshot snapshot = new SeriesProgressMetadataRefreshService.Snapshot(
+                new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                        seriesTmdbId, 2, 100, 2, LocalDate.of(2026, 9, 21),
+                        LocalDateTime.now(), LocalDateTime.now()),
+                List.of(new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                        seriesTmdbId, 1, 2, 100, 2, LocalDate.of(2026, 9, 21), LocalDateTime.now())));
+
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.DESC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
+        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+                .thenReturn(seriesProgressTotals(1L, null, false));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
+                eq(lucasId), eq(List.of(seriesTmdbId))))
+                .thenReturn(List.of(seasonProgress(seriesTmdbId, 1, 1L, null, false)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
+                .thenReturn(Map.of(seriesTmdbId, snapshot));
+
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
+
+        assertThat(result.content().getFirst().remainingRuntimeMinutes()).isNull();
+        assertThat(result.content().getFirst().seasonProgress().getFirst().remainingRuntimeMinutes()).isNull();
+        assertThat(result.aggregate().remainingRuntimeMinutes()).isNull();
+    }
+
+    @Test
     @DisplayName("[getSeriesInProgress] Should Exclude Regular Seasons With No Released Episodes")
     void shouldExcludeRegularSeasonsWithNoReleasedEpisodesForDetailedSeriesInProgress() {
         String seriesTmdbId = "zero-released-season";
@@ -625,8 +662,8 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 eq(lucasId), eq(List.of(seriesTmdbId))))
                 .thenReturn(List.of(seasonProgress(seriesTmdbId, 1, 1L, 20L)));
-        when(seriesProgressMetadataRefreshService.refreshIfMissingOrExpired(eq(seriesTmdbId), any()))
-                .thenReturn(new SeriesProgressMetadataRefreshService.Snapshot(
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
+                .thenReturn(Map.of(seriesTmdbId, new SeriesProgressMetadataRefreshService.Snapshot(
                         new SeriesProgressMetadataRefreshService.SeriesSnapshot(
                                 seriesTmdbId, 2, 40, 2, LocalDate.of(2026, 9, 21),
                                 LocalDateTime.now(), LocalDateTime.now()),
@@ -636,7 +673,7 @@ class DiaryEntryServiceImplTest {
                                 new SeriesProgressMetadataRefreshService.SeasonSnapshot(
                                         seriesTmdbId, 1, 2, 40, 2, LocalDate.of(2026, 9, 21), LocalDateTime.now()),
                                 new SeriesProgressMetadataRefreshService.SeasonSnapshot(
-                                        seriesTmdbId, 2, 0, 0, 0, null, LocalDateTime.now()))));
+                                        seriesTmdbId, 2, 0, 0, 0, null, LocalDateTime.now())))));
 
         SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
                 lucasId, lucasId, 1, 10,
@@ -1006,6 +1043,19 @@ class DiaryEntryServiceImplTest {
             Integer lastWatchedSeasonNumber, Integer lastWatchedEpisodeNumber,
             Integer totalReleasedEpisodeCount, Integer totalKnownRuntime,
             LocalDate lastReleasedEpisodeDate, Long remainingEpisodeCount, Long remainingRuntimeMinutes) {
+        return progressCandidate(seriesTmdbId, watchedEpisodeCount, watchedRuntimeMinutes,
+                maxSeasonNumber, maxEpisodeNumber, lastWatchedDate, lastWatchedSeasonNumber,
+                lastWatchedEpisodeNumber, totalReleasedEpisodeCount, totalKnownRuntime,
+                lastReleasedEpisodeDate, remainingEpisodeCount, remainingRuntimeMinutes, true);
+    }
+
+    private SeriesProgressReadRepository.SeriesProgressCandidate progressCandidate(
+            String seriesTmdbId, Long watchedEpisodeCount, Long watchedRuntimeMinutes,
+            Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate,
+            Integer lastWatchedSeasonNumber, Integer lastWatchedEpisodeNumber,
+            Integer totalReleasedEpisodeCount, Integer totalKnownRuntime,
+            LocalDate lastReleasedEpisodeDate, Long remainingEpisodeCount, Long remainingRuntimeMinutes,
+            boolean watchedRuntimeComplete) {
         return new SeriesProgressReadRepository.SeriesProgressCandidate() {
             @Override
             public String getSeriesTmdbId() {
@@ -1071,11 +1121,21 @@ class DiaryEntryServiceImplTest {
             public Long getRemainingRuntimeMinutes() {
                 return remainingRuntimeMinutes;
             }
+
+            @Override
+            public Boolean getWatchedRuntimeComplete() {
+                return watchedRuntimeComplete;
+            }
         };
     }
 
     private SeriesProgressReadRepository.SeriesProgressTotals seriesProgressTotals(
             Long watchedEpisodeCount, Long watchedRuntimeMinutes) {
+        return seriesProgressTotals(watchedEpisodeCount, watchedRuntimeMinutes, true);
+    }
+
+    private SeriesProgressReadRepository.SeriesProgressTotals seriesProgressTotals(
+            Long watchedEpisodeCount, Long watchedRuntimeMinutes, boolean watchedRuntimeComplete) {
         return new SeriesProgressReadRepository.SeriesProgressTotals() {
             @Override
             public Long getWatchedEpisodeCount() {
@@ -1086,11 +1146,22 @@ class DiaryEntryServiceImplTest {
             public Long getWatchedRuntimeMinutes() {
                 return watchedRuntimeMinutes;
             }
+
+            @Override
+            public Boolean getWatchedRuntimeComplete() {
+                return watchedRuntimeComplete;
+            }
         };
     }
 
     private DiaryEntryRepository.SeasonProgress seasonProgress(
             String seriesTmdbId, Integer seasonNumber, Long watchedEpisodeCount, Long watchedRuntimeMinutes) {
+        return seasonProgress(seriesTmdbId, seasonNumber, watchedEpisodeCount, watchedRuntimeMinutes, true);
+    }
+
+    private DiaryEntryRepository.SeasonProgress seasonProgress(
+            String seriesTmdbId, Integer seasonNumber, Long watchedEpisodeCount, Long watchedRuntimeMinutes,
+            boolean watchedRuntimeComplete) {
         return new DiaryEntryRepository.SeasonProgress() {
             @Override
             public String getSeriesTmdbId() {
@@ -1110,6 +1181,11 @@ class DiaryEntryServiceImplTest {
             @Override
             public Long getWatchedRuntimeMinutes() {
                 return watchedRuntimeMinutes;
+            }
+
+            @Override
+            public Boolean getWatchedRuntimeComplete() {
+                return watchedRuntimeComplete;
             }
         };
     }

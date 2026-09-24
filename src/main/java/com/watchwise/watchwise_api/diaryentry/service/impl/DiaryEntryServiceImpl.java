@@ -212,14 +212,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         LocalDate today = LocalDate.now();
-        Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = new LinkedHashMap<>();
-        rows.stream()
+        List<String> seriesTmdbIds = rows.stream()
                 .map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
                 .distinct()
-                .forEach(seriesTmdbId -> snapshots.put(
-                        seriesTmdbId,
-                        seriesProgressMetadataRefreshService.refreshIfMissingOrExpired(seriesTmdbId, today)));
-        return snapshots;
+                .toList();
+        return seriesProgressMetadataRefreshService.getSnapshotsForRead(seriesTmdbIds, today);
     }
 
     private Map<String, Map<Integer, DiaryEntryRepository.SeasonProgress>> loadWatchedProgress(
@@ -253,11 +250,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 : row.getTotalReleasedEpisodeCount();
         Integer totalKnownRuntime = series != null ? series.totalKnownRuntime() : row.getTotalKnownRuntime();
         Long watchedEpisodeCount = valueOrZero(row.getWatchedEpisodeCount());
-        Long watchedRuntimeMinutes = valueOrZero(row.getWatchedRuntimeMinutes());
+        Long watchedRuntimeMinutes = row.getWatchedRuntimeMinutes();
         Long remainingEpisodeCount = row.getRemainingEpisodeCount() != null
                 ? row.getRemainingEpisodeCount()
                 : remainingEpisodes(totalReleasedEpisodeCount, watchedEpisodeCount);
-        Long remainingRuntimeMinutes = remainingRuntime(totalKnownRuntime, watchedRuntimeMinutes);
+        Long remainingRuntimeMinutes = remainingRuntime(
+                totalKnownRuntime, watchedRuntimeMinutes, row.getWatchedRuntimeComplete());
 
         List<SeasonProgressDTO> seasonProgress = snapshot == null
                 ? List.of()
@@ -293,7 +291,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             SeriesProgressMetadataRefreshService.SeasonSnapshot season,
             DiaryEntryRepository.SeasonProgress watched) {
         Long watchedEpisodeCount = watched == null ? 0L : valueOrZero(watched.getWatchedEpisodeCount());
-        Long watchedRuntimeMinutes = watched == null ? 0L : valueOrZero(watched.getWatchedRuntimeMinutes());
+        Long watchedRuntimeMinutes = watched == null ? Long.valueOf(0L) : watched.getWatchedRuntimeMinutes();
         Integer totalEpisodeCount = season.regularReleasedEpisodeCount();
         return new SeasonProgressDTO(
                 season.seasonNumber(),
@@ -302,7 +300,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 percentage(watchedEpisodeCount, totalEpisodeCount),
                 watchedRuntimeMinutes,
                 remainingEpisodes(totalEpisodeCount, watchedEpisodeCount),
-                remainingRuntime(season.totalKnownRuntime(), watchedRuntimeMinutes));
+                remainingRuntime(season.totalKnownRuntime(), watchedRuntimeMinutes,
+                        watched == null || Boolean.TRUE.equals(watched.getWatchedRuntimeComplete())));
     }
 
     private SeriesInProgressAggregateDTO calculateAggregate(
@@ -326,6 +325,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             } else {
                 knownRuntime += runtime;
             }
+            if (!Boolean.TRUE.equals(row.getWatchedRuntimeComplete())) {
+                completeRuntime = false;
+            }
             fallbackWatchedEpisodeCount += valueOrZero(row.getWatchedEpisodeCount());
             fallbackWatchedRuntimeMinutes += valueOrZero(row.getWatchedRuntimeMinutes());
         }
@@ -338,6 +340,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         long watchedRuntimeMinutes = totals == null || totals.getWatchedRuntimeMinutes() == null
                 ? fallbackWatchedRuntimeMinutes
                 : totals.getWatchedRuntimeMinutes();
+        if (totals != null && !Boolean.TRUE.equals(totals.getWatchedRuntimeComplete())) {
+            completeRuntime = false;
+        }
         Long remainingRuntimeMinutes = completeRuntime
                 ? Math.max(knownRuntime - watchedRuntimeMinutes, 0L)
                 : null;
@@ -357,9 +362,16 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private Long remainingRuntime(Integer totalRuntimeMinutes, Long watchedRuntimeMinutes) {
+        return remainingRuntime(totalRuntimeMinutes, watchedRuntimeMinutes, true);
+    }
+
+    private Long remainingRuntime(
+            Integer totalRuntimeMinutes, Long watchedRuntimeMinutes, Boolean watchedRuntimeComplete) {
         return totalRuntimeMinutes == null
+                || !Boolean.TRUE.equals(watchedRuntimeComplete)
+                || watchedRuntimeMinutes == null
                 ? null
-                : Math.max(totalRuntimeMinutes.longValue() - valueOrZero(watchedRuntimeMinutes), 0L);
+                : Math.max(totalRuntimeMinutes.longValue() - watchedRuntimeMinutes, 0L);
     }
 
     private Double percentage(Long watchedEpisodeCount, Integer totalEpisodeCount) {

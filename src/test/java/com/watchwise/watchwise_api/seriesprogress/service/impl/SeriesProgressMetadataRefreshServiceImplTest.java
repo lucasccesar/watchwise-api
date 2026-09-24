@@ -50,7 +50,9 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -65,11 +67,13 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     @Mock private NewTransactionExecutor newTransactionExecutor;
 
     private ExecutorService seasonExecutor;
+    private ExecutorService refreshExecutor;
     private SeriesProgressMetadataRefreshServiceImpl service;
 
     @BeforeEach
     void setUp() {
         seasonExecutor = Executors.newFixedThreadPool(4);
+        refreshExecutor = Executors.newFixedThreadPool(2);
         lenient().when(newTransactionExecutor.runInNewTransaction(any())).thenAnswer(invocation ->
                 ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         service = new SeriesProgressMetadataRefreshServiceImpl(
@@ -78,6 +82,7 @@ class SeriesProgressMetadataRefreshServiceImplTest {
                 seasonMetadataRepository,
                 new SeriesProgressMetadataCalculator(new SeriesRuntimeCalculator()),
                 seasonExecutor,
+                refreshExecutor,
                 newTransactionExecutor);
         lenient().when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.empty());
         lenient().when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(anyCollection())).thenReturn(List.of());
@@ -86,6 +91,7 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     @AfterEach
     void tearDown() {
         seasonExecutor.shutdownNow();
+        refreshExecutor.shutdownNow();
     }
 
     @Test
@@ -234,35 +240,119 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     }
 
     @Test
-    @DisplayName("[refreshIfMissingOrExpired] Revalidates A Same-Day Runtime-Incomplete Snapshot")
-    void shouldRevalidateSameDayRuntimeIncompleteSnapshot() {
+    @DisplayName("[getSnapshotsForRead] Uses A Same-Day Runtime-Incomplete Snapshot Without TMDB")
+    void shouldUseSameDayRuntimeIncompleteSnapshotWithoutTmdb() {
         SeriesProgressMetadata incomplete = storedMetadata(TODAY.atTime(8, 0)).toBuilder()
                 .totalKnownRuntime(null)
                 .knownRuntimeEpisodeCount(1)
                 .runtimeVerifiedAt(null)
                 .build();
-        when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.of(incomplete));
+        when(metadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(metadataProjection(incomplete)));
         when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
                 .thenReturn(List.of(seasonProjection(1, incomplete.getRefreshedAt())));
-        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
-                .thenReturn(new TmdbLookupResult.Found<>(tv(summary(1))));
-        when(tmdbClient.getSeasonFullDetails(SERIES_ID, 1, "en-US"))
-                .thenReturn(found(season(1,
-                        episode(1, "2026-09-01", null),
-                        episode(2, "2026-09-02", 40))));
 
-        SeriesProgressMetadataRefreshService.Snapshot result =
-                service.refreshIfMissingOrExpired(SERIES_ID, TODAY);
+        SeriesProgressMetadataRefreshService.Snapshot result = service
+                .getSnapshotsForRead(List.of(SERIES_ID), TODAY)
+                .get(SERIES_ID);
 
         assertThat(result.series().regularReleasedEpisodeCount()).isEqualTo(2);
         assertThat(result.series().knownRuntimeEpisodeCount()).isEqualTo(1);
         assertThat(result.series().totalKnownRuntime()).isNull();
-        verify(tmdbClient).getTvFullDetails(SERIES_ID, "en-US");
-        verify(metadataRepository).save(argThat(metadata ->
-                metadata.getRegularReleasedEpisodeCount() == 2
-                        && metadata.getKnownRuntimeEpisodeCount() == 1
-                        && metadata.getTotalKnownRuntime() == null
-                        && metadata.getRuntimeVerifiedAt() == null));
+        verifyNoInteractions(tmdbClient);
+        verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+    }
+
+    @Test
+    @DisplayName("[getSnapshotsForRead] Reads Series And Season Snapshots In One Batch")
+    void shouldReadSeriesAndSeasonSnapshotsInOneBatch() {
+        String secondSeriesId = "1400";
+        SeriesProgressMetadata first = storedMetadata(TODAY.atTime(8, 0));
+        SeriesProgressMetadata second = storedMetadata(TODAY.atTime(8, 0)).toBuilder()
+                .seriesTmdbId(secondSeriesId)
+                .build();
+        when(metadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID, secondSeriesId)))
+                .thenReturn(List.of(metadataProjection(first), metadataProjection(second)));
+        when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID, secondSeriesId)))
+                .thenReturn(List.of(
+                        seasonProjection(SERIES_ID, 1, first.getRefreshedAt()),
+                        seasonProjection(secondSeriesId, 1, second.getRefreshedAt())));
+
+        var snapshots = service.getSnapshotsForRead(List.of(SERIES_ID, secondSeriesId), TODAY);
+
+        assertThat(snapshots).containsOnlyKeys(SERIES_ID, secondSeriesId);
+        verify(metadataRepository, times(1)).findAllBySeriesTmdbIdIn(List.of(SERIES_ID, secondSeriesId));
+        verify(seasonMetadataRepository, times(1)).findAllBySeriesTmdbIdIn(List.of(SERIES_ID, secondSeriesId));
+        verify(metadataRepository, never()).findById(anyString());
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getSnapshotsForRead] Returns A Stale Snapshot Before Background Refresh Completes")
+    void shouldReturnStaleSnapshotWithoutWaitingForBackgroundRefresh() throws Exception {
+        SeriesProgressMetadata stale = storedMetadata(TODAY.minusDays(2).atTime(8, 0));
+        CountDownLatch refreshStarted = new CountDownLatch(1);
+        CountDownLatch releaseRefresh = new CountDownLatch(1);
+        when(metadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(metadataProjection(stale)));
+        when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(seasonProjection(SERIES_ID, 1, stale.getRefreshedAt())));
+        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
+                .thenAnswer(invocation -> {
+                    refreshStarted.countDown();
+                    releaseRefresh.await(5, TimeUnit.SECONDS);
+                    return new TmdbLookupResult.Found<>(tv(summary(1)));
+                });
+        when(tmdbClient.getSeasonFullDetails(SERIES_ID, 1, "en-US"))
+                .thenReturn(found(season(1, episode(1, "2026-09-23", 40))));
+
+        long startedAt = System.nanoTime();
+        SeriesProgressMetadataRefreshService.Snapshot result = service
+                .getSnapshotsForRead(List.of(SERIES_ID), TODAY)
+                .get(SERIES_ID);
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+        assertThat(result.series().totalKnownRuntime()).isEqualTo(100);
+        assertThat(elapsedMillis).isLessThan(500);
+        assertThat(refreshStarted.await(1, TimeUnit.SECONDS)).isTrue();
+        releaseRefresh.countDown();
+        verify(metadataRepository, timeout(1000)).save(any(SeriesProgressMetadata.class));
+    }
+
+    @Test
+    @DisplayName("[refresh] Preserves A Valid Snapshot When TMDB Seasons Are Missing")
+    void shouldPreserveValidSnapshotWhenTmdbSeasonsAreMissing() {
+        SeriesProgressMetadata previous = storedMetadata(TODAY.minusDays(2).atTime(8, 0));
+        when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.of(previous));
+        when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(seasonProjection(SERIES_ID, 1, previous.getRefreshedAt())));
+
+        SeriesProgressMetadataRefreshService.Snapshot result = service
+                .refresh(SERIES_ID, tvWithNullSeasons(), TODAY);
+
+        assertThat(result.series().totalKnownRuntime()).isEqualTo(100);
+        assertThat(result.series().runtimeVerifiedAt()).isEqualTo(previous.getRuntimeVerifiedAt());
+        verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+        verify(seasonMetadataRepository, never()).deleteAllBySeriesTmdbIdIn(anyCollection());
+    }
+
+    @Test
+    @DisplayName("[getSnapshotsForRead] Does Not Retry A Failed Runtime Refresh On Every Request")
+    void shouldNotRetryFailedRuntimeRefreshOnEveryRequest() throws Exception {
+        SeriesProgressMetadata previous = storedMetadata(TODAY.minusDays(2).atTime(8, 0));
+        when(metadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(metadataProjection(previous)));
+        when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(seasonProjection(SERIES_ID, 1, previous.getRefreshedAt())));
+        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(tvWithNullSeasons()));
+
+        service.getSnapshotsForRead(List.of(SERIES_ID), TODAY);
+        verify(tmdbClient, timeout(1000)).getTvFullDetails(SERIES_ID, "en-US");
+
+        service.getSnapshotsForRead(List.of(SERIES_ID), TODAY);
+
+        verify(tmdbClient, times(1)).getTvFullDetails(SERIES_ID, "en-US");
     }
 
     @Test
@@ -451,10 +541,28 @@ class SeriesProgressMetadataRefreshServiceImplTest {
                 .build();
     }
 
+    private static SeriesProgressMetadataRepository.SeriesProgressMetadataProjection metadataProjection(
+            SeriesProgressMetadata metadata) {
+        return new SeriesProgressMetadataRepository.SeriesProgressMetadataProjection() {
+            public String getSeriesTmdbId() { return metadata.getSeriesTmdbId(); }
+            public Integer getRegularReleasedEpisodeCount() { return metadata.getRegularReleasedEpisodeCount(); }
+            public Integer getTotalKnownRuntime() { return metadata.getTotalKnownRuntime(); }
+            public Integer getKnownRuntimeEpisodeCount() { return metadata.getKnownRuntimeEpisodeCount(); }
+            public LocalDate getLastReleasedEpisodeDate() { return metadata.getLastReleasedEpisodeDate(); }
+            public LocalDateTime getRefreshedAt() { return metadata.getRefreshedAt(); }
+            public LocalDateTime getRuntimeVerifiedAt() { return metadata.getRuntimeVerifiedAt(); }
+        };
+    }
+
     private static SeriesProgressSeasonMetadataRepository.SeriesProgressSeasonMetadataProjection seasonProjection(
             int seasonNumber, LocalDateTime refreshedAt) {
+        return seasonProjection(SERIES_ID, seasonNumber, refreshedAt);
+    }
+
+    private static SeriesProgressSeasonMetadataRepository.SeriesProgressSeasonMetadataProjection seasonProjection(
+            String seriesTmdbId, int seasonNumber, LocalDateTime refreshedAt) {
         return new SeriesProgressSeasonMetadataRepository.SeriesProgressSeasonMetadataProjection() {
-            public String getSeriesTmdbId() { return SERIES_ID; }
+            public String getSeriesTmdbId() { return seriesTmdbId; }
             public Integer getSeasonNumber() { return seasonNumber; }
             public Integer getRegularReleasedEpisodeCount() { return 1; }
             public Integer getTotalKnownRuntime() { return 40; }
@@ -476,6 +584,12 @@ class SeriesProgressMetadataRefreshServiceImplTest {
         return new TmdbTvFullDetails(
                 seriesId, null, null, null, null, null, null, null, null, null, null,
                 List.of(summaries), null, null, null, null, null, null, null, null, null, null);
+    }
+
+    private static TmdbTvFullDetails tvWithNullSeasons() {
+        return new TmdbTvFullDetails(
+                SERIES_ID, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private static TmdbSeasonSummary summary(int seasonNumber) {

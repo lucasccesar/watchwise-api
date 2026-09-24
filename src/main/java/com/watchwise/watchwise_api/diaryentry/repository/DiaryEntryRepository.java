@@ -313,7 +313,10 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             SELECT series_tmdb_id AS seriesTmdbId,
                    season_number AS seasonNumber,
                    COUNT(*) AS watchedEpisodeCount,
-                   COALESCE(SUM(runtime_minutes), 0) AS watchedRuntimeMinutes
+                   CASE WHEN COUNT(runtime_minutes) = COUNT(*)
+                        THEN COALESCE(SUM(runtime_minutes), 0)
+                        ELSE NULL END AS watchedRuntimeMinutes,
+                   COUNT(runtime_minutes) = COUNT(*) AS watchedRuntimeComplete
             FROM distinct_episode_coordinates
             GROUP BY series_tmdb_id, season_number
             ORDER BY series_tmdb_id, season_number
@@ -340,6 +343,10 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
         Integer getSeasonNumber();
         Long getWatchedEpisodeCount();
         Long getWatchedRuntimeMinutes();
+
+        default Boolean getWatchedRuntimeComplete() {
+            return true;
+        }
     }
 
     @Query("""
