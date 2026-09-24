@@ -608,6 +608,46 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getSeriesInProgress] Should Exclude Regular Seasons With No Released Episodes")
+    void shouldExcludeRegularSeasonsWithNoReleasedEpisodesForDetailedSeriesInProgress() {
+        String seriesTmdbId = "zero-released-season";
+        SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
+                seriesTmdbId, 1L, 20L, 1, 1, LocalDate.of(2026, 9, 20), 1, 1,
+                2, 40, LocalDate.of(2026, 9, 21), 1L, 20L);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.DESC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(
+                        invocation.getArgument(3), List.of(candidate), false));
+        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+                .thenReturn(seriesProgressTotals(1L, 20L));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
+                eq(lucasId), eq(List.of(seriesTmdbId))))
+                .thenReturn(List.of(seasonProgress(seriesTmdbId, 1, 1L, 20L)));
+        when(seriesProgressMetadataRefreshService.refreshIfMissingOrExpired(eq(seriesTmdbId), any()))
+                .thenReturn(new SeriesProgressMetadataRefreshService.Snapshot(
+                        new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                                seriesTmdbId, 2, 40, 2, LocalDate.of(2026, 9, 21),
+                                LocalDateTime.now(), LocalDateTime.now()),
+                        List.of(
+                                new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                        seriesTmdbId, 0, 1, 20, 1, LocalDate.of(2026, 9, 1), LocalDateTime.now()),
+                                new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                        seriesTmdbId, 1, 2, 40, 2, LocalDate.of(2026, 9, 21), LocalDateTime.now()),
+                                new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                        seriesTmdbId, 2, 0, 0, 0, null, LocalDateTime.now()))));
+
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
+
+        assertThat(result.content().getFirst().seasonProgress())
+                .extracting(SeasonProgressDTO::seasonNumber, SeasonProgressDTO::totalEpisodeCount)
+                .containsExactly(tuple(1, 2));
+    }
+
+    @Test
     @DisplayName("[getSeriesInProgress] Should Return Mapped Page - When Viewer Is The Profile Owner")
     void shouldReturnMappedPageWhenViewerIsTheProfileOwnerForSeriesInProgress() {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 8, 6, LocalDate.of(2024, 5, 1));

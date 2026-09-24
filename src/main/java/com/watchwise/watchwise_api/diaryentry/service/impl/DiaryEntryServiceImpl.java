@@ -263,6 +263,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 ? List.of()
                 : snapshot.seasons().stream()
                 .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
+                .filter(season -> season.regularReleasedEpisodeCount() != null
+                        && season.regularReleasedEpisodeCount() > 0)
                 .sorted(Comparator.comparing(SeriesProgressMetadataRefreshService.SeasonSnapshot::seasonNumber))
                 .map(season -> toDetailedSeasonProgress(season, watchedProgress.get(season.seasonNumber())))
                 .toList();

@@ -22,3 +22,16 @@ No Docker or Testcontainers command was run.
 
 - Repository-backed integration behavior was not exercised because Docker was intentionally not run.
 - The pre-existing `.gitignore` modification and local Maven cache directories remain outside the Task 4 commit.
+
+## Round 1 fix - 2026-09-23
+
+The detailed mapper now excludes snapshot seasons unless their `regularReleasedEpisodeCount` is positive, while retaining the existing `seasonNumber > 0` Specials exclusion. This prevents future or zero-released regular seasons from appearing with a zero episode total.
+
+Added a focused regression test covering a zero-released regular season and an explicit HomeSummary assertion that the legacy `DiaryEntryRepository` preview query still produces `SeriesInProgressPreviewDTO`.
+
+| Command | Result |
+| --- | --- |
+| `mvn.cmd -o "-Dmaven.repo.local=<workspace>\\.m2-local" "-DargLine=-Djdk.net.URLClassPath.disableClassPathURLCheck=true" test "-Dtest=DiaryEntryServiceImplTest,DiaryEntryControllerTest,SummaryServiceImplTest"` | `BUILD SUCCESS`; 262 tests, 0 failures, 0 errors. |
+| `mvn.cmd -o "-Dmaven.repo.local=<workspace>\\.m2-local" "-DargLine=-Djdk.net.URLClassPath.disableClassPathURLCheck=true" -DskipTests package` | `BUILD SUCCESS`. |
+
+OpenAPI was intentionally not changed; Task 5 owns documentation updates.
