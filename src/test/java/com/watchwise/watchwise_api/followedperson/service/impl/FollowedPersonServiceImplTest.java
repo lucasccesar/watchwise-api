@@ -224,6 +224,45 @@ class FollowedPersonServiceImplTest {
     }
 
     @Test
+    @DisplayName("[isFollowing] Should Return Whether Viewer Follows Person - Without Looking Up Person On TMDB")
+    void shouldReturnWhetherViewerFollowsPerson() {
+        when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(true);
+
+        assertThat(followedPersonService.isFollowing(userId, personTmdbId)).isTrue();
+
+        verify(followedPersonRepository).existsByUserIdAndPersonTmdbId(userId, personTmdbId);
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[isFollowing] Should Return False - When Viewer Does Not Follow Person")
+    void shouldReturnFalseWhenViewerDoesNotFollowPerson() {
+        when(followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId)).thenReturn(false);
+
+        assertThat(followedPersonService.isFollowing(userId, personTmdbId)).isFalse();
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[isFollowing] Should Throw BadRequestException - When PersonTmdbId Is Not Numeric")
+    void shouldThrowBadRequestExceptionWhenPersonTmdbIdIsNotNumericOnIsFollowing() {
+        assertThatThrownBy(() -> followedPersonService.isFollowing(userId, "abc"))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(followedPersonRepository, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[isFollowing] Should Throw BadRequestException - When PersonTmdbId Exceeds 20 Digits")
+    void shouldThrowBadRequestExceptionWhenPersonTmdbIdExceedsTwentyDigitsOnIsFollowing() {
+        assertThatThrownBy(() -> followedPersonService.isFollowing(userId, "123456789012345678901"))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(followedPersonRepository, tmdbClient);
+    }
+
+    @Test
     @DisplayName("[unfollowPerson] Should Throw BadRequestException - When PersonTmdbId Is Not Numeric")
     void shouldThrowBadRequestExceptionWhenPersonTmdbIdIsNotNumericOnUnfollow() {
         assertThatThrownBy(() -> followedPersonService.unfollowPerson(userId, "abc"))

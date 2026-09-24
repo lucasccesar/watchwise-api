@@ -71,6 +71,12 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
                 .ifPresent(followedPersonRepository::delete);
     }
 
+    @Override
+    public boolean isFollowing(UUID userId, String personTmdbId) {
+        validatePersonTmdbId(personTmdbId);
+        return followedPersonRepository.existsByUserIdAndPersonTmdbId(userId, personTmdbId);
+    }
+
     private void validatePersonTmdbId(String personTmdbId) {
         if (personTmdbId == null || !personTmdbId.matches("\\d{1,20}")) {
             throw new BadRequestException("personTmdbId must be a numeric TMDB id up to 20 digits");

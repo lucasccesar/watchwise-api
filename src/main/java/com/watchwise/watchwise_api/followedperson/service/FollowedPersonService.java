@@ -10,6 +10,8 @@ public interface FollowedPersonService {
 
     void unfollowPerson(UUID userId, String personTmdbId);
 
+    boolean isFollowing(UUID userId, String personTmdbId);
+
     Page<String> getFollowedPeople(UUID viewerId, UUID targetUserId, Integer pageNumber, Integer pageSize);
 
 }
