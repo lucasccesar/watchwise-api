@@ -22,7 +22,7 @@ public interface Top5EntryRepository extends JpaRepository<Top5Entry, UUID> {
             AND (
                 CAST(:cursorCreatedAt AS timestamp) IS NULL
                 OR t.createdAt < :cursorCreatedAt
-                OR (t.createdAt = :cursorCreatedAt AND (:cursorId IS NULL OR t.id < :cursorId))
+                OR (t.createdAt = :cursorCreatedAt AND :cursorId IS NOT NULL AND t.id < :cursorId)
             )
             ORDER BY t.createdAt DESC, t.id DESC
             """)

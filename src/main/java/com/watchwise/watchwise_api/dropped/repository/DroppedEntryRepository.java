@@ -24,7 +24,7 @@ public interface DroppedEntryRepository extends JpaRepository<DroppedEntry, UUID
             AND (
                 CAST(:cursorCreatedAt AS timestamp) IS NULL
                 OR d.createdAt < :cursorCreatedAt
-                OR (d.createdAt = :cursorCreatedAt AND (:cursorId IS NULL OR d.id < :cursorId))
+                OR (d.createdAt = :cursorCreatedAt AND :cursorId IS NOT NULL AND d.id < :cursorId)
             )
             ORDER BY d.createdAt DESC, d.id DESC
             """)

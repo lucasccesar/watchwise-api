@@ -40,7 +40,7 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
               and (
                   cast(:cursorCreatedAt as timestamp) is null
                   or pick.createdAt < :cursorCreatedAt
-                  or (pick.createdAt = :cursorCreatedAt and (:cursorId is null or pick.id < :cursorId))
+                  or (pick.createdAt = :cursorCreatedAt and :cursorId is not null and pick.id < :cursorId)
               )
             order by pick.createdAt desc, pick.id desc
             """)

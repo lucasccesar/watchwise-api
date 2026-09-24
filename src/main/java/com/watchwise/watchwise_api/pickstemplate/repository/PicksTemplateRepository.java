@@ -28,7 +28,7 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
               and (
                   cast(:cursorCreatedAt as timestamp) is null
                   or template.createdAt < :cursorCreatedAt
-                  or (template.createdAt = :cursorCreatedAt and (:cursorId is null or template.id < :cursorId))
+                  or (template.createdAt = :cursorCreatedAt and :cursorId is not null and template.id < :cursorId)
               )
             order by template.createdAt desc, template.id desc
             """)
