@@ -23,6 +23,10 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressMetadata;
+import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressSeasonMetadata;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressMetadataRepository;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressSeasonMetadataRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
@@ -60,8 +64,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -105,6 +113,12 @@ class DiaryEntryControllerIntegrationTest {
     private DroppedEntryRepository droppedEntryRepository;
 
     @Autowired
+    private SeriesProgressMetadataRepository seriesProgressMetadataRepository;
+
+    @Autowired
+    private SeriesProgressSeasonMetadataRepository seriesProgressSeasonMetadataRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -121,6 +135,8 @@ class DiaryEntryControllerIntegrationTest {
         diaryEntryRepository.deleteAll();
         watchlistEntryRepository.deleteAll();
         droppedEntryRepository.deleteAll();
+        seriesProgressSeasonMetadataRepository.deleteAll();
+        seriesProgressMetadataRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -310,6 +326,73 @@ class DiaryEntryControllerIntegrationTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
+    }
+
+    private Content persistEpisodeWithRuntime(String seriesTmdbId, int seasonNumber, int episodeNumber,
+            Integer runtimeMinutes) {
+        LocalDateTime now = LocalDateTime.now();
+        return contentRepository.save(Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .runtimeMinutes(runtimeMinutes)
+                .type(ContentType.EPISODE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private void persistFreshSnapshot(String seriesTmdbId, int releasedEpisodes, int totalRuntime,
+            int seasonNumber, int seasonRuntime) {
+        persistSnapshot(seriesTmdbId, releasedEpisodes, totalRuntime, seasonNumber,
+                LocalDate.now(), LocalDateTime.now(), LocalDateTime.now());
+    }
+
+    private void persistSnapshot(String seriesTmdbId, int releasedEpisodes, Integer totalRuntime,
+            int seasonNumber, LocalDate lastReleasedDate, LocalDateTime refreshedAt, LocalDateTime runtimeVerifiedAt) {
+        seriesProgressMetadataRepository.saveAndFlush(SeriesProgressMetadata.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .regularReleasedEpisodeCount(releasedEpisodes)
+                .totalKnownRuntime(totalRuntime)
+                .knownRuntimeEpisodeCount(totalRuntime == null ? 0 : releasedEpisodes)
+                .lastReleasedEpisodeDate(lastReleasedDate)
+                .refreshedAt(refreshedAt)
+                .runtimeVerifiedAt(runtimeVerifiedAt)
+                .build());
+        seriesProgressSeasonMetadataRepository.saveAndFlush(SeriesProgressSeasonMetadata.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .regularReleasedEpisodeCount(releasedEpisodes)
+                .totalKnownRuntime(totalRuntime)
+                .knownRuntimeEpisodeCount(totalRuntime == null ? 0 : releasedEpisodes)
+                .lastReleasedEpisodeDate(lastReleasedDate)
+                .refreshedAt(refreshedAt)
+                .build());
+    }
+
+    private TmdbLookupResult<TmdbTvFullDetails> foundTv(String seriesTmdbId, int specialsEpisodeCount,
+            int regularEpisodeCount) {
+        return new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                seriesTmdbId, null, null, null, null, null, null, null, null, null, null,
+                List.of(
+                        new TmdbSeasonSummary(0, "Specials", null, null, specialsEpisodeCount, null),
+                        new TmdbSeasonSummary(1, "Season 1", null, null, regularEpisodeCount, null)),
+                null, null, null, null, null, null, null, null, null, null));
+    }
+
+    private TmdbLookupResult<TmdbSeasonFullDetails> foundSeason(int seasonNumber, TmdbEpisodeSummary... episodes) {
+        return new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
+                null, null, null, null, null, seasonNumber, List.of(episodes), null, null));
+    }
+
+    private void persistSortedSeries(User user, String seriesTmdbId, LocalDate watchedDate,
+            LocalDate releasedDate, int watchedEpisode, int runtimeMinutes, int releasedEpisodes, int totalRuntime) {
+        Content episode = persistEpisodeWithRuntime(seriesTmdbId, 1, watchedEpisode, runtimeMinutes);
+        DiaryEntry entry = persistEntry(user, episode);
+        entry.setWatchedDate(watchedDate);
+        diaryEntryRepository.save(entry);
+        persistSnapshot(seriesTmdbId, releasedEpisodes, totalRuntime, 1,
+                releasedDate, LocalDateTime.now(), LocalDateTime.now());
     }
 
     private Content persistSeason(String seriesTmdbId, int seasonNumber, Boolean isSeriesFinale) {
@@ -611,6 +694,164 @@ class DiaryEntryControllerIntegrationTest {
         mockMvc.perform(getSeriesInProgressRequest(viewer, target.id()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Detailed Envelope And Global Aggregate Without TMDB - When Snapshots Are Fresh")
+    void shouldReturnDetailedEnvelopeAndGlobalAggregateWithoutTmdbWhenSnapshotsAreFresh() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogressfreshsnapshot");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content firstEpisode = persistEpisodeWithRuntime("fresh-one", 1, 1, 40);
+        Content secondEpisode = persistEpisodeWithRuntime("fresh-two", 1, 1, 20);
+        DiaryEntry firstEntry = persistEntry(entity, firstEpisode);
+        firstEntry.setWatchedDate(LocalDate.now().minusDays(1));
+        diaryEntryRepository.save(firstEntry);
+        DiaryEntry secondEntry = persistEntry(entity, secondEpisode);
+        secondEntry.setWatchedDate(LocalDate.now());
+        diaryEntryRepository.save(secondEntry);
+        persistFreshSnapshot("fresh-one", 5, 100, 1, 40);
+        persistFreshSnapshot("fresh-two", 3, 60, 1, 20);
+
+        mockMvc.perform(getSeriesInProgressRequest(user, user.id()).param("page", "1").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].seriesTmdbId").value("fresh-two"))
+                .andExpect(jsonPath("$.content[0].watchedEpisodeCount").value(1))
+                .andExpect(jsonPath("$.content[0].totalReleasedEpisodeCount").value(3))
+                .andExpect(jsonPath("$.content[0].remainingEpisodeCount").value(2))
+                .andExpect(jsonPath("$.content[0].remainingRuntimeMinutes").value(40))
+                .andExpect(jsonPath("$.content[0].seasonProgress[0].seasonNumber").value(1))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.hasNext").value(true))
+                .andExpect(jsonPath("$.aggregate.totalSeriesCount").value(2))
+                .andExpect(jsonPath("$.aggregate.watchedEpisodeCount").value(2))
+                .andExpect(jsonPath("$.aggregate.totalReleasedEpisodeCount").value(8))
+                .andExpect(jsonPath("$.aggregate.remainingEpisodeCount").value(6))
+                .andExpect(jsonPath("$.aggregate.remainingRuntimeMinutes").value(100));
+
+        verify(tmdbClient, never()).getTvFullDetails(any(), any());
+        verify(tmdbClient, never()).getSeasonFullDetails(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Hydrate Cold Snapshot And Exclude Specials And Future Episodes")
+    void shouldHydrateColdSnapshotAndExcludeSpecialsAndFutureEpisodes() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogresscoldsnapshot");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistEntry(entity, persistEpisodeWithRuntime("cold-series", 1, 1, 45));
+        when(tmdbClient.getTvFullDetails("cold-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(foundTv("cold-series", 0, 1));
+        when(tmdbClient.getSeasonFullDetails("cold-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(foundSeason(1, new TmdbEpisodeSummary(1, null, null,
+                        LocalDate.now().minusDays(1).toString(), 45, null, null),
+                        new TmdbEpisodeSummary(2, null, null,
+                                LocalDate.now().plusDays(1).toString(), 45, null, null)));
+
+        mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].totalReleasedEpisodeCount").value(1))
+                .andExpect(jsonPath("$.content[0].seasonProgress.length()").value(1))
+                .andExpect(jsonPath("$.content[0].seasonProgress[0].seasonNumber").value(1))
+                .andExpect(jsonPath("$.content[0].seasonProgress[0].totalEpisodeCount").value(1));
+
+        verify(tmdbClient, times(1)).getTvFullDetails("cold-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, times(1)).getSeasonFullDetails("cold-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        assertThat(seriesProgressMetadataRepository.findById("cold-series")).isPresent();
+        assertThat(seriesProgressSeasonMetadataRepository.findBySeriesTmdbIdAndSeasonNumber("cold-series", 1))
+                .isPresent();
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Refresh A Stale Snapshot")
+    void shouldRefreshAStaleSnapshot() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogressstalesnapshot");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistEntry(entity, persistEpisodeWithRuntime("stale-series", 1, 1, 30));
+        persistSnapshot("stale-series", 1, 30, 1, LocalDate.now().minusDays(1), LocalDateTime.now().minusDays(1), LocalDateTime.now().minusDays(1));
+        when(tmdbClient.getTvFullDetails("stale-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(foundTv("stale-series", 0, 1));
+        when(tmdbClient.getSeasonFullDetails("stale-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(foundSeason(1, new TmdbEpisodeSummary(1, null, null,
+                        LocalDate.now().toString(), 50, null, null)));
+
+        mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].totalKnownRuntime").value(50))
+                .andExpect(jsonPath("$.content[0].remainingRuntimeMinutes").value(20));
+
+        verify(tmdbClient, times(1)).getTvFullDetails("stale-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, times(1)).getSeasonFullDetails("stale-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Preserve Null Runtime And Return BadGateway For A Cold TMDB Failure")
+    void shouldPreserveNullRuntimeAndReturnBadGatewayForColdTmdbFailure() throws Exception {
+        RegisteredUser runtimeUser = registerUser("seriesinprogressnullruntime");
+        User runtimeEntity = userRepository.findById(runtimeUser.id()).orElseThrow();
+        persistEntry(runtimeEntity, persistEpisodeWithRuntime("null-runtime", 1, 1, null));
+        when(tmdbClient.getTvFullDetails("null-runtime", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(foundTv("null-runtime", 0, 1));
+        when(tmdbClient.getSeasonFullDetails("null-runtime", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(foundSeason(1, new TmdbEpisodeSummary(1, null, null,
+                        LocalDate.now().toString(), null, null, null)));
+
+        mockMvc.perform(getSeriesInProgressRequest(runtimeUser, runtimeUser.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].totalKnownRuntime").value(nullValue()))
+                .andExpect(jsonPath("$.content[0].remainingRuntimeMinutes").value(nullValue()));
+
+        RegisteredUser unavailableUser = registerUser("seriesinprogresscoldfailure");
+        User unavailableEntity = userRepository.findById(unavailableUser.id()).orElseThrow();
+        persistEntry(unavailableEntity, persistEpisodeWithRuntime("unavailable-series", 1, 1, 30));
+        when(tmdbClient.getTvFullDetails("unavailable-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(getSeriesInProgressRequest(unavailableUser, unavailableUser.id()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Apply Every Sort Direction And Keep Stable Tie Breaks Across Pages")
+    void shouldApplyEverySortDirectionAndKeepStableTieBreaksAcrossPages() throws Exception {
+        RegisteredUser user = registerUser("seriesinprogresssorts");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistSortedSeries(entity, "sort-a", LocalDate.of(2024, 1, 1), LocalDate.of(2024, 4, 1), 1, 10, 10, 100);
+        persistSortedSeries(entity, "sort-b", LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1), 2, 20, 5, 80);
+        persistSortedSeries(entity, "sort-c", LocalDate.of(2024, 3, 1), LocalDate.of(2024, 2, 1), 1, 10, 7, 70);
+
+        assertSortOrder(user, "LAST_WATCHED", "DESC", "sort-c", "sort-b", "sort-a");
+        assertSortOrder(user, "LAST_WATCHED", "ASC", "sort-a", "sort-b", "sort-c");
+        assertSortOrder(user, "LAST_RELEASED", "DESC", "sort-a", "sort-b", "sort-c");
+        assertSortOrder(user, "LAST_RELEASED", "ASC", "sort-c", "sort-b", "sort-a");
+        assertSortOrder(user, "REMAINING_EPISODES", "DESC", "sort-a", "sort-c", "sort-b");
+        assertSortOrder(user, "REMAINING_EPISODES", "ASC", "sort-b", "sort-c", "sort-a");
+        assertSortOrder(user, "REMAINING_RUNTIME", "DESC", "sort-a", "sort-b", "sort-c");
+        assertSortOrder(user, "REMAINING_RUNTIME", "ASC", "sort-b", "sort-c", "sort-a");
+
+        RegisteredUser tieUser = registerUser("seriesinprogressties");
+        User tieEntity = userRepository.findById(tieUser.id()).orElseThrow();
+        persistSortedSeries(tieEntity, "1399", LocalDate.of(2024, 5, 1), LocalDate.of(2024, 5, 1), 1, 10, 5, 50);
+        persistSortedSeries(tieEntity, "1396", LocalDate.of(2024, 5, 1), LocalDate.of(2024, 5, 1), 1, 10, 5, 50);
+        mockMvc.perform(getSeriesInProgressRequest(tieUser, tieUser.id()).param("page", "1").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].seriesTmdbId").value("1396"));
+        mockMvc.perform(getSeriesInProgressRequest(tieUser, tieUser.id()).param("page", "2").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].seriesTmdbId").value("1399"));
+    }
+
+    private void assertSortOrder(RegisteredUser user, String sortBy, String direction, String... expected) throws Exception {
+        var result = mockMvc.perform(getSeriesInProgressRequest(user, user.id())
+                        .param("sortBy", sortBy).param("direction", direction).param("size", "10"))
+                .andExpect(status().isOk())
+                .andReturn();
+        List<String> actualOrder = JsonPath.read(result.getResponse().getContentAsString(), "$.content[*].seriesTmdbId");
+        assertThat(actualOrder)
+                .containsExactlyElementsOf(List.of(expected));
     }
 
     // ---------- GET /contents/{contentId}/reviews ----------
