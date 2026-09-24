@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -52,6 +53,7 @@ public class PersonServiceImpl implements PersonService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final UserListItemRepository userListItemRepository;
     private final FollowedPersonService followedPersonService;
+    private final PageRequestFactory pageRequestFactory;
 
     @Override
     public PersonResponseDTO getPerson(UUID viewerId, String personTmdbId, PersonParticipation participation,
@@ -72,10 +74,12 @@ public class PersonServiceImpl implements PersonService {
         List<PersonCreditDTO> filtered = credits.stream()
                 .filter(credit -> matchesParticipation(credit.participation(), participation))
                 .sorted(Comparator.comparing(NormalizedCredit::releaseDate, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(NormalizedCredit::title, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
+                        .thenComparing(credit -> credit.key().type().name())
                         .thenComparing(credit -> credit.key().tmdbId()))
                 .map(credit -> toDto(credit, watched.contains(credit.key()), inList.contains(credit.key())))
                 .toList();
-        PageRequest request = pageRequest(pageNumber, pageSize);
+        PageRequest request = pageRequestFactory.build(pageNumber, pageSize);
         PageResponseDTO<PersonCreditDTO> page = page(filtered, request);
         PersonDetailsDTO person = new PersonDetailsDTO(aggregate.id(), aggregate.name(), aggregate.biography(), aggregate.birthday(),
                 aggregate.deathday(), aggregate.placeOfBirth(), aggregate.gender(), TmdbImageUrlBuilder.profileUrl(aggregate.profilePath()),
@@ -85,7 +89,10 @@ public class PersonServiceImpl implements PersonService {
 
     private TmdbPersonAggregate requireAggregate(TmdbLookupResult<TmdbPersonAggregate> lookup) {
         if (lookup instanceof TmdbLookupResult.Found<TmdbPersonAggregate> found) {
-            return found.value();
+            if (found.value() != null) {
+                return found.value();
+            }
+            throw new TmdbUnavailableException("TMDB returned an unusable person response");
         }
         if (lookup.isNotFound()) {
             throw new NotFoundException("No person found on TMDB for the given id");
@@ -103,7 +110,7 @@ public class PersonServiceImpl implements PersonService {
     private void mergeCredits(List<TmdbPersonAggregateCredit> source, boolean cast, Map<CreditKey, MutableCredit> merged) {
         for (TmdbPersonAggregateCredit credit : safeList(source)) {
             MovieOrSeriesType type = supportedType(credit.mediaType());
-            if (type == null || credit.id() == null || credit.id().isBlank()) {
+            if (type == null || !isNumericTmdbId(credit.id())) {
                 continue;
             }
             CreditKey key = new CreditKey(type, credit.id());
@@ -175,20 +182,14 @@ public class PersonServiceImpl implements PersonService {
         return tmdbId == null || tmdbId.isBlank() ? null : new CreditKey(type, tmdbId);
     }
 
-    private PageRequest pageRequest(Integer pageNumber, Integer pageSize) {
-        if (pageNumber != null && pageNumber < 0) {
-            throw new BadRequestException("Page number must be greater than or equal to 0");
-        }
-        int page = pageNumber == null || pageNumber == 0 ? 1 : pageNumber;
-        int size = pageSize == null ? 20 : pageSize;
-        if (size <= 0) throw new BadRequestException("Page size must be greater than 0");
-        return PageRequest.of(page - 1, Math.min(size, 1000));
-    }
-
     private void validatePersonTmdbId(String personTmdbId) {
-        if (personTmdbId == null || !personTmdbId.matches("\\d{1,20}")) {
+        if (!isNumericTmdbId(personTmdbId) || personTmdbId.length() > 20) {
             throw new BadRequestException("personTmdbId must be a numeric TMDB id up to 20 digits");
         }
+    }
+
+    private static boolean isNumericTmdbId(String tmdbId) {
+        return tmdbId != null && tmdbId.matches("\\d+");
     }
 
     private static <T> List<T> safeList(List<T> values) {

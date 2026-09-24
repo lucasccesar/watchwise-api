@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.person.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregate;
@@ -53,7 +54,7 @@ class PersonServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new PersonServiceImpl(userRepository, tmdbClient, diaryEntryRepository, userListItemRepository,
-                followedPersonService);
+                followedPersonService, new PageRequestFactory());
         viewerId = UUID.randomUUID();
         when(userRepository.findById(viewerId)).thenReturn(Optional.of(User.builder()
                 .id(viewerId).preferredLanguage("pt-BR").build()));
@@ -155,10 +156,38 @@ class PersonServiceImplTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple("1", "2024-01-01"),
                         org.assertj.core.groups.Tuple.tuple("2", "1999-01-01"),
-                        org.assertj.core.groups.Tuple.tuple("3", null),
-                        org.assertj.core.groups.Tuple.tuple("4", null),
                         org.assertj.core.groups.Tuple.tuple("5", null),
-                        org.assertj.core.groups.Tuple.tuple("6", null));
+                        org.assertj.core.groups.Tuple.tuple("3", null),
+                        org.assertj.core.groups.Tuple.tuple("6", null),
+                        org.assertj.core.groups.Tuple.tuple("4", null));
+    }
+
+    @Test
+    void shouldOrderEqualAndNullDatesByCaseInsensitiveTitleTypeAndTmdbId() {
+        stubAggregate(List.of(
+                credit("40", "movie", "alpha", null, null, "2024-01-01", null, null),
+                credit("30", "tv", null, "Alpha", null, "2024-01-01", null, null),
+                credit("10", "movie", "ALPHA", null, null, "2024-01-01", null, null),
+                credit("20", "movie", "Beta", null, null, "2024-01-01", null, null),
+                credit("60", "movie", "Zulu", null, null, null, null, null),
+                credit("50", "movie", "Aaron", null, null, null, null, null)), List.of());
+
+        PersonResponseDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20);
+
+        assertThat(result.credits().content()).extracting(PersonCreditDTO::tmdbId)
+                .containsExactly("10", "40", "30", "20", "50", "60");
+    }
+
+    @Test
+    void shouldIgnoreCreditsWithNonNumericTmdbIds() {
+        stubAggregate(List.of(
+                credit("abc", "movie", "Malformed", null, null, "2024-01-01", null, null),
+                credit("123", "movie", "Valid", null, null, "2023-01-01", null, null)), List.of());
+
+        PersonResponseDTO result = service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20);
+
+        assertThat(result.progress().totalCredits()).isEqualTo(1);
+        assertThat(result.credits().content()).extracting(PersonCreditDTO::tmdbId).containsExactly("123");
     }
 
     @Test
@@ -238,6 +267,14 @@ class PersonServiceImplTest {
                 .isInstanceOf(NotFoundException.class);
 
         when(tmdbClient.getPersonAggregate("503", "pt-BR")).thenReturn(new TmdbLookupResult.Unavailable<>());
+        assertThatThrownBy(() -> service.getPerson(viewerId, "503", null, 1, 20))
+                .isInstanceOf(TmdbUnavailableException.class);
+    }
+
+    @Test
+    void shouldMapNullSuccessfulAggregateToTmdbUnavailable() {
+        when(tmdbClient.getPersonAggregate("503", "pt-BR")).thenReturn(new TmdbLookupResult.Found<>(null));
+
         assertThatThrownBy(() -> service.getPerson(viewerId, "503", null, 1, 20))
                 .isInstanceOf(TmdbUnavailableException.class);
     }

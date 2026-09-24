@@ -123,29 +123,49 @@ public class TmdbClient {
     }
 
     public TmdbLookupResult<TmdbPersonDetails> getPersonDetails(String personTmdbId) {
-        return cachedLookup(tmdbPersonDetailsCache, personTmdbId, () -> callWithRetry(() -> tmdbRestClient.get()
+        TmdbLookupResult<TmdbPersonDetails> cached = tmdbPersonDetailsCache.getIfPresent(personTmdbId);
+        if (cached instanceof TmdbLookupResult.Found<TmdbPersonDetails> found) {
+            return new TmdbLookupResult.Found<>(found.value(), TmdbLookupOrigin.CACHE);
+        }
+        return callWithRetry(() -> tmdbRestClient.get()
                         .uri("/person/{id}", personTmdbId)
                         .retrieve()
                         .body(TmdbPersonDetails.class),
-                "person details " + personTmdbId));
+                "person details " + personTmdbId);
     }
 
     public TmdbLookupResult<TmdbPersonAggregate> getPersonAggregate(String personTmdbId, String language) {
         TmdbLookupResult<TmdbPersonAggregate> result = cachedLookup(
-                tmdbPersonAggregateCache, personTmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
-                        .uri(uriBuilder -> uriBuilder.path("/person/{id}")
-                                .queryParam("language", language)
-                                .queryParam("append_to_response", "combined_credits")
-                                .build(personTmdbId))
-                        .retrieve()
-                        .body(TmdbPersonAggregate.class),
-                        "person aggregate " + personTmdbId));
+                tmdbPersonAggregateCache, personTmdbId + "|" + language,
+                () -> loadPersonAggregate(personTmdbId, language));
         if (result instanceof TmdbLookupResult.Found<TmdbPersonAggregate> found) {
             TmdbPersonDetails details = new TmdbPersonDetails(found.value().id());
             tmdbPersonDetailsCache.put(personTmdbId,
                     new TmdbLookupResult.Found<>(details, found.origin()));
         }
         return result;
+    }
+
+    private TmdbLookupResult<TmdbPersonAggregate> loadPersonAggregate(String personTmdbId, String language) {
+        TmdbLookupResult<Optional<TmdbPersonAggregate>> lookup = callWithRetry(() -> Optional.ofNullable(tmdbRestClient.get()
+                        .uri(uriBuilder -> uriBuilder.path("/person/{id}")
+                                .queryParam("language", language)
+                                .queryParam("append_to_response", "combined_credits")
+                                .build(personTmdbId))
+                        .retrieve()
+                        .body(TmdbPersonAggregate.class)),
+                "person aggregate " + personTmdbId);
+        if (lookup instanceof TmdbLookupResult.Found<Optional<TmdbPersonAggregate>> found) {
+            return found.value()
+                    .filter(TmdbClient::isUsablePersonAggregate)
+                    .<TmdbLookupResult<TmdbPersonAggregate>>map(value -> new TmdbLookupResult.Found<>(value, found.origin()))
+                    .orElseGet(TmdbLookupResult.Unavailable::new);
+        }
+        return lookup.isNotFound() ? new TmdbLookupResult.NotFound<>() : new TmdbLookupResult.Unavailable<>();
+    }
+
+    private static boolean isUsablePersonAggregate(TmdbPersonAggregate aggregate) {
+        return aggregate.id() != null && aggregate.id().matches("\\d+");
     }
 
     public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {

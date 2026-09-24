@@ -95,6 +95,9 @@ class PersonControllerIntegrationTest {
     void shouldReturnBadRequestWhenPersonIdIsNotNumeric() throws Exception {
         UUID viewerId = UUID.randomUUID();
         mockValidSession(viewerId);
+        when(personService.getPerson(viewerId, "abc", PersonParticipation.ALL, null, null))
+                .thenThrow(new BadRequestException("personTmdbId must be a numeric TMDB id up to 20 digits"));
+
         mockMvc.perform(get("/people/abc").cookie(accessCookie(viewerId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))

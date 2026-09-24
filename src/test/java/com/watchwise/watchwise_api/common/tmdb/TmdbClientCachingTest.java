@@ -172,6 +172,36 @@ class TmdbClientCachingTest {
     }
 
     @Test
+    void shouldCallTmdbForEachUnseededPersonExistenceLookup() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
+                .andRespond(withSuccess("{\"id\":6193}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
+                .andRespond(withSuccess("{\"id\":6193}", MediaType.APPLICATION_JSON));
+
+        var first = tmdbClient.getPersonDetails("6193");
+        var second = tmdbClient.getPersonDetails("6193");
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(tmdbPersonDetailsCache.getIfPresent("6193")).isNull();
+        mockServer.verify();
+    }
+
+    @Test
+    void shouldTreatNullSuccessfulPersonAggregateAsUnavailable() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193?language=en-US&append_to_response=combined_credits"))
+                .andRespond(withSuccess("null", MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getPersonAggregate("6193", "en-US");
+
+        assertThat(result.isUnavailable()).isTrue();
+        assertThat(tmdbPersonAggregateCache.getIfPresent("6193|en-US")).isNull();
+        mockServer.verify();
+    }
+
+    @Test
     void shouldCachePersonAggregateNotFound() {
         mockServer.expect(requestTo("https://api.themoviedb.org/3/person/999?language=en-US&append_to_response=combined_credits"))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
