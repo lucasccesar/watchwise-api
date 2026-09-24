@@ -420,7 +420,7 @@ class DiaryEntryRepositoryTest {
     @Test
     @DisplayName("[findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds] Should Count Watched Episodes By Positive Season In One Batch")
     void shouldCountWatchedEpisodesByPositiveSeasonInOneBatch() {
-        Content firstSeasonEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content firstSeasonEpisode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
         Content secondSeasonEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
         Content specialEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
         Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
@@ -430,7 +430,7 @@ class DiaryEntryRepositoryTest {
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, specialEpisode));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeriesEpisode));
 
-        var result = diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(
+        var result = diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
                 lucas.getId(), List.of("1399", "1396"));
 
         assertThat(result)
@@ -439,6 +439,11 @@ class DiaryEntryRepositoryTest {
                         org.assertj.core.groups.Tuple.tuple("1399", 1, 1L),
                         org.assertj.core.groups.Tuple.tuple("1399", 2, 1L),
                         org.assertj.core.groups.Tuple.tuple("1396", 1, 1L));
+        assertThat(result).extracting("seriesTmdbId", "seasonNumber", "watchedRuntimeMinutes")
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("1399", 1, 55L),
+                        org.assertj.core.groups.Tuple.tuple("1399", 2, 0L),
+                        org.assertj.core.groups.Tuple.tuple("1396", 1, 0L));
     }
 
     @Test
