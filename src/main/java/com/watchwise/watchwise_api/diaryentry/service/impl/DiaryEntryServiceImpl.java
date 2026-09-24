@@ -28,6 +28,8 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
@@ -38,6 +40,8 @@ import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -49,6 +53,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,6 +65,8 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,6 +96,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final WatchCompanionRepository watchCompanionRepository;
     private final PageRequestFactory pageRequestFactory;
     private final TmdbClient tmdbClient;
+    private final SeriesProgressReadRepository seriesProgressReadRepository;
+    private final SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -140,6 +150,225 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         return seriesInProgress.map(row -> toSeriesInProgressResponse(
                 row, watchedEpisodeCountsBySeriesAndSeason.getOrDefault(row.getSeriesTmdbId(), Map.of())));
+    }
+
+    @Override
+    public SeriesInProgressPageResponseDTO getSeriesInProgress(
+            UUID viewerId,
+            UUID userId,
+            Integer pageNumber,
+            Integer pageSize,
+            SeriesProgressReadRepository.SeriesProgressSort sortBy,
+            Sort.Direction direction) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+
+        assertCanViewDiary(viewerId, userId, target);
+
+        SeriesProgressReadRepository.SeriesProgressSort effectiveSort = sortBy == null
+                ? SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED
+                : sortBy;
+        Sort.Direction effectiveDirection = direction == null ? Sort.Direction.DESC : direction;
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+
+        Page<SeriesProgressReadRepository.SeriesProgressCandidate> allCandidates =
+                seriesProgressReadRepository.findCandidatesByUserId(
+                        userId, effectiveSort, effectiveDirection, Pageable.unpaged());
+        List<SeriesProgressReadRepository.SeriesProgressCandidate> allRows = allCandidates.getContent();
+        Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = refreshSnapshots(allRows);
+
+        Page<SeriesProgressReadRepository.SeriesProgressCandidate> page =
+                seriesProgressReadRepository.findCandidatesByUserId(
+                        userId, effectiveSort, effectiveDirection, pageRequest);
+        List<String> pageSeriesIds = page.getContent().stream()
+                .map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .distinct()
+                .toList();
+        Map<String, Map<Integer, DiaryEntryRepository.SeasonProgress>> watchedProgress =
+                loadWatchedProgress(userId, pageSeriesIds);
+
+        List<SeriesInProgressResponseDTO> content = page.getContent().stream()
+                .map(row -> toDetailedSeriesResponse(
+                        row,
+                        snapshots.get(row.getSeriesTmdbId()),
+                        watchedProgress.getOrDefault(row.getSeriesTmdbId(), Map.of())))
+                .toList();
+        SeriesInProgressAggregateDTO aggregate = calculateAggregate(userId, allRows, snapshots);
+
+        return new SeriesInProgressPageResponseDTO(
+                content,
+                page.getNumber() + 1,
+                page.getSize(),
+                page.getTotalElements(),
+                page.getTotalPages(),
+                page.hasNext(),
+                aggregate);
+    }
+
+    private Map<String, SeriesProgressMetadataRefreshService.Snapshot> refreshSnapshots(
+            List<SeriesProgressReadRepository.SeriesProgressCandidate> rows) {
+        if (rows.isEmpty()) {
+            return Map.of();
+        }
+
+        LocalDate today = LocalDate.now();
+        Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots = new LinkedHashMap<>();
+        rows.stream()
+                .map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .distinct()
+                .forEach(seriesTmdbId -> snapshots.put(
+                        seriesTmdbId,
+                        seriesProgressMetadataRefreshService.refreshIfMissingOrExpired(seriesTmdbId, today)));
+        return snapshots;
+    }
+
+    private Map<String, Map<Integer, DiaryEntryRepository.SeasonProgress>> loadWatchedProgress(
+            UUID userId, List<String> seriesTmdbIds) {
+        if (seriesTmdbIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<DiaryEntryRepository.SeasonProgress> progress = Optional.ofNullable(
+                diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(userId, seriesTmdbIds))
+                .orElseGet(List::of);
+        return progress.stream().collect(Collectors.groupingBy(
+                DiaryEntryRepository.SeasonProgress::getSeriesTmdbId,
+                LinkedHashMap::new,
+                Collectors.toMap(
+                        DiaryEntryRepository.SeasonProgress::getSeasonNumber,
+                        row -> row,
+                        (first, second) -> first,
+                        LinkedHashMap::new)));
+    }
+
+    private SeriesInProgressResponseDTO toDetailedSeriesResponse(
+            SeriesProgressReadRepository.SeriesProgressCandidate row,
+            SeriesProgressMetadataRefreshService.Snapshot snapshot,
+            Map<Integer, DiaryEntryRepository.SeasonProgress> watchedProgress) {
+        SeriesProgressMetadataRefreshService.SeriesSnapshot series = snapshot == null
+                ? null
+                : snapshot.series();
+        Integer totalReleasedEpisodeCount = series != null
+                ? series.regularReleasedEpisodeCount()
+                : row.getTotalReleasedEpisodeCount();
+        Integer totalKnownRuntime = series != null ? series.totalKnownRuntime() : row.getTotalKnownRuntime();
+        Long watchedEpisodeCount = valueOrZero(row.getWatchedEpisodeCount());
+        Long watchedRuntimeMinutes = valueOrZero(row.getWatchedRuntimeMinutes());
+        Long remainingEpisodeCount = row.getRemainingEpisodeCount() != null
+                ? row.getRemainingEpisodeCount()
+                : remainingEpisodes(totalReleasedEpisodeCount, watchedEpisodeCount);
+        Long remainingRuntimeMinutes = remainingRuntime(totalKnownRuntime, watchedRuntimeMinutes);
+
+        List<SeasonProgressDTO> seasonProgress = snapshot == null
+                ? List.of()
+                : snapshot.seasons().stream()
+                .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
+                .sorted(Comparator.comparing(SeriesProgressMetadataRefreshService.SeasonSnapshot::seasonNumber))
+                .map(season -> toDetailedSeasonProgress(season, watchedProgress.get(season.seasonNumber())))
+                .toList();
+        Double watchedPercentage = percentage(watchedEpisodeCount, totalReleasedEpisodeCount);
+
+        return new SeriesInProgressResponseDTO(
+                row.getSeriesTmdbId(),
+                row.getMaxSeasonNumber(),
+                row.getMaxEpisodeNumber(),
+                row.getLastWatchedDate(),
+                watchedEpisodeCount,
+                totalReleasedEpisodeCount,
+                watchedPercentage,
+                seasonProgress,
+                row.getLastWatchedSeasonNumber(),
+                row.getLastWatchedEpisodeNumber(),
+                watchedRuntimeMinutes,
+                totalReleasedEpisodeCount,
+                totalKnownRuntime,
+                series != null ? series.lastReleasedEpisodeDate() : row.getLastReleasedEpisodeDate(),
+                remainingEpisodeCount,
+                remainingRuntimeMinutes);
+    }
+
+    private SeasonProgressDTO toDetailedSeasonProgress(
+            SeriesProgressMetadataRefreshService.SeasonSnapshot season,
+            DiaryEntryRepository.SeasonProgress watched) {
+        Long watchedEpisodeCount = watched == null ? 0L : valueOrZero(watched.getWatchedEpisodeCount());
+        Long watchedRuntimeMinutes = watched == null ? 0L : valueOrZero(watched.getWatchedRuntimeMinutes());
+        Integer totalEpisodeCount = season.regularReleasedEpisodeCount();
+        return new SeasonProgressDTO(
+                season.seasonNumber(),
+                watchedEpisodeCount,
+                totalEpisodeCount,
+                percentage(watchedEpisodeCount, totalEpisodeCount),
+                watchedRuntimeMinutes,
+                remainingEpisodes(totalEpisodeCount, watchedEpisodeCount),
+                remainingRuntime(season.totalKnownRuntime(), watchedRuntimeMinutes));
+    }
+
+    private SeriesInProgressAggregateDTO calculateAggregate(
+            UUID userId,
+            List<SeriesProgressReadRepository.SeriesProgressCandidate> rows,
+            Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots) {
+        long releasedEpisodeCount = 0L;
+        long knownRuntime = 0L;
+        boolean completeRuntime = true;
+        long fallbackWatchedEpisodeCount = 0L;
+        long fallbackWatchedRuntimeMinutes = 0L;
+
+        for (SeriesProgressReadRepository.SeriesProgressCandidate row : rows) {
+            SeriesProgressMetadataRefreshService.Snapshot snapshot = snapshots.get(row.getSeriesTmdbId());
+            SeriesProgressMetadataRefreshService.SeriesSnapshot series = snapshot == null ? null : snapshot.series();
+            Integer released = series != null ? series.regularReleasedEpisodeCount() : row.getTotalReleasedEpisodeCount();
+            Integer runtime = series != null ? series.totalKnownRuntime() : row.getTotalKnownRuntime();
+            releasedEpisodeCount += valueOrZero(released);
+            if (runtime == null) {
+                completeRuntime = false;
+            } else {
+                knownRuntime += runtime;
+            }
+            fallbackWatchedEpisodeCount += valueOrZero(row.getWatchedEpisodeCount());
+            fallbackWatchedRuntimeMinutes += valueOrZero(row.getWatchedRuntimeMinutes());
+        }
+
+        SeriesProgressReadRepository.SeriesProgressTotals totals =
+                seriesProgressReadRepository.findGlobalTotalsByUserId(userId);
+        long watchedEpisodeCount = totals == null || totals.getWatchedEpisodeCount() == null
+                ? fallbackWatchedEpisodeCount
+                : totals.getWatchedEpisodeCount();
+        long watchedRuntimeMinutes = totals == null || totals.getWatchedRuntimeMinutes() == null
+                ? fallbackWatchedRuntimeMinutes
+                : totals.getWatchedRuntimeMinutes();
+        Long remainingRuntimeMinutes = completeRuntime
+                ? Math.max(knownRuntime - watchedRuntimeMinutes, 0L)
+                : null;
+
+        return new SeriesInProgressAggregateDTO(
+                rows.stream().map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId).distinct().count(),
+                watchedEpisodeCount,
+                releasedEpisodeCount,
+                Math.max(releasedEpisodeCount - watchedEpisodeCount, 0L),
+                remainingRuntimeMinutes);
+    }
+
+    private Long remainingEpisodes(Integer totalEpisodeCount, Long watchedEpisodeCount) {
+        return totalEpisodeCount == null
+                ? null
+                : Math.max(totalEpisodeCount.longValue() - valueOrZero(watchedEpisodeCount), 0L);
+    }
+
+    private Long remainingRuntime(Integer totalRuntimeMinutes, Long watchedRuntimeMinutes) {
+        return totalRuntimeMinutes == null
+                ? null
+                : Math.max(totalRuntimeMinutes.longValue() - valueOrZero(watchedRuntimeMinutes), 0L);
+    }
+
+    private Double percentage(Long watchedEpisodeCount, Integer totalEpisodeCount) {
+        if (totalEpisodeCount == null || totalEpisodeCount <= 0) {
+            return null;
+        }
+        return Math.min(100.0, valueOrZero(watchedEpisodeCount) * 100.0 / totalEpisodeCount);
+    }
+
+    private long valueOrZero(Number value) {
+        return value == null ? 0L : value.longValue();
     }
 
     private Map<String, Map<Integer, Long>> loadWatchedEpisodeCountsBySeriesAndSeason(

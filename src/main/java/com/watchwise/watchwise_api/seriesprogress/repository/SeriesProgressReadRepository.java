@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.seriesprogress.repository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,7 +16,16 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
 
     default Page<SeriesProgressCandidate> findCandidatesByUserId(
             UUID userId, SeriesProgressSort sort, Pageable pageable) {
-        return findCandidatesByUserIdAndSort(userId, Objects.requireNonNull(sort).name(), pageable);
+        return findCandidatesByUserId(userId, sort, Sort.Direction.DESC, pageable);
+    }
+
+    default Page<SeriesProgressCandidate> findCandidatesByUserId(
+            UUID userId, SeriesProgressSort sort, Sort.Direction direction, Pageable pageable) {
+        return findCandidatesByUserIdAndSort(
+                userId,
+                Objects.requireNonNull(sort).name(),
+                Objects.requireNonNull(direction).name(),
+                pageable);
     }
 
     @Query(value = """
@@ -139,10 +149,14 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                    remaining_runtime_minutes AS remainingRuntimeMinutes
             FROM candidate_rows
             ORDER BY
-                CASE WHEN :sort = 'LAST_WATCHED' THEN last_watched_date END DESC NULLS LAST,
-                CASE WHEN :sort = 'LAST_RELEASED' THEN last_released_episode_date END DESC NULLS LAST,
-                CASE WHEN :sort = 'REMAINING_EPISODES' THEN remaining_episode_count END ASC NULLS LAST,
-                CASE WHEN :sort = 'REMAINING_RUNTIME' THEN remaining_runtime_minutes END ASC NULLS LAST,
+                CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'ASC' THEN last_watched_date END ASC NULLS LAST,
+                CASE WHEN :sort = 'LAST_WATCHED' AND :direction = 'DESC' THEN last_watched_date END DESC NULLS LAST,
+                CASE WHEN :sort = 'LAST_RELEASED' AND :direction = 'ASC' THEN last_released_episode_date END ASC NULLS LAST,
+                CASE WHEN :sort = 'LAST_RELEASED' AND :direction = 'DESC' THEN last_released_episode_date END DESC NULLS LAST,
+                CASE WHEN :sort = 'REMAINING_EPISODES' AND :direction = 'ASC' THEN remaining_episode_count END ASC NULLS LAST,
+                CASE WHEN :sort = 'REMAINING_EPISODES' AND :direction = 'DESC' THEN remaining_episode_count END DESC NULLS LAST,
+                CASE WHEN :sort = 'REMAINING_RUNTIME' AND :direction = 'ASC' THEN remaining_runtime_minutes END ASC NULLS LAST,
+                CASE WHEN :sort = 'REMAINING_RUNTIME' AND :direction = 'DESC' THEN remaining_runtime_minutes END DESC NULLS LAST,
                 series_tmdb_id ASC
             """,
             countQuery = """
@@ -181,7 +195,8 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
             """,
             nativeQuery = true)
     Page<SeriesProgressCandidate> findCandidatesByUserIdAndSort(
-            @Param("userId") UUID userId, @Param("sort") String sort, Pageable pageable);
+            @Param("userId") UUID userId, @Param("sort") String sort,
+            @Param("direction") String direction, Pageable pageable);
 
     @Query(value = """
             WITH episode_entries AS (

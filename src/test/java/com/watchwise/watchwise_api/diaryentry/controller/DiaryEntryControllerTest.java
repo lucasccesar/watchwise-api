@@ -11,8 +11,11 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -128,6 +132,29 @@ class DiaryEntryControllerTest {
         diaryEntryController.getSeriesInProgress(targetUserId, null, null);
 
         verify(diaryEntryService).getSeriesInProgress(currentUserId, targetUserId, null, null);
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Detailed Envelope And Forward Typed Sort Parameters")
+    void shouldReturnDetailedEnvelopeAndForwardTypedSortParametersWhenGettingSeriesInProgress() {
+        UUID targetUserId = UUID.randomUUID();
+        SeriesInProgressPageResponseDTO expected = new SeriesInProgressPageResponseDTO(
+                List.of(), 1, 10, 0, 0, false,
+                new SeriesInProgressAggregateDTO(0L, 0L, 0L, 0L, 0L));
+        when(diaryEntryService.getSeriesInProgress(
+                currentUserId, targetUserId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.REMAINING_EPISODES, Sort.Direction.ASC))
+                .thenReturn(expected);
+
+        ResponseEntity<SeriesInProgressPageResponseDTO> result = diaryEntryController.getSeriesInProgress(
+                targetUserId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.REMAINING_EPISODES, Sort.Direction.ASC);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(expected);
+        verify(diaryEntryService).getSeriesInProgress(
+                currentUserId, targetUserId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.REMAINING_EPISODES, Sort.Direction.ASC);
     }
 
     @Test

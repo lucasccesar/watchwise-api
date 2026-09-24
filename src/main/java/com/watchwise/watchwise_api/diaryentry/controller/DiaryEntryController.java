@@ -9,12 +9,15 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -69,12 +72,26 @@ public class DiaryEntryController {
     }
 
     @GetMapping("/users/{userId}/series-in-progress")
-    public ResponseEntity<PageResponseDTO<SeriesInProgressResponseDTO>> getSeriesInProgress(
+    public ResponseEntity<SeriesInProgressPageResponseDTO> getSeriesInProgress(
             @PathVariable UUID userId,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false, defaultValue = "LAST_WATCHED")
+            SeriesProgressReadRepository.SeriesProgressSort sortBy,
+            @RequestParam(required = false, defaultValue = "DESC") Sort.Direction direction
     ) {
-        Page<SeriesInProgressResponseDTO> entries = diaryEntryService.getSeriesInProgress(getCurrentUserId(), userId, page, size);
+        SeriesInProgressPageResponseDTO response = diaryEntryService.getSeriesInProgress(
+                getCurrentUserId(), userId, page, size, sortBy, direction);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Compatibility overload for callers compiled against the pre-Task-4 Java API.
+     */
+    public ResponseEntity<PageResponseDTO<SeriesInProgressResponseDTO>> getSeriesInProgress(
+            UUID userId, Integer page, Integer size) {
+        Page<SeriesInProgressResponseDTO> entries = diaryEntryService.getSeriesInProgress(
+                getCurrentUserId(), userId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 

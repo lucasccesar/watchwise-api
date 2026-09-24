@@ -30,12 +30,16 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -65,6 +69,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Method;
@@ -83,6 +89,7 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -139,6 +146,12 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private TmdbClient tmdbClient;
+
+    @Mock
+    private SeriesProgressReadRepository seriesProgressReadRepository;
+
+    @Mock
+    private SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
 
     @Mock
     private EntityManager entityManager;
@@ -530,6 +543,71 @@ class DiaryEntryServiceImplTest {
     // ---------- getSeriesInProgress ----------
 
     @Test
+    @DisplayName("[getSeriesInProgress] Should Build Detailed Envelope With Global Metrics And Directional Ordering")
+    void shouldBuildDetailedEnvelopeWithGlobalMetricsAndDirectionalOrderingForSeriesInProgress() {
+        DiaryEntryRepository.SeasonProgress progressA = seasonProgress("a", 1, 2L, 40L);
+        DiaryEntryRepository.SeasonProgress progressB = seasonProgress("b", 1, 1L, 20L);
+        List<SeriesProgressReadRepository.SeriesProgressCandidate> candidates = List.of(
+                progressCandidate("a", 2L, 40L, 2, 9, LocalDate.of(2026, 9, 20), 1, 2, 5, 100, LocalDate.of(2026, 9, 21), 3L, 60L),
+                progressCandidate("b", 3L, 60L, 1, 4, LocalDate.of(2026, 9, 19), 1, 1, 4, 80, LocalDate.of(2026, 9, 22), 1L, 20L),
+                progressCandidate("off-page", 4L, 200L, 3, 7, LocalDate.of(2026, 9, 18), 3, 2, 3, null, null, 0L, null));
+
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.DESC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), candidates, false));
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.ASC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), candidates.reversed(), true));
+        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+                .thenReturn(seriesProgressTotals(9L, 300L));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
+                eq(lucasId), any(List.class)))
+                .thenReturn(List.of(progressA, progressB));
+        when(seriesProgressMetadataRefreshService.refreshIfMissingOrExpired(any(), any()))
+                .thenAnswer(invocation -> snapshot(invocation.getArgument(0)));
+
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 2,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
+
+        assertThat(result.content()).extracting(SeriesInProgressResponseDTO::seriesTmdbId)
+                .containsExactly("a", "b");
+        assertThat(result.content().getFirst())
+                .extracting(SeriesInProgressResponseDTO::lastWatchedSeasonNumber,
+                        SeriesInProgressResponseDTO::lastWatchedEpisodeNumber,
+                        SeriesInProgressResponseDTO::remainingEpisodeCount,
+                        SeriesInProgressResponseDTO::remainingRuntimeMinutes)
+                .containsExactly(1, 2, 3L, 60L);
+        assertThat(result.content().getFirst().seasonProgress())
+                .extracting(SeasonProgressDTO::seasonNumber,
+                        SeasonProgressDTO::remainingEpisodeCount,
+                        SeasonProgressDTO::remainingRuntimeMinutes)
+                .containsExactly(tuple(1, 3L, 60L));
+        assertThat(result.content().getFirst().seasonProgress())
+                .extracting(SeasonProgressDTO::seasonNumber)
+                .doesNotContain(0);
+        assertThat(result.aggregate())
+                .isEqualTo(new SeriesInProgressAggregateDTO(3L, 9L, 12L, 3L, null));
+        assertThat(result.totalElements()).isEqualTo(3L);
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.size()).isEqualTo(2);
+        verifyNoInteractions(tmdbClient);
+
+        SeriesInProgressPageResponseDTO ascending = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 2,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.ASC);
+
+        assertThat(ascending.content()).extracting(SeriesInProgressResponseDTO::seriesTmdbId)
+                .containsExactly("off-page", "b");
+        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.ASC), any(Pageable.class));
+    }
+
+    @Test
     @DisplayName("[getSeriesInProgress] Should Return Mapped Page - When Viewer Is The Profile Owner")
     void shouldReturnMappedPageWhenViewerIsTheProfileOwnerForSeriesInProgress() {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 8, 6, LocalDate.of(2024, 5, 1));
@@ -870,6 +948,149 @@ class DiaryEntryServiceImplTest {
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
             String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
         return seriesInProgress(seriesTmdbId, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate);
+    }
+
+    private Page<SeriesProgressReadRepository.SeriesProgressCandidate> candidatesPage(
+            Pageable pageable, List<SeriesProgressReadRepository.SeriesProgressCandidate> candidates, boolean ascending) {
+        if (pageable.isUnpaged()) {
+            return new PageImpl<>(candidates);
+        }
+        int from = Math.min(pageable.getPageNumber() * pageable.getPageSize(), candidates.size());
+        int to = Math.min(from + pageable.getPageSize(), candidates.size());
+        return new PageImpl<>(candidates.subList(from, to), pageable, candidates.size());
+    }
+
+    private SeriesProgressReadRepository.SeriesProgressCandidate progressCandidate(
+            String seriesTmdbId, Long watchedEpisodeCount, Long watchedRuntimeMinutes,
+            Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate,
+            Integer lastWatchedSeasonNumber, Integer lastWatchedEpisodeNumber,
+            Integer totalReleasedEpisodeCount, Integer totalKnownRuntime,
+            LocalDate lastReleasedEpisodeDate, Long remainingEpisodeCount, Long remainingRuntimeMinutes) {
+        return new SeriesProgressReadRepository.SeriesProgressCandidate() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Long getWatchedEpisodeCount() {
+                return watchedEpisodeCount;
+            }
+
+            @Override
+            public Long getWatchedRuntimeMinutes() {
+                return watchedRuntimeMinutes;
+            }
+
+            @Override
+            public Integer getMaxSeasonNumber() {
+                return maxSeasonNumber;
+            }
+
+            @Override
+            public Integer getMaxEpisodeNumber() {
+                return maxEpisodeNumber;
+            }
+
+            @Override
+            public LocalDate getLastWatchedDate() {
+                return lastWatchedDate;
+            }
+
+            @Override
+            public Integer getLastWatchedSeasonNumber() {
+                return lastWatchedSeasonNumber;
+            }
+
+            @Override
+            public Integer getLastWatchedEpisodeNumber() {
+                return lastWatchedEpisodeNumber;
+            }
+
+            @Override
+            public Integer getTotalReleasedEpisodeCount() {
+                return totalReleasedEpisodeCount;
+            }
+
+            @Override
+            public Integer getTotalKnownRuntime() {
+                return totalKnownRuntime;
+            }
+
+            @Override
+            public LocalDate getLastReleasedEpisodeDate() {
+                return lastReleasedEpisodeDate;
+            }
+
+            @Override
+            public Long getRemainingEpisodeCount() {
+                return remainingEpisodeCount;
+            }
+
+            @Override
+            public Long getRemainingRuntimeMinutes() {
+                return remainingRuntimeMinutes;
+            }
+        };
+    }
+
+    private SeriesProgressReadRepository.SeriesProgressTotals seriesProgressTotals(
+            Long watchedEpisodeCount, Long watchedRuntimeMinutes) {
+        return new SeriesProgressReadRepository.SeriesProgressTotals() {
+            @Override
+            public Long getWatchedEpisodeCount() {
+                return watchedEpisodeCount;
+            }
+
+            @Override
+            public Long getWatchedRuntimeMinutes() {
+                return watchedRuntimeMinutes;
+            }
+        };
+    }
+
+    private DiaryEntryRepository.SeasonProgress seasonProgress(
+            String seriesTmdbId, Integer seasonNumber, Long watchedEpisodeCount, Long watchedRuntimeMinutes) {
+        return new DiaryEntryRepository.SeasonProgress() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Integer getSeasonNumber() {
+                return seasonNumber;
+            }
+
+            @Override
+            public Long getWatchedEpisodeCount() {
+                return watchedEpisodeCount;
+            }
+
+            @Override
+            public Long getWatchedRuntimeMinutes() {
+                return watchedRuntimeMinutes;
+            }
+        };
+    }
+
+    private SeriesProgressMetadataRefreshService.Snapshot snapshot(String seriesTmdbId) {
+        Integer released = switch (seriesTmdbId) {
+            case "a" -> 5;
+            case "b" -> 4;
+            default -> 3;
+        };
+        Integer runtime = "off-page".equals(seriesTmdbId) ? null : released * 20;
+        return new SeriesProgressMetadataRefreshService.Snapshot(
+                new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                        seriesTmdbId, released, runtime, runtime == null ? 0 : released,
+                        LocalDate.of(2026, 9, 22), LocalDateTime.now(), runtime == null ? null : LocalDateTime.now()),
+                List.of(
+                        new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                seriesTmdbId, 0, 1, 20, 1, LocalDate.of(2026, 9, 1), LocalDateTime.now()),
+                        new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                seriesTmdbId, released == 3 ? 3 : 1, released, runtime, runtime == null ? 0 : released,
+                                LocalDate.of(2026, 9, 22), LocalDateTime.now())));
     }
 
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
