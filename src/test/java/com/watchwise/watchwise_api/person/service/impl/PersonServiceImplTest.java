@@ -37,6 +37,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -56,11 +57,11 @@ class PersonServiceImplTest {
         service = new PersonServiceImpl(userRepository, tmdbClient, diaryEntryRepository, userListItemRepository,
                 followedPersonService, new PageRequestFactory());
         viewerId = UUID.randomUUID();
-        when(userRepository.findById(viewerId)).thenReturn(Optional.of(User.builder()
+        lenient().when(userRepository.findById(viewerId)).thenReturn(Optional.of(User.builder()
                 .id(viewerId).preferredLanguage("pt-BR").build()));
-        when(followedPersonService.isFollowing(viewerId, "287")).thenReturn(true);
-        when(diaryEntryRepository.findWatchedMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of());
-        when(userListItemRepository.findViewerMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of());
+        lenient().when(followedPersonService.isFollowing(viewerId, "287")).thenReturn(true);
+        lenient().when(diaryEntryRepository.findWatchedMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of());
+        lenient().when(userListItemRepository.findViewerMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of());
     }
 
     @Test
