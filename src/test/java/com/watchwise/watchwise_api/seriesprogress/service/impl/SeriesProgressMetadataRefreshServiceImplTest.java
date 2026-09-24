@@ -41,6 +41,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
@@ -173,8 +174,8 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     }
 
     @Test
-    @DisplayName("[refresh] Does Not Publish Incomplete Runtime Snapshot")
-    void shouldNotPublishIncompleteRuntimeSnapshot() {
+    @DisplayName("[refresh] Publishes Episode Metrics With Null Runtime When Runtime Is Incomplete")
+    void shouldPublishEpisodeMetricsWithNullRuntimeWhenRuntimeIsIncomplete() {
         SeriesProgressMetadata existing = storedMetadata(LocalDateTime.of(2026, 9, 1, 10, 0));
         when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.of(existing));
         when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(anyCollection())).thenReturn(List.of());
@@ -185,9 +186,17 @@ class SeriesProgressMetadataRefreshServiceImplTest {
 
         SeriesProgressMetadataRefreshService.Snapshot result = service.refresh(SERIES_ID, tv(summary(1)), TODAY);
 
-        assertThat(result.series().totalKnownRuntime()).isEqualTo(100);
-        verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
-        verify(seasonMetadataRepository, never()).saveAll(any());
+        assertThat(result.series().regularReleasedEpisodeCount()).isEqualTo(2);
+        assertThat(result.series().knownRuntimeEpisodeCount()).isEqualTo(1);
+        assertThat(result.series().totalKnownRuntime()).isNull();
+        assertThat(result.series().lastReleasedEpisodeDate()).isEqualTo(LocalDate.of(2026, 9, 2));
+        verify(metadataRepository).save(argThat(metadata ->
+                metadata.getTotalKnownRuntime() == null && metadata.getRuntimeVerifiedAt() == null));
+        verify(seasonMetadataRepository).deleteAllBySeriesTmdbIdIn(List.of(SERIES_ID));
+        verify(seasonMetadataRepository).saveAll(argThat(seasons -> {
+            SeriesProgressSeasonMetadata season = (SeriesProgressSeasonMetadata) seasons.iterator().next();
+            return season.getTotalKnownRuntime() == null;
+        }));
     }
 
     @Test
@@ -249,6 +258,74 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     }
 
     @Test
+    @DisplayName("[refreshIfMissingOrExpired] Shares A Failed Refresh And Preserves Stale Snapshot")
+    void shouldShareFailedRefreshAndPreserveStaleSnapshotConcurrently() throws Exception {
+        SeriesProgressMetadata stale = storedMetadata(TODAY.minusDays(2).atTime(8, 0));
+        when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.of(stale));
+        when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(seasonProjection(1, stale.getRefreshedAt())));
+        CountDownLatch tvLookupStarted = new CountDownLatch(1);
+        CountDownLatch releaseTvLookup = new CountDownLatch(1);
+        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
+                .thenAnswer(invocation -> {
+                    tvLookupStarted.countDown();
+                    releaseTvLookup.await(5, TimeUnit.SECONDS);
+                    return new TmdbLookupResult.Found<>(tv(summary(1)));
+                });
+        when(tmdbClient.getSeasonFullDetails(SERIES_ID, 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        var callers = Executors.newFixedThreadPool(2);
+        try {
+            var first = callers.submit(() -> service.refreshIfMissingOrExpired(SERIES_ID, TODAY));
+            assertThat(tvLookupStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            var second = callers.submit(() -> service.refreshIfMissingOrExpired(SERIES_ID, TODAY));
+            releaseTvLookup.countDown();
+
+            assertThat(first.get(5, TimeUnit.SECONDS).series().totalKnownRuntime()).isEqualTo(100);
+            assertThat(second.get(5, TimeUnit.SECONDS).series().totalKnownRuntime()).isEqualTo(100);
+        } finally {
+            releaseTvLookup.countDown();
+            callers.shutdownNow();
+        }
+
+        verify(tmdbClient, times(1)).getTvFullDetails(SERIES_ID, "en-US");
+        verify(tmdbClient, times(1)).getSeasonFullDetails(SERIES_ID, 1, "en-US");
+        verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+        verify(seasonMetadataRepository, never()).deleteAllBySeriesTmdbIdIn(anyCollection());
+        verify(seasonMetadataRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("[refreshIfMissingOrExpired] Preserves Stale Snapshot When A Season Is Not Found")
+    void shouldPreserveStaleSnapshotWhenSeasonIsNotFound() {
+        SeriesProgressMetadata stale = storedMetadata(TODAY.minusDays(2).atTime(8, 0));
+        when(metadataRepository.findById(SERIES_ID)).thenReturn(Optional.of(stale));
+        when(seasonMetadataRepository.findAllBySeriesTmdbIdIn(List.of(SERIES_ID)))
+                .thenReturn(List.of(seasonProjection(1, stale.getRefreshedAt())));
+        when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(tv(summary(1))));
+        when(tmdbClient.getSeasonFullDetails(SERIES_ID, 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
+
+        SeriesProgressMetadataRefreshService.Snapshot result =
+                service.refreshIfMissingOrExpired(SERIES_ID, TODAY);
+
+        assertThat(result.series().totalKnownRuntime()).isEqualTo(100);
+        verify(metadataRepository, never()).save(any(SeriesProgressMetadata.class));
+        verify(seasonMetadataRepository, never()).deleteAllBySeriesTmdbIdIn(anyCollection());
+        verify(seasonMetadataRepository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("[refresh] Rejects TV Details For A Different Series")
+    void shouldRejectTvDetailsForDifferentSeries() {
+        assertThatThrownBy(() -> service.refresh(SERIES_ID, tv("different", summary(1)), TODAY))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not match");
+    }
+
+    @Test
     @DisplayName("[refreshIfMissingOrExpired] Fails When Cold TV Lookup Is Unavailable")
     void shouldFailWhenColdTvLookupIsUnavailable() {
         when(tmdbClient.getTvFullDetails(SERIES_ID, "en-US"))
@@ -293,8 +370,12 @@ class SeriesProgressMetadataRefreshServiceImplTest {
     }
 
     private static TmdbTvFullDetails tv(TmdbSeasonSummary... summaries) {
+        return tv(SERIES_ID, summaries);
+    }
+
+    private static TmdbTvFullDetails tv(String seriesId, TmdbSeasonSummary... summaries) {
         return new TmdbTvFullDetails(
-                SERIES_ID, null, null, null, null, null, null, null, null, null, null,
+                seriesId, null, null, null, null, null, null, null, null, null, null,
                 List.of(summaries), null, null, null, null, null, null, null, null, null, null);
     }
 

@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
@@ -37,7 +38,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     private final SeriesProgressMetadataCalculator calculator;
     private final ExecutorService seasonFetchExecutor;
     private final NewTransactionExecutor newTransactionExecutor;
-    private final ConcurrentHashMap<String, LockEntry> refreshLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CompletableFuture<Snapshot>> refreshes = new ConcurrentHashMap<>();
 
     public SeriesProgressMetadataRefreshServiceImpl(
             TmdbClient tmdbClient,
@@ -57,7 +58,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     @Override
     public Snapshot refreshIfMissingOrExpired(String seriesTmdbId, LocalDate today) {
         requireArguments(seriesTmdbId, today);
-        return withLock(seriesTmdbId, () -> {
+        return singleFlight(seriesTmdbId, () -> {
             Snapshot current = readSnapshot(seriesTmdbId);
             if (isFresh(current, today)) {
                 return current;
@@ -74,7 +75,11 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     public Snapshot refresh(String seriesTmdbId, TmdbTvFullDetails tvDetails, LocalDate today) {
         requireArguments(seriesTmdbId, today);
         Objects.requireNonNull(tvDetails, "tvDetails must not be null");
-        return withLock(seriesTmdbId, () -> refreshLoaded(seriesTmdbId, tvDetails, today, readSnapshot(seriesTmdbId)));
+        if (!seriesTmdbId.equals(tvDetails.id())) {
+            throw new IllegalArgumentException("tvDetails.id() does not match seriesTmdbId");
+        }
+        return singleFlight(seriesTmdbId,
+                () -> refreshLoaded(seriesTmdbId, tvDetails, today, readSnapshot(seriesTmdbId)));
     }
 
     private Snapshot refreshLoaded(
@@ -97,7 +102,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
                 seriesTmdbId,
                 loadedSeasons.stream().map(LoadedSeason::details).toList(),
                 today);
-        if (!completeLoad || !calculated.series().runtimeComplete()) {
+        if (!completeLoad) {
             return previous == null ? unavailable() : previous;
         }
         return persist(seriesTmdbId, calculated);
@@ -125,7 +130,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
                     .knownRuntimeEpisodeCount(calculated.series().knownRuntimeEpisodeCount())
                     .lastReleasedEpisodeDate(calculated.series().lastReleasedEpisodeDate())
                     .refreshedAt(refreshedAt)
-                    .runtimeVerifiedAt(refreshedAt)
+                    .runtimeVerifiedAt(calculated.series().runtimeComplete() ? refreshedAt : null)
                     .build();
             metadataRepository.save(metadata);
 
@@ -212,23 +217,36 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
                 && snapshot.series().refreshedAt().toLocalDate().equals(today);
     }
 
-    private Snapshot withLock(String seriesTmdbId, Supplier<Snapshot> action) {
-        LockEntry lock = refreshLocks.compute(seriesTmdbId, (ignored, current) -> {
-            LockEntry selected = current == null ? new LockEntry() : current;
-            selected.participants++;
-            return selected;
-        });
-        synchronized (lock.monitor) {
-            try {
-                return action.get();
-            } finally {
-                refreshLocks.computeIfPresent(seriesTmdbId, (ignored, current) -> {
-                    if (current != lock) {
-                        return current;
-                    }
-                    return --current.participants == 0 ? null : current;
-                });
+    private Snapshot singleFlight(String seriesTmdbId, Supplier<Snapshot> action) {
+        CompletableFuture<Snapshot> created = new CompletableFuture<>();
+        CompletableFuture<Snapshot> shared = refreshes.putIfAbsent(seriesTmdbId, created);
+        if (shared != null) {
+            return await(shared);
+        }
+        try {
+            Snapshot result = action.get();
+            created.complete(result);
+            return result;
+        } catch (RuntimeException | Error exception) {
+            created.completeExceptionally(exception);
+            throw exception;
+        } finally {
+            refreshes.remove(seriesTmdbId, created);
+        }
+    }
+
+    private Snapshot await(CompletableFuture<Snapshot> shared) {
+        try {
+            return shared.join();
+        } catch (CompletionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
             }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw exception;
         }
     }
 
@@ -246,8 +264,4 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
     private record LoadedSeason(TmdbSeasonFullDetails details) {
     }
 
-    private static final class LockEntry {
-        private final Object monitor = new Object();
-        private int participants;
-    }
 }

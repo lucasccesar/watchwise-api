@@ -28,7 +28,7 @@ public class SeriesProgressMetadata {
     @Column(name = "regular_released_episode_count", nullable = false)
     private Integer regularReleasedEpisodeCount;
 
-    @Column(name = "total_known_runtime", nullable = false)
+    @Column(name = "total_known_runtime")
     private Integer totalKnownRuntime;
 
     @Column(name = "known_runtime_episode_count", nullable = false)
