@@ -18,7 +18,7 @@ public class TmdbClientConfig {
             @Value("${app.tmdb.base-url}") String baseUrl,
             @Value("${app.tmdb.api-key}") String apiKey,
             @Value("${app.tmdb.timeout-ms}") long timeoutMs) {
-        ClientHttpRequestFactory requestFactory = ClientHttpRequestFactoryBuilder.detect()
+        ClientHttpRequestFactory requestFactory = ClientHttpRequestFactoryBuilder.simple()
                 .build(HttpClientSettings.defaults()
                         .withConnectTimeout(Duration.ofMillis(timeoutMs))
                         .withReadTimeout(Duration.ofMillis(timeoutMs)));

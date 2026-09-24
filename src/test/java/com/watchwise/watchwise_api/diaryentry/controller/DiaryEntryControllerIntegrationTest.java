@@ -592,7 +592,7 @@ class DiaryEntryControllerIntegrationTest {
         persistEntry(entity, specialEpisode);
         when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null,
+                        "1399", null, null, null, null, null, null, null, null, null, null,
                         List.of(
                                 new TmdbSeasonSummary(0, "Specials", null, null, 1, null),
                                 new TmdbSeasonSummary(1, "Season 1", null, null, 10, null)),
@@ -779,8 +779,14 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(getSeriesInProgressRequest(user, user.id()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].totalKnownRuntime").value(50))
-                .andExpect(jsonPath("$.content[0].remainingRuntimeMinutes").value(20));
+                .andExpect(jsonPath("$.content[0].totalKnownRuntime").value(30))
+                .andExpect(jsonPath("$.content[0].remainingRuntimeMinutes").value(0));
+
+        org.awaitility.Awaitility.await()
+                .atMost(5, TimeUnit.SECONDS)
+                .untilAsserted(() -> assertThat(seriesProgressMetadataRepository.findById("stale-series")
+                        .orElseThrow()
+                        .getTotalKnownRuntime()).isEqualTo(50));
 
         verify(tmdbClient, times(1)).getTvFullDetails("stale-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
         verify(tmdbClient, times(1)).getSeasonFullDetails("stale-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);

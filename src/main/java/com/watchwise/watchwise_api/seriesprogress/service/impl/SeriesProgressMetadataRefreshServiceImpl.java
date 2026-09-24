@@ -172,6 +172,7 @@ public class SeriesProgressMetadataRefreshServiceImpl implements SeriesProgressM
             metadataRepository.save(metadata);
 
             seasonMetadataRepository.deleteAllBySeriesTmdbIdIn(List.of(seriesTmdbId));
+            seasonMetadataRepository.flush();
             List<SeriesProgressSeasonMetadata> seasons = calculated.seasons().stream()
                     .map(season -> SeriesProgressSeasonMetadata.builder()
                             .seriesTmdbId(seriesTmdbId)
