@@ -31,6 +31,8 @@ public class TmdbClient {
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache;
+    private final Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache;
+    private final Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache;
 
     public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> searchMovies(
             String query, String language, int page) {
@@ -121,11 +123,29 @@ public class TmdbClient {
     }
 
     public TmdbLookupResult<TmdbPersonDetails> getPersonDetails(String personTmdbId) {
-        return callWithRetry(() -> tmdbRestClient.get()
+        return cachedLookup(tmdbPersonDetailsCache, personTmdbId, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri("/person/{id}", personTmdbId)
                         .retrieve()
                         .body(TmdbPersonDetails.class),
-                "person details " + personTmdbId);
+                "person details " + personTmdbId));
+    }
+
+    public TmdbLookupResult<TmdbPersonAggregate> getPersonAggregate(String personTmdbId, String language) {
+        TmdbLookupResult<TmdbPersonAggregate> result = cachedLookup(
+                tmdbPersonAggregateCache, personTmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
+                        .uri(uriBuilder -> uriBuilder.path("/person/{id}")
+                                .queryParam("language", language)
+                                .queryParam("append_to_response", "combined_credits")
+                                .build(personTmdbId))
+                        .retrieve()
+                        .body(TmdbPersonAggregate.class),
+                        "person aggregate " + personTmdbId));
+        if (result instanceof TmdbLookupResult.Found<TmdbPersonAggregate> found) {
+            TmdbPersonDetails details = new TmdbPersonDetails(found.value().id());
+            tmdbPersonDetailsCache.put(personTmdbId,
+                    new TmdbLookupResult.Found<>(details, found.origin()));
+        }
+        return result;
     }
 
     public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {

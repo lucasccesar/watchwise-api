@@ -34,7 +34,46 @@ class TmdbClientTest {
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
+    }
+
+    @Test
+    @DisplayName("[getPersonAggregate] Should Load Person Details And Combined Credits With One Request")
+    void shouldLoadPersonDetailsAndCombinedCreditsWithOneRequest() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193?language=pt-BR&append_to_response=combined_credits"))
+                .andRespond(withSuccess("""
+                        {"id":6193,"name":"Leonardo DiCaprio","biography":"Bio","birthday":"1974-11-11",
+                         "deathday":null,"place_of_birth":"Los Angeles","profile_path":"/leo.jpg",
+                         "known_for_department":"Acting","combined_credits":{
+                           "cast":[{"id":1,"media_type":"movie","title":"Inception","poster_path":"/inception.jpg",
+                             "release_date":"2010-07-16","character":"Cobb"}],
+                           "crew":[{"id":2,"media_type":"tv","name":"Show","poster_path":"/show.jpg",
+                             "first_air_date":"2020-01-01","job":"Producer"}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        var aggregate = tmdbClient.getPersonAggregate("6193", "pt-BR").toOptional().orElseThrow();
+
+        assertThat(aggregate.id()).isEqualTo("6193");
+        assertThat(aggregate.name()).isEqualTo("Leonardo DiCaprio");
+        assertThat(aggregate.biography()).isEqualTo("Bio");
+        assertThat(aggregate.birthday()).isEqualTo("1974-11-11");
+        assertThat(aggregate.placeOfBirth()).isEqualTo("Los Angeles");
+        assertThat(aggregate.profilePath()).isEqualTo("/leo.jpg");
+        assertThat(aggregate.knownForDepartment()).isEqualTo("Acting");
+        assertThat(aggregate.combinedCredits().cast()).singleElement().satisfies(credit -> {
+            assertThat(credit.title()).isEqualTo("Inception");
+            assertThat(credit.posterPath()).isEqualTo("/inception.jpg");
+            assertThat(credit.releaseDate()).isEqualTo("2010-07-16");
+            assertThat(credit.character()).isEqualTo("Cobb");
+        });
+        assertThat(aggregate.combinedCredits().crew()).singleElement().satisfies(credit -> {
+            assertThat(credit.name()).isEqualTo("Show");
+            assertThat(credit.posterPath()).isEqualTo("/show.jpg");
+            assertThat(credit.firstAirDate()).isEqualTo("2020-01-01");
+            assertThat(credit.job()).isEqualTo("Producer");
+        });
+        mockServer.verify();
     }
 
     @Test

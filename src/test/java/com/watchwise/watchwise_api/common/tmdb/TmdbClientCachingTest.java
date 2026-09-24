@@ -43,6 +43,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 @ContextConfiguration(classes = {TmdbCacheConfig.class, TmdbClientCachingTest.Config.class})
 @TestPropertySource(properties = {
         "app.tmdb.details-cache-ttl-hours=24",
+        "app.tmdb.person-aggregate-cache-max-size=10000",
         "app.tmdb.calendar-schedule-cache-ttl-hours=24",
         "app.tmdb.calendar-schedule-cache-maximum-size=10000",
         "app.tmdb.search-cache-ttl-minutes=10",
@@ -80,11 +81,14 @@ class TmdbClientCachingTest {
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache,
-                Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache) {
+                Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache,
+                Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache,
+                Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
                     tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
                     tmdbMovieReleaseDatesCache, tmdbCalendarSeasonDetailsCache,
-                    tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache);
+                    tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache,
+                    tmdbPersonAggregateCache, tmdbPersonDetailsCache);
         }
     }
 
@@ -124,6 +128,12 @@ class TmdbClientCachingTest {
     @Autowired
     private Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache;
 
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache;
+
     @BeforeEach
     void resetExpectationsAndCache() {
         mockServer.reset();
@@ -137,6 +147,53 @@ class TmdbClientCachingTest {
         tmdbTvSearchCache.invalidateAll();
         tmdbPersonSearchCache.invalidateAll();
         tmdbMultiSearchCache.invalidateAll();
+        tmdbPersonAggregateCache.invalidateAll();
+        tmdbPersonDetailsCache.invalidateAll();
+    }
+
+    @Test
+    void shouldCachePersonAggregateAndSeedPersonExistenceLookup() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193?language=pt-BR&append_to_response=combined_credits"))
+                .andRespond(withSuccess("""
+                        {"id":6193,"name":"Leonardo DiCaprio","combined_credits":{"cast":[],"crew":[]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        var first = tmdbClient.getPersonAggregate("6193", "pt-BR");
+        var second = tmdbClient.getPersonAggregate("6193", "pt-BR");
+        var existence = tmdbClient.getPersonDetails("6193");
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(existence.toOptional()).isPresent();
+        assertThat(tmdbPersonDetailsCache.getIfPresent("6193")).isNotNull();
+        mockServer.verify();
+    }
+
+    @Test
+    void shouldCachePersonAggregateNotFound() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/999?language=en-US&append_to_response=combined_credits"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThat(tmdbClient.getPersonAggregate("999", "en-US").isNotFound()).isTrue();
+        assertThat(tmdbClient.getPersonAggregate("999", "en-US").isNotFound()).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    void shouldNotCacheUnavailablePersonAggregateAndRecover() {
+        String uri = "https://api.themoviedb.org/3/person/6193?language=en-US&append_to_response=combined_credits";
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withSuccess("""
+                {"id":6193,"name":"Leonardo DiCaprio","combined_credits":{"cast":[],"crew":[]}}
+                """, MediaType.APPLICATION_JSON));
+
+        assertThat(tmdbClient.getPersonAggregate("6193", "en-US").isUnavailable()).isTrue();
+        assertThat(tmdbPersonAggregateCache.getIfPresent("6193|en-US")).isNull();
+        assertThat(tmdbClient.getPersonAggregate("6193", "en-US").toOptional()).isPresent();
+        mockServer.verify();
     }
 
     @Test

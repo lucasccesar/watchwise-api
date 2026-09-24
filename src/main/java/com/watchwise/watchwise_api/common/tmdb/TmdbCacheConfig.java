@@ -41,6 +41,20 @@ public class TmdbCacheConfig {
     }
 
     @Bean
+    public Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache(
+            @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours,
+            @Value("${app.tmdb.person-aggregate-cache-max-size}") long maximumSize) {
+        return newScheduleCache(ttlHours, maximumSize);
+    }
+
+    @Bean
+    public Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache(
+            @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours,
+            @Value("${app.tmdb.person-aggregate-cache-max-size}") long maximumSize) {
+        return newScheduleCache(ttlHours, maximumSize);
+    }
+
+    @Bean
     public Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache(
             @Value("${app.tmdb.calendar-schedule-cache-ttl-hours}") long ttlHours,
             @Value("${app.tmdb.calendar-schedule-cache-maximum-size}") long maximumSize) {
