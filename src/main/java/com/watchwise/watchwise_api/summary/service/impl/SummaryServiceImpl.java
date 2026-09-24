@@ -27,6 +27,8 @@ import com.watchwise.watchwise_api.summary.dto.DecadeCountDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeScoreDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapItemDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.LongestWatchedItemDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthCountDTO;
@@ -42,6 +44,7 @@ import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
 import com.watchwise.watchwise_api.summary.dto.YearCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.service.SummaryService;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -95,6 +98,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final Top5EntryRepository top5EntryRepository;
     private final WatchCompanionRepository watchCompanionRepository;
     private final UserMapper userMapper;
+    private final SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
 
     @Override
     public SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type) {
@@ -426,6 +430,38 @@ public class SummaryServiceImpl implements SummaryService {
                 .toList();
 
         return new EpisodeRatingsGridResponseDTO(seriesTmdbId, episodes);
+    }
+
+    @Override
+    public EpisodeRatingsMapResponseDTO getEpisodeRatingsMap(UUID viewerId, UUID userId) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewSummary(viewerId, userId, target);
+
+        List<DiaryEntryRepository.SeriesEpisodeCount> counts = diaryEntryRepository
+                .findEpisodeSeriesCountsByUserId(userId);
+        if (counts.isEmpty()) {
+            return new EpisodeRatingsMapResponseDTO(List.of());
+        }
+
+        List<String> seriesTmdbIds = counts.stream()
+                .map(DiaryEntryRepository.SeriesEpisodeCount::getSeriesTmdbId)
+                .toList();
+        Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots =
+                seriesProgressMetadataRefreshService.getSnapshotsForRead(seriesTmdbIds, LocalDate.now());
+
+        List<EpisodeRatingsMapItemDTO> series = counts.stream()
+                .map(row -> {
+                    SeriesProgressMetadataRefreshService.Snapshot snapshot = snapshots.get(row.getSeriesTmdbId());
+                    Integer totalEpisodeCount = snapshot == null || snapshot.series() == null
+                            ? null
+                            : snapshot.series().regularReleasedEpisodeCount();
+                    return new EpisodeRatingsMapItemDTO(
+                            row.getSeriesTmdbId(), row.getWatchedEpisodeCount(), totalEpisodeCount);
+                })
+                .toList();
+
+        return new EpisodeRatingsMapResponseDTO(series);
     }
 
     private ContentType watchedContentTypeFor(ContentType type) {

@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
@@ -75,6 +76,12 @@ public class SummaryController {
             @PathVariable String seriesTmdbId
     ) {
         EpisodeRatingsGridResponseDTO response = summaryService.getEpisodeRatingsGrid(getCurrentUserId(), userId, seriesTmdbId);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/users/{userId}/episode-ratings-map")
+    public ResponseEntity<EpisodeRatingsMapResponseDTO> getEpisodeRatingsMap(@PathVariable UUID userId) {
+        EpisodeRatingsMapResponseDTO response = summaryService.getEpisodeRatingsMap(getCurrentUserId(), userId);
         return ResponseEntity.ok(response);
     }
 

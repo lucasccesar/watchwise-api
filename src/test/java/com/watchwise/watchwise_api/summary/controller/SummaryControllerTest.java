@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
@@ -180,6 +181,20 @@ class SummaryControllerTest {
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenGetEpisodeRatingsMapIsCalled() {
+        UUID targetUserId = UUID.randomUUID();
+        EpisodeRatingsMapResponseDTO dto = new EpisodeRatingsMapResponseDTO(List.of());
+        when(summaryService.getEpisodeRatingsMap(currentUserId, targetUserId)).thenReturn(dto);
+
+        ResponseEntity<EpisodeRatingsMapResponseDTO> result = summaryController.getEpisodeRatingsMap(targetUserId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+        verify(summaryService).getEpisodeRatingsMap(currentUserId, targetUserId);
     }
 
     private SummaryResponseDTO buildSummaryResponseDto() {

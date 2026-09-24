@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
@@ -31,6 +32,7 @@ import com.watchwise.watchwise_api.summary.dto.SeriesInProgressPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
@@ -53,6 +55,7 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -103,6 +106,9 @@ class SummaryServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
 
     @InjectMocks
     private SummaryServiceImpl summaryService;
@@ -956,6 +962,70 @@ class SummaryServiceImplTest {
 
         assertThat(result.episodes()).hasSize(1);
         assertThat(result.episodes().getFirst().score()).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Return Empty Series - When User Has No Episode Entries")
+    void shouldReturnEmptySeriesWhenUserHasNoEpisodeEntriesForEpisodeRatingsMap() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId)).thenReturn(List.of());
+
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId);
+
+        assertThat(result.series()).isEmpty();
+        verifyNoInteractions(seriesProgressMetadataRefreshService);
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Return Watched And Total Counts - When Series Is Completed")
+    void shouldReturnWatchedAndTotalCountsWhenSeriesIsCompletedForEpisodeRatingsMap() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId))
+                .thenReturn(List.of(seriesEpisodeCount("1399", 7L)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
+                .thenReturn(Map.of("1399", seriesProgressSnapshot("1399", 10)));
+
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId);
+
+        assertThat(result.series())
+                .extracting("seriesTmdbId", "watchedEpisodeCount", "totalEpisodeCount")
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("1399", 7L, 10));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Throw ForbiddenException - When Target Profile Is Private")
+    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateForEpisodeRatingsMap() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsMap(marinaId, lucasId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+
+        verifyNoInteractions(diaryEntryRepository, seriesProgressMetadataRefreshService);
+    }
+
+    private DiaryEntryRepository.SeriesEpisodeCount seriesEpisodeCount(String seriesTmdbId, long watchedEpisodeCount) {
+        return new DiaryEntryRepository.SeriesEpisodeCount() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Long getWatchedEpisodeCount() {
+                return watchedEpisodeCount;
+            }
+        };
+    }
+
+    private SeriesProgressMetadataRefreshService.Snapshot seriesProgressSnapshot(String seriesTmdbId, int totalEpisodeCount) {
+        return new SeriesProgressMetadataRefreshService.Snapshot(
+                new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                        seriesTmdbId, totalEpisodeCount, null, 0, null, LocalDateTime.now(), null),
+                List.of());
     }
 
     private DiaryEntryRepository.SeriesRuntime seriesRuntime(String seriesTmdbId, long totalMinutes) {

@@ -447,6 +447,31 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findEpisodeSeriesCountsByUserId] Should Count Distinct Regular Episodes Across All Series")
+    void shouldCountDistinctRegularEpisodesAcrossAllSeries() {
+        Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content secondEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
+        Content specialEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
+        Content completedSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        Content completedSeries = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 2));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, specialEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedSeriesEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedSeries));
+
+        List<DiaryEntryRepository.SeriesEpisodeCount> result =
+                diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucas.getId());
+
+        assertThat(result)
+                .extracting("seriesTmdbId", "watchedEpisodeCount")
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("1396", 1L),
+                        org.assertj.core.groups.Tuple.tuple("1399", 2L));
+    }
+
+    @Test
     @DisplayName("[findDistinctInProgressSeriesTmdbIdsByUserId] Should Return Only The User's Uncompleted Episode Series")
     void shouldReturnOnlyUsersUncompletedEpisodeSeries() {
         Content lucasEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
