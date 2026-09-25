@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import jakarta.validation.Valid;
@@ -71,6 +72,12 @@ public class UserListController {
     ) {
         UserListDetailedResponseDTO list = userListService.getUserListById(getCurrentUserId(), listId, type, genre, sortBy, sortDirection);
         return ResponseEntity.ok(list);
+    }
+
+    @GetMapping("/lists/{listId}/progress")
+    public ResponseEntity<UserListProgressResponseDTO> getUserListProgress(@PathVariable UUID listId) {
+        UserListProgressResponseDTO progress = userListService.getUserListProgress(getCurrentUserId(), listId);
+        return ResponseEntity.ok(progress);
     }
 
     @PatchMapping("/lists/{listId}")

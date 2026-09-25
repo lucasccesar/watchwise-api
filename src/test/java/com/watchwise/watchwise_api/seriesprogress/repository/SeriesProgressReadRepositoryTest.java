@@ -279,6 +279,44 @@ class SeriesProgressReadRepositoryTest {
         assertThat(totals.getWatchedRuntimeMinutes()).isEqualTo(70L);
     }
 
+    @Test
+    @DisplayName("[findProgressByUserIdAndSeriesTmdbIds] Should Include Unwatched Series And Season-Only References")
+    void shouldIncludeUnwatchedSeriesAndSeasonOnlyReferences() {
+        saveSeason("1399", 1);
+        Content watchedEpisode = saveEpisode("1399", 1, 1, 40);
+        Content specialEpisode = saveEpisode("1399", 0, 99, 999);
+        saveContent("1396", ContentType.SERIES);
+        saveEntry(watchedEpisode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
+        saveEntry(watchedEpisode, 2, LocalDate.of(2024, 2, 1), LocalDateTime.of(2024, 2, 1, 10, 0));
+        saveEntry(specialEpisode, 1, LocalDate.of(2024, 3, 1), LocalDateTime.of(2024, 3, 1, 10, 0));
+        saveMetadata("1399", 2, 80, LocalDate.of(2024, 2, 1));
+        saveMetadata("1396", 3, 120, LocalDate.of(2024, 2, 1));
+        entityManager.clear();
+
+        List<SeriesProgressReadRepository.SeriesProgressCandidate> rows =
+                seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(
+                        lucas.getId(), List.of("1399", "1396"));
+
+        assertThat(rows).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .containsExactly("1396", "1399");
+        var unwatched = rows.stream()
+                .filter(row -> row.getSeriesTmdbId().equals("1396"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(unwatched.getWatchedEpisodeCount()).isZero();
+        assertThat(unwatched.getMaxSeasonNumber()).isNull();
+        assertThat(unwatched.getRemainingEpisodeCount()).isEqualTo(3L);
+        assertThat(unwatched.getRemainingRuntimeMinutes()).isEqualTo(120L);
+
+        var seasonOnly = rows.stream()
+                .filter(row -> row.getSeriesTmdbId().equals("1399"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(seasonOnly.getWatchedEpisodeCount()).isEqualTo(1L);
+        assertThat(seasonOnly.getMaxSeasonNumber()).isEqualTo(1);
+        assertThat(seasonOnly.getRemainingEpisodeCount()).isEqualTo(1L);
+    }
+
     private Content saveEpisode(String seriesTmdbId, int seasonNumber, int episodeNumber, Integer runtimeMinutes) {
         return contentRepository.saveAndFlush(Content.builder()
                 .seriesTmdbId(seriesTmdbId)
@@ -286,6 +324,16 @@ class SeriesProgressReadRepositoryTest {
                 .episodeNumber(episodeNumber)
                 .runtimeMinutes(runtimeMinutes)
                 .type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+    }
+
+    private Content saveSeason(String seriesTmdbId, int seasonNumber) {
+        return contentRepository.saveAndFlush(Content.builder()
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .type(ContentType.SEASON)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build());

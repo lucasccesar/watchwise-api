@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import org.springframework.data.domain.Page;
 
@@ -19,6 +20,8 @@ public interface UserListService {
 
     UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
             String sortBy, String sortDirection);
+
+    UserListProgressResponseDTO getUserListProgress(UUID viewerId, UUID listId);
 
     UserListResponseDTO createUserList(UUID userId, UserListCreationDTO userListCreationDTO);
 

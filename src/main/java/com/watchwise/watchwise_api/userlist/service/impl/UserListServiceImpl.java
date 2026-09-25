@@ -7,7 +7,11 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -23,14 +27,19 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressItemDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.mapper.UserListMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -60,11 +69,14 @@ public class UserListServiceImpl implements UserListService {
     private final FollowerRepository followerRepository;
     private final UserListItemService userListItemService;
     private final UserListMapper userListMapper;
+    private final ContentMapper contentMapper;
     private final LikeService likeService;
     private final PageRequestFactory pageRequestFactory;
     private final CommentRepository commentRepository;
     private final LikeRepository likeRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final UserListItemRepository userListItemRepository;
+    private final SeriesProgressReader seriesProgressReader;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
     private static final Set<String> GENERIC_SORT_FIELDS = Set.of("rank", "updatedAt", "name", "likesCount");
@@ -217,6 +229,126 @@ public class UserListServiceImpl implements UserListService {
 
         return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe,
                 allItems.size(), commentsCount, totalRuntimeMinutes, itemScope);
+    }
+
+    @Override
+    public UserListProgressResponseDTO getUserListProgress(UUID viewerId, UUID listId) {
+        UserList userList = userListRepository.findById(listId)
+                .orElseThrow(() -> new NotFoundException("List not found"));
+
+        assertListIsVisibleTo(viewerId, userList);
+
+        List<UserListItem> items = userListItemRepository
+                .findByUserListIdWithContentAndChildListOrderByPositionAsc(listId);
+        if (items.stream().anyMatch(item -> item.getChildList() != null)) {
+            throw new BadRequestException("List progress is only available for content lists");
+        }
+
+        List<UserListItem> contentItems = items.stream()
+                .filter(item -> item.getContent() != null)
+                .toList();
+        Set<UUID> directContentIds = contentItems.stream()
+                .filter(item -> item.getContent().getType() == ContentType.MOVIE
+                        || item.getContent().getType() == ContentType.EPISODE)
+                .map(UserListItem::getContent)
+                .map(Content::getId)
+                .collect(Collectors.toSet());
+        Set<UUID> watchedDirectContentIds = directContentIds.isEmpty()
+                ? Set.of()
+                : diaryEntryRepository.findWatchedDirectContentIds(viewerId, directContentIds);
+
+        List<String> seriesTmdbIds = contentItems.stream()
+                .map(UserListItem::getContent)
+                .filter(content -> content.getType() == ContentType.SERIES
+                        || content.getType() == ContentType.SEASON)
+                .map(this::seriesTmdbIdForProgress)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<String, SeriesInProgressResponseDTO> seriesProgressById = seriesTmdbIds.isEmpty()
+                ? Map.of()
+                : seriesProgressReader.readForSeriesIds(viewerId, seriesTmdbIds);
+
+        List<UserListProgressItemDTO> progressItems = new ArrayList<>();
+        long watchedItems = 0L;
+        for (UserListItem item : contentItems) {
+            Content content = item.getContent();
+            SeriesInProgressResponseDTO seriesProgress = null;
+            SeasonProgressDTO seasonProgress = null;
+            boolean watched = false;
+
+            if (content.getType() == ContentType.MOVIE || content.getType() == ContentType.EPISODE) {
+                watched = watchedDirectContentIds.contains(content.getId());
+            } else if (content.getType() == ContentType.SERIES) {
+                seriesProgress = seriesProgressById.get(content.getTmdbId());
+                watched = isComplete(seriesProgress == null ? null : seriesProgress.watchedPercentage());
+            } else if (content.getType() == ContentType.SEASON) {
+                seriesProgress = seriesProgressById.get(content.getSeriesTmdbId());
+                seasonProgress = findSeasonProgress(seriesProgress, content.getSeasonNumber());
+                watched = isComplete(seasonProgress == null ? null : seasonProgress.watchedPercentage());
+            }
+
+            if (watched) {
+                watchedItems++;
+            }
+            progressItems.add(new UserListProgressItemDTO(
+                    item.getId(),
+                    contentMapper.contentToContentRefDto(content),
+                    item.getPosition(),
+                    item.getDescription(),
+                    item.getCreatedAt(),
+                    item.getUpdatedAt(),
+                    item.getCustomPosterUrl(),
+                    content.getType() == ContentType.SERIES ? seriesProgress : null,
+                    content.getType() == ContentType.SEASON ? seasonProgress : null));
+        }
+
+        long totalItems = contentItems.size();
+        double watchedPercentage = totalItems == 0 ? 0.0 : watchedItems * 100.0 / totalItems;
+        long commentsCount = commentRepository.countByListId(listId);
+        long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
+        boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
+        UserListItemScope itemScope = userListItemService.getItemScope(listId);
+
+        return new UserListProgressResponseDTO(
+                userList.getId(),
+                userList.getName(),
+                userList.getDescription(),
+                userList.getVisibility(),
+                userList.getCreatedAt(),
+                userList.getUpdatedAt(),
+                userList.getLikesCount(),
+                likedByMe,
+                items.size(),
+                commentsCount,
+                totalRuntimeMinutes,
+                userList.getRank(),
+                itemScope,
+                totalItems,
+                watchedItems,
+                watchedPercentage,
+                progressItems);
+    }
+
+    private String seriesTmdbIdForProgress(Content content) {
+        return content.getType() == ContentType.SERIES
+                ? content.getTmdbId()
+                : content.getSeriesTmdbId();
+    }
+
+    private SeasonProgressDTO findSeasonProgress(
+            SeriesInProgressResponseDTO seriesProgress, Integer seasonNumber) {
+        if (seriesProgress == null || seasonNumber == null) {
+            return null;
+        }
+        return seriesProgress.seasonProgress().stream()
+                .filter(season -> Objects.equals(season.seasonNumber(), seasonNumber))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean isComplete(Double percentage) {
+        return percentage != null && percentage >= 100.0;
     }
 
     private UserListItemScope resolveItemScopeFromLoadedItems(List<UserListItemResponseDTO> items) {

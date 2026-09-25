@@ -41,6 +41,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -65,7 +66,6 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -98,6 +98,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final TmdbClient tmdbClient;
     private final SeriesProgressReadRepository seriesProgressReadRepository;
     private final SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
+    private final SeriesProgressAssembler seriesProgressAssembler;
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -242,66 +243,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             SeriesProgressReadRepository.SeriesProgressCandidate row,
             SeriesProgressMetadataRefreshService.Snapshot snapshot,
             Map<Integer, DiaryEntryRepository.SeasonProgress> watchedProgress) {
-        SeriesProgressMetadataRefreshService.SeriesSnapshot series = snapshot == null
-                ? null
-                : snapshot.series();
-        Integer totalReleasedEpisodeCount = series != null
-                ? series.regularReleasedEpisodeCount()
-                : row.getTotalReleasedEpisodeCount();
-        Integer totalKnownRuntime = series != null ? series.totalKnownRuntime() : row.getTotalKnownRuntime();
-        Long watchedEpisodeCount = valueOrZero(row.getWatchedEpisodeCount());
-        Long watchedRuntimeMinutes = row.getWatchedRuntimeMinutes();
-        Long remainingEpisodeCount = row.getRemainingEpisodeCount() != null
-                ? row.getRemainingEpisodeCount()
-                : remainingEpisodes(totalReleasedEpisodeCount, watchedEpisodeCount);
-        Long remainingRuntimeMinutes = remainingRuntime(
-                totalKnownRuntime, watchedRuntimeMinutes, row.getWatchedRuntimeComplete());
-
-        List<SeasonProgressDTO> seasonProgress = snapshot == null
-                ? List.of()
-                : snapshot.seasons().stream()
-                .filter(season -> season.seasonNumber() != null && season.seasonNumber() > 0)
-                .filter(season -> season.regularReleasedEpisodeCount() != null
-                        && season.regularReleasedEpisodeCount() > 0)
-                .sorted(Comparator.comparing(SeriesProgressMetadataRefreshService.SeasonSnapshot::seasonNumber))
-                .map(season -> toDetailedSeasonProgress(season, watchedProgress.get(season.seasonNumber())))
-                .toList();
-        Double watchedPercentage = percentage(watchedEpisodeCount, totalReleasedEpisodeCount);
-
-        return new SeriesInProgressResponseDTO(
-                row.getSeriesTmdbId(),
-                row.getMaxSeasonNumber(),
-                row.getMaxEpisodeNumber(),
-                row.getLastWatchedDate(),
-                watchedEpisodeCount,
-                totalReleasedEpisodeCount,
-                watchedPercentage,
-                seasonProgress,
-                row.getLastWatchedSeasonNumber(),
-                row.getLastWatchedEpisodeNumber(),
-                watchedRuntimeMinutes,
-                totalReleasedEpisodeCount,
-                totalKnownRuntime,
-                series != null ? series.lastReleasedEpisodeDate() : row.getLastReleasedEpisodeDate(),
-                remainingEpisodeCount,
-                remainingRuntimeMinutes);
-    }
-
-    private SeasonProgressDTO toDetailedSeasonProgress(
-            SeriesProgressMetadataRefreshService.SeasonSnapshot season,
-            DiaryEntryRepository.SeasonProgress watched) {
-        Long watchedEpisodeCount = watched == null ? 0L : valueOrZero(watched.getWatchedEpisodeCount());
-        Long watchedRuntimeMinutes = watched == null ? Long.valueOf(0L) : watched.getWatchedRuntimeMinutes();
-        Integer totalEpisodeCount = season.regularReleasedEpisodeCount();
-        return new SeasonProgressDTO(
-                season.seasonNumber(),
-                watchedEpisodeCount,
-                totalEpisodeCount,
-                percentage(watchedEpisodeCount, totalEpisodeCount),
-                watchedRuntimeMinutes,
-                remainingEpisodes(totalEpisodeCount, watchedEpisodeCount),
-                remainingRuntime(season.totalKnownRuntime(), watchedRuntimeMinutes,
-                        watched == null || Boolean.TRUE.equals(watched.getWatchedRuntimeComplete())));
+        return seriesProgressAssembler.toDetailedSeriesResponse(row, snapshot, watchedProgress);
     }
 
     private SeriesInProgressAggregateDTO calculateAggregate(
@@ -353,32 +295,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 releasedEpisodeCount,
                 Math.max(releasedEpisodeCount - watchedEpisodeCount, 0L),
                 remainingRuntimeMinutes);
-    }
-
-    private Long remainingEpisodes(Integer totalEpisodeCount, Long watchedEpisodeCount) {
-        return totalEpisodeCount == null
-                ? null
-                : Math.max(totalEpisodeCount.longValue() - valueOrZero(watchedEpisodeCount), 0L);
-    }
-
-    private Long remainingRuntime(Integer totalRuntimeMinutes, Long watchedRuntimeMinutes) {
-        return remainingRuntime(totalRuntimeMinutes, watchedRuntimeMinutes, true);
-    }
-
-    private Long remainingRuntime(
-            Integer totalRuntimeMinutes, Long watchedRuntimeMinutes, Boolean watchedRuntimeComplete) {
-        return totalRuntimeMinutes == null
-                || !Boolean.TRUE.equals(watchedRuntimeComplete)
-                || watchedRuntimeMinutes == null
-                ? null
-                : Math.max(totalRuntimeMinutes.longValue() - watchedRuntimeMinutes, 0L);
-    }
-
-    private Double percentage(Long watchedEpisodeCount, Integer totalEpisodeCount) {
-        if (totalEpisodeCount == null || totalEpisodeCount <= 0) {
-            return null;
-        }
-        return Math.min(100.0, valueOrZero(watchedEpisodeCount) * 100.0 / totalEpisodeCount);
     }
 
     private long valueOrZero(Number value) {

@@ -39,6 +39,7 @@ import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -152,6 +153,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
+
+    @Spy
+    private SeriesProgressAssembler seriesProgressAssembler = new SeriesProgressAssembler();
 
     @Mock
     private EntityManager entityManager;

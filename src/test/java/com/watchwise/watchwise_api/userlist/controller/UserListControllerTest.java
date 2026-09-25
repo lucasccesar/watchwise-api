@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
@@ -145,6 +146,30 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getUserListProgress] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenGettingUserListProgress() {
+        UUID listId = UUID.randomUUID();
+        UserListProgressResponseDTO dto = buildProgressResponseDto();
+        when(userListService.getUserListProgress(currentUserId, listId)).thenReturn(dto);
+
+        ResponseEntity<UserListProgressResponseDTO> result = userListController.getUserListProgress(listId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Resolve The Current User Id From The Security Context - When Called")
+    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingUserListProgress() {
+        UUID listId = UUID.randomUUID();
+        when(userListService.getUserListProgress(currentUserId, listId)).thenReturn(buildProgressResponseDto());
+
+        userListController.getUserListProgress(listId);
+
+        verify(userListService).getUserListProgress(currentUserId, listId);
+    }
+
+    @Test
     @DisplayName("[createUserList] Should Return Created With The Service Result - When Called")
     void shouldReturnCreatedWithTheServiceResultWhenCreatingUserList() {
         UserListCreationDTO creationDTO = new UserListCreationDTO("Best sci-fi of the 90s", null, UserListVisibility.PRIVATE);
@@ -252,6 +277,13 @@ class UserListControllerTest {
                 new ContentRefDTO(UUID.randomUUID(), "100", ContentType.MOVIE, null, null, null, null, null, now, now),
                 null, 1, null, now, now);
         return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(item), 0, false, 1L, 0L, 0L, 1, null);
+    }
+
+    private UserListProgressResponseDTO buildProgressResponseDto() {
+        LocalDateTime now = LocalDateTime.now();
+        return new UserListProgressResponseDTO(
+                UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, now, now,
+                0, false, 1L, 0L, 0L, 1, null, 1L, 0L, 0.0, List.of());
     }
 
     private ContentRefCreationDTO buildContentRef() {

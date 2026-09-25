@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -207,6 +209,143 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
     Page<SeriesProgressCandidate> findCandidatesByUserIdAndSort(
             @Param("userId") UUID userId, @Param("sort") String sort,
             @Param("direction") String direction, Pageable pageable);
+
+    @Query(value = """
+            WITH requested_series AS (
+                SELECT DISTINCT CASE
+                           WHEN c.type = 'SERIES' THEN c.tmdb_id
+                           ELSE c.series_tmdb_id
+                       END AS series_tmdb_id
+                FROM contents c
+                WHERE c.type IN ('SERIES', 'SEASON', 'EPISODE')
+                AND (
+                    (c.type = 'SERIES' AND c.tmdb_id IN (:seriesTmdbIds))
+                    OR (c.type IN ('SEASON', 'EPISODE') AND c.series_tmdb_id IN (:seriesTmdbIds))
+                )
+            ),
+            episode_entries AS (
+                SELECT c.series_tmdb_id AS series_tmdb_id,
+                       c.season_number AS season_number,
+                       c.episode_number AS episode_number,
+                       c.runtime_minutes AS runtime_minutes,
+                       d.watched_date AS watched_date,
+                       d.created_at AS created_at,
+                       d.id AS diary_entry_id,
+                       COALESCE(d.watched_date, d.created_at::date) AS effective_date
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                AND c.type = 'EPISODE'
+                AND c.season_number > 0
+                AND c.series_tmdb_id IN (:seriesTmdbIds)
+            ),
+            distinct_episode_coordinates AS (
+                SELECT ee.series_tmdb_id,
+                       ee.season_number,
+                       ee.episode_number,
+                       MAX(ee.runtime_minutes) AS runtime_minutes
+                FROM episode_entries ee
+                GROUP BY ee.series_tmdb_id, ee.season_number, ee.episode_number
+            ),
+            series_aggregates AS (
+                SELECT rs.series_tmdb_id,
+                       COUNT(dec.episode_number) AS watched_episode_count,
+                       CASE
+                           WHEN COUNT(dec.episode_number) = 0 THEN 0
+                           WHEN COUNT(dec.runtime_minutes) = COUNT(dec.episode_number)
+                           THEN COALESCE(SUM(dec.runtime_minutes), 0)
+                           ELSE NULL
+                       END AS watched_runtime_minutes,
+                       CASE
+                           WHEN COUNT(dec.episode_number) = 0 THEN TRUE
+                           ELSE COUNT(dec.runtime_minutes) = COUNT(dec.episode_number)
+                       END AS watched_runtime_complete
+                FROM requested_series rs
+                LEFT JOIN distinct_episode_coordinates dec ON dec.series_tmdb_id = rs.series_tmdb_id
+                GROUP BY rs.series_tmdb_id
+            ),
+            max_progress AS (
+                SELECT dec.series_tmdb_id,
+                       MAX(dec.season_number) AS max_season_number
+                FROM distinct_episode_coordinates dec
+                GROUP BY dec.series_tmdb_id
+            ),
+            max_progress_episode AS (
+                SELECT dec.series_tmdb_id,
+                       MAX(dec.episode_number) AS max_episode_number
+                FROM distinct_episode_coordinates dec
+                JOIN max_progress mp ON mp.series_tmdb_id = dec.series_tmdb_id
+                                      AND mp.max_season_number = dec.season_number
+                GROUP BY dec.series_tmdb_id
+            ),
+            last_watched_ranked AS (
+                SELECT ee.series_tmdb_id,
+                       ee.season_number,
+                       ee.episode_number,
+                       ee.effective_date,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY ee.series_tmdb_id
+                           ORDER BY ee.effective_date DESC, ee.created_at DESC, ee.diary_entry_id DESC
+                       ) AS row_number
+                FROM episode_entries ee
+            ),
+            candidate_rows AS (
+                SELECT sa.series_tmdb_id,
+                       sa.watched_episode_count,
+                       sa.watched_runtime_minutes,
+                       sa.watched_runtime_complete,
+                       mp.max_season_number,
+                       mpe.max_episode_number,
+                       lw.effective_date AS last_watched_date,
+                       lw.season_number AS last_watched_season_number,
+                       lw.episode_number AS last_watched_episode_number,
+                       metadata.regular_released_episode_count AS total_released_episode_count,
+                       metadata.total_known_runtime AS total_known_runtime,
+                       metadata.last_released_episode_date AS last_released_episode_date,
+                       CASE
+                           WHEN metadata.regular_released_episode_count IS NULL THEN NULL
+                           ELSE GREATEST(
+                               metadata.regular_released_episode_count::bigint - sa.watched_episode_count,
+                               0::bigint
+                           )
+                       END AS remaining_episode_count,
+                       CASE
+                           WHEN metadata.total_known_runtime IS NULL
+                                OR sa.watched_runtime_complete = FALSE
+                           THEN NULL
+                           ELSE GREATEST(
+                               metadata.total_known_runtime::bigint - sa.watched_runtime_minutes,
+                               0::bigint
+                           )
+                       END AS remaining_runtime_minutes
+                FROM series_aggregates sa
+                LEFT JOIN max_progress mp ON mp.series_tmdb_id = sa.series_tmdb_id
+                LEFT JOIN max_progress_episode mpe ON mpe.series_tmdb_id = sa.series_tmdb_id
+                LEFT JOIN last_watched_ranked lw ON lw.series_tmdb_id = sa.series_tmdb_id
+                                                AND lw.row_number = 1
+                LEFT JOIN series_progress_metadata metadata
+                    ON metadata.series_tmdb_id = sa.series_tmdb_id
+            )
+            SELECT series_tmdb_id AS seriesTmdbId,
+                   watched_episode_count AS watchedEpisodeCount,
+                   watched_runtime_minutes AS watchedRuntimeMinutes,
+                   watched_runtime_complete AS watchedRuntimeComplete,
+                   max_season_number AS maxSeasonNumber,
+                   max_episode_number AS maxEpisodeNumber,
+                   last_watched_date AS lastWatchedDate,
+                   last_watched_season_number AS lastWatchedSeasonNumber,
+                   last_watched_episode_number AS lastWatchedEpisodeNumber,
+                   total_released_episode_count AS totalReleasedEpisodeCount,
+                   total_known_runtime AS totalKnownRuntime,
+                   last_released_episode_date AS lastReleasedEpisodeDate,
+                   remaining_episode_count AS remainingEpisodeCount,
+                   remaining_runtime_minutes AS remainingRuntimeMinutes
+            FROM candidate_rows
+            ORDER BY series_tmdb_id ASC
+            """, nativeQuery = true)
+    List<SeriesProgressCandidate> findProgressByUserIdAndSeriesTmdbIds(
+            @Param("userId") UUID userId,
+            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
     @Query(value = """
             WITH episode_entries AS (

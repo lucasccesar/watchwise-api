@@ -55,6 +55,7 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -867,6 +868,29 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getUserListProgress] Should Return Aggregated Movie Progress Without Item State")
+    void shouldReturnAggregatedMovieProgressWithoutItemState() throws Exception {
+        RegisteredUser user = registerUser("listprogressmovie");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Movie progress", UserListVisibility.PUBLIC);
+        persistContentItem(list, "550", 1);
+        clearInvocations(tmdbClient);
+
+        mockMvc.perform(get("/lists/{listId}/progress", list.getId())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Movie progress"))
+                .andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.watchedItems").value(0))
+                .andExpect(jsonPath("$.items[0].content.tmdbId").value("550"))
+                .andExpect(jsonPath("$.items[0].contentState").doesNotExist())
+                .andExpect(jsonPath("$.items[0].seriesProgress").doesNotExist())
+                .andExpect(jsonPath("$.items[0].seasonProgress").doesNotExist());
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Report The Locked Content Type Group As ItemScope - When List Has A Movie Item")
     void shouldReportTheLockedContentTypeGroupAsItemScopeWhenListHasAMovieItem() throws Exception {
         RegisteredUser user = registerUser("itemscopeowner");
@@ -895,6 +919,13 @@ class UserListControllerIntegrationTest {
     @DisplayName("[getUserListById] Should Return Unauthorized - When No Access Token Cookie Is Present")
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetById() throws Exception {
         mockMvc.perform(get("/lists/" + UUID.randomUUID()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGetUserListProgress() throws Exception {
+        mockMvc.perform(get("/lists/{listId}/progress", UUID.randomUUID()))
                 .andExpect(status().isUnauthorized());
     }
 

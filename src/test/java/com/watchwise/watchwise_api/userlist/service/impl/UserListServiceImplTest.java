@@ -12,7 +12,9 @@ import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -27,13 +29,18 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressItemDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
+import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.mapper.UserListMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -88,6 +95,9 @@ class UserListServiceImplTest {
     private UserListMapper userListMapper;
 
     @Mock
+    private ContentMapper contentMapper;
+
+    @Mock
     private LikeService likeService;
 
     @Mock
@@ -98,6 +108,12 @@ class UserListServiceImplTest {
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
+    private UserListItemRepository userListItemRepository;
+
+    @Mock
+    private SeriesProgressReader seriesProgressReader;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -131,6 +147,15 @@ class UserListServiceImplTest {
         marina = buildUser(marinaId, "marina", true);
 
         lenient().when(likeService.getLikedListIds(any(), any())).thenReturn(Set.of());
+        lenient().when(contentMapper.contentToContentRefDto(any(Content.class)))
+                .thenAnswer(invocation -> {
+                    Content content = invocation.getArgument(0);
+                    return new ContentRefDTO(
+                            content.getId(), content.getTmdbId(), content.getType(), content.getSeriesTmdbId(),
+                            content.getSeasonNumber(), content.getEpisodeNumber(), content.getIsSeasonFinale(),
+                            content.getIsSeriesFinale(), content.getCreatedAt(), content.getUpdatedAt(),
+                            content.getRuntimeMinutes(), content.getGenres(), content.getReleaseYear(), content.getCountries());
+                });
     }
 
     // ---------- getUserLists ----------
@@ -1037,6 +1062,108 @@ class UserListServiceImplTest {
                 eq(UserListItemScope.MOVIE_OR_SERIES));
     }
 
+    // ---------- getUserListProgress ----------
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Return Aggregated Movie Progress Without Item State")
+    void shouldReturnAggregatedMovieProgressWithoutItemState() {
+        UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
+        Content firstMovie = buildContent(ContentType.MOVIE, "100", null, null, null);
+        Content secondMovie = buildContent(ContentType.MOVIE, "200", null, null, null);
+        Content thirdMovie = buildContent(ContentType.MOVIE, "300", null, null, null);
+        List<UserListItem> items = List.of(
+                buildContentItem(list, firstMovie, 1),
+                buildContentItem(list, secondMovie, 2),
+                buildContentItem(list, thirdMovie, 3));
+        Set<UUID> contentIds = Set.of(firstMovie.getId(), secondMovie.getId(), thirdMovie.getId());
+
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
+                .thenReturn(items);
+        when(diaryEntryRepository.findWatchedDirectContentIds(lucasId, contentIds))
+                .thenReturn(Set.of(firstMovie.getId(), secondMovie.getId()));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+
+        UserListProgressResponseDTO result = userListService.getUserListProgress(lucasId, list.getId());
+
+        assertThat(result.totalItems()).isEqualTo(3);
+        assertThat(result.watchedItems()).isEqualTo(2);
+        assertThat(result.watchedPercentage()).isEqualTo(200.0 / 3.0 * 1.0);
+        assertThat(result.items()).extracting(UserListProgressItemDTO::seriesProgress)
+                .containsOnlyNulls();
+        assertThat(result.items()).extracting(UserListProgressItemDTO::seasonProgress)
+                .containsOnlyNulls();
+        verifyNoInteractions(seriesProgressReader);
+        verify(diaryEntryRepository).findWatchedDirectContentIds(lucasId, contentIds);
+    }
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Return Every Series With Viewer Progress")
+    void shouldReturnEverySeriesWithViewerProgress() {
+        UserList list = buildList(lucas, "Series", null, UserListVisibility.PUBLIC);
+        Content firstSeries = buildContent(ContentType.SERIES, "1396", null, null, null);
+        Content secondSeries = buildContent(ContentType.SERIES, "94605", null, null, null);
+        List<UserListItem> items = List.of(
+                buildContentItem(list, firstSeries, 1),
+                buildContentItem(list, secondSeries, 2));
+        SeriesInProgressResponseDTO zeroProgress = new SeriesInProgressResponseDTO(
+                "1396", null, null, null, 0L, 10, 0.0);
+        SeriesInProgressResponseDTO completedProgress = new SeriesInProgressResponseDTO(
+                "94605", 2, 5, LocalDateTime.now().toLocalDate(), 10L, 10, 100.0);
+
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
+                .thenReturn(items);
+        when(seriesProgressReader.readForSeriesIds(marinaId, List.of("1396", "94605")))
+                .thenReturn(Map.of("1396", zeroProgress, "94605", completedProgress));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+
+        UserListProgressResponseDTO result = userListService.getUserListProgress(marinaId, list.getId());
+
+        assertThat(result.items()).extracting(UserListProgressItemDTO::seriesProgress)
+                .containsExactly(zeroProgress, completedProgress);
+        assertThat(result.watchedItems()).isEqualTo(1);
+        verify(seriesProgressReader).readForSeriesIds(marinaId, List.of("1396", "94605"));
+        verifyNoInteractions(diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Reject A Nested-List List")
+    void shouldRejectANestedListList() {
+        UserList list = buildList(lucas, "Nested", null, UserListVisibility.PUBLIC);
+        UserList childList = buildList(lucas, "Child", null, UserListVisibility.PUBLIC);
+        UserListItem nestedItem = UserListItem.builder()
+                .id(UUID.randomUUID())
+                .userList(list)
+                .childList(childList)
+                .position(1)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
+                .thenReturn(List.of(nestedItem));
+
+        assertThatThrownBy(() -> userListService.getUserListProgress(lucasId, list.getId()))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("List progress is only available for content lists");
+
+        verifyNoInteractions(diaryEntryRepository, seriesProgressReader);
+    }
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Throw ForbiddenException - When List Is Private To Another User")
+    void shouldThrowForbiddenExceptionWhenListIsPrivateToAnotherUser() {
+        UserList list = buildList(lucas, "Private", null, UserListVisibility.PRIVATE);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+
+        assertThatThrownBy(() -> userListService.getUserListProgress(marinaId, list.getId()))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This list is private");
+
+        verifyNoInteractions(userListItemRepository, diaryEntryRepository, seriesProgressReader);
+    }
+
     // ---------- createUserList ----------
 
     @Test
@@ -1611,5 +1738,31 @@ class UserListServiceImplTest {
                 UUID.randomUUID(), content.tmdbId(), content.type(), content.seriesTmdbId(),
                 content.seasonNumber(), content.episodeNumber(), null, null, now, now);
         return new UserListItemResponseDTO(UUID.randomUUID(), contentRefDTO, null, 1, null, now, now);
+    }
+
+    private Content buildContent(
+            ContentType type, String tmdbId, String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        return Content.builder()
+                .id(UUID.randomUUID())
+                .type(type)
+                .tmdbId(tmdbId)
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    private UserListItem buildContentItem(UserList list, Content content, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        return UserListItem.builder()
+                .id(UUID.randomUUID())
+                .userList(list)
+                .content(content)
+                .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
     }
 }
