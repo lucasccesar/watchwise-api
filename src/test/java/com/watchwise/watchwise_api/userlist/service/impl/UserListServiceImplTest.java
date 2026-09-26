@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -115,6 +116,9 @@ class UserListServiceImplTest {
     @Mock
     private SeriesProgressReader seriesProgressReader;
 
+    @Mock
+    private UserContentPosterService userContentPosterService;
+
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
@@ -147,6 +151,8 @@ class UserListServiceImplTest {
         marina = buildUser(marinaId, "marina", true);
 
         lenient().when(likeService.getLikedListIds(any(), any())).thenReturn(Set.of());
+        lenient().when(userContentPosterService.findByUserAndContentIds(any(), any()))
+                .thenReturn(Map.of());
         lenient().when(contentMapper.contentToContentRefDto(any(Content.class)))
                 .thenAnswer(invocation -> {
                     Content content = invocation.getArgument(0);
