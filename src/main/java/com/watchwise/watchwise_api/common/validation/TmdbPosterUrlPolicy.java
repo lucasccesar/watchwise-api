@@ -8,6 +8,14 @@ public final class TmdbPosterUrlPolicy {
     }
 
     public static boolean isValid(String value) {
-        return value != null && value.startsWith(PREFIX) && value.length() > PREFIX.length();
+        if (value == null || !value.startsWith(PREFIX)) {
+            return false;
+        }
+
+        String suffix = value.substring(PREFIX.length());
+        return !suffix.isEmpty()
+                && !suffix.isBlank()
+                && suffix.trim().equals(suffix)
+                && suffix.chars().noneMatch(Character::isWhitespace);
     }
 }

@@ -54,6 +54,24 @@ class TmdbPosterUrlValidatorTest {
     }
 
     @Test
+    @DisplayName("Should Reject A Poster URL - When Its Suffix Is Only Whitespace")
+    void shouldRejectPosterUrlWhenItsSuffixIsOnlyWhitespace() {
+        assertThat(TmdbPosterUrlPolicy.isValid(TmdbPosterUrlPolicy.PREFIX + " ")).isFalse();
+    }
+
+    @Test
+    @DisplayName("Should Reject A Poster URL - When Its Suffix Has Trailing Whitespace")
+    void shouldRejectPosterUrlWhenItsSuffixHasTrailingWhitespace() {
+        assertThat(TmdbPosterUrlPolicy.isValid(TmdbPosterUrlPolicy.PREFIX + "poster.png ")).isFalse();
+    }
+
+    @Test
+    @DisplayName("Should Reject A Poster URL - When Its Path Contains Whitespace")
+    void shouldRejectPosterUrlWhenItsPathContainsWhitespace() {
+        assertThat(TmdbPosterUrlPolicy.isValid(TmdbPosterUrlPolicy.PREFIX + "poster image.png")).isFalse();
+    }
+
+    @Test
     @DisplayName("Should Reject A Null Poster URL In The Service Policy")
     void shouldRejectNullPosterUrlInTheServicePolicy() {
         assertThat(TmdbPosterUrlPolicy.isValid(null)).isFalse();
