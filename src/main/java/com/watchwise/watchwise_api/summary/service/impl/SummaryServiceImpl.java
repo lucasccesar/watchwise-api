@@ -58,6 +58,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -181,11 +182,11 @@ public class SummaryServiceImpl implements SummaryService {
         Stream<DiaryEntry> episodes = diaryEntryRepository
                 .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, ContentType.EPISODE, topN).stream();
 
-        return Stream.concat(movies, episodes)
+        List<DiaryEntry> entries = Stream.concat(movies, episodes)
                 .sorted(Comparator.comparing(DiaryEntry::getCreatedAt).reversed())
                 .limit(HOME_RECENTLY_WATCHED_LIMIT)
-                .map(this::toDiaryEntryResponseDto)
                 .toList();
+        return toDiaryEntryResponseDtos(entries, loadPostersForOwner(userId, entries));
     }
 
     @Override
@@ -206,16 +207,14 @@ public class SummaryServiceImpl implements SummaryService {
         ContentType watchedContentType = watchedContentTypeFor(type);
         PageRequest topN = PageRequest.of(0, MONTH_TOP_LIMIT);
 
-        List<DiaryEntryResponseDTO> recentWatched = diaryEntryRepository
+        List<DiaryEntry> recentWatchedEntries = diaryEntryRepository
                 .findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(userId, type, start, end, topN)
-                .stream().map(this::toDiaryEntryResponseDto).toList();
+                .stream().toList();
 
         List<DiaryEntry> topRatedRaw = diaryEntryRepository
                 .findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository
                 .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
-        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type));
-        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw);
 
         List<RatingCountDTO> ratingsDistribution = diaryEntryRepository
                 .countByUserIdAndContentTypeAndWatchedDateBetweenGroupByScore(userId, watchedContentType, start, end)
@@ -232,8 +231,17 @@ public class SummaryServiceImpl implements SummaryService {
                 .findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
                         userId, watchedContentType, start, end, singleEntry)
                 .stream().findFirst().orElse(null);
-        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null ? null : toDiaryEntryResponseDto(firstWatchedEntry);
-        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null ? null : toDiaryEntryResponseDto(lastWatchedEntry);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId,
+                collectDiaryEntries(recentWatchedEntries, topRatedRaw, bottomRatedRaw,
+                        firstWatchedEntry == null ? List.of() : List.of(firstWatchedEntry),
+                        lastWatchedEntry == null ? List.of() : List.of(lastWatchedEntry)));
+        List<DiaryEntryResponseDTO> recentWatched = toDiaryEntryResponseDtos(recentWatchedEntries, customPosterByContentId);
+        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type), customPosterByContentId);
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId);
+        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(firstWatchedEntry, customPosterByContentId);
+        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(lastWatchedEntry, customPosterByContentId);
 
         List<DailyMinutesDTO> minutesPerDay = diaryEntryRepository
                 .sumRuntimeMinutesByUserIdAndContentTypeGroupByWatchedDateBetween(userId, watchedContentType, start, end)
@@ -290,8 +298,6 @@ public class SummaryServiceImpl implements SummaryService {
                 .findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository
                 .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
-        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type));
-        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw);
 
         List<RatingCountDTO> ratingsDistribution = diaryEntryRepository
                 .countByUserIdAndContentTypeAndWatchedDateBetweenGroupByScore(userId, watchedContentType, start, end)
@@ -323,8 +329,16 @@ public class SummaryServiceImpl implements SummaryService {
                 .findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
                         userId, watchedContentType, start, end, singleEntry)
                 .stream().findFirst().orElse(null);
-        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null ? null : toDiaryEntryResponseDto(firstWatchedEntry);
-        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null ? null : toDiaryEntryResponseDto(lastWatchedEntry);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId,
+                collectDiaryEntries(topRatedRaw, bottomRatedRaw,
+                        firstWatchedEntry == null ? List.of() : List.of(firstWatchedEntry),
+                        lastWatchedEntry == null ? List.of() : List.of(lastWatchedEntry)));
+        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type), customPosterByContentId);
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId);
+        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(firstWatchedEntry, customPosterByContentId);
+        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(lastWatchedEntry, customPosterByContentId);
 
         List<LongestWatchedItemDTO> longestWatched = computeLongestWatched(userId, type, start, end);
 
@@ -389,8 +403,11 @@ public class SummaryServiceImpl implements SummaryService {
 
         List<DiaryEntry> topRatedRaw = diaryEntryRepository.findTopRatedByUserId(userId, PageRequest.of(0, ALL_TIME_TOP_LIMIT));
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository.findBottomRatedByUserId(userId, PageRequest.of(0, ALL_TIME_TOP_LIMIT));
-        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(ContentType.MOVIE, ContentType.SERIES));
-        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId,
+                collectDiaryEntries(topRatedRaw, bottomRatedRaw));
+        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId,
+                List.of(ContentType.MOVIE, ContentType.SERIES), customPosterByContentId);
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId);
 
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanionsAllTime(userId);
 
@@ -481,11 +498,20 @@ public class SummaryServiceImpl implements SummaryService {
         return type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.EPISODE;
     }
 
-    private DiaryEntryResponseDTO toDiaryEntryResponseDto(DiaryEntry entry) {
-        return diaryEntryMapper.diaryEntryToResponseDto(entry, false);
+    private List<DiaryEntryResponseDTO> toDiaryEntryResponseDtos(List<DiaryEntry> entries,
+            Map<UUID, String> customPosterByContentId) {
+        return entries.stream()
+                .map(entry -> toDiaryEntryResponseDto(entry, customPosterByContentId))
+                .toList();
     }
 
-    private List<DiaryEntryResponseDTO> promoteTop5First(List<DiaryEntry> entries, UUID userId, List<ContentType> top5Types) {
+    private DiaryEntryResponseDTO toDiaryEntryResponseDto(DiaryEntry entry, Map<UUID, String> customPosterByContentId) {
+        return diaryEntryMapper.diaryEntryToResponseDto(entry, false)
+                .withCustomPosterUrl(customPosterByContentId.get(entry.getContent().getId()));
+    }
+
+    private List<DiaryEntryResponseDTO> promoteTop5First(List<DiaryEntry> entries, UUID userId,
+            List<ContentType> top5Types, Map<UUID, String> customPosterByContentId) {
         Set<UUID> top5ContentIds = top5Types.stream()
                 .flatMap(t -> top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(userId, t).stream())
                 .map(entry -> entry.getContent().getId())
@@ -493,14 +519,36 @@ public class SummaryServiceImpl implements SummaryService {
 
         return entries.stream()
                 .sorted(Comparator.comparing((DiaryEntry d) -> !top5ContentIds.contains(d.getContent().getId())))
-                .map(this::toDiaryEntryResponseDto)
+                .map(entry -> toDiaryEntryResponseDto(entry, customPosterByContentId))
                 .toList();
     }
 
-    private List<DiaryEntryResponseDTO> sortBottomRated(List<DiaryEntry> entries) {
+    private List<DiaryEntryResponseDTO> sortBottomRated(List<DiaryEntry> entries,
+            Map<UUID, String> customPosterByContentId) {
         return entries.stream()
                 .sorted(Comparator.comparing(DiaryEntry::getScore))
-                .map(this::toDiaryEntryResponseDto)
+                .map(entry -> toDiaryEntryResponseDto(entry, customPosterByContentId))
+                .toList();
+    }
+
+    private Map<UUID, String> loadPostersForOwner(UUID ownerId, Collection<DiaryEntry> entries) {
+        List<UUID> contentIds = entries.stream()
+                .map(DiaryEntry::getContent)
+                .filter(java.util.Objects::nonNull)
+                .map(Content::getId)
+                .distinct()
+                .toList();
+        if (contentIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, String> posters = userContentPosterService.findByUserAndContentIds(ownerId, contentIds);
+        return posters == null ? Map.of() : posters;
+    }
+
+    @SafeVarargs
+    private final List<DiaryEntry> collectDiaryEntries(Collection<DiaryEntry>... collections) {
+        return Stream.of(collections)
+                .flatMap(Collection::stream)
                 .toList();
     }
 

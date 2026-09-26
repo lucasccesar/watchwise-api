@@ -148,6 +148,8 @@ class SummaryServiceImplTest {
                 .thenAnswer(invocation -> buildDiaryEntryResponseDto());
         lenient().when(userContentPosterService.findSeriesPosters(any(), any()))
                 .thenReturn(Map.of());
+        lenient().when(userContentPosterService.findByUserAndContentIds(any(), any()))
+                .thenReturn(Map.of());
     }
 
     @Test
@@ -444,6 +446,128 @@ class SummaryServiceImplTest {
 
         assertThat(result.recentlyWatched()).extracting(DiaryEntryResponseDTO::id)
                 .containsExactly(newestEpisode.getId(), newestMovie.getId(), oldestEpisode.getId(), oldestMovie.getId());
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Enrich Recently Watched With The Profile Owner Poster In One Batch")
+    void shouldEnrichRecentlyWatchedWithTheProfileOwnerPosterInOneBatch() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movieContent = buildContent("100", ContentType.MOVIE);
+        Content episodeContent = buildContent("1399", ContentType.EPISODE);
+        LocalDateTime now = LocalDateTime.now();
+        DiaryEntry movieEntry = buildDiaryEntry(movieContent, now.minusHours(1));
+        DiaryEntry episodeEntry = buildDiaryEntry(episodeContent, now);
+        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                eq(lucasId), eq(ContentType.MOVIE), any())).thenReturn(List.of(movieEntry));
+        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                eq(lucasId), eq(ContentType.EPISODE), any())).thenReturn(List.of(episodeEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
+                .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
+        when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any()))
+                .thenReturn(Map.of(
+                        movieContent.getId(), "https://image.tmdb.org/t/p/w342/lucas-movie.png",
+                        episodeContent.getId(), "https://image.tmdb.org/t/p/w342/lucas-episode.png"));
+
+        HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
+
+        assertThat(result.recentlyWatched()).extracting(DiaryEntryResponseDTO::customPosterUrl)
+                .containsExactly(
+                        "https://image.tmdb.org/t/p/w342/lucas-episode.png",
+                        "https://image.tmdb.org/t/p/w342/lucas-movie.png");
+        verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Enrich Every Diary Response With The Profile Owner Poster In One Batch")
+    void shouldEnrichEveryDiaryResponseWithTheProfileOwnerPosterInOneBatchForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        DiaryEntry recent = buildDiaryEntry(buildContent("recent", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry top = buildDiaryEntry(buildContent("top", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry bottom = buildDiaryEntry(buildContent("bottom", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry first = buildDiaryEntry(buildContent("first", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry last = buildDiaryEntry(buildContent("last", ContentType.MOVIE), LocalDateTime.now());
+        when(diaryEntryRepository.findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(recent));
+        when(diaryEntryRepository.findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(top));
+        when(diaryEntryRepository.findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(bottom));
+        when(diaryEntryRepository.findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(first));
+        when(diaryEntryRepository.findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(last));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
+                .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
+        when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any())).thenReturn(Map.of(
+                recent.getContent().getId(), "https://image.tmdb.org/t/p/w342/recent.png",
+                top.getContent().getId(), "https://image.tmdb.org/t/p/w342/top.png",
+                bottom.getContent().getId(), "https://image.tmdb.org/t/p/w342/bottom.png",
+                first.getContent().getId(), "https://image.tmdb.org/t/p/w342/first.png",
+                last.getContent().getId(), "https://image.tmdb.org/t/p/w342/last.png"));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.recentWatched().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/recent.png");
+        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/top.png");
+        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/bottom.png");
+        assertThat(result.firstWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/first.png");
+        assertThat(result.lastWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/last.png");
+        verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Enrich Rankings And First Last Diary Entries With The Owner Poster")
+    void shouldEnrichRankingsAndFirstLastDiaryEntriesWithTheOwnerPosterForYearInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        DiaryEntry top = buildDiaryEntry(buildContent("top", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry bottom = buildDiaryEntry(buildContent("bottom", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry first = buildDiaryEntry(buildContent("first", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry last = buildDiaryEntry(buildContent("last", ContentType.MOVIE), LocalDateTime.now());
+        when(diaryEntryRepository.findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(top));
+        when(diaryEntryRepository.findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(bottom));
+        when(diaryEntryRepository.findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(first));
+        when(diaryEntryRepository.findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(last));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
+                .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
+        when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any())).thenReturn(Map.of(
+                top.getContent().getId(), "https://image.tmdb.org/t/p/w342/top.png",
+                bottom.getContent().getId(), "https://image.tmdb.org/t/p/w342/bottom.png",
+                first.getContent().getId(), "https://image.tmdb.org/t/p/w342/first.png",
+                last.getContent().getId(), "https://image.tmdb.org/t/p/w342/last.png"));
+
+        YearInReviewResponseDTO result = summaryService.getYearInReview(lucasId, lucasId, ContentType.MOVIE, 2026);
+
+        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/top.png");
+        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/bottom.png");
+        assertThat(result.firstWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/first.png");
+        assertThat(result.lastWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/last.png");
+        verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Enrich Both Rating Rankings With The Owner Poster In One Batch")
+    void shouldEnrichBothRatingRankingsWithTheOwnerPosterInOneBatchForAllTimeStats() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        DiaryEntry top = buildDiaryEntry(buildContent("top", ContentType.MOVIE), LocalDateTime.now());
+        DiaryEntry bottom = buildDiaryEntry(buildContent("bottom", ContentType.MOVIE), LocalDateTime.now());
+        when(diaryEntryRepository.findTopRatedByUserId(eq(lucasId), any())).thenReturn(List.of(top));
+        when(diaryEntryRepository.findBottomRatedByUserId(eq(lucasId), any())).thenReturn(List.of(bottom));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
+                .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
+        when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any())).thenReturn(Map.of(
+                top.getContent().getId(), "https://image.tmdb.org/t/p/w342/top.png",
+                bottom.getContent().getId(), "https://image.tmdb.org/t/p/w342/bottom.png"));
+
+        AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
+
+        assertThat(result.topRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/top.png");
+        assertThat(result.bottomRated().getFirst().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/bottom.png");
+        verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
     }
 
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
