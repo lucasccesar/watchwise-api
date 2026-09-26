@@ -384,10 +384,7 @@ public class UserListItemServiceImpl implements UserListItemService {
                     userId, item.getContent().getId(), userListItemPatchDTO.customPosterUrl());
         }
 
-        UserListItemResponseDTO response = toResponseDto(userId, item);
-        return customPosterUrlProvided
-                ? response.withCustomPosterUrl(userListItemPatchDTO.customPosterUrl())
-                : response;
+        return toResponseDto(userId, item);
     }
 
     private UserListItemResponseDTO toResponseDto(UUID viewerId, UserListItem item) {

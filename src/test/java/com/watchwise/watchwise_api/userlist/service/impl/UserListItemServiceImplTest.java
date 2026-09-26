@@ -1318,6 +1318,27 @@ class UserListItemServiceImplTest {
     }
 
     @Test
+    @DisplayName("[updateItem] Should Return Canonical Poster - When Upsert Resolves A Different Current Value")
+    void shouldReturnCanonicalPosterWhenUpsertResolvesADifferentCurrentValue() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        UserListItemResponseDTO mapped = new UserListItemResponseDTO(
+                item.getId(), buildContentRefDto(fightClub), null, 1, null, LocalDateTime.now(), LocalDateTime.now());
+        String requestedPoster = "https://image.tmdb.org/t/p/w342/requested.png";
+        String canonicalPoster = "https://image.tmdb.org/t/p/w342/canonical.png";
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
+        when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
+        when(userContentPosterService.findByUserAndContentIds(lucasId, List.of(fightClub.getId())))
+                .thenReturn(Map.of(fightClub.getId(), canonicalPoster));
+
+        UserListItemResponseDTO result = userListItemService.updateItem(
+                lucasId, listId, item.getId(), new UserListItemPatchDTO(null, null, requestedPoster));
+
+        assertThat(result.customPosterUrl()).isEqualTo(canonicalPoster);
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), requestedPoster);
+    }
+
+    @Test
     @DisplayName("[updateItem] Should Upsert CustomPosterUrl - When A Value Is Provided")
     void shouldUpsertCustomPosterUrlWhenAValueIsProvided() {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
