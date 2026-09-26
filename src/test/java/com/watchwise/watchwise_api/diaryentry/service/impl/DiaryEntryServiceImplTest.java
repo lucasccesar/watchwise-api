@@ -226,6 +226,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new TmdbLookupResult.Found<>(emptySeriesDetails()));
         lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(emptyMovieDetails()));
+        lenient().when(userContentPosterService.findSeriesPosters(any(), any()))
+                .thenReturn(Map.of());
     }
 
     private TmdbSeasonFullDetails emptySeasonDetails() {
@@ -635,6 +637,103 @@ class DiaryEntryServiceImplTest {
         verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.ASC), any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Expose The Owner's Custom Poster")
+    void shouldExposeOwnersCustomPosterForDetailedSeriesInProgress() {
+        String seriesTmdbId = "poster-series";
+        SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
+                seriesTmdbId, 1L, 20L, 1, 1, LocalDate.of(2026, 9, 20), 1, 1,
+                3, 60, LocalDate.of(2026, 9, 21), 2L, 40L);
+
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.DESC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
+        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+                .thenReturn(seriesProgressTotals(1L, 20L));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
+                eq(lucasId), eq(List.of(seriesTmdbId))))
+                .thenReturn(List.of());
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
+                .thenReturn(Map.of(seriesTmdbId, snapshot(seriesTmdbId)));
+        when(userContentPosterService.findSeriesPosters(lucasId, List.of(seriesTmdbId)))
+                .thenReturn(Map.of(seriesTmdbId, "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
+
+        assertThat(result.content().getFirst().customPosterUrl())
+                .isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+        verify(userContentPosterService).findSeriesPosters(lucasId, List.of(seriesTmdbId));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Expose The Target User's Poster To An Authorized Viewer")
+    void shouldExposeTargetUsersPosterToAuthorizedViewerForDetailedSeriesInProgress() {
+        String seriesTmdbId = "poster-series";
+        SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
+                seriesTmdbId, 1L, 20L, 1, 1, LocalDate.of(2026, 9, 20), 1, 1,
+                3, 60, LocalDate.of(2026, 9, 21), 2L, 40L);
+        lucas.setIsProfilePublic(false);
+
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(
+                marinaId, lucasId, FollowStatus.ACCEPTED)).thenReturn(true);
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.DESC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
+        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+                .thenReturn(seriesProgressTotals(1L, 20L));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
+                eq(lucasId), eq(List.of(seriesTmdbId))))
+                .thenReturn(List.of());
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
+                .thenReturn(Map.of(seriesTmdbId, snapshot(seriesTmdbId)));
+        when(userContentPosterService.findSeriesPosters(lucasId, List.of(seriesTmdbId)))
+                .thenReturn(Map.of(seriesTmdbId, "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                marinaId, lucasId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
+
+        assertThat(result.content().getFirst().customPosterUrl())
+                .isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+        verify(userContentPosterService).findSeriesPosters(lucasId, List.of(seriesTmdbId));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Return Null Custom Poster When The Target Has None")
+    void shouldReturnNullCustomPosterWhenDetailedSeriesInProgressHasNoPoster() {
+        String seriesTmdbId = "poster-series";
+        SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
+                seriesTmdbId, 1L, 20L, 1, 1, LocalDate.of(2026, 9, 20), 1, 1,
+                3, 60, LocalDate.of(2026, 9, 21), 2L, 40L);
+
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.DESC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
+        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+                .thenReturn(seriesProgressTotals(1L, 20L));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
+                eq(lucasId), eq(List.of(seriesTmdbId))))
+                .thenReturn(List.of());
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
+                .thenReturn(Map.of(seriesTmdbId, snapshot(seriesTmdbId)));
+        when(userContentPosterService.findSeriesPosters(lucasId, List.of(seriesTmdbId)))
+                .thenReturn(Map.of());
+
+        SeriesInProgressPageResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
+
+        assertThat(result.content().getFirst().customPosterUrl()).isNull();
     }
 
     @Test

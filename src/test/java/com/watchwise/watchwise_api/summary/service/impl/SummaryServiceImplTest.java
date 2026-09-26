@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
@@ -22,6 +23,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapItemDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
@@ -110,6 +112,9 @@ class SummaryServiceImplTest {
     @Mock
     private SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
 
+    @Mock
+    private UserContentPosterService userContentPosterService;
+
     @InjectMocks
     private SummaryServiceImpl summaryService;
 
@@ -141,6 +146,8 @@ class SummaryServiceImplTest {
                 .thenReturn(List.of());
         lenient().when(diaryEntryMapper.diaryEntryToResponseDto(any(), anyBoolean()))
                 .thenAnswer(invocation -> buildDiaryEntryResponseDto());
+        lenient().when(userContentPosterService.findSeriesPosters(any(), any()))
+                .thenReturn(Map.of());
     }
 
     @Test
@@ -965,6 +972,22 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Expose The Owner's Series Poster")
+    void shouldExposeOwnersSeriesPosterForEpisodeRatingsGrid() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findEpisodeEntriesBySeriesForUser(lucasId, "1399"))
+                .thenReturn(List.of());
+        when(userContentPosterService.findSeriesPosters(lucasId, List.of("1399")))
+                .thenReturn(Map.of("1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+
+        EpisodeRatingsGridResponseDTO result = summaryService.getEpisodeRatingsGrid(lucasId, lucasId, "1399");
+
+        assertThat(result.customPosterUrl())
+                .isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+        verify(userContentPosterService).findSeriesPosters(lucasId, List.of("1399"));
+    }
+
+    @Test
     @DisplayName("[getEpisodeRatingsMap] Should Return Empty Series - When User Has No Episode Entries")
     void shouldReturnEmptySeriesWhenUserHasNoEpisodeEntriesForEpisodeRatingsMap() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
@@ -990,6 +1013,35 @@ class SummaryServiceImplTest {
         assertThat(result.series())
                 .extracting("seriesTmdbId", "watchedEpisodeCount", "totalEpisodeCount")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("1399", 7L, 10));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Resolve Posters For The Target User And Preserve Null Fallbacks")
+    void shouldResolvePostersForTargetUserAndPreserveNullFallbacksForEpisodeRatingsMap() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId))
+                .thenReturn(List.of(seriesEpisodeCount("1399", 7L), seriesEpisodeCount("94605", 2L)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(
+                eq(List.of("1399", "94605")), any(LocalDate.class)))
+                .thenReturn(Map.of(
+                        "1399", seriesProgressSnapshot("1399", 10),
+                        "94605", seriesProgressSnapshot("94605", 4)));
+        when(userContentPosterService.findSeriesPosters(lucasId, List.of("1399", "94605")))
+                .thenReturn(Map.of("1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(marinaId, lucasId);
+
+        assertThat(result.series())
+                .extracting(EpisodeRatingsMapItemDTO::seriesTmdbId,
+                        EpisodeRatingsMapItemDTO::customPosterUrl)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                "1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"),
+                        org.assertj.core.groups.Tuple.tuple("94605", null));
+        verify(userContentPosterService).findSeriesPosters(lucasId, List.of("1399", "94605"));
     }
 
     @Test

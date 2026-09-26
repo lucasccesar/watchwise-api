@@ -4,5 +4,12 @@ import java.util.List;
 
 public record EpisodeRatingsGridResponseDTO(
         String seriesTmdbId,
-        List<EpisodeScoreDTO> episodes) {
+        List<EpisodeScoreDTO> episodes,
+        String customPosterUrl) {
+
+    public EpisodeRatingsGridResponseDTO(
+            String seriesTmdbId,
+            List<EpisodeScoreDTO> episodes) {
+        this(seriesTmdbId, episodes, null);
+    }
 }

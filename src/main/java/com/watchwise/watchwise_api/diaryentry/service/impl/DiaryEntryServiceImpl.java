@@ -155,9 +155,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .toList();
         Map<String, Map<Integer, Long>> watchedEpisodeCountsBySeriesAndSeason =
                 loadWatchedEpisodeCountsBySeriesAndSeason(userId, seriesTmdbIds);
+        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, seriesTmdbIds);
 
         return seriesInProgress.map(row -> toSeriesInProgressResponse(
-                row, watchedEpisodeCountsBySeriesAndSeason.getOrDefault(row.getSeriesTmdbId(), Map.of())));
+                row,
+                watchedEpisodeCountsBySeriesAndSeason.getOrDefault(row.getSeriesTmdbId(), Map.of()),
+                customPosterBySeries.get(row.getSeriesTmdbId())));
     }
 
     @Override
@@ -194,12 +197,14 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .toList();
         Map<String, Map<Integer, DiaryEntryRepository.SeasonProgress>> watchedProgress =
                 loadWatchedProgress(userId, pageSeriesIds);
+        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, pageSeriesIds);
 
         List<SeriesInProgressResponseDTO> content = page.getContent().stream()
                 .map(row -> toDetailedSeriesResponse(
                         row,
                         snapshots.get(row.getSeriesTmdbId()),
-                        watchedProgress.getOrDefault(row.getSeriesTmdbId(), Map.of())))
+                        watchedProgress.getOrDefault(row.getSeriesTmdbId(), Map.of()),
+                        customPosterBySeries.get(row.getSeriesTmdbId())))
                 .toList();
         SeriesInProgressAggregateDTO aggregate = calculateAggregate(userId, allRows, snapshots);
 
@@ -249,8 +254,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private SeriesInProgressResponseDTO toDetailedSeriesResponse(
             SeriesProgressReadRepository.SeriesProgressCandidate row,
             SeriesProgressMetadataRefreshService.Snapshot snapshot,
-            Map<Integer, DiaryEntryRepository.SeasonProgress> watchedProgress) {
-        return seriesProgressAssembler.toDetailedSeriesResponse(row, snapshot, watchedProgress);
+            Map<Integer, DiaryEntryRepository.SeasonProgress> watchedProgress,
+            String customPosterUrl) {
+        return seriesProgressAssembler.toDetailedSeriesResponse(
+                row, snapshot, watchedProgress, customPosterUrl);
     }
 
     private SeriesInProgressAggregateDTO calculateAggregate(
@@ -327,8 +334,18 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         LinkedHashMap::new)));
     }
 
+    private Map<String, String> loadSeriesPosters(UUID userId, List<String> seriesTmdbIds) {
+        if (seriesTmdbIds.isEmpty()) {
+            return Map.of();
+        }
+        return Optional.ofNullable(userContentPosterService.findSeriesPosters(userId, seriesTmdbIds))
+                .orElseGet(Map::of);
+    }
+
     private SeriesInProgressResponseDTO toSeriesInProgressResponse(
-            DiaryEntryRepository.SeriesInProgress row, Map<Integer, Long> watchedEpisodeCountsBySeason) {
+            DiaryEntryRepository.SeriesInProgress row,
+            Map<Integer, Long> watchedEpisodeCountsBySeason,
+            String customPosterUrl) {
         TmdbTvFullDetails details = tmdbClient
                 .getTvFullDetails(row.getSeriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)
                 .toOptional()
@@ -343,7 +360,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         return new SeriesInProgressResponseDTO(
                 row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),
-                row.getWatchedEpisodeCount(), totalEpisodeCount, watchedPercentage, progress.seasonProgress());
+                row.getWatchedEpisodeCount(), totalEpisodeCount, watchedPercentage, progress.seasonProgress(),
+                null, null, null, totalEpisodeCount, null, null, null, null, customPosterUrl);
     }
 
     private SeriesProgressDetails calculateSeriesProgress(

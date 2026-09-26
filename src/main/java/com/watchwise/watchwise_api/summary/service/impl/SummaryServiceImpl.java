@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
@@ -99,6 +100,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final WatchCompanionRepository watchCompanionRepository;
     private final UserMapper userMapper;
     private final SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
+    private final UserContentPosterService userContentPosterService;
 
     @Override
     public SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type) {
@@ -429,7 +431,8 @@ public class SummaryServiceImpl implements SummaryService {
                 .map(d -> new EpisodeScoreDTO(d.getContent().getSeasonNumber(), d.getContent().getEpisodeNumber(), d.getScore()))
                 .toList();
 
-        return new EpisodeRatingsGridResponseDTO(seriesTmdbId, episodes);
+        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, List.of(seriesTmdbId));
+        return new EpisodeRatingsGridResponseDTO(seriesTmdbId, episodes, customPosterBySeries.get(seriesTmdbId));
     }
 
     @Override
@@ -449,6 +452,7 @@ public class SummaryServiceImpl implements SummaryService {
                 .toList();
         Map<String, SeriesProgressMetadataRefreshService.Snapshot> snapshots =
                 seriesProgressMetadataRefreshService.getSnapshotsForRead(seriesTmdbIds, LocalDate.now());
+        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, seriesTmdbIds);
 
         List<EpisodeRatingsMapItemDTO> series = counts.stream()
                 .map(row -> {
@@ -457,11 +461,20 @@ public class SummaryServiceImpl implements SummaryService {
                             ? null
                             : snapshot.series().regularReleasedEpisodeCount();
                     return new EpisodeRatingsMapItemDTO(
-                            row.getSeriesTmdbId(), row.getWatchedEpisodeCount(), totalEpisodeCount);
+                            row.getSeriesTmdbId(), row.getWatchedEpisodeCount(), totalEpisodeCount,
+                            customPosterBySeries.get(row.getSeriesTmdbId()));
                 })
                 .toList();
 
         return new EpisodeRatingsMapResponseDTO(series);
+    }
+
+    private Map<String, String> loadSeriesPosters(UUID userId, List<String> seriesTmdbIds) {
+        if (seriesTmdbIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> posters = userContentPosterService.findSeriesPosters(userId, seriesTmdbIds);
+        return posters == null ? Map.of() : posters;
     }
 
     private ContentType watchedContentTypeFor(ContentType type) {

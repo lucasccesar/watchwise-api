@@ -17,6 +17,14 @@ public class SeriesProgressAssembler {
             SeriesProgressReadRepository.SeriesProgressCandidate row,
             SeriesProgressMetadataRefreshService.Snapshot snapshot,
             Map<Integer, DiaryEntryRepository.SeasonProgress> watchedProgress) {
+        return toDetailedSeriesResponse(row, snapshot, watchedProgress, null);
+    }
+
+    public SeriesInProgressResponseDTO toDetailedSeriesResponse(
+            SeriesProgressReadRepository.SeriesProgressCandidate row,
+            SeriesProgressMetadataRefreshService.Snapshot snapshot,
+            Map<Integer, DiaryEntryRepository.SeasonProgress> watchedProgress,
+            String customPosterUrl) {
         SeriesProgressMetadataRefreshService.SeriesSnapshot series = snapshot == null
                 ? null
                 : snapshot.series();
@@ -58,7 +66,8 @@ public class SeriesProgressAssembler {
                 totalKnownRuntime,
                 series != null ? series.lastReleasedEpisodeDate() : row.getLastReleasedEpisodeDate(),
                 remainingEpisodeCount,
-                remainingRuntimeMinutes);
+                remainingRuntimeMinutes,
+                customPosterUrl);
     }
 
     public SeasonProgressDTO toSeasonProgress(
