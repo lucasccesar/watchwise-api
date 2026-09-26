@@ -45,6 +45,7 @@ class UserContentPosterMigrationRepositoryTest {
         Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration")
+                .target("58")
                 .load()
                 .migrate();
 
