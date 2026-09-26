@@ -1,9 +1,9 @@
 package com.watchwise.watchwise_api.top5entry.dto;
 
+import com.watchwise.watchwise_api.common.validation.TmdbPosterUrl;
 import jakarta.validation.constraints.Size;
-import org.hibernate.validator.constraints.URL;
 
 public record Top5EntryPatchDTO(
-        @Size(max = 2048) @URL String customPosterUrl
+        @Size(max = 2048) @TmdbPosterUrl String customPosterUrl
 ) {
 }

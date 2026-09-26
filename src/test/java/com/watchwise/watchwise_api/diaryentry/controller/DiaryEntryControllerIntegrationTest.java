@@ -952,6 +952,23 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
+    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnCreate() throws Exception {
+        RegisteredUser user = registerUser("creatediaryunsupportedposter");
+        String body = """
+                {
+                    "content": { "tmdbId": "550", "type": "MOVIE" },
+                    "customPosterUrl": "https://image.tmdb.org/t/p/w500/poster.png"
+                }
+                """;
+
+        mockMvc.perform(createRequest(user, body))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findAll()).isEmpty();
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When Content Is Missing")
     void shouldReturnBadRequestAndNotPersistWhenContentIsMissing() throws Exception {
         RegisteredUser user = registerUser("creatediarymissingcontent");
@@ -1349,6 +1366,20 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.score").value(9));
 
         assertThat(diaryEntryRepository.findById(entry.getId()).orElseThrow().getScore()).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
+    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnUpdate() throws Exception {
+        RegisteredUser user = registerUser("updatediaryunsupportedposter");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        DiaryEntry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE));
+
+        mockMvc.perform(updateRequest(user, entry.getId(),
+                        updateBody("customPosterUrl", "https://image.tmdb.org/t/p/w500/poster.png")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(diaryEntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl()).isNull();
     }
 
     @Test

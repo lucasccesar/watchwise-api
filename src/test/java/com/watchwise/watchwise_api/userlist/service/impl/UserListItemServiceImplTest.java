@@ -718,10 +718,10 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.addItem(lucasId, listId,
-                new UserListItemCreationDTO(contentRefCreation("550"), null, null, null, "https://example.com/poster.png"));
+                new UserListItemCreationDTO(contentRefCreation("550"), null, null, null, "https://image.tmdb.org/t/p/w342/poster.png"));
 
         verify(userListItemRepository).save(itemCaptor.capture());
-        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
+        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
     }
 
     @Test
@@ -730,7 +730,7 @@ class UserListItemServiceImplTest {
         when(userListRepository.findByIdForUpdate(listId)).thenReturn(Optional.of(scifi));
 
         assertThatThrownBy(() -> userListItemService.addItem(lucasId, listId,
-                new UserListItemCreationDTO(null, UUID.randomUUID(), null, null, "https://example.com/poster.png")))
+                new UserListItemCreationDTO(null, UUID.randomUUID(), null, null, "https://image.tmdb.org/t/p/w342/poster.png")))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("customPosterUrl is only allowed on content items");
 
@@ -1284,28 +1284,28 @@ class UserListItemServiceImplTest {
     @DisplayName("[updateItem] Should Change CustomPosterUrl - When A Different Value Is Provided")
     void shouldChangeCustomPosterUrlWhenADifferentValueIsProvided() {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
-        item.setCustomPosterUrl("https://example.com/old.png");
+        item.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
         when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.updateItem(lucasId, listId, item.getId(),
-                new UserListItemPatchDTO(null, null, "https://example.com/new.png"));
+                new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/new.png"));
 
         verify(userListItemRepository).save(itemCaptor.capture());
-        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/new.png");
+        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
     }
 
     @Test
     @DisplayName("[updateItem] Should Not Save - When Same CustomPosterUrl Value Is Provided")
     void shouldNotSaveWhenSameCustomPosterUrlValueIsProvided() {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
-        item.setCustomPosterUrl("https://example.com/same.png");
+        item.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/same.png");
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
 
         userListItemService.updateItem(lucasId, listId, item.getId(),
-                new UserListItemPatchDTO(null, null, "https://example.com/same.png"));
+                new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/same.png"));
 
         verify(userListItemRepository, never()).save(any());
         verify(userListItemRepository, never()).flush();
@@ -1320,7 +1320,7 @@ class UserListItemServiceImplTest {
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
 
         assertThatThrownBy(() -> userListItemService.updateItem(lucasId, listId, item.getId(),
-                new UserListItemPatchDTO(null, null, "https://example.com/x.png")))
+                new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/x.png")))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("customPosterUrl is only allowed on content items");
 

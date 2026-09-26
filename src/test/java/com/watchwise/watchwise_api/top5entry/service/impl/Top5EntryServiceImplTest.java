@@ -250,10 +250,10 @@ class Top5EntryServiceImplTest {
         when(top5EntryMapper.top5EntryToResponseDto(savedEntry)).thenReturn(buildResponseDto(savedEntry));
 
         top5EntryService.insertEntry(lucasId, ContentType.MOVIE,
-                new Top5EntryCreationDTO(fightClub.getTmdbId(), null, "https://example.com/poster.png"));
+                new Top5EntryCreationDTO(fightClub.getTmdbId(), null, "https://image.tmdb.org/t/p/w342/poster.png"));
 
         verify(top5EntryRepository).save(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
+        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
     }
 
     @Test
@@ -634,16 +634,16 @@ class Top5EntryServiceImplTest {
     @DisplayName("[updateEntry] Should Update CustomPosterUrl - When A Different Value Is Provided")
     void shouldUpdateCustomPosterUrlWhenADifferentValueIsProvided() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
-        entry.setCustomPosterUrl("https://example.com/old.png");
+        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(top5EntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(top5EntryRepository.save(any(Top5Entry.class))).thenReturn(entry);
         when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
         top5EntryService.updateEntry(lucasId, ContentType.MOVIE, entry.getId(),
-                new Top5EntryPatchDTO("https://example.com/new.png"));
+                new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/new.png"));
 
         verify(top5EntryRepository).save(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/new.png");
+        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
         verify(top5EntryRepository, times(1)).flush();
     }
 
@@ -651,7 +651,7 @@ class Top5EntryServiceImplTest {
     @DisplayName("[updateEntry] Should Not Save - When CustomPosterUrl Is Null")
     void shouldNotSaveWhenCustomPosterUrlIsNullOnUpdate() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
-        entry.setCustomPosterUrl("https://example.com/old.png");
+        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(top5EntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
@@ -659,14 +659,14 @@ class Top5EntryServiceImplTest {
 
         verify(top5EntryRepository, never()).save(any());
         verify(top5EntryRepository, never()).flush();
-        assertThat(entry.getCustomPosterUrl()).isEqualTo("https://example.com/old.png");
+        assertThat(entry.getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/old.png");
     }
 
     @Test
     @DisplayName("[updateEntry] Should Throw BadRequestException - When Type Is Season")
     void shouldThrowBadRequestExceptionWhenTypeIsSeasonOnUpdate() {
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.SEASON, UUID.randomUUID(), new Top5EntryPatchDTO("https://example.com/x.png")))
+                lucasId, ContentType.SEASON, UUID.randomUUID(), new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
                 .isInstanceOf(BadRequestException.class);
 
         verifyNoInteractions(top5EntryRepository);
@@ -679,7 +679,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.findById(missingId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.MOVIE, missingId, new Top5EntryPatchDTO("https://example.com/x.png")))
+                lucasId, ContentType.MOVIE, missingId, new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Top 5 entry not found");
     }
@@ -700,7 +700,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.findById(marinasEntry.getId())).thenReturn(Optional.of(marinasEntry));
 
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.MOVIE, marinasEntry.getId(), new Top5EntryPatchDTO("https://example.com/x.png")))
+                lucasId, ContentType.MOVIE, marinasEntry.getId(), new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Top 5 entry not found");
     }
@@ -712,7 +712,7 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.findById(movieEntry.getId())).thenReturn(Optional.of(movieEntry));
 
         assertThatThrownBy(() -> top5EntryService.updateEntry(
-                lucasId, ContentType.SERIES, movieEntry.getId(), new Top5EntryPatchDTO("https://example.com/x.png")))
+                lucasId, ContentType.SERIES, movieEntry.getId(), new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/x.png")))
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Top 5 entry not found");
     }

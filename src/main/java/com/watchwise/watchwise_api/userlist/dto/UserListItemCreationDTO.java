@@ -1,10 +1,10 @@
 package com.watchwise.watchwise_api.userlist.dto;
 
+import com.watchwise.watchwise_api.common.validation.TmdbPosterUrl;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
-import org.hibernate.validator.constraints.URL;
 
 import java.util.UUID;
 
@@ -13,7 +13,7 @@ public record UserListItemCreationDTO(
         UUID childListId,
         @Min(1) Integer position,
         @Size(max = 400) String description,
-        @Size(max = 2048) @URL String customPosterUrl
+        @Size(max = 2048) @TmdbPosterUrl String customPosterUrl
 ) {
     public UserListItemCreationDTO(ContentRefCreationDTO content, UUID childListId, Integer position, String description) {
         this(content, childListId, position, description, null);

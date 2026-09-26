@@ -1102,12 +1102,12 @@ class UserListItemControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "My list", true);
 
-        mockMvc.perform(addItemRequest(user, list.getId(), contentItemBody("550", null, null, "https://example.com/poster.png")))
+        mockMvc.perform(addItemRequest(user, list.getId(), contentItemBody("550", null, null, "https://image.tmdb.org/t/p/w342/poster.png")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/poster.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/poster.png"));
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId()).get(0).getCustomPosterUrl())
-                .isEqualTo("https://example.com/poster.png");
+                .isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
     }
 
     @Test
@@ -1118,7 +1118,7 @@ class UserListItemControllerIntegrationTest {
         UserList parent = persistList(entity, "Parent", true);
         UserList child = persistList(entity, "Child", true);
 
-        mockMvc.perform(addItemRequest(user, parent.getId(), childListItemBodyWithPoster(child.getId(), "https://example.com/x.png")))
+        mockMvc.perform(addItemRequest(user, parent.getId(), childListItemBodyWithPoster(child.getId(), "https://image.tmdb.org/t/p/w342/x.png")))
                 .andExpect(status().isBadRequest());
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(parent.getId())).isEmpty();
@@ -1132,12 +1132,12 @@ class UserListItemControllerIntegrationTest {
         UserList list = persistList(entity, "My list", true);
         UserListItem item = persistContentItem(list, persistContent("550"), 1);
 
-        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, null, "https://example.com/new.png")))
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, null, "https://image.tmdb.org/t/p/w342/new.png")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/new.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/new.png"));
 
         assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl())
-                .isEqualTo("https://example.com/new.png");
+                .isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
     }
 
     @Test
@@ -1149,7 +1149,7 @@ class UserListItemControllerIntegrationTest {
         UserList child = persistList(entity, "Child", true);
         UserListItem item = persistChildListItem(parent, child, 1);
 
-        mockMvc.perform(updateItemRequest(user, parent.getId(), item.getId(), patchItemBody(null, null, "https://example.com/x.png")))
+        mockMvc.perform(updateItemRequest(user, parent.getId(), item.getId(), patchItemBody(null, null, "https://image.tmdb.org/t/p/w342/x.png")))
                 .andExpect(status().isBadRequest());
 
         assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl()).isNull();
@@ -1162,7 +1162,8 @@ class UserListItemControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "My list", true);
 
-        mockMvc.perform(addItemRequest(user, list.getId(), contentItemBody("550", null, null, "not-a-url")))
+        mockMvc.perform(addItemRequest(user, list.getId(),
+                        contentItemBody("550", null, null, "https://image.tmdb.org/t/p/w500/poster.png")))
                 .andExpect(status().isBadRequest());
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).isEmpty();
@@ -1176,7 +1177,8 @@ class UserListItemControllerIntegrationTest {
         UserList list = persistList(entity, "My list", true);
         UserListItem item = persistContentItem(list, persistContent("550"), 1);
 
-        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(), patchItemBody(null, null, "not-a-url")))
+        mockMvc.perform(updateItemRequest(user, list.getId(), item.getId(),
+                        patchItemBody(null, null, "https://image.tmdb.org/t/p/w500/poster.png")))
                 .andExpect(status().isBadRequest());
 
         assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl()).isNull();

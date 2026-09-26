@@ -1336,7 +1336,7 @@ class DiaryEntryServiceImplTest {
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null),
-                "Great movie", 9, watchedDate, true, false, "https://example.com/poster.png");
+                "Great movie", 9, watchedDate, true, false, "https://image.tmdb.org/t/p/w342/poster.png");
 
         DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntry(lucasId, dto);
 
@@ -1350,7 +1350,7 @@ class DiaryEntryServiceImplTest {
         assertThat(captured.getWatchedDate()).isEqualTo(watchedDate);
         assertThat(captured.getWatchNumber()).isEqualTo(2);
         assertThat(captured.getWatchedInTheater()).isFalse();
-        assertThat(captured.getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
+        assertThat(captured.getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
         assertThat(captured.getIgnore()).isFalse();
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue())
@@ -4263,7 +4263,7 @@ class DiaryEntryServiceImplTest {
         entry.setWatchedDate(LocalDate.of(2023, 1, 1));
         entry.setWatchNumber(2);
         entry.setWatchedInTheater(true);
-        entry.setCustomPosterUrl("https://example.com/original.png");
+        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/original.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
@@ -4277,7 +4277,7 @@ class DiaryEntryServiceImplTest {
         assertThat(saved.getWatchedDate()).isEqualTo(LocalDate.of(2023, 1, 1));
         assertThat(saved.getWatchNumber()).isEqualTo(2);
         assertThat(saved.getWatchedInTheater()).isTrue();
-        assertThat(saved.getCustomPosterUrl()).isEqualTo("https://example.com/original.png");
+        assertThat(saved.getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/original.png");
     }
 
     @Test
@@ -4473,16 +4473,16 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[updateDiaryEntry] Should Update CustomPosterUrl - When A Different Value Is Provided")
     void shouldUpdateCustomPosterUrlWhenADifferentValueIsProvided() {
         DiaryEntry entry = buildEntry(lucas, fightClub);
-        entry.setCustomPosterUrl("https://example.com/old.png");
+        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
 
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
-                null, null, null, null, "https://example.com/new.png"));
+                null, null, null, null, "https://image.tmdb.org/t/p/w342/new.png"));
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://example.com/new.png");
+        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
     }
 
     // ---------- deleteDiaryEntry ----------

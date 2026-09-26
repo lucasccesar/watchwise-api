@@ -361,13 +361,27 @@ class Top5EntryControllerIntegrationTest {
     void shouldPersistCustomPosterUrlWhenProvidedOnInsert() throws Exception {
         RegisteredUser user = registerUser("inserttop5poster");
 
-        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null, "https://example.com/poster.png")))
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE, contentBody("550", null, "https://image.tmdb.org/t/p/w342/poster.png")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/poster.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/poster.png"));
 
         User entity = userRepository.findById(user.id()).orElseThrow();
         var entries = top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(entity.getId(), ContentType.MOVIE);
-        assertThat(entries.get(0).getCustomPosterUrl()).isEqualTo("https://example.com/poster.png");
+        assertThat(entries.get(0).getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+    }
+
+    @Test
+    @DisplayName("[insertEntry] Should Return BadRequest And Not Persist - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
+    void shouldReturnBadRequestAndNotPersistWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnInsert() throws Exception {
+        RegisteredUser user = registerUser("inserttop5unsupportedposter");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+
+        mockMvc.perform(insertRequest(user, ContentType.MOVIE,
+                        contentBody("550", null, "https://image.tmdb.org/t/p/w500/poster.png")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(entity.getId(), ContentType.MOVIE))
+                .isEmpty();
     }
 
     @Test
@@ -594,22 +608,23 @@ class Top5EntryControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         Top5Entry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
 
-        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(), posterPatchBody("https://example.com/new.png")))
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(), posterPatchBody("https://image.tmdb.org/t/p/w342/new.png")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.customPosterUrl").value("https://example.com/new.png"));
+                .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/new.png"));
 
         assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl())
-                .isEqualTo("https://example.com/new.png");
+                .isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
     }
 
     @Test
-    @DisplayName("[updateEntry] Should Return BadRequest - When CustomPosterUrl Is Not A Valid Url")
-    void shouldReturnBadRequestWhenCustomPosterUrlIsNotAValidUrl() throws Exception {
+    @DisplayName("[updateEntry] Should Return BadRequest - When CustomPosterUrl Uses An Unsupported TMDB Prefix")
+    void shouldReturnBadRequestWhenCustomPosterUrlUsesAnUnsupportedTmdbPrefixOnUpdate() throws Exception {
         RegisteredUser user = registerUser("updatetop5invalidurl");
         User entity = userRepository.findById(user.id()).orElseThrow();
         Top5Entry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
 
-        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(), posterPatchBody("not-a-url")))
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, entry.getId(),
+                        posterPatchBody("https://image.tmdb.org/t/p/w500/poster.png")))
                 .andExpect(status().isBadRequest());
 
         assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl()).isNull();
@@ -620,7 +635,7 @@ class Top5EntryControllerIntegrationTest {
     void shouldReturnNotFoundWhenEntryDoesNotExistOnUpdate() throws Exception {
         RegisteredUser user = registerUser("updatetop5notfound");
 
-        mockMvc.perform(updateRequest(user, ContentType.MOVIE, UUID.randomUUID(), posterPatchBody("https://example.com/x.png")))
+        mockMvc.perform(updateRequest(user, ContentType.MOVIE, UUID.randomUUID(), posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
     }
@@ -633,7 +648,7 @@ class Top5EntryControllerIntegrationTest {
         User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
         Top5Entry entry = persistEntry(ownerEntity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
 
-        mockMvc.perform(updateRequest(intruder, ContentType.MOVIE, entry.getId(), posterPatchBody("https://example.com/x.png")))
+        mockMvc.perform(updateRequest(intruder, ContentType.MOVIE, entry.getId(), posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
 
@@ -649,7 +664,7 @@ class Top5EntryControllerIntegrationTest {
                         .cookie(user.csrfToken())
                         .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(posterPatchBody("https://example.com/x.png")))
+                        .content(posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -661,7 +676,7 @@ class Top5EntryControllerIntegrationTest {
         mockMvc.perform(patch("/users/me/top5/MOVIE/" + UUID.randomUUID())
                         .cookie(user.accessToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(posterPatchBody("https://example.com/x.png")))
+                        .content(posterPatchBody("https://image.tmdb.org/t/p/w342/x.png")))
                 .andExpect(status().isForbidden());
     }
 }

@@ -1,12 +1,12 @@
 package com.watchwise.watchwise_api.diaryentry.dto;
 
+import com.watchwise.watchwise_api.common.validation.TmdbPosterUrl;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
-import org.hibernate.validator.constraints.URL;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -19,7 +19,7 @@ public record DiaryEntryCreationDTO(
         LocalDate watchedDate,
         Boolean isRewatch,
         Boolean watchedInTheater,
-        @Size(max = 2048) @URL String customPosterUrl,
+        @Size(max = 2048) @TmdbPosterUrl String customPosterUrl,
         @Size(max = 20) List<UUID> watchedWith
 ) {
     public DiaryEntryCreationDTO(ContentRefCreationDTO content, String comment, Integer score, LocalDate watchedDate,

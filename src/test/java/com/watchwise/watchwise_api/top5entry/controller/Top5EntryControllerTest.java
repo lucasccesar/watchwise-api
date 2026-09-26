@@ -109,7 +109,7 @@ class Top5EntryControllerTest {
     @DisplayName("[updateEntry] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenUpdatingEntry() {
         UUID top5EntryId = UUID.randomUUID();
-        Top5EntryPatchDTO patchDTO = new Top5EntryPatchDTO("https://example.com/new.png");
+        Top5EntryPatchDTO patchDTO = new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/new.png");
         Top5EntryResponseDTO dto = buildResponseDto();
         when(top5EntryService.updateEntry(currentUserId, ContentType.MOVIE, top5EntryId, patchDTO)).thenReturn(dto);
 
@@ -123,7 +123,7 @@ class Top5EntryControllerTest {
     @DisplayName("[updateEntry] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenUpdatingEntry() {
         UUID top5EntryId = UUID.randomUUID();
-        Top5EntryPatchDTO patchDTO = new Top5EntryPatchDTO("https://example.com/new.png");
+        Top5EntryPatchDTO patchDTO = new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/new.png");
         when(top5EntryService.updateEntry(currentUserId, ContentType.MOVIE, top5EntryId, patchDTO)).thenReturn(buildResponseDto());
 
         top5EntryController.updateEntry(MovieOrSeriesType.MOVIE, top5EntryId, patchDTO);
