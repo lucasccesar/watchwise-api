@@ -59,13 +59,17 @@ public class ContentController {
     }
 
     @GetMapping("/{contentId}/details")
-    public ResponseEntity<ContentDetailsDTO> getDetails(@PathVariable UUID contentId) {
-        return ResponseEntity.ok(contentDetailsService.getDetails(contentId, getCurrentUserId()));
+    public ResponseEntity<ContentDetailsDTO> getDetails(
+            @PathVariable UUID contentId,
+            @RequestParam(required = false) UUID posterUserId) {
+        return ResponseEntity.ok(contentDetailsService.getDetails(contentId, getCurrentUserId(), posterUserId));
     }
 
     @GetMapping("/details")
-    public ResponseEntity<List<ContentDetailsDTO>> getDetailsBatch(@RequestParam List<UUID> ids) {
-        return ResponseEntity.ok(contentDetailsService.getDetailsBatch(ids, getCurrentUserId()));
+    public ResponseEntity<List<ContentDetailsDTO>> getDetailsBatch(
+            @RequestParam List<UUID> ids,
+            @RequestParam(required = false) UUID posterUserId) {
+        return ResponseEntity.ok(contentDetailsService.getDetailsBatch(ids, getCurrentUserId(), posterUserId));
     }
 
     private String contentReferenceKey() {

@@ -9,5 +9,9 @@ public interface ContentDetailsService {
 
     ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId);
 
+    ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId, UUID posterUserId);
+
     List<ContentDetailsDTO> getDetailsBatch(List<UUID> contentIds, UUID requestingUserId);
+
+    List<ContentDetailsDTO> getDetailsBatch(List<UUID> contentIds, UUID requestingUserId, UUID posterUserId);
 }

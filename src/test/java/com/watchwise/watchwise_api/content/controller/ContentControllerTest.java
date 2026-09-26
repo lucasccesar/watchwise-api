@@ -129,13 +129,30 @@ class ContentControllerTest {
                 contentId, ContentType.MOVIE, "The Matrix", null, null, null, null, null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
                 null, null, List.of(), List.of(), List.of());
-        when(contentDetailsService.getDetails(contentId, currentUserId)).thenReturn(details);
+        when(contentDetailsService.getDetails(contentId, currentUserId, null)).thenReturn(details);
 
-        ResponseEntity<ContentDetailsDTO> result = contentController.getDetails(contentId);
+        ResponseEntity<ContentDetailsDTO> result = contentController.getDetails(contentId, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(details);
-        verify(contentDetailsService).getDetails(contentId, currentUserId);
+        verify(contentDetailsService).getDetails(contentId, currentUserId, null);
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Forward An Explicit Poster User - When Provided")
+    void shouldForwardAnExplicitPosterUserWhenProvided() {
+        UUID contentId = UUID.randomUUID();
+        UUID posterUserId = UUID.randomUUID();
+        ContentDetailsDTO details = new ContentDetailsDTO(
+                contentId, ContentType.MOVIE, "The Matrix", null, null, null, null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                null, null, List.of(), List.of(), List.of());
+        when(contentDetailsService.getDetails(contentId, currentUserId, posterUserId)).thenReturn(details);
+
+        ResponseEntity<ContentDetailsDTO> result = contentController.getDetails(contentId, posterUserId);
+
+        assertThat(result.getBody()).isEqualTo(details);
+        verify(contentDetailsService).getDetails(contentId, currentUserId, posterUserId);
     }
 
     @Test
@@ -151,13 +168,36 @@ class ContentControllerTest {
                 second, ContentType.MOVIE, "Second", null, null, null, null, null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
                 null, null, List.of(), List.of(), List.of());
-        when(contentDetailsService.getDetailsBatch(List.of(first, second), currentUserId))
+        when(contentDetailsService.getDetailsBatch(List.of(first, second), currentUserId, null))
                 .thenReturn(List.of(firstDetails, secondDetails));
 
-        ResponseEntity<List<ContentDetailsDTO>> result = contentController.getDetailsBatch(List.of(first, second));
+        ResponseEntity<List<ContentDetailsDTO>> result = contentController.getDetailsBatch(List.of(first, second), null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).containsExactly(firstDetails, secondDetails);
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Forward An Explicit Poster User - When Provided")
+    void shouldForwardAnExplicitPosterUserForTheBatchWhenProvided() {
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        UUID posterUserId = UUID.randomUUID();
+        List<ContentDetailsDTO> details = List.of(
+                new ContentDetailsDTO(first, ContentType.MOVIE, "First", null, null, null, null, null, null, null, null,
+                        List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                        null, null, List.of(), List.of(), List.of()),
+                new ContentDetailsDTO(second, ContentType.MOVIE, "Second", null, null, null, null, null, null, null, null,
+                        List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                        null, null, List.of(), List.of(), List.of()));
+        when(contentDetailsService.getDetailsBatch(List.of(first, second), currentUserId, posterUserId))
+                .thenReturn(details);
+
+        ResponseEntity<List<ContentDetailsDTO>> result =
+                contentController.getDetailsBatch(List.of(first, second), posterUserId);
+
+        assertThat(result.getBody()).containsExactlyElementsOf(details);
+        verify(contentDetailsService).getDetailsBatch(List.of(first, second), currentUserId, posterUserId);
     }
 
 }

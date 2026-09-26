@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleSynchronizer
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember;
@@ -47,7 +48,9 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.notification.service.ContentTrackingService;
+import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -75,8 +78,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -100,6 +105,12 @@ class ContentDetailsServiceImplTest {
     @Mock
     private CalendarScheduleSynchronizer calendarScheduleSynchronizer;
 
+    @Mock
+    private UserContentPosterService userContentPosterService;
+
+    @Mock
+    private UserVisibilityService userVisibilityService;
+
     private ContentDetailsServiceImpl contentDetailsService;
     private ExecutorService seasonFetchExecutor;
 
@@ -111,7 +122,8 @@ class ContentDetailsServiceImplTest {
         seasonFetchExecutor = Executors.newSingleThreadExecutor();
         contentDetailsService = new ContentDetailsServiceImpl(
                 contentRepository, userRepository, tmdbClient, seasonFetchExecutor, contentTrackingService,
-                seriesRuntimeAggregateService, calendarScheduleSynchronizer);
+                seriesRuntimeAggregateService, calendarScheduleSynchronizer, userContentPosterService,
+                userVisibilityService);
         requestingUserId = UUID.randomUUID();
         requestingUser = User.builder().id(requestingUserId).preferredLanguage("en-US").preferredRegion("US").build();
         lenient().when(userRepository.findById(requestingUserId)).thenReturn(Optional.of(requestingUser));
@@ -152,6 +164,95 @@ class ContentDetailsServiceImplTest {
         verify(contentRepository).save(captor.capture());
         assertThat(captor.getValue().getRuntimeMinutes()).isEqualTo(136);
         assertThat(captor.getValue().getUpdatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Resolve The Requesting User Poster - When Poster User Is Omitted")
+    void shouldResolveTheRequestingUserPosterWhenPosterUserIsOmitted() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(movieDetails("/tmdb-poster.jpg"));
+        when(userContentPosterService.findByUserAndContentIds(requestingUserId, List.of(contentId)))
+                .thenReturn(Map.of(contentId, "https://image.tmdb.org/t/p/w342/custom-poster.jpg"));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.posterPath()).isEqualTo("/tmdb-poster.jpg");
+        assertThat(result.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/custom-poster.jpg");
+        verify(userContentPosterService).findByUserAndContentIds(requestingUserId, List.of(contentId));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Resolve The Explicit Poster User - When The Viewer Is Authorized")
+    void shouldResolveTheExplicitPosterUserWhenTheViewerIsAuthorized() {
+        UUID contentId = UUID.randomUUID();
+        UUID posterUserId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(movieDetails("/tmdb-poster.jpg"));
+        when(userContentPosterService.findByUserAndContentIds(posterUserId, List.of(contentId)))
+                .thenReturn(Map.of(contentId, "https://image.tmdb.org/t/p/w342/friend-poster.jpg"));
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId, posterUserId);
+
+        assertThat(result.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/friend-poster.jpg");
+        verify(userVisibilityService).assertCanView(requestingUserId, posterUserId);
+        verify(userContentPosterService).findByUserAndContentIds(posterUserId, List.of(contentId));
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Reject The Explicit Poster User - When The Viewer Is Unauthorized")
+    void shouldRejectTheExplicitPosterUserWhenTheViewerIsUnauthorized() {
+        UUID contentId = UUID.randomUUID();
+        UUID posterUserId = UUID.randomUUID();
+        doThrow(new ForbiddenException("This user profile is private"))
+                .when(userVisibilityService).assertCanView(requestingUserId, posterUserId);
+
+        assertThatThrownBy(() -> contentDetailsService.getDetails(contentId, requestingUserId, posterUserId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+
+        verifyNoInteractions(contentRepository, tmdbClient, userContentPosterService);
+    }
+
+    @Test
+    @DisplayName("[getDetails] Should Preserve The TMDB Poster And Return Null Custom Poster - When No User Poster Exists")
+    void shouldPreserveTheTmdbPosterAndReturnNullCustomPosterWhenNoUserPosterExists() {
+        UUID contentId = UUID.randomUUID();
+        Content movie = Content.builder().id(contentId).type(ContentType.MOVIE).tmdbId("603").build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(movie));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(movieDetails("/tmdb-poster.jpg"));
+        when(userContentPosterService.findByUserAndContentIds(requestingUserId, List.of(contentId)))
+                .thenReturn(Map.of());
+
+        ContentDetailsDTO result = contentDetailsService.getDetails(contentId, requestingUserId);
+
+        assertThat(result.posterPath()).isEqualTo("/tmdb-poster.jpg");
+        assertThat(result.customPosterUrl()).isNull();
+    }
+
+    @Test
+    @DisplayName("[getDetailsBatch] Should Load User Posters Once And Apply Them In Input Order")
+    void shouldLoadUserPostersOnceAndApplyThemInInputOrder() {
+        UUID firstId = UUID.randomUUID();
+        UUID secondId = UUID.randomUUID();
+        Content first = Content.builder().id(firstId).type(ContentType.MOVIE).tmdbId("603").build();
+        Content second = Content.builder().id(secondId).type(ContentType.MOVIE).tmdbId("604").build();
+        when(contentRepository.findAllById(List.of(firstId, secondId))).thenReturn(List.of(first, second));
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(movieDetails("/first-tmdb.jpg"));
+        when(tmdbClient.getMovieFullDetails("604", "en-US")).thenReturn(movieDetails("/second-tmdb.jpg"));
+        when(userContentPosterService.findByUserAndContentIds(eq(requestingUserId), any()))
+                .thenReturn(Map.of(firstId, "https://image.tmdb.org/t/p/w342/first-custom.jpg",
+                        secondId, "https://image.tmdb.org/t/p/w342/second-custom.jpg"));
+
+        List<ContentDetailsDTO> result = contentDetailsService.getDetailsBatch(List.of(firstId, secondId), requestingUserId);
+
+        assertThat(result).extracting(ContentDetailsDTO::customPosterUrl)
+                .containsExactly("https://image.tmdb.org/t/p/w342/first-custom.jpg",
+                        "https://image.tmdb.org/t/p/w342/second-custom.jpg");
+        verify(userContentPosterService).findByUserAndContentIds(eq(requestingUserId), any());
+        verifyNoMoreInteractions(userContentPosterService);
     }
 
     @Test
@@ -1394,6 +1495,12 @@ class ContentDetailsServiceImplTest {
         assertThatThrownBy(() -> contentDetailsService.getDetailsBatch(tooMany, requestingUserId))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("Cannot request details for more than " + ContentDetailsServiceImpl.MAX_BATCH_IDS + " contents at once");
+    }
+
+    private TmdbLookupResult<TmdbMovieFullDetails> movieDetails(String posterPath) {
+        return new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                "603", "The Matrix", "The Matrix", null, posterPath, null, null, null,
+                List.of(), List.of(), null, null, null, null, null, null, null));
     }
 
     private SeriesRuntimeResolution resolution(Integer totalRuntimeMinutes, Integer averageRuntimeMinutes) {

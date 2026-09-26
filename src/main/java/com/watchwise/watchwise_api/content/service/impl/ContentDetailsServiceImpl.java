@@ -55,10 +55,12 @@ import com.watchwise.watchwise_api.content.service.ContentDetailsService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregate;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeAggregateService;
 import com.watchwise.watchwise_api.content.service.SeriesRuntimeResolution;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.notification.service.ContentTrackingService;
 import com.watchwise.watchwise_api.notification.tracking.ContentChangeDetector;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -102,16 +104,35 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
     private final ContentTrackingService contentTrackingService;
     private final SeriesRuntimeAggregateService seriesRuntimeAggregateService;
     private final CalendarScheduleSynchronizer calendarScheduleSynchronizer;
+    private final UserContentPosterService userContentPosterService;
+    private final UserVisibilityService userVisibilityService;
 
     @Override
     public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId) {
+        return getDetails(contentId, requestingUserId, requestingUserId);
+    }
+
+    @Override
+    public ContentDetailsDTO getDetails(UUID contentId, UUID requestingUserId, UUID posterUserId) {
         User user = userRepository.findById(requestingUserId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
-        return buildDetails(contentId, user.getPreferredLanguage(), user.getPreferredRegion());
+        UUID resolvedPosterUserId = resolvePosterUserId(requestingUserId, posterUserId);
+        Content content = contentRepository.findById(contentId)
+                .orElseThrow(() -> new NotFoundException("Content not found"));
+        String customPosterUrl = userContentPosterService
+                .findByUserAndContentIds(resolvedPosterUserId, List.of(contentId))
+                .get(contentId);
+        return buildDetails(content, user.getPreferredLanguage(), user.getPreferredRegion(), customPosterUrl);
     }
 
     @Override
     public List<ContentDetailsDTO> getDetailsBatch(List<UUID> contentIds, UUID requestingUserId) {
+        return getDetailsBatch(contentIds, requestingUserId, requestingUserId);
+    }
+
+    @Override
+    public List<ContentDetailsDTO> getDetailsBatch(
+            List<UUID> contentIds, UUID requestingUserId, UUID posterUserId) {
         if (contentIds == null || contentIds.isEmpty()) {
             throw new BadRequestException("ids must not be empty");
         }
@@ -121,6 +142,7 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
 
         User user = userRepository.findById(requestingUserId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
+        UUID resolvedPosterUserId = resolvePosterUserId(requestingUserId, posterUserId);
         String language = user.getPreferredLanguage();
         String region = user.getPreferredRegion();
 
@@ -141,27 +163,32 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
             throw new NotFoundException("Content not found");
         }
 
+        Map<UUID, String> customPosterUrls = userContentPosterService
+                .findByUserAndContentIds(resolvedPosterUserId, contentById.keySet());
+
         return contentIds.stream()
-                .map(contentId -> buildDetails(contentById.get(contentId), language, region))
+                .map(contentId -> buildDetails(
+                        contentById.get(contentId), language, region, customPosterUrls.get(contentId)))
                 .toList();
     }
 
-    private ContentDetailsDTO buildDetails(UUID contentId, String language, String region) {
-        Content content = contentRepository.findById(contentId)
-                .orElseThrow(() -> new NotFoundException("Content not found"));
-        return buildDetails(content, language, region);
+    private UUID resolvePosterUserId(UUID requestingUserId, UUID posterUserId) {
+        UUID resolvedPosterUserId = posterUserId == null ? requestingUserId : posterUserId;
+        userVisibilityService.assertCanView(requestingUserId, resolvedPosterUserId);
+        return resolvedPosterUserId;
     }
 
-    private ContentDetailsDTO buildDetails(Content content, String language, String region) {
+    private ContentDetailsDTO buildDetails(Content content, String language, String region, String customPosterUrl) {
         return switch (content.getType()) {
-            case MOVIE -> buildMovieDetails(content, language, region);
-            case SERIES -> buildSeriesDetails(content, language, region);
-            case SEASON -> buildSeasonDetails(content, language, region);
-            case EPISODE -> buildEpisodeDetails(content, language, region);
+            case MOVIE -> buildMovieDetails(content, language, region, customPosterUrl);
+            case SERIES -> buildSeriesDetails(content, language, region, customPosterUrl);
+            case SEASON -> buildSeasonDetails(content, language, region, customPosterUrl);
+            case EPISODE -> buildEpisodeDetails(content, language, region, customPosterUrl);
         };
     }
 
-    private ContentDetailsDTO buildMovieDetails(Content content, String language, String region) {
+    private ContentDetailsDTO buildMovieDetails(
+            Content content, String language, String region, String customPosterUrl) {
         Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbMovieFullDetails> lookup = tmdbClient.getMovieFullDetails(content.getTmdbId(), language);
         TmdbMovieFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
@@ -202,10 +229,12 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 externalIds == null ? null : externalIds.imdbId(),
                 externalIds == null ? null : externalIds.facebookId(),
                 externalIds == null ? null : externalIds.instagramId(),
-                externalIds == null ? null : externalIds.twitterId());
+                externalIds == null ? null : externalIds.twitterId(),
+                customPosterUrl);
     }
 
-    private ContentDetailsDTO buildSeriesDetails(Content content, String language, String region) {
+    private ContentDetailsDTO buildSeriesDetails(
+            Content content, String language, String region, String customPosterUrl) {
         Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbTvFullDetails> lookup = tmdbClient.getTvFullDetails(content.getTmdbId(), language);
         TmdbTvFullDetails details = lookup.toOptional().orElseThrow(this::tmdbUnavailable);
@@ -258,10 +287,12 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 externalIds == null ? null : externalIds.imdbId(),
                 externalIds == null ? null : externalIds.facebookId(),
                 externalIds == null ? null : externalIds.instagramId(),
-                externalIds == null ? null : externalIds.twitterId());
+                externalIds == null ? null : externalIds.twitterId(),
+                customPosterUrl);
     }
 
-    private ContentDetailsDTO buildSeasonDetails(Content content, String language, String region) {
+    private ContentDetailsDTO buildSeasonDetails(
+            Content content, String language, String region, String customPosterUrl) {
         Instant checkedAt = Instant.now();
         TmdbLookupResult<TmdbSeasonFullDetails> seasonLookup = tmdbClient
                 .getSeasonFullDetails(content.getSeriesTmdbId(), content.getSeasonNumber(), language);
@@ -300,10 +331,12 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 null,
                 null,
-                null);
+                null,
+                customPosterUrl);
     }
 
-    private ContentDetailsDTO buildEpisodeDetails(Content content, String language, String region) {
+    private ContentDetailsDTO buildEpisodeDetails(
+            Content content, String language, String region, String customPosterUrl) {
         TmdbEpisodeFullDetails episode = tmdbClient.getEpisodeFullDetails(
                         content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
@@ -340,7 +373,8 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 episode.externalIds() == null ? null : episode.externalIds().imdbId(),
                 null,
                 null,
-                null);
+                null,
+                customPosterUrl);
     }
 
     private String resolveMovieTitle(TmdbMovieFullDetails details, String region) {

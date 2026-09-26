@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserService;
+import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -75,6 +76,9 @@ class UserServiceImplTest {
 
     @Mock
     private FollowerRepository followerRepository;
+
+    @Mock
+    private UserVisibilityService userVisibilityService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -333,10 +337,9 @@ class UserServiceImplTest {
     void shouldThrowForbiddenExceptionWhenProfileIsPrivate() {
         UUID viewerId = UUID.randomUUID();
         UUID id = savedUser.getId();
-        savedUser.setIsProfilePublic(false);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
-        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, id, FollowStatus.ACCEPTED))
-                .thenReturn(false);
+        doThrow(new ForbiddenException("This user profile is private"))
+                .when(userVisibilityService).assertCanView(viewerId, id);
 
         assertThatThrownBy(() -> userService.getUserById(viewerId, id))
                 .isInstanceOf(ForbiddenException.class)
@@ -349,8 +352,8 @@ class UserServiceImplTest {
     @DisplayName("[getUserById] Should Return Private Profile - When Requester Is The Profile Owner")
     void shouldReturnPrivateProfileWhenRequesterIsTheProfileOwner() {
         UUID id = savedUser.getId();
-        savedUser.setIsProfilePublic(false);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
+        doNothing().when(userVisibilityService).assertCanView(id, id);
         when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L))
                 .thenReturn(publicUserDTO);
 
@@ -364,17 +367,15 @@ class UserServiceImplTest {
     void shouldReturnPrivateProfileWhenRequesterIsAnAcceptedFollower() {
         UUID viewerId = UUID.randomUUID();
         UUID id = savedUser.getId();
-        savedUser.setIsProfilePublic(false);
         when(userRepository.findById(id)).thenReturn(Optional.of(savedUser));
-        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, id, FollowStatus.ACCEPTED))
-                .thenReturn(true);
+        doNothing().when(userVisibilityService).assertCanView(viewerId, id);
         when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L))
                 .thenReturn(publicUserDTO);
 
         PublicUserProfileDTO result = userService.getUserById(viewerId, id);
 
         assertThat(result).isEqualTo(publicUserDTO);
-        verify(followerRepository).existsByFollowerIdAndFollowedIdAndStatus(viewerId, id, FollowStatus.ACCEPTED);
+        verify(userVisibilityService).assertCanView(viewerId, id);
     }
 
     @Test

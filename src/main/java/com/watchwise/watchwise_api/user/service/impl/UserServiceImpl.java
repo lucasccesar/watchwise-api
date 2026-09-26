@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserService;
+import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -55,6 +56,7 @@ public class UserServiceImpl implements UserService {
     private final PageRequestFactory pageRequestFactory;
     private final DiaryEntryRepository diaryEntryRepository;
     private final FollowerRepository followerRepository;
+    private final UserVisibilityService userVisibilityService;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -245,26 +247,13 @@ public class UserServiceImpl implements UserService {
         User foundUser = userRepository.findById(targetUserId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
-        assertCanViewProfile(viewerId, targetUserId, foundUser);
+        userVisibilityService.assertCanView(viewerId, targetUserId);
 
         ProfileStats stats = computeProfileStats(targetUserId);
         return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatchedMovies(),
                 stats.totalMinutesWatchedEpisodes(), stats.minutesWatchedMoviesLast30Days(),
                 stats.minutesWatchedEpisodesLast30Days(), stats.totalTheaterVisits(), stats.genreCountsMovies(),
                 stats.genreCountsSeries(), stats.followersCount(), stats.followingCount());
-    }
-
-    private void assertCanViewProfile(UUID viewerId, UUID targetUserId, User targetUser) {
-        if (Boolean.TRUE.equals(targetUser.getIsProfilePublic()) || targetUserId.equals(viewerId)) {
-            return;
-        }
-
-        boolean viewerFollowsTarget = followerRepository
-                .existsByFollowerIdAndFollowedIdAndStatus(viewerId, targetUserId, FollowStatus.ACCEPTED);
-
-        if (!viewerFollowsTarget) {
-            throw new ForbiddenException("This user profile is private");
-        }
     }
 
     @Override
