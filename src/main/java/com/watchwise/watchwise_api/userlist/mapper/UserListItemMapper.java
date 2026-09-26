@@ -14,6 +14,8 @@ import org.mapstruct.ReportingPolicy;
 public interface UserListItemMapper {
 
     @Mapping(target = "contentState", ignore = true)
+    @Mapping(target = "customPosterUrl", ignore = true)
+    @Mapping(target = "withCustomPosterUrl", ignore = true)
     UserListItemResponseDTO userListItemToResponseDto(UserListItem userListItem);
 
     UserListPreviewDTO userListToPreviewDto(UserList userList);

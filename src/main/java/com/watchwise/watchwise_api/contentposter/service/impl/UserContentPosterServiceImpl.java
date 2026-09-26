@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -57,6 +58,30 @@ public class UserContentPosterServiceImpl implements UserContentPosterService {
                 .collect(Collectors.toMap(
                         UserContentPosterRepository.ContentPosterProjection::getContentId,
                         UserContentPosterRepository.ContentPosterProjection::getCustomPosterUrl));
+    }
+
+    @Override
+    public Map<UserContentPosterKey, String> findByUserAndContentPairs(Collection<UserContentPosterKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return Map.of();
+        }
+
+        var requestedKeys = new LinkedHashSet<>(keys);
+        var userIds = requestedKeys.stream()
+                .map(UserContentPosterKey::userId)
+                .distinct()
+                .toList();
+        var contentIds = requestedKeys.stream()
+                .map(UserContentPosterKey::contentId)
+                .distinct()
+                .toList();
+
+        return userContentPosterRepository.findByUserIdInAndContentIdIn(userIds, contentIds).stream()
+                .map(projection -> Map.entry(
+                        new UserContentPosterKey(projection.getUserId(), projection.getContentId()),
+                        projection.getCustomPosterUrl()))
+                .filter(entry -> requestedKeys.contains(entry.getKey()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     @Override

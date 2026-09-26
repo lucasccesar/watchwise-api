@@ -17,4 +17,9 @@ public record UserListProgressItemDTO(
         String customPosterUrl,
         SeriesInProgressResponseDTO seriesProgress,
         SeasonProgressDTO seasonProgress) {
+
+    public UserListProgressItemDTO withCustomPosterUrl(String customPosterUrl) {
+        return new UserListProgressItemDTO(
+                id, content, position, description, createdAt, updatedAt, customPosterUrl, seriesProgress, seasonProgress);
+    }
 }

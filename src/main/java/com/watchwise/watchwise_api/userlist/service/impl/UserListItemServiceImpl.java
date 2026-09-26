@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
@@ -56,6 +57,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final FollowerRepository followerRepository;
     private final UserListItemMapper userListItemMapper;
     private final UserListContentStateService userListContentStateService;
+    private final UserContentPosterService userContentPosterService;
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
@@ -81,8 +83,9 @@ public class UserListItemServiceImpl implements UserListItemService {
         List<UserListItem> entities = userListItemRepository
                 .findByUserListIdWithContentAndChildListOrderByPositionAsc(listId);
         UserListContentStateResult stateResult = userListContentStateService.resolve(viewerId, entities);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(entities);
         List<UserListItemResponseDTO> items = entities.stream()
-                .map(item -> toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId()))
+                .map(item -> toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId(), customPosterByContentId))
                 .toList();
         return new UserListItemsWithState(
                 items,
@@ -90,19 +93,23 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     private UserListItemResponseDTO toVisibilityScopedResponseDto(
-            UUID viewerId, UserListItem item, Map<UUID, ContentStateDTO> stateByItemId) {
+            UUID viewerId, UserListItem item, Map<UUID, ContentStateDTO> stateByItemId,
+            Map<UUID, String> customPosterByContentId) {
         UserListItemResponseDTO dto = userListItemMapper.userListItemToResponseDto(item);
         ContentStateDTO contentState = item.getId() == null ? null : stateByItemId.get(item.getId());
+        String customPosterUrl = item.getContent() == null
+                ? null
+                : customPosterByContentId.get(item.getContent().getId());
 
         if (item.getChildList() != null && !isVisibleTo(viewerId, item.getChildList())) {
             return new UserListItemResponseDTO(
                     dto.id(), dto.content(), null, dto.position(), dto.description(), dto.createdAt(), dto.updatedAt(),
-                    dto.customPosterUrl(), null);
+                    null, null);
         }
 
         return new UserListItemResponseDTO(
                 dto.id(), dto.content(), dto.childList(), dto.position(), dto.description(), dto.createdAt(), dto.updatedAt(),
-                dto.customPosterUrl(), contentState);
+                customPosterUrl, contentState);
     }
 
     @Override
@@ -258,7 +265,6 @@ public class UserListItemServiceImpl implements UserListItemService {
             assertContentTypeGroupMatches(resolveExistingContentScope(listId), userListItemCreationDTO.content().type());
             ContentRefDTO contentRef = contentService.getOrCreateReference(userListItemCreationDTO.content());
             builder.content(contentRepository.getReferenceById(contentRef.id()));
-            builder.customPosterUrl(userListItemCreationDTO.customPosterUrl());
         } else {
             assertListIsNotLockedAsContentList(listId);
             builder.childList(resolveChildList(userId, listId, userListItemCreationDTO.childListId()));
@@ -268,6 +274,10 @@ public class UserListItemServiceImpl implements UserListItemService {
 
         try {
             UserListItem saved = insertAtPosition(listId, newItem, userListItemCreationDTO.position());
+            if (userListItemCreationDTO.customPosterUrl() != null) {
+                userContentPosterService.upsert(
+                        userId, saved.getContent().getId(), userListItemCreationDTO.customPosterUrl());
+            }
             return toResponseDto(userId, saved);
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
@@ -311,8 +321,10 @@ public class UserListItemServiceImpl implements UserListItemService {
             List<UserListItem> saved = userListItemRepository.saveAll(newItems);
             userListItemRepository.flush();
             UserListContentStateResult stateResult = userListContentStateService.resolve(userId, saved);
+            Map<UUID, String> customPosterByContentId = loadPostersForOwner(saved);
             List<UserListItemResponseDTO> items = saved.stream()
-                    .map(item -> toVisibilityScopedResponseDto(userId, item, stateResult.stateByItemId()))
+                    .map(item -> toVisibilityScopedResponseDto(
+                            userId, item, stateResult.stateByItemId(), customPosterByContentId))
                     .toList();
             return new UserListItemsWithState(
                     items,
@@ -336,10 +348,9 @@ public class UserListItemServiceImpl implements UserListItemService {
                 && !userListItemPatchDTO.description().equals(item.getDescription());
         boolean positionChanged = userListItemPatchDTO.position() != null
                 && !userListItemPatchDTO.position().equals(item.getPosition());
-        boolean customPosterUrlChanged = userListItemPatchDTO.customPosterUrl() != null
-                && !userListItemPatchDTO.customPosterUrl().equals(item.getCustomPosterUrl());
+        boolean customPosterUrlProvided = userListItemPatchDTO.customPosterUrl() != null;
 
-        if (!descriptionChanged && !positionChanged && !customPosterUrlChanged) {
+        if (!descriptionChanged && !positionChanged && !customPosterUrlProvided) {
             return toResponseDto(userId, item);
         }
 
@@ -351,10 +362,9 @@ public class UserListItemServiceImpl implements UserListItemService {
         if (descriptionChanged) {
             item.setDescription(userListItemPatchDTO.description());
         }
-        if (customPosterUrlChanged) {
-            item.setCustomPosterUrl(userListItemPatchDTO.customPosterUrl());
+        if (descriptionChanged || positionChanged) {
+            item.setUpdatedAt(LocalDateTime.now());
         }
-        item.setUpdatedAt(LocalDateTime.now());
 
         if (positionChanged) {
             try {
@@ -363,16 +373,44 @@ public class UserListItemServiceImpl implements UserListItemService {
                 throw new ConflictException("List item could not be reordered due to a concurrent update");
             }
         } else {
-            item = userListItemRepository.save(item);
-            userListItemRepository.flush();
+            if (descriptionChanged) {
+                item = userListItemRepository.save(item);
+                userListItemRepository.flush();
+            }
         }
 
-        return toResponseDto(userId, item);
+        if (customPosterUrlProvided) {
+            userContentPosterService.upsert(
+                    userId, item.getContent().getId(), userListItemPatchDTO.customPosterUrl());
+        }
+
+        UserListItemResponseDTO response = toResponseDto(userId, item);
+        return customPosterUrlProvided
+                ? response.withCustomPosterUrl(userListItemPatchDTO.customPosterUrl())
+                : response;
     }
 
     private UserListItemResponseDTO toResponseDto(UUID viewerId, UserListItem item) {
         UserListContentStateResult stateResult = userListContentStateService.resolve(viewerId, List.of(item));
-        return toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId());
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(List.of(item));
+        return toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId(), customPosterByContentId);
+    }
+
+    private Map<UUID, String> loadPostersForOwner(List<UserListItem> items) {
+        if (items.isEmpty()) {
+            return Map.of();
+        }
+
+        UUID ownerId = items.get(0).getUserList().getUser().getId();
+        List<UUID> contentIds = items.stream()
+                .map(UserListItem::getContent)
+                .filter(java.util.Objects::nonNull)
+                .map(content -> content.getId())
+                .distinct()
+                .toList();
+        return contentIds.isEmpty()
+                ? Map.of()
+                : userContentPosterService.findByUserAndContentIds(ownerId, contentIds);
     }
 
     private UserListItem performMove(UserListItem item, int oldPosition, int newPosition, long currentCount) {

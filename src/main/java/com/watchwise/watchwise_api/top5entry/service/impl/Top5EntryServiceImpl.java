@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -39,6 +41,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     private final UserRepository userRepository;
     private final ContentRepository contentRepository;
     private final ContentService contentService;
+    private final UserContentPosterService userContentPosterService;
     private final FollowerRepository followerRepository;
     private final Top5EntryMapper top5EntryMapper;
 
@@ -53,8 +56,11 @@ public class Top5EntryServiceImpl implements Top5EntryService {
 
         assertCanViewTop5(viewerId, userId, target);
 
-        return top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(userId, type).stream()
-                .map(top5EntryMapper::top5EntryToResponseDto)
+        List<Top5Entry> entries = top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(userId, type);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, entries);
+
+        return entries.stream()
+                .map(entry -> enrichTop5EntryResponse(entry, customPosterByContentId.get(entry.getContent().getId())))
                 .toList();
     }
 
@@ -94,7 +100,6 @@ public class Top5EntryServiceImpl implements Top5EntryService {
                 .content(content)
                 .type(type)
                 .position(finalPosition)
-                .customPosterUrl(top5EntryCreationDTO.customPosterUrl())
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -102,7 +107,12 @@ public class Top5EntryServiceImpl implements Top5EntryService {
         try {
             Top5Entry saved = top5EntryRepository.save(newEntry);
             top5EntryRepository.flush();
-            return top5EntryMapper.top5EntryToResponseDto(saved);
+            String customPosterUrl = top5EntryCreationDTO.customPosterUrl();
+            if (customPosterUrl != null) {
+                userContentPosterService.upsert(userId, contentRef.id(), customPosterUrl);
+            }
+            Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, List.of(saved));
+            return enrichTop5EntryResponse(saved, customPosterByContentId.get(contentRef.id()));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -137,14 +147,29 @@ public class Top5EntryServiceImpl implements Top5EntryService {
 
         Top5Entry entry = findOwnedEntry(userId, type, top5EntryId);
 
-        if (top5EntryPatchDTO.customPosterUrl() != null) {
-            entry.setCustomPosterUrl(top5EntryPatchDTO.customPosterUrl());
-            entry.setUpdatedAt(LocalDateTime.now());
-            top5EntryRepository.save(entry);
-            top5EntryRepository.flush();
+        String customPosterUrl = top5EntryPatchDTO.customPosterUrl();
+        if (customPosterUrl != null) {
+            userContentPosterService.upsert(userId, entry.getContent().getId(), customPosterUrl);
         }
 
-        return top5EntryMapper.top5EntryToResponseDto(entry);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, List.of(entry));
+        return enrichTop5EntryResponse(entry, customPosterByContentId.get(entry.getContent().getId()));
+    }
+
+    private Top5EntryResponseDTO enrichTop5EntryResponse(Top5Entry entry, String customPosterUrl) {
+        return top5EntryMapper.top5EntryToResponseDto(entry).withCustomPosterUrl(customPosterUrl);
+    }
+
+    private Map<UUID, String> loadPostersForOwner(UUID ownerId, List<Top5Entry> entries) {
+        List<UUID> contentIds = entries.stream()
+                .map(Top5Entry::getContent)
+                .filter(java.util.Objects::nonNull)
+                .map(Content::getId)
+                .distinct()
+                .toList();
+        return contentIds.isEmpty()
+                ? Map.of()
+                : userContentPosterService.findByUserAndContentIds(ownerId, contentIds);
     }
 
     private Top5Entry findOwnedEntry(UUID userId, ContentType type, UUID top5EntryId) {

@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
@@ -77,6 +78,7 @@ public class UserListServiceImpl implements UserListService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final UserListItemRepository userListItemRepository;
     private final SeriesProgressReader seriesProgressReader;
+    private final UserContentPosterService userContentPosterService;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
     private static final Set<String> GENERIC_SORT_FIELDS = Set.of("rank", "updatedAt", "name", "likesCount");
@@ -247,6 +249,7 @@ public class UserListServiceImpl implements UserListService {
         List<UserListItem> contentItems = items.stream()
                 .filter(item -> item.getContent() != null)
                 .toList();
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userList.getUser().getId(), contentItems);
         Set<UUID> directContentIds = contentItems.stream()
                 .filter(item -> item.getContent().getType() == ContentType.MOVIE
                         || item.getContent().getType() == ContentType.EPISODE)
@@ -298,7 +301,7 @@ public class UserListServiceImpl implements UserListService {
                     item.getDescription(),
                     item.getCreatedAt(),
                     item.getUpdatedAt(),
-                    item.getCustomPosterUrl(),
+                    customPosterByContentId.get(content.getId()),
                     content.getType() == ContentType.SERIES ? seriesProgress : null,
                     content.getType() == ContentType.SEASON ? seasonProgress : null));
         }
@@ -328,6 +331,18 @@ public class UserListServiceImpl implements UserListService {
                 watchedItems,
                 watchedPercentage,
                 progressItems);
+    }
+
+    private Map<UUID, String> loadPostersForOwner(UUID ownerId, List<UserListItem> items) {
+        List<UUID> contentIds = items.stream()
+                .map(UserListItem::getContent)
+                .filter(Objects::nonNull)
+                .map(Content::getId)
+                .distinct()
+                .toList();
+        return contentIds.isEmpty()
+                ? Map.of()
+                : userContentPosterService.findByUserAndContentIds(ownerId, contentIds);
     }
 
     private String seriesTmdbIdForProgress(Content content) {

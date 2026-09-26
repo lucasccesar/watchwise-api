@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -107,6 +108,9 @@ class DiaryEntryControllerIntegrationTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Autowired
+    private UserContentPosterRepository userContentPosterRepository;
+
+    @Autowired
     private WatchlistEntryRepository watchlistEntryRepository;
 
     @Autowired
@@ -132,6 +136,7 @@ class DiaryEntryControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        userContentPosterRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         watchlistEntryRepository.deleteAll();
         droppedEntryRepository.deleteAll();
@@ -1379,7 +1384,7 @@ class DiaryEntryControllerIntegrationTest {
                         updateBody("customPosterUrl", "https://image.tmdb.org/t/p/w500/poster.png")))
                 .andExpect(status().isBadRequest());
 
-        assertThat(diaryEntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), entry.getContent().getId())).isEmpty();
     }
 
     @Test

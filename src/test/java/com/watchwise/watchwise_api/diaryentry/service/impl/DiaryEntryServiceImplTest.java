@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
@@ -120,6 +121,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private ContentService contentService;
+
+    @Mock
+    private UserContentPosterService userContentPosterService;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -283,6 +287,27 @@ class DiaryEntryServiceImplTest {
         Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, null);
 
         assertThat(result.getContent()).containsExactly(dto);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Return Canonical Poster - When Poster Was Set Through Another Feature")
+    void shouldReturnCanonicalPosterWhenPosterWasSetThroughAnotherFeature() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        DiaryEntryResponseDTO mapped = buildResponseDto(entry);
+        String canonicalPoster = "https://image.tmdb.org/t/p/w342/from-list.png";
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(entry)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(mapped);
+        when(userContentPosterService.findByUserAndContentIds(lucasId, List.of(fightClub.getId())))
+                .thenReturn(Map.of(fightClub.getId(), canonicalPoster));
+
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 10, null, null, null, null);
+
+        assertThat(result.getContent()).singleElement()
+                .extracting(DiaryEntryResponseDTO::customPosterUrl)
+                .isEqualTo(canonicalPoster);
     }
 
     @Test
@@ -1296,6 +1321,36 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getReviewsForContent] Should Batch Posters By Author And Content - When Reviews Have Multiple Authors")
+    void shouldBatchPostersByAuthorAndContentWhenReviewsHaveMultipleAuthors() {
+        DiaryEntry firstEntry = buildEntry(lucas, fightClub);
+        DiaryEntry secondEntry = buildEntry(marina, fightClub);
+        DiaryEntryResponseDTO firstMapped = buildResponseDto(firstEntry);
+        DiaryEntryResponseDTO secondMapped = buildResponseDto(secondEntry);
+        String firstPoster = "https://image.tmdb.org/t/p/w342/lucas.png";
+        String secondPoster = "https://image.tmdb.org/t/p/w342/marina.png";
+        UserContentPosterService.UserContentPosterKey firstKey =
+                new UserContentPosterService.UserContentPosterKey(lucasId, fightClub.getId());
+        UserContentPosterService.UserContentPosterKey secondKey =
+                new UserContentPosterService.UserContentPosterKey(marinaId, fightClub.getId());
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(firstEntry, secondEntry)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(firstEntry, false, List.of())).thenReturn(firstMapped);
+        when(diaryEntryMapper.diaryEntryToResponseDto(secondEntry, false, List.of())).thenReturn(secondMapped);
+        when(userContentPosterService.findByUserAndContentPairs(List.of(firstKey, secondKey)))
+                .thenReturn(Map.of(firstKey, firstPoster, secondKey, secondPoster));
+
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getReviewsForContent(
+                lucasId, fightClub.getId(), 1, 10);
+
+        assertThat(result.getContent()).extracting(DiaryEntryResponseDTO::customPosterUrl)
+                .containsExactly(firstPoster, secondPoster);
+        verify(userContentPosterService).findByUserAndContentPairs(List.of(firstKey, secondKey));
+        verify(userContentPosterService, never()).findByUserAndContentIds(any(), any());
+    }
+
+    @Test
     @DisplayName("[getReviewsForContent] Should Return Empty Page - When Content Has No Visible Reviews")
     void shouldReturnEmptyPageWhenContentHasNoVisibleReviews() {
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
@@ -1350,7 +1405,7 @@ class DiaryEntryServiceImplTest {
         assertThat(captured.getWatchedDate()).isEqualTo(watchedDate);
         assertThat(captured.getWatchNumber()).isEqualTo(2);
         assertThat(captured.getWatchedInTheater()).isFalse();
-        assertThat(captured.getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/poster.png");
         assertThat(captured.getIgnore()).isFalse();
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue())
@@ -4033,7 +4088,7 @@ class DiaryEntryServiceImplTest {
                             content.getIsSeasonFinale(), content.getIsSeriesFinale(), null, null);
                     return new DiaryEntryResponseDTO(entry.getId(), entry.getUser().getId(), contentRef, entry.getComment(),
                             entry.getScore(), entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(),
-                            entry.getCustomPosterUrl(), entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
+                            null, entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
                             entry.getLikesCount(), false);
                 });
 
@@ -4111,7 +4166,7 @@ class DiaryEntryServiceImplTest {
                             entryContent.getIsSeasonFinale(), entryContent.getIsSeriesFinale(), null, null);
                     return new DiaryEntryResponseDTO(entry.getId(), entry.getUser().getId(), contentRef, entry.getComment(),
                             entry.getScore(), entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(),
-                            entry.getCustomPosterUrl(), entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
+                            null, entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
                             entry.getLikesCount(), false);
                 });
 
@@ -4192,7 +4247,7 @@ class DiaryEntryServiceImplTest {
                             entryContent.getIsSeasonFinale(), entryContent.getIsSeriesFinale(), null, null);
                     return new DiaryEntryResponseDTO(entry.getId(), entry.getUser().getId(), contentRef, entry.getComment(),
                             entry.getScore(), entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(),
-                            entry.getCustomPosterUrl(), entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
+                            null, entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
                             entry.getLikesCount(), false);
                 });
 
@@ -4263,7 +4318,6 @@ class DiaryEntryServiceImplTest {
         entry.setWatchedDate(LocalDate.of(2023, 1, 1));
         entry.setWatchNumber(2);
         entry.setWatchedInTheater(true);
-        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/original.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
@@ -4277,7 +4331,6 @@ class DiaryEntryServiceImplTest {
         assertThat(saved.getWatchedDate()).isEqualTo(LocalDate.of(2023, 1, 1));
         assertThat(saved.getWatchNumber()).isEqualTo(2);
         assertThat(saved.getWatchedInTheater()).isTrue();
-        assertThat(saved.getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/original.png");
     }
 
     @Test
@@ -4473,7 +4526,6 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[updateDiaryEntry] Should Update CustomPosterUrl - When A Different Value Is Provided")
     void shouldUpdateCustomPosterUrlWhenADifferentValueIsProvided() {
         DiaryEntry entry = buildEntry(lucas, fightClub);
-        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(diaryEntryRepository.save(any(DiaryEntry.class))).thenReturn(entry);
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
@@ -4481,8 +4533,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.updateDiaryEntry(lucasId, entry.getId(), new DiaryEntryUpdateDTO(
                 null, null, null, null, "https://image.tmdb.org/t/p/w342/new.png"));
 
-        verify(diaryEntryRepository).save(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/new.png");
     }
 
     // ---------- deleteDiaryEntry ----------
@@ -4496,6 +4547,7 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.deleteDiaryEntry(lucasId, entry.getId(), false);
 
         verify(diaryEntryRepository).delete(entry);
+        verify(userContentPosterService, never()).delete(lucasId, fightClub.getId());
     }
 
     @Test
@@ -5118,7 +5170,7 @@ class DiaryEntryServiceImplTest {
         return new DiaryEntryResponseDTO(
                 entry.getId(), entry.getUser().getId(), null, entry.getComment(), entry.getScore(),
                 entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(),
-                entry.getCustomPosterUrl(), entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
+                null, entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
                 entry.getLikesCount(), false);
     }
 

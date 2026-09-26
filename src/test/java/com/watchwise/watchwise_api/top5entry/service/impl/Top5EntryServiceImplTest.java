@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
@@ -34,6 +35,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -56,6 +58,9 @@ class Top5EntryServiceImplTest {
 
     @Mock
     private ContentService contentService;
+
+    @Mock
+    private UserContentPosterService userContentPosterService;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -117,6 +122,26 @@ class Top5EntryServiceImplTest {
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
 
         assertThat(result).containsExactly(dto1, dto2);
+    }
+
+    @Test
+    @DisplayName("[getTop5] Should Return Canonical Poster - When Poster Was Set Through Diary")
+    void shouldReturnCanonicalPosterWhenPosterWasSetThroughDiary() {
+        Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        Top5EntryResponseDTO mapped = buildResponseDto(entry);
+        String canonicalPoster = "https://image.tmdb.org/t/p/w342/from-diary.png";
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of(entry));
+        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(mapped);
+        when(userContentPosterService.findByUserAndContentIds(lucasId, List.of(fightClub.getId())))
+                .thenReturn(Map.of(fightClub.getId(), canonicalPoster));
+
+        List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
+
+        assertThat(result).singleElement()
+                .extracting(Top5EntryResponseDTO::customPosterUrl)
+                .isEqualTo(canonicalPoster);
     }
 
     @Test
@@ -252,8 +277,7 @@ class Top5EntryServiceImplTest {
         top5EntryService.insertEntry(lucasId, ContentType.MOVIE,
                 new Top5EntryCreationDTO(fightClub.getTmdbId(), null, "https://image.tmdb.org/t/p/w342/poster.png"));
 
-        verify(top5EntryRepository).save(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/poster.png");
     }
 
     @Test
@@ -634,24 +658,21 @@ class Top5EntryServiceImplTest {
     @DisplayName("[updateEntry] Should Update CustomPosterUrl - When A Different Value Is Provided")
     void shouldUpdateCustomPosterUrlWhenADifferentValueIsProvided() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
-        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(top5EntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
-        when(top5EntryRepository.save(any(Top5Entry.class))).thenReturn(entry);
         when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
         top5EntryService.updateEntry(lucasId, ContentType.MOVIE, entry.getId(),
                 new Top5EntryPatchDTO("https://image.tmdb.org/t/p/w342/new.png"));
 
-        verify(top5EntryRepository).save(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
-        verify(top5EntryRepository, times(1)).flush();
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/new.png");
+        verify(top5EntryRepository, never()).save(any());
+        verify(top5EntryRepository, never()).flush();
     }
 
     @Test
     @DisplayName("[updateEntry] Should Not Save - When CustomPosterUrl Is Null")
     void shouldNotSaveWhenCustomPosterUrlIsNullOnUpdate() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
-        entry.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(top5EntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
         when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(buildResponseDto(entry));
 
@@ -659,7 +680,6 @@ class Top5EntryServiceImplTest {
 
         verify(top5EntryRepository, never()).save(any());
         verify(top5EntryRepository, never()).flush();
-        assertThat(entry.getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/old.png");
     }
 
     @Test

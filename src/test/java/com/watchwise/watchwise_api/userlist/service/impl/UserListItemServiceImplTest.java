@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -70,6 +71,9 @@ class UserListItemServiceImplTest {
 
     @Mock
     private ContentService contentService;
+
+    @Mock
+    private UserContentPosterService userContentPosterService;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -130,7 +134,7 @@ class UserListItemServiceImplTest {
                     UserListItem item = invocation.getArgument(0);
                     return new UserListItemResponseDTO(
                             item.getId(), null, null, item.getPosition(), item.getDescription(),
-                            item.getCreatedAt(), item.getUpdatedAt(), item.getCustomPosterUrl(), null);
+                            item.getCreatedAt(), item.getUpdatedAt(), null, null);
                 });
     }
 
@@ -204,6 +208,26 @@ class UserListItemServiceImplTest {
 
         assertThat(result.get(0)).isEqualTo(mapped);
         verifyNoInteractions(followerRepository);
+    }
+
+    @Test
+    @DisplayName("[getItems] Should Return Canonical Poster - When Poster Was Set Through Diary")
+    void shouldReturnCanonicalPosterWhenPosterWasSetThroughDiary() {
+        UserListItem item = buildContentItem(scifi, fightClub, 1);
+        UserListItemResponseDTO mapped = new UserListItemResponseDTO(
+                item.getId(), buildContentRefDto(fightClub), null, 1, null, LocalDateTime.now(), LocalDateTime.now());
+        String canonicalPoster = "https://image.tmdb.org/t/p/w342/from-diary.png";
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(item));
+        when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
+        when(userContentPosterService.findByUserAndContentIds(lucasId, List.of(fightClub.getId())))
+                .thenReturn(Map.of(fightClub.getId(), canonicalPoster));
+
+        List<UserListItemResponseDTO> result = userListItemService.getItems(lucasId, listId);
+
+        assertThat(result).singleElement()
+                .extracting(UserListItemResponseDTO::customPosterUrl)
+                .isEqualTo(canonicalPoster);
     }
 
     @Test
@@ -720,8 +744,7 @@ class UserListItemServiceImplTest {
         userListItemService.addItem(lucasId, listId,
                 new UserListItemCreationDTO(contentRefCreation("550"), null, null, null, "https://image.tmdb.org/t/p/w342/poster.png"));
 
-        verify(userListItemRepository).save(itemCaptor.capture());
-        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/poster.png");
     }
 
     @Test
@@ -1284,29 +1307,27 @@ class UserListItemServiceImplTest {
     @DisplayName("[updateItem] Should Change CustomPosterUrl - When A Different Value Is Provided")
     void shouldChangeCustomPosterUrlWhenADifferentValueIsProvided() {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
-        item.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/old.png");
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
-        when(userListItemRepository.save(any(UserListItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         userListItemService.updateItem(lucasId, listId, item.getId(),
                 new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/new.png"));
 
-        verify(userListItemRepository).save(itemCaptor.capture());
-        assertThat(itemCaptor.getValue().getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/new.png");
+        verify(userListItemRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("[updateItem] Should Not Save - When Same CustomPosterUrl Value Is Provided")
-    void shouldNotSaveWhenSameCustomPosterUrlValueIsProvided() {
+    @DisplayName("[updateItem] Should Upsert CustomPosterUrl - When A Value Is Provided")
+    void shouldUpsertCustomPosterUrlWhenAValueIsProvided() {
         UserListItem item = buildContentItem(scifi, fightClub, 1);
-        item.setCustomPosterUrl("https://image.tmdb.org/t/p/w342/same.png");
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.findById(item.getId())).thenReturn(Optional.of(item));
 
         userListItemService.updateItem(lucasId, listId, item.getId(),
                 new UserListItemPatchDTO(null, null, "https://image.tmdb.org/t/p/w342/same.png"));
 
+        verify(userContentPosterService).upsert(lucasId, fightClub.getId(), "https://image.tmdb.org/t/p/w342/same.png");
         verify(userListItemRepository, never()).save(any());
         verify(userListItemRepository, never()).flush();
     }
@@ -1516,6 +1537,7 @@ class UserListItemServiceImplTest {
         userListItemService.removeItem(lucasId, listId, item.getId());
 
         verify(userListItemRepository).delete(item);
+        verify(userContentPosterService, never()).delete(lucasId, fightClub.getId());
         verify(userListItemRepository).parkPositionsInRange(
                 listId, 2, Integer.MAX_VALUE, UserListItemServiceImpl.POSITION_PARK_OFFSET);
         verify(userListItemRepository).settleParkedPositions(

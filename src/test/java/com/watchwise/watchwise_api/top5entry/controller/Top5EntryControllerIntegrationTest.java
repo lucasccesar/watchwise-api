@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -78,6 +79,9 @@ class Top5EntryControllerIntegrationTest {
     private Top5EntryRepository top5EntryRepository;
 
     @Autowired
+    private UserContentPosterRepository userContentPosterRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -91,6 +95,7 @@ class Top5EntryControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        userContentPosterRepository.deleteAll();
         top5EntryRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
@@ -365,9 +370,11 @@ class Top5EntryControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/poster.png"));
 
-        User entity = userRepository.findById(user.id()).orElseThrow();
-        var entries = top5EntryRepository.findByUserIdAndTypeOrderByPositionAsc(entity.getId(), ContentType.MOVIE);
-        assertThat(entries.get(0).getCustomPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+        Content content = contentRepository.findByTmdbIdAndType("550", ContentType.MOVIE).orElseThrow();
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), content.getId()))
+                .get()
+                .extracting(poster -> poster.getCustomPosterUrl())
+                .isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
     }
 
     @Test
@@ -612,7 +619,9 @@ class Top5EntryControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/new.png"));
 
-        assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl())
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), entry.getContent().getId()))
+                .get()
+                .extracting(poster -> poster.getCustomPosterUrl())
                 .isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
     }
 
@@ -627,7 +636,7 @@ class Top5EntryControllerIntegrationTest {
                         posterPatchBody("https://image.tmdb.org/t/p/w500/poster.png")))
                 .andExpect(status().isBadRequest());
 
-        assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), entry.getContent().getId())).isEmpty();
     }
 
     @Test
@@ -652,7 +661,7 @@ class Top5EntryControllerIntegrationTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Top 5 entry not found"));
 
-        assertThat(top5EntryRepository.findById(entry.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(intruder.id(), entry.getContent().getId())).isEmpty();
     }
 
     @Test

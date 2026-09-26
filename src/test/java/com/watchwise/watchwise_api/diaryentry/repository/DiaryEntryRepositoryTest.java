@@ -268,7 +268,6 @@ class DiaryEntryRepositoryTest {
         assertThat(found.getComment()).isNull();
         assertThat(found.getWatchedDate()).isNull();
         assertThat(found.getWatchedInTheater()).isNull();
-        assertThat(found.getCustomPosterUrl()).isNull();
         assertThat(found.getWatchNumber()).isEqualTo(1);
     }
 

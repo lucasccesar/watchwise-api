@@ -55,7 +55,6 @@ class UserListItemMapperTest {
                 .content(content)
                 .position(1)
                 .description("Best plot twist")
-                .customPosterUrl("https://image.tmdb.org/t/p/w342/poster.png")
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -68,7 +67,7 @@ class UserListItemMapperTest {
         assertThat(result.childList()).isNull();
         assertThat(result.position()).isEqualTo(1);
         assertThat(result.description()).isEqualTo("Best plot twist");
-        assertThat(result.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
+        assertThat(result.customPosterUrl()).isNull();
         assertThat(result.createdAt()).isEqualTo(now);
         assertThat(result.updatedAt()).isEqualTo(now);
     }

@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.dto.UserContentPosterResponseDTO;
 import com.watchwise.watchwise_api.contentposter.entity.UserContentPoster;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -179,6 +180,36 @@ class UserContentPosterServiceImplTest {
     }
 
     @Test
+    @DisplayName("[findByUserAndContentPairs] Should Resolve Exact Pairs In One Batch - When Reviews Have Multiple Authors")
+    void shouldResolveExactPairsInOneBatchWhenReviewsHaveMultipleAuthors() {
+        UUID secondOwnerId = UUID.randomUUID();
+        UUID secondContentId = UUID.randomUUID();
+        UserContentPosterRepository.UserContentPosterPairProjection first =
+                pairProjection(ownerId, contentId, FIRST_POSTER);
+        UserContentPosterRepository.UserContentPosterPairProjection second =
+                pairProjection(secondOwnerId, secondContentId, SECOND_POSTER);
+        UserContentPosterRepository.UserContentPosterPairProjection crossPair =
+                pairProjection(ownerId, secondContentId, "https://image.tmdb.org/t/p/w342/cross-pair.png");
+        UserContentPosterService.UserContentPosterKey firstKey =
+                new UserContentPosterService.UserContentPosterKey(ownerId, contentId);
+        UserContentPosterService.UserContentPosterKey secondKey =
+                new UserContentPosterService.UserContentPosterKey(secondOwnerId, secondContentId);
+
+        when(userContentPosterRepository.findByUserIdInAndContentIdIn(
+                List.of(ownerId, secondOwnerId), List.of(contentId, secondContentId)))
+                .thenReturn(List.of(first, second, crossPair));
+
+        Map<UserContentPosterService.UserContentPosterKey, String> result =
+                userContentPosterService.findByUserAndContentPairs(List.of(firstKey, secondKey));
+
+        assertThat(result).containsExactlyInAnyOrderEntriesOf(Map.of(
+                firstKey, FIRST_POSTER,
+                secondKey, SECOND_POSTER));
+        verify(userContentPosterRepository).findByUserIdInAndContentIdIn(
+                List.of(ownerId, secondOwnerId), List.of(contentId, secondContentId));
+    }
+
+    @Test
     @DisplayName("[findSeriesPosters] Should Return Empty Map - When Series Id Collection Is Empty")
     void shouldReturnEmptyMapWhenSeriesIdCollectionIsEmpty() {
         Map<String, String> result = userContentPosterService.findSeriesPosters(ownerId, List.of());
@@ -198,5 +229,15 @@ class UserContentPosterServiceImplTest {
                 .updatedAt(updatedAt)
                 .createdAt(updatedAt.minusMinutes(1))
                 .build();
+    }
+
+    private UserContentPosterRepository.UserContentPosterPairProjection pairProjection(
+            UUID userId, UUID contentId, String posterUrl) {
+        UserContentPosterRepository.UserContentPosterPairProjection projection =
+                org.mockito.Mockito.mock(UserContentPosterRepository.UserContentPosterPairProjection.class);
+        when(projection.getUserId()).thenReturn(userId);
+        when(projection.getContentId()).thenReturn(contentId);
+        when(projection.getCustomPosterUrl()).thenReturn(posterUrl);
+        return projection;
     }
 }

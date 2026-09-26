@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
@@ -66,6 +67,7 @@ import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -86,6 +88,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final UserRepository userRepository;
     private final ContentRepository contentRepository;
     private final ContentService contentService;
+    private final UserContentPosterService userContentPosterService;
     private final FollowerRepository followerRepository;
     private final DiaryEntryMapper diaryEntryMapper;
     private final UserMapper userMapper;
@@ -127,9 +130,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         List<UUID> entryIds = entries.getContent().stream().map(DiaryEntry::getId).toList();
         Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(entryIds);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, entries.getContent());
 
-        return entries.map(entry -> diaryEntryMapper.diaryEntryToResponseDto(entry, likedEntryIds.contains(entry.getId()),
-                watchedWithByEntryId.getOrDefault(entry.getId(), List.of())));
+        return entries.map(entry -> enrichDiaryEntryResponse(
+                entry,
+                likedEntryIds.contains(entry.getId()),
+                watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
+                customPosterByContentId.get(entry.getContent().getId())));
     }
 
     @Override
@@ -390,9 +397,24 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         List<UUID> entryIds = reviews.getContent().stream().map(DiaryEntry::getId).toList();
         Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(entryIds);
+        List<UserContentPosterService.UserContentPosterKey> posterKeys = reviews.getContent().stream()
+                .map(entry -> new UserContentPosterService.UserContentPosterKey(
+                        entry.getUser().getId(), entry.getContent().getId()))
+                .distinct()
+                .toList();
+        Map<UserContentPosterService.UserContentPosterKey, String> customPosterByAuthorAndContent = posterKeys.isEmpty()
+                ? Map.of()
+                : userContentPosterService.findByUserAndContentPairs(posterKeys);
 
-        return reviews.map(entry -> diaryEntryMapper.diaryEntryToResponseDto(entry, likedEntryIds.contains(entry.getId()),
-                watchedWithByEntryId.getOrDefault(entry.getId(), List.of())));
+        return reviews.map(entry -> {
+            UserContentPosterService.UserContentPosterKey posterKey = new UserContentPosterService.UserContentPosterKey(
+                    entry.getUser().getId(), entry.getContent().getId());
+            return enrichDiaryEntryResponse(
+                    entry,
+                    likedEntryIds.contains(entry.getId()),
+                    watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
+                    customPosterByAuthorAndContent.get(posterKey));
+        });
     }
 
     private void assertCanViewDiary(UUID viewerId, UUID targetUserId, User target) {
@@ -441,6 +463,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         } catch (DataIntegrityViolationException e) {
             throw mapWatchNumberConflict(e);
         }
+        if (diaryEntryCreationDTO.customPosterUrl() != null) {
+            userContentPosterService.upsert(userId, contentRef.id(), diaryEntryCreationDTO.customPosterUrl());
+        }
         saveCompanions(entry, companionIds);
 
         removeFromWatchlistAndDropped(userId, contentRef);
@@ -452,16 +477,23 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .map(DiaryEntry::getId)
                 .toList();
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(resultIds);
+        List<DiaryEntry> resultEntries = Stream.of(entry, completion.completedSeason(), completion.completedSeries())
+                .filter(Objects::nonNull)
+                .toList();
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, resultEntries);
 
         return new DiaryEntryCreationResultDTO(
-                diaryEntryMapper.diaryEntryToResponseDto(entry, false, watchedWithByEntryId.getOrDefault(entry.getId(), List.of())),
+                enrichDiaryEntryResponse(entry, false, watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
+                        customPosterByContentId.get(entry.getContent().getId())),
                 completion.completedSeason() != null
-                        ? diaryEntryMapper.diaryEntryToResponseDto(completion.completedSeason(), false,
-                                watchedWithByEntryId.getOrDefault(completion.completedSeason().getId(), List.of()))
+                        ? enrichDiaryEntryResponse(completion.completedSeason(), false,
+                                watchedWithByEntryId.getOrDefault(completion.completedSeason().getId(), List.of()),
+                                customPosterByContentId.get(completion.completedSeason().getContent().getId()))
                         : null,
                 completion.completedSeries() != null
-                        ? diaryEntryMapper.diaryEntryToResponseDto(completion.completedSeries(), false,
-                                watchedWithByEntryId.getOrDefault(completion.completedSeries().getId(), List.of()))
+                        ? enrichDiaryEntryResponse(completion.completedSeries(), false,
+                                watchedWithByEntryId.getOrDefault(completion.completedSeries().getId(), List.of()),
+                                customPosterByContentId.get(completion.completedSeries().getContent().getId()))
                         : null);
     }
 
@@ -530,7 +562,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .watchedDate(watchedDate)
                 .watchNumber(watchNumber)
                 .watchedInTheater(watchedInTheater)
-                .customPosterUrl(customPosterUrl)
                 .autoGenerated(autoGenerated)
                 .ignore(ignore)
                 .createdAt(now)
@@ -573,10 +604,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         List<UUID> createdIds = created.stream().map(DiaryEntry::getId).toList();
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(createdIds);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, created);
 
         return created.stream()
-                .map(entry -> diaryEntryMapper.diaryEntryToResponseDto(entry, false,
-                        watchedWithByEntryId.getOrDefault(entry.getId(), List.of())))
+                .map(entry -> enrichDiaryEntryResponse(entry, false,
+                        watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
+                        customPosterByContentId.get(entry.getContent().getId())))
                 .toList();
     }
 
@@ -603,10 +636,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             assertWatchedInTheaterAllowed(entry.getContent().getType(), diaryEntryUpdateDTO.watchedInTheater());
             entry.setWatchedInTheater(diaryEntryUpdateDTO.watchedInTheater());
         }
-        if (diaryEntryUpdateDTO.customPosterUrl() != null) {
-            entry.setCustomPosterUrl(diaryEntryUpdateDTO.customPosterUrl());
-        }
-
         if (diaryEntryUpdateDTO.watchedWith() != null) {
             List<UUID> companionIds = validateCompanions(userId, diaryEntryUpdateDTO.watchedWith());
             watchCompanionRepository.deleteByDiaryEntryId(entry.getId());
@@ -618,9 +647,32 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         entry.setUpdatedAt(LocalDateTime.now());
 
         DiaryEntry saved = diaryEntryRepository.save(entry);
+        if (diaryEntryUpdateDTO.customPosterUrl() != null) {
+            userContentPosterService.upsert(userId, saved.getContent().getId(), diaryEntryUpdateDTO.customPosterUrl());
+        }
         boolean likedByMe = likeService.getLikedDiaryEntryIds(userId, List.of(saved.getId())).contains(saved.getId());
         List<UserPreviewDTO> watchedWith = loadWatchedWith(List.of(saved.getId())).getOrDefault(saved.getId(), List.of());
-        return diaryEntryMapper.diaryEntryToResponseDto(saved, likedByMe, watchedWith);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, List.of(saved));
+        return enrichDiaryEntryResponse(saved, likedByMe, watchedWith,
+                customPosterByContentId.get(saved.getContent().getId()));
+    }
+
+    private DiaryEntryResponseDTO enrichDiaryEntryResponse(
+            DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith, String customPosterUrl) {
+        return diaryEntryMapper.diaryEntryToResponseDto(entry, likedByMe, watchedWith)
+                .withCustomPosterUrl(customPosterUrl);
+    }
+
+    private Map<UUID, String> loadPostersForOwner(UUID ownerId, Collection<DiaryEntry> entries) {
+        List<UUID> contentIds = entries.stream()
+                .map(DiaryEntry::getContent)
+                .filter(Objects::nonNull)
+                .map(Content::getId)
+                .distinct()
+                .toList();
+        return contentIds.isEmpty()
+                ? Map.of()
+                : userContentPosterService.findByUserAndContentIds(ownerId, contentIds);
     }
 
     private void assertWatchedInTheaterAllowed(ContentType contentType, Boolean watchedInTheater) {

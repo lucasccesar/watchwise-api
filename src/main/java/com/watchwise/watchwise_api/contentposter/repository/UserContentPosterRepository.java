@@ -57,6 +57,18 @@ public interface UserContentPosterRepository extends JpaRepository<UserContentPo
             @Param("contentIds") Collection<UUID> contentIds);
 
     @Query("""
+            SELECT poster.user.id AS userId,
+                   poster.content.id AS contentId,
+                   poster.customPosterUrl AS customPosterUrl
+            FROM UserContentPoster poster
+            WHERE poster.user.id IN :userIds
+            AND poster.content.id IN :contentIds
+            """)
+    List<UserContentPosterPairProjection> findByUserIdInAndContentIdIn(
+            @Param("userIds") Collection<UUID> userIds,
+            @Param("contentIds") Collection<UUID> contentIds);
+
+    @Query("""
             SELECT poster.content.tmdbId AS seriesTmdbId,
                    poster.customPosterUrl AS customPosterUrl
             FROM UserContentPoster poster
@@ -69,6 +81,14 @@ public interface UserContentPosterRepository extends JpaRepository<UserContentPo
             @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
     interface ContentPosterProjection {
+        UUID getContentId();
+
+        String getCustomPosterUrl();
+    }
+
+    interface UserContentPosterPairProjection {
+        UUID getUserId();
+
         UUID getContentId();
 
         String getCustomPosterUrl();

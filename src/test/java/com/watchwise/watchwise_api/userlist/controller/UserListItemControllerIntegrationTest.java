@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -89,6 +90,9 @@ class UserListItemControllerIntegrationTest {
     private ContentRepository contentRepository;
 
     @Autowired
+    private UserContentPosterRepository userContentPosterRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -99,6 +103,7 @@ class UserListItemControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        userContentPosterRepository.deleteAll();
         userListItemRepository.deleteAll();
         userListRepository.deleteAll();
         contentRepository.deleteAll();
@@ -1106,7 +1111,10 @@ class UserListItemControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/poster.png"));
 
-        assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId()).get(0).getCustomPosterUrl())
+        Content content = userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId()).get(0).getContent();
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), content.getId()))
+                .get()
+                .extracting(poster -> poster.getCustomPosterUrl())
                 .isEqualTo("https://image.tmdb.org/t/p/w342/poster.png");
     }
 
@@ -1136,7 +1144,9 @@ class UserListItemControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.customPosterUrl").value("https://image.tmdb.org/t/p/w342/new.png"));
 
-        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl())
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), item.getContent().getId()))
+                .get()
+                .extracting(poster -> poster.getCustomPosterUrl())
                 .isEqualTo("https://image.tmdb.org/t/p/w342/new.png");
     }
 
@@ -1152,7 +1162,7 @@ class UserListItemControllerIntegrationTest {
         mockMvc.perform(updateItemRequest(user, parent.getId(), item.getId(), patchItemBody(null, null, "https://image.tmdb.org/t/p/w342/x.png")))
                 .andExpect(status().isBadRequest());
 
-        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+        assertThat(userContentPosterRepository.findAll()).isEmpty();
     }
 
     @Test
@@ -1181,6 +1191,6 @@ class UserListItemControllerIntegrationTest {
                         patchItemBody(null, null, "https://image.tmdb.org/t/p/w500/poster.png")))
                 .andExpect(status().isBadRequest());
 
-        assertThat(userListItemRepository.findById(item.getId()).orElseThrow().getCustomPosterUrl()).isNull();
+        assertThat(userContentPosterRepository.findByUserIdAndContentId(user.id(), item.getContent().getId())).isEmpty();
     }
 }

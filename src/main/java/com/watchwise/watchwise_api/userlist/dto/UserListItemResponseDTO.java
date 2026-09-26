@@ -17,6 +17,11 @@ public record UserListItemResponseDTO(
         String customPosterUrl,
         ContentStateDTO contentState
 ) {
+    public UserListItemResponseDTO withCustomPosterUrl(String customPosterUrl) {
+        return new UserListItemResponseDTO(
+                id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState);
+    }
+
     public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
             String description, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this(id, content, childList, position, description, createdAt, updatedAt, null, null);

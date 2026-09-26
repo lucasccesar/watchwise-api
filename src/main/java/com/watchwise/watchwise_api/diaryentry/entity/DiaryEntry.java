@@ -51,10 +51,6 @@ public class DiaryEntry {
     @Setter
     private Boolean watchedInTheater;
 
-    @Column(name = "custom_poster_url", length = 2048)
-    @Setter
-    private String customPosterUrl;
-
     @Column(name = "auto_generated", nullable = false)
     @Setter
     @Builder.Default
