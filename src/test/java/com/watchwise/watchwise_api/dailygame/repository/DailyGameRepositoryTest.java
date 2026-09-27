@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -62,6 +63,9 @@ class DailyGameRepositoryTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUp() {
@@ -112,6 +116,85 @@ class DailyGameRepositoryTest {
 
         assertThat(reloaded.getAnswerSnapshot().get("answer").asText()).isEqualTo("Fight Club");
         assertThat(reloaded.getDisplaySnapshot().get("title").asText()).isEqualTo("Fight Club");
+    }
+
+    @Test
+    @DisplayName("[existsByChallengeDateAndGameType] Should Find Only The Exact Challenge Identity")
+    void shouldFindOnlyTheExactChallengeIdentity() {
+        LocalDate challengeDate = LocalDate.of(2026, 9, 27);
+        DailyGameType gameType = DailyGameType.MOVIE_BY_POSTER;
+        challengeRepository.saveAndFlush(buildChallenge(challengeDate, gameType, "movie:550"));
+
+        assertThat(challengeRepository.existsByChallengeDateAndGameType(challengeDate, gameType)).isTrue();
+        assertThat(challengeRepository.existsByChallengeDateAndGameType(
+                challengeDate.plusDays(1), gameType)).isFalse();
+    }
+
+    @Test
+    @DisplayName("[existsByGameTypeAndAnswerKey] Should Find Only The Exact Game Answer Identity")
+    void shouldFindOnlyTheExactGameAnswerIdentity() {
+        DailyGameType gameType = DailyGameType.MOVIE_BY_POSTER;
+        challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), gameType, "movie:550"));
+
+        assertThat(challengeRepository.existsByGameTypeAndAnswerKey(gameType, "movie:550")).isTrue();
+        assertThat(challengeRepository.existsByGameTypeAndAnswerKey(gameType, "movie:680")).isFalse();
+        assertThat(challengeRepository.existsByGameTypeAndAnswerKey(
+                DailyGameType.MOVIE_BY_INFO, "movie:550")).isFalse();
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject An Invalid Game Type Enum Value")
+    void shouldRejectAnInvalidGameTypeEnumValue() {
+        assertThatThrownBy(() -> insertChallengeRow(
+                "NOT_A_GAME", "MOVIE", "550", null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenges_game_type");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject An Invalid Target Kind Enum Value")
+    void shouldRejectAnInvalidTargetKindEnumValue() {
+        assertThatThrownBy(() -> insertChallengeRow(
+                "MOVIE_BY_POSTER", "NOT_A_TARGET", "550", null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenges_target_kind");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject A Game And Target Kind Mismatch")
+    void shouldRejectAGameAndTargetKindMismatch() {
+        assertThatThrownBy(() -> insertChallengeRow(
+                "MOVIE_BY_POSTER", "SERIES", "550", null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenges_game_target_kind");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject A Movie Without Its Target Coordinate")
+    void shouldRejectAMovieWithoutItsTargetCoordinate() {
+        assertThatThrownBy(() -> insertChallengeRow(
+                "MOVIE_BY_POSTER", "MOVIE", null, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenges_coordinates");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject A Movie With Episode Coordinates")
+    void shouldRejectAMovieWithEpisodeCoordinates() {
+        assertThatThrownBy(() -> insertChallengeRow(
+                "MOVIE_BY_POSTER", "MOVIE", "550", "1396", 1, 1))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenges_coordinates");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject An Episode Without Its Episode Coordinate")
+    void shouldRejectAnEpisodeWithoutItsEpisodeCoordinate() {
+        assertThatThrownBy(() -> insertChallengeRow(
+                "EPISODE_BY_FRAME", "EPISODE", null, "1396", 1, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenges_coordinates");
     }
 
     @Test
@@ -199,6 +282,60 @@ class DailyGameRepositoryTest {
     }
 
     @Test
+    @DisplayName("[save] Should Reject A Zero Hint Position")
+    void shouldRejectAZeroHintPosition() {
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+
+        assertThatThrownBy(() -> hintRepository.saveAndFlush(DailyChallengeHint.builder()
+                .dailyChallenge(challenge)
+                .position(0)
+                .hintType("YEAR")
+                .hintValue("1999")
+                .build()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenge_hints_positive_position");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject A Negative Hint Position")
+    void shouldRejectANegativeHintPosition() {
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+
+        assertThatThrownBy(() -> hintRepository.saveAndFlush(DailyChallengeHint.builder()
+                .dailyChallenge(challenge)
+                .position(-1)
+                .hintType("YEAR")
+                .hintValue("1999")
+                .build()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_daily_challenge_hints_positive_position");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject Duplicate Hint Positions For A Challenge")
+    void shouldRejectDuplicateHintPositionsForAChallenge() {
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+        hintRepository.saveAndFlush(DailyChallengeHint.builder()
+                .dailyChallenge(challenge)
+                .position(1)
+                .hintType("YEAR")
+                .hintValue("1999")
+                .build());
+
+        assertThatThrownBy(() -> hintRepository.saveAndFlush(DailyChallengeHint.builder()
+                .dailyChallenge(challenge)
+                .position(1)
+                .hintType("GENRE")
+                .hintValue("Drama")
+                .build()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_daily_challenge_hints_position");
+    }
+
+    @Test
     @DisplayName("[delete] Should Cascade Delete Hints When Challenge Is Deleted")
     void shouldCascadeDeleteHintsWhenChallengeIsDeleted() {
         DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
@@ -232,6 +369,45 @@ class DailyGameRepositoryTest {
     }
 
     @Test
+    @DisplayName("[save] Should Reject Negative Attempts")
+    void shouldRejectNegativeAttempts() {
+        User user = userRepository.saveAndFlush(buildUser());
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+
+        assertThatThrownBy(() -> insertResultRow(
+                UUID.randomUUID(), user.getId(), challenge.getId(), -1, 0, "IN_PROGRESS"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_user_daily_game_results_non_negative");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject Negative Score")
+    void shouldRejectNegativeScore() {
+        User user = userRepository.saveAndFlush(buildUser());
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+
+        assertThatThrownBy(() -> insertResultRow(
+                UUID.randomUUID(), user.getId(), challenge.getId(), 0, -1, "IN_PROGRESS"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_user_daily_game_results_non_negative");
+    }
+
+    @Test
+    @DisplayName("[save] Should Reject An Invalid Result Status")
+    void shouldRejectAnInvalidResultStatus() {
+        User user = userRepository.saveAndFlush(buildUser());
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+
+        assertThatThrownBy(() -> insertResultRow(
+                UUID.randomUUID(), user.getId(), challenge.getId(), 0, 0, "NOT_A_STATUS"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_user_daily_game_results_status");
+    }
+
+    @Test
     @DisplayName("[insertIfAbsent] Should Ignore A Concurrently Existing User Result")
     void shouldIgnoreAConcurrentlyExistingUserResult() {
         User user = userRepository.saveAndFlush(buildUser());
@@ -255,6 +431,22 @@ class DailyGameRepositoryTest {
                 user.getId(), List.of(challenge.getId())))
                 .extracting(UserDailyGameResult::getId)
                 .containsExactly(firstId);
+    }
+
+    @Test
+    @DisplayName("[delete] Should Cascade Delete User Results When User Is Deleted")
+    void shouldCascadeDeleteUserResultsWhenUserIsDeleted() {
+        User user = userRepository.saveAndFlush(buildUser());
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:550"));
+        UserDailyGameResult result = resultRepository.saveAndFlush(buildResult(
+                user, challenge, LocalDateTime.of(2026, 9, 27, 12, 0)));
+
+        userRepository.deleteById(user.getId());
+        userRepository.flush();
+        entityManager.clear();
+
+        assertThat(resultRepository.findById(result.getId())).isEmpty();
     }
 
     @Test
@@ -298,6 +490,60 @@ class DailyGameRepositoryTest {
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private void insertChallengeRow(
+            String gameType,
+            String targetKind,
+            String targetTmdbId,
+            String seriesTmdbId,
+            Integer seasonNumber,
+            Integer episodeNumber) {
+        jdbcTemplate.update("""
+                INSERT INTO daily_challenges (
+                    id, challenge_date, game_type, target_kind, target_tmdb_id, series_tmdb_id,
+                    season_number, episode_number, answer_key, source_tmdb_id, image_path,
+                    answer_snapshot, display_snapshot, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)
+                """,
+                UUID.randomUUID(),
+                LocalDate.of(2026, 9, 27),
+                gameType,
+                targetKind,
+                targetTmdbId,
+                seriesTmdbId,
+                seasonNumber,
+                episodeNumber,
+                "raw:answer",
+                null,
+                "/raw-image.jpg",
+                "{}",
+                "{}",
+                LocalDateTime.of(2026, 9, 27, 12, 0),
+                LocalDateTime.of(2026, 9, 27, 12, 0));
+    }
+
+    private void insertResultRow(
+            UUID id,
+            UUID userId,
+            UUID challengeId,
+            int attemptsUsed,
+            int score,
+            String status) {
+        jdbcTemplate.update("""
+                INSERT INTO user_daily_game_results (
+                    id, user_id, daily_challenge_id, attempts_used, score, status,
+                    completed_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                id,
+                userId,
+                challengeId,
+                attemptsUsed,
+                score,
+                status,
+                LocalDateTime.of(2026, 9, 27, 12, 0),
+                LocalDateTime.of(2026, 9, 27, 12, 0));
     }
 
     private User buildUser() {

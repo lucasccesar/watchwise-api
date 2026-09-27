@@ -33,7 +33,18 @@ CREATE TABLE daily_challenges (
         target_kind IN ('MOVIE', 'SERIES', 'PERSON', 'EPISODE')
     ),
     CONSTRAINT ck_daily_challenges_game_target_kind CHECK (
-        (game_type IN ('MOVIE_BY_POSTER', 'MOVIE_BY_INFO') AND target_kind = 'MOVIE')
+        game_type NOT IN (
+            'MOVIE_BY_POSTER',
+            'SERIES_BY_POSTER',
+            'PERSON_BY_FACE',
+            'EPISODE_BY_FRAME',
+            'MOVIE_BY_INFO',
+            'SERIES_BY_INFO',
+            'ACTOR_BY_MOVIE_FILMOGRAPHY',
+            'ACTOR_BY_SERIES_FILMOGRAPHY'
+        )
+        OR target_kind NOT IN ('MOVIE', 'SERIES', 'PERSON', 'EPISODE')
+        OR (game_type IN ('MOVIE_BY_POSTER', 'MOVIE_BY_INFO') AND target_kind = 'MOVIE')
         OR (game_type IN ('SERIES_BY_POSTER', 'SERIES_BY_INFO') AND target_kind = 'SERIES')
         OR (game_type = 'PERSON_BY_FACE' AND target_kind = 'PERSON')
         OR (game_type = 'EPISODE_BY_FRAME' AND target_kind = 'EPISODE')
@@ -41,6 +52,8 @@ CREATE TABLE daily_challenges (
             AND target_kind = 'PERSON')
     ),
     CONSTRAINT ck_daily_challenges_coordinates CHECK (
+        target_kind NOT IN ('MOVIE', 'SERIES', 'PERSON', 'EPISODE')
+        OR
         (
             target_kind IN ('MOVIE', 'SERIES', 'PERSON')
             AND target_tmdb_id IS NOT NULL
