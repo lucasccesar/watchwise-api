@@ -152,8 +152,8 @@ class DailyChallengeGenerationServiceImplTest {
     }
 
     @Test
-    @DisplayName("[ensureGenerated] Should Serialize Answer Keys Across Dates - When Another Date Already Owns The Key")
-    void shouldSerializeAnswerKeysAcrossDatesWhenAnotherDateAlreadyOwnsTheKey() {
+    @DisplayName("[ensureGenerated] Should Serialize One Lock Per Game Type - When Another Date Already Owns The Key")
+    void shouldSerializeOneLockPerGameTypeWhenAnotherDateAlreadyOwnsTheKey() {
         DailyChallengeGenerator generator = mock(DailyChallengeGenerator.class);
         DailyChallengeCandidate first = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550");
         DailyChallengeCandidate second = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:680");
@@ -176,10 +176,10 @@ class DailyChallengeGenerationServiceImplTest {
         InOrder order = inOrder(advisoryLock, challengeRepository);
         order.verify(advisoryLock).lock("daily-games|2026-09-27");
         order.verify(challengeRepository).existsByChallengeDateAndGameType(DATE, DailyGameType.MOVIE_BY_POSTER);
-        order.verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER|MOVIE:550");
+        order.verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER");
         order.verify(challengeRepository).existsByGameTypeAndAnswerKey(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550");
-        order.verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER|MOVIE:680");
         order.verify(challengeRepository).existsByGameTypeAndAnswerKey(DailyGameType.MOVIE_BY_POSTER, "MOVIE:680");
+        verify(advisoryLock, times(1)).lock("daily-games-answer|MOVIE_BY_POSTER");
     }
 
     @Test
@@ -200,8 +200,10 @@ class DailyChallengeGenerationServiceImplTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("later modality failed");
         verify(challengeRepository, times(2)).saveAndFlush(any(DailyChallenge.class));
-        verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER|MOVIE:550");
-        verify(advisoryLock).lock("daily-games-answer|SERIES_BY_POSTER|SERIES:550");
+        InOrder order = inOrder(advisoryLock);
+        order.verify(advisoryLock).lock("daily-games|2026-09-27");
+        order.verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER");
+        order.verify(advisoryLock).lock("daily-games-answer|SERIES_BY_POSTER");
     }
 
     @Test

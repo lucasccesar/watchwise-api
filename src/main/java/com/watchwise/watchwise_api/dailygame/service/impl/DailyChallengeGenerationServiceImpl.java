@@ -64,6 +64,7 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
         if (challengeRepository.existsByChallengeDateAndGameType(challengeDate, gameType)) {
             return;
         }
+        advisoryLock.lock("daily-games-answer|" + gameType);
         DailyChallengeGenerator generator = generators.get(gameType);
         if (generator == null) {
             throw new IllegalStateException("No generator registered for " + gameType);
@@ -75,7 +76,6 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
                 addRejectedAnswerKey(rejectedAnswerKeys, candidate);
                 continue;
             }
-            advisoryLock.lock("daily-games-answer|" + gameType + "|" + candidate.answerKey());
             if (challengeRepository.existsByGameTypeAndAnswerKey(gameType, candidate.answerKey())) {
                 rejectedAnswerKeys.add(candidate.answerKey());
                 continue;
