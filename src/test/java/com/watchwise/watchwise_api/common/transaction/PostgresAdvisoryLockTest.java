@@ -65,22 +65,22 @@ class PostgresAdvisoryLockTest {
         AtomicLong firstBackendPid = new AtomicLong();
         AtomicLong secondBackendPid = new AtomicLong();
 
-        Future<?> first = executor.submit(() -> inTransaction(() -> {
-            firstBackendPid.set(currentBackendPid());
-            advisoryLock.lock("same-identity");
-            firstAcquired.countDown();
-            await(releaseFirst);
-        }));
-        assertThat(firstAcquired.await(5, TimeUnit.SECONDS)).isTrue();
-
-        Future<?> second = executor.submit(() -> inTransaction(() -> {
-            secondBackendPid.set(currentBackendPid());
-            secondReady.countDown();
-            advisoryLock.lock("same-identity");
-            secondAcquired.countDown();
-        }));
-
         try {
+            Future<?> first = executor.submit(() -> inTransaction(() -> {
+                firstBackendPid.set(currentBackendPid());
+                advisoryLock.lock("same-identity");
+                firstAcquired.countDown();
+                await(releaseFirst);
+            }));
+            assertThat(firstAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> second = executor.submit(() -> inTransaction(() -> {
+                secondBackendPid.set(currentBackendPid());
+                secondReady.countDown();
+                advisoryLock.lock("same-identity");
+                secondAcquired.countDown();
+            }));
+
             assertThat(secondReady.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(awaitWaitingForAdvisoryLock(secondBackendPid.get())).isTrue();
             assertThat(firstBackendPid.get()).isNotEqualTo(secondBackendPid.get());
@@ -108,22 +108,22 @@ class PostgresAdvisoryLockTest {
         AtomicLong firstBackendPid = new AtomicLong();
         AtomicLong secondBackendPid = new AtomicLong();
 
-        Future<?> first = executor.submit(() -> inTransaction(() -> {
-            firstBackendPid.set(currentBackendPid());
-            advisoryLock.lock("first-identity");
-            firstAcquired.countDown();
-            await(releaseFirst);
-        }));
-        assertThat(firstAcquired.await(5, TimeUnit.SECONDS)).isTrue();
-
-        Future<?> second = executor.submit(() -> inTransaction(() -> {
-            secondBackendPid.set(currentBackendPid());
-            secondReady.countDown();
-            advisoryLock.lock("second-identity");
-            secondAcquired.countDown();
-        }));
-
         try {
+            Future<?> first = executor.submit(() -> inTransaction(() -> {
+                firstBackendPid.set(currentBackendPid());
+                advisoryLock.lock("first-identity");
+                firstAcquired.countDown();
+                await(releaseFirst);
+            }));
+            assertThat(firstAcquired.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<?> second = executor.submit(() -> inTransaction(() -> {
+                secondBackendPid.set(currentBackendPid());
+                secondReady.countDown();
+                advisoryLock.lock("second-identity");
+                secondAcquired.countDown();
+            }));
+
             assertThat(secondReady.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(secondAcquired.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(firstBackendPid.get()).isNotEqualTo(secondBackendPid.get());
