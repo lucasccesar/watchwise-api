@@ -1,4 +1,4 @@
-package com.watchwise.watchwise_api.calendar.repository;
+package com.watchwise.watchwise_api.common.transaction;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -6,7 +6,7 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 @RequiredArgsConstructor
-class PostgresCalendarScheduleIdentityLock implements CalendarScheduleIdentityLock {
+public class PostgresAdvisoryLock implements AdvisoryLock {
 
     private final JdbcTemplate jdbcTemplate;
 

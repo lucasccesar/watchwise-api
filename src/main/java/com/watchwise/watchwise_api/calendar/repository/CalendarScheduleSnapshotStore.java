@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleReadModel;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +42,7 @@ public class CalendarScheduleSnapshotStore {
     private final CalendarScheduleSnapshotRepository snapshotRepository;
     private final CalendarScheduleCompletenessRepository completenessRepository;
     private final NewTransactionExecutor newTransactionExecutor;
-    private final CalendarScheduleIdentityLock scheduleLock;
+    private final AdvisoryLock scheduleLock;
 
     public CalendarScheduleSnapshotStore(
             CalendarScheduleSnapshotRepository snapshotRepository,

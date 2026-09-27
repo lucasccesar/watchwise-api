@@ -11,7 +11,9 @@ import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.PostgresAdvisoryLock;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,7 +47,7 @@ import static org.mockito.Mockito.mock;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
-@Import({NewTransactionExecutor.class, PostgresCalendarScheduleIdentityLock.class})
+@Import({NewTransactionExecutor.class, PostgresAdvisoryLock.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class CalendarScheduleCompletenessRepositoryTest {
 
@@ -72,7 +74,7 @@ class CalendarScheduleCompletenessRepositoryTest {
     private NewTransactionExecutor newTransactionExecutor;
 
     @Autowired
-    private CalendarScheduleIdentityLock scheduleLock;
+    private AdvisoryLock scheduleLock;
 
     @BeforeEach
     void setUp() {
