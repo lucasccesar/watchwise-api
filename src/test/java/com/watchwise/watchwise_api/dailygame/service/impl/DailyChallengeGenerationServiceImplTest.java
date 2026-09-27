@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
-import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -15,14 +14,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.lang.reflect.Method;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
@@ -35,8 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -57,9 +59,6 @@ class DailyChallengeGenerationServiceImplTest {
 
     @Mock
     private DailyChallengeHintRepository hintRepository;
-
-    @Mock
-    private NewTransactionExecutor newTransactionExecutor;
 
     @Test
     @DisplayName("[ensureGenerated] Should Lock And Persist Only Missing Modalities - When The Same Date Is Generated Repeatedly")
@@ -105,8 +104,8 @@ class DailyChallengeGenerationServiceImplTest {
     }
 
     @Test
-    @DisplayName("[ensureGenerated] Should Propagate Persistence Failure - When Isolated Persistence Fails")
-    void shouldPropagatePersistenceFailureWhenIsolatedPersistenceFails() {
+    @DisplayName("[ensureGenerated] Should Propagate Persistence Failure - When Outer Transaction Persistence Fails")
+    void shouldPropagatePersistenceFailureWhenOuterTransactionPersistenceFails() {
         Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
         when(challengeRepository.existsByChallengeDateAndGameType(any(), any())).thenReturn(false);
         when(challengeRepository.existsByGameTypeAndAnswerKey(any(), any())).thenReturn(false);
@@ -153,8 +152,8 @@ class DailyChallengeGenerationServiceImplTest {
     }
 
     @Test
-    @DisplayName("[ensureGenerated] Should Retry After An Isolated Unique Conflict - When Another Date Claims The Answer")
-    void shouldRetryAfterAnIsolatedUniqueConflictWhenAnotherDateClaimsTheAnswer() {
+    @DisplayName("[ensureGenerated] Should Serialize Answer Keys Across Dates - When Another Date Already Owns The Key")
+    void shouldSerializeAnswerKeysAcrossDatesWhenAnotherDateAlreadyOwnsTheKey() {
         DailyChallengeGenerator generator = mock(DailyChallengeGenerator.class);
         DailyChallengeCandidate first = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550");
         DailyChallengeCandidate second = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:680");
@@ -163,34 +162,62 @@ class DailyChallengeGenerationServiceImplTest {
         Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
         generators.put(DailyGameType.MOVIE_BY_POSTER, generator);
         stubOnlyMovieIsMissing();
-        java.util.concurrent.atomic.AtomicBoolean conflictObserved = new java.util.concurrent.atomic.AtomicBoolean();
         when(challengeRepository.existsByGameTypeAndAnswerKey(any(), any())).thenAnswer(invocation ->
-                "MOVIE:550".equals(invocation.getArgument(1)) && conflictObserved.get());
+                "MOVIE:550".equals(invocation.getArgument(1)));
         when(challengeRepository.saveAndFlush(any(DailyChallenge.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        DataIntegrityViolationException conflict = new DataIntegrityViolationException("duplicate answer key");
         DailyChallengeGenerationServiceImpl service = service(generators, 2);
-        doAnswer(invocation -> {
-                    conflictObserved.set(true);
-                    throw conflict;
-                })
-                .doAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get())
-                .when(newTransactionExecutor).runInNewTransaction(any());
 
         service.ensureGenerated(DATE);
 
         ArgumentCaptor<DailyChallenge> challengeCaptor = ArgumentCaptor.forClass(DailyChallenge.class);
         verify(challengeRepository).saveAndFlush(challengeCaptor.capture());
         assertThat(challengeCaptor.getValue().getAnswerKey()).isEqualTo("MOVIE:680");
-        verify(newTransactionExecutor, times(2)).runInNewTransaction(any());
+        InOrder order = inOrder(advisoryLock, challengeRepository);
+        order.verify(advisoryLock).lock("daily-games|2026-09-27");
+        order.verify(challengeRepository).existsByChallengeDateAndGameType(DATE, DailyGameType.MOVIE_BY_POSTER);
+        order.verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER|MOVIE:550");
+        order.verify(challengeRepository).existsByGameTypeAndAnswerKey(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550");
+        order.verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER|MOVIE:680");
+        order.verify(challengeRepository).existsByGameTypeAndAnswerKey(DailyGameType.MOVIE_BY_POSTER, "MOVIE:680");
+    }
+
+    @Test
+    @DisplayName("[ensureGenerated] Should Propagate The Later Failure - When An Earlier Modality Was Already Persisted In The Outer Transaction")
+    void shouldPropagateTheLaterFailureWhenAnEarlierModalityWasAlreadyPersistedInTheOuterTransaction() {
+        Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
+        when(challengeRepository.existsByChallengeDateAndGameType(any(), any())).thenReturn(false);
+        when(challengeRepository.existsByGameTypeAndAnswerKey(any(), any())).thenReturn(false);
+        when(challengeRepository.saveAndFlush(any(DailyChallenge.class))).thenAnswer(invocation -> {
+            DailyChallenge challenge = invocation.getArgument(0);
+            if (challenge.getGameType() == DailyGameType.SERIES_BY_POSTER) {
+                throw new IllegalStateException("later modality failed");
+            }
+            return challenge;
+        });
+
+        assertThatThrownBy(() -> service(generators, 1).ensureGenerated(DATE))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("later modality failed");
+        verify(challengeRepository, times(2)).saveAndFlush(any(DailyChallenge.class));
+        verify(advisoryLock).lock("daily-games-answer|MOVIE_BY_POSTER|MOVIE:550");
+        verify(advisoryLock).lock("daily-games-answer|SERIES_BY_POSTER|SERIES:550");
+    }
+
+    @Test
+    @DisplayName("[ensureGenerated] Should Keep The Required Outer Transaction - When The Method Is Inspected")
+    void shouldKeepTheRequiredOuterTransactionWhenTheMethodIsInspected() throws NoSuchMethodException {
+        Method method = DailyChallengeGenerationServiceImpl.class.getMethod("ensureGenerated", LocalDate.class);
+        Transactional transactional = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
+
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRED);
     }
 
     private DailyChallengeGenerationServiceImpl service(Map<DailyGameType, DailyChallengeGenerator> generators,
                                                         int maxCandidates) {
-        lenient().when(newTransactionExecutor.runInNewTransaction(any()))
-                .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         return new DailyChallengeGenerationServiceImpl(advisoryLock, challengeRepository, hintRepository,
-                newTransactionExecutor, List.copyOf(generators.values()), maxCandidates, CLOCK);
+                List.copyOf(generators.values()), maxCandidates, CLOCK);
     }
 
     private void stubOnlyMovieIsMissing() {

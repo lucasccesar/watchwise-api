@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
-import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -13,7 +12,6 @@ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository
 import com.watchwise.watchwise_api.dailygame.service.DailyChallengeGenerationService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +32,6 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
     private final AdvisoryLock advisoryLock;
     private final DailyChallengeRepository challengeRepository;
     private final DailyChallengeHintRepository hintRepository;
-    private final NewTransactionExecutor newTransactionExecutor;
     private final Map<DailyGameType, DailyChallengeGenerator> generators;
     private final int generationMaxCandidates;
     private final Clock clock;
@@ -43,14 +40,12 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
             AdvisoryLock advisoryLock,
             DailyChallengeRepository challengeRepository,
             DailyChallengeHintRepository hintRepository,
-            NewTransactionExecutor newTransactionExecutor,
             List<DailyChallengeGenerator> generators,
             @Value("${app.daily-games.generation-max-candidates}") int generationMaxCandidates,
             Clock clock) {
         this.advisoryLock = advisoryLock;
         this.challengeRepository = challengeRepository;
         this.hintRepository = hintRepository;
-        this.newTransactionExecutor = newTransactionExecutor;
         this.generators = indexGenerators(generators);
         this.generationMaxCandidates = generationMaxCandidates;
         this.clock = clock;
@@ -80,26 +75,13 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
                 addRejectedAnswerKey(rejectedAnswerKeys, candidate);
                 continue;
             }
+            advisoryLock.lock("daily-games-answer|" + gameType + "|" + candidate.answerKey());
             if (challengeRepository.existsByGameTypeAndAnswerKey(gameType, candidate.answerKey())) {
                 rejectedAnswerKeys.add(candidate.answerKey());
                 continue;
             }
-            try {
-                newTransactionExecutor.runInNewTransaction(() -> {
-                    persistChallenge(challengeDate, candidate);
-                    return null;
-                });
-                return;
-            } catch (DataIntegrityViolationException exception) {
-                if (challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType).isPresent()) {
-                    return;
-                }
-                if (challengeRepository.existsByGameTypeAndAnswerKey(gameType, candidate.answerKey())) {
-                    rejectedAnswerKeys.add(candidate.answerKey());
-                    continue;
-                }
-                throw exception;
-            }
+            persistChallenge(challengeDate, candidate);
+            return;
         }
         log.error("Daily game generation exhausted eligible candidates for {} on {}", gameType, challengeDate);
     }
