@@ -28,7 +28,8 @@ public record TmdbTvFullDetails(
         @JsonProperty("production_companies") List<TmdbProductionCompany> productionCompanies,
         TmdbVideos videos,
         String status,
-        @JsonProperty("external_ids") TmdbExternalIds externalIds) {
+        @JsonProperty("external_ids") TmdbExternalIds externalIds,
+        List<TmdbNetwork> networks) {
 
     public TmdbTvFullDetails(
             String id,
@@ -55,6 +56,35 @@ public record TmdbTvFullDetails(
         this(id, name, originalName, overview, posterPath, backdropPath, firstAirDate, episodeRunTime,
                 genres, productionCountries, createdBy, seasons, nextEpisodeToAir, aggregateCredits,
                 watchProviders, alternativeTitles, numberOfSeasons, numberOfEpisodes, productionCompanies,
-                videos, status, null);
+                videos, status, null, null);
+    }
+
+    public TmdbTvFullDetails(
+            String id,
+            String name,
+            String originalName,
+            String overview,
+            String posterPath,
+            String backdropPath,
+            String firstAirDate,
+            List<Integer> episodeRunTime,
+            List<TmdbGenre> genres,
+            List<TmdbProductionCountry> productionCountries,
+            List<TmdbCreator> createdBy,
+            List<TmdbSeasonSummary> seasons,
+            TmdbNextEpisode nextEpisodeToAir,
+            TmdbAggregateCredits aggregateCredits,
+            TmdbWatchProviders watchProviders,
+            TmdbTvAlternativeTitles alternativeTitles,
+            Integer numberOfSeasons,
+            Integer numberOfEpisodes,
+            List<TmdbProductionCompany> productionCompanies,
+            TmdbVideos videos,
+            String status,
+            TmdbExternalIds externalIds) {
+        this(id, name, originalName, overview, posterPath, backdropPath, firstAirDate, episodeRunTime,
+                genres, productionCountries, createdBy, seasons, nextEpisodeToAir, aggregateCredits,
+                watchProviders, alternativeTitles, numberOfSeasons, numberOfEpisodes, productionCompanies,
+                videos, status, externalIds, null);
     }
 }

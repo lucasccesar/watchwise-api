@@ -31,6 +31,9 @@ public class TmdbClient {
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache;
+    private final Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieDiscoveryCache;
+    private final Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvDiscoveryCache;
+    private final Cache<String, TmdbLookupResult<TmdbTvContentRatings>> tmdbTvContentRatingsCache;
     private final Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache;
     private final Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache;
 
@@ -96,6 +99,45 @@ public class TmdbClient {
                         .retrieve()
                         .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbMultiSearchResult>>() {}),
                 "multi search"));
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> getPopularMovies(int page, String language) {
+        return cachedLookup(tmdbMovieDiscoveryCache, discoveryCacheKey("movie-popular", page, language),
+                () -> loadDiscoveryPage("/movie/popular", page, language,
+                        new ParameterizedTypeReference<TmdbSearchPage<TmdbMovieSearchResult>>() {},
+                        "popular movies"));
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> getTopRatedMovies(int page, String language) {
+        return cachedLookup(tmdbMovieDiscoveryCache, discoveryCacheKey("movie-top-rated", page, language),
+                () -> loadDiscoveryPage("/movie/top_rated", page, language,
+                        new ParameterizedTypeReference<TmdbSearchPage<TmdbMovieSearchResult>>() {},
+                        "top rated movies"));
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>> getPopularSeries(int page, String language) {
+        return cachedLookup(tmdbTvDiscoveryCache, discoveryCacheKey("tv-popular", page, language),
+                () -> loadDiscoveryPage("/tv/popular", page, language,
+                        new ParameterizedTypeReference<TmdbSearchPage<TmdbTvSearchResult>>() {},
+                        "popular series"));
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>> getTopRatedSeries(int page, String language) {
+        return cachedLookup(tmdbTvDiscoveryCache, discoveryCacheKey("tv-top-rated", page, language),
+                () -> loadDiscoveryPage("/tv/top_rated", page, language,
+                        new ParameterizedTypeReference<TmdbSearchPage<TmdbTvSearchResult>>() {},
+                        "top rated series"));
+    }
+
+    public TmdbLookupResult<TmdbTvContentRatings> getTvContentRatings(String tmdbId, String language) {
+        return cachedLookup(tmdbTvContentRatingsCache, "tv-content-ratings|" + tmdbId + "|" + language,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri(uriBuilder -> uriBuilder.path("/tv/{id}/content_ratings")
+                                        .queryParam("language", language)
+                                        .build(tmdbId))
+                                .retrieve()
+                                .body(TmdbTvContentRatings.class),
+                        "tv content ratings " + tmdbId));
     }
 
     public Optional<TmdbMovieDetails> getMovieDetails(String tmdbId) {
@@ -241,6 +283,27 @@ public class TmdbClient {
                                 .retrieve()
                                 .body(TmdbEpisodeFullDetails.class),
                         "episode full details " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber));
+    }
+
+    private <T> TmdbLookupResult<TmdbSearchPage<T>> loadDiscoveryPage(
+            String path,
+            int page,
+            String language,
+            ParameterizedTypeReference<TmdbSearchPage<T>> responseType,
+            String description) {
+        return callWithRetry(() -> tmdbRestClient.get()
+                        .uri(uriBuilder -> uriBuilder.path(path)
+                                .queryParam("page", page)
+                                .queryParam("language", language)
+                                .queryParam("include_adult", false)
+                                .build())
+                        .retrieve()
+                        .body(responseType),
+                description);
+    }
+
+    private static String discoveryCacheKey(String endpointFamily, int page, String language) {
+        return endpointFamily + "|" + page + "|" + language;
     }
 
     private <K, T> TmdbLookupResult<T> cachedLookup(

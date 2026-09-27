@@ -47,7 +47,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
         "app.tmdb.calendar-schedule-cache-ttl-hours=24",
         "app.tmdb.calendar-schedule-cache-maximum-size=10000",
         "app.tmdb.search-cache-ttl-minutes=10",
-        "app.tmdb.search-cache-max-size=10000"
+        "app.tmdb.search-cache-max-size=10000",
+        "app.tmdb.discovery-cache-ttl-minutes=10",
+        "app.tmdb.discovery-cache-max-size=10000",
+        "app.tmdb.tv-content-ratings-cache-ttl-minutes=60",
+        "app.tmdb.tv-content-ratings-cache-max-size=10000"
 })
 @Import(TmdbCacheConfig.class)
 class TmdbClientCachingTest {
@@ -82,12 +86,16 @@ class TmdbClientCachingTest {
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvSearchCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbPersonSearchResult>>> tmdbPersonSearchCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache,
+                Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieDiscoveryCache,
+                Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvDiscoveryCache,
+                Cache<String, TmdbLookupResult<TmdbTvContentRatings>> tmdbTvContentRatingsCache,
                 Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache,
                 Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
                     tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
                     tmdbMovieReleaseDatesCache, tmdbCalendarSeasonDetailsCache,
                     tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache,
+                    tmdbMovieDiscoveryCache, tmdbTvDiscoveryCache, tmdbTvContentRatingsCache,
                     tmdbPersonAggregateCache, tmdbPersonDetailsCache);
         }
     }
@@ -129,6 +137,15 @@ class TmdbClientCachingTest {
     private Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMultiSearchResult>>> tmdbMultiSearchCache;
 
     @Autowired
+    private Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieDiscoveryCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvDiscoveryCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbTvContentRatings>> tmdbTvContentRatingsCache;
+
+    @Autowired
     private Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache;
 
     @Autowired
@@ -147,6 +164,9 @@ class TmdbClientCachingTest {
         tmdbTvSearchCache.invalidateAll();
         tmdbPersonSearchCache.invalidateAll();
         tmdbMultiSearchCache.invalidateAll();
+        tmdbMovieDiscoveryCache.invalidateAll();
+        tmdbTvDiscoveryCache.invalidateAll();
+        tmdbTvContentRatingsCache.invalidateAll();
         tmdbPersonAggregateCache.invalidateAll();
         tmdbPersonDetailsCache.invalidateAll();
     }
@@ -458,6 +478,160 @@ class TmdbClientCachingTest {
         var recovered = tmdbClient.searchMovies("Matrix", "en-US", 1).toOptional().orElseThrow();
 
         assertThat(recovered.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[movie discovery] Should Keep Popular And Top Rated Pages Separate - When The Same Page Is Requested")
+    void shouldKeepPopularAndTopRatedMoviePagesSeparateWhenTheSamePageIsRequested() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
+                .andRespond(movieSearchSuccess(1, "Popular Movie"));
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/top_rated?")))
+                .andRespond(movieSearchSuccess(1, "Top Rated Movie"));
+
+        var popular = tmdbClient.getPopularMovies(1, "en-US").toOptional().orElseThrow();
+        var topRated = tmdbClient.getTopRatedMovies(1, "en-US").toOptional().orElseThrow();
+
+        assertThat(popular.results()).extracting(TmdbMovieSearchResult::title).containsExactly("Popular Movie");
+        assertThat(topRated.results()).extracting(TmdbMovieSearchResult::title).containsExactly("Top Rated Movie");
+        assertThat(tmdbMovieDiscoveryCache.getIfPresent("movie-popular|1|en-US")).isNotNull();
+        assertThat(tmdbMovieDiscoveryCache.getIfPresent("movie-top-rated|1|en-US")).isNotNull();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[series discovery] Should Mark Remote Then Cached - When The Same Popular Page Repeats")
+    void shouldMarkRemoteThenCachedWhenTheSamePopularSeriesPageRepeats() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/popular?")))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":1,"total_results":1,"results":[
+                          {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var first = tmdbClient.getPopularSeries(1, "en-US");
+        var second = tmdbClient.getPopularSeries(1, "en-US");
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(tmdbTvDiscoveryCache.getIfPresent("tv-popular|1|en-US")).isNotNull();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTvContentRatings] Should Mark Remote Then Cached - When The Same Lookup Repeats")
+    void shouldMarkRemoteThenCachedWhenTheSameTvContentRatingsLookupRepeats() {
+        String uri = "https://api.themoviedb.org/3/tv/1396/content_ratings?language=en-US";
+        mockServer.expect(requestTo(uri)).andRespond(withSuccess("""
+                {"id":1396,"results":[{"iso_3166_1":"BR","rating":"16"}]}
+                """, MediaType.APPLICATION_JSON));
+
+        var first = tmdbClient.getTvContentRatings("1396", "en-US");
+        var second = tmdbClient.getTvContentRatings("1396", "en-US");
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getPopularMovies] Should Evict Unavailable Result - When A Later Lookup Succeeds")
+    void shouldEvictUnavailablePopularMoviesWhenALaterLookupSucceeds() {
+        String uri = "https://api.themoviedb.org/3/movie/popular?page=1&language=en-US&include_adult=false";
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(movieSearchSuccess(1, "Popular Movie"));
+
+        assertThat(tmdbClient.getPopularMovies(1, "en-US").isUnavailable()).isTrue();
+        assertThat(tmdbMovieDiscoveryCache.getIfPresent("movie-popular|1|en-US")).isNull();
+
+        assertThat(tmdbClient.getPopularMovies(1, "en-US")).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTopRatedSeries] Should Evict Unavailable Result - When A Later Lookup Succeeds")
+    void shouldEvictUnavailableTopRatedSeriesWhenALaterLookupSucceeds() {
+        String uri = "https://api.themoviedb.org/3/tv/top_rated?page=1&language=en-US&include_adult=false";
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withSuccess("""
+                {"page":1,"total_pages":1,"total_results":1,"results":[
+                  {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
+                """, MediaType.APPLICATION_JSON));
+
+        assertThat(tmdbClient.getTopRatedSeries(1, "en-US").isUnavailable()).isTrue();
+        assertThat(tmdbTvDiscoveryCache.getIfPresent("tv-top-rated|1|en-US")).isNull();
+
+        assertThat(tmdbClient.getTopRatedSeries(1, "en-US")).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTvContentRatings] Should Evict Unavailable Result - When A Later Lookup Succeeds")
+    void shouldEvictUnavailableTvContentRatingsWhenALaterLookupSucceeds() {
+        String uri = "https://api.themoviedb.org/3/tv/1396/content_ratings?language=en-US";
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withSuccess("""
+                {"id":1396,"results":[{"iso_3166_1":"BR","rating":"16"}]}
+                """, MediaType.APPLICATION_JSON));
+
+        assertThat(tmdbClient.getTvContentRatings("1396", "en-US").isUnavailable()).isTrue();
+        assertThat(tmdbTvContentRatingsCache.getIfPresent("tv-content-ratings|1396|en-US")).isNull();
+
+        var recovered = tmdbClient.getTvContentRatings("1396", "en-US");
+
+        assertThat(recovered).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getPopularMovies] Should Make One TMDB Call - When Concurrent Requests Use The Same Key")
+    void shouldMakeOneTmdbCallWhenConcurrentPopularMovieRequestsUseTheSameKey() throws Exception {
+        int concurrentCallers = 6;
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch requestStarted = new CountDownLatch(1);
+        CountDownLatch releaseResponse = new CountDownLatch(1);
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
+                .andRespond(request -> {
+                    requestStarted.countDown();
+                    try {
+                        assertThat(releaseResponse.await(5, TimeUnit.SECONDS)).isTrue();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError(interrupted);
+                    }
+                    return movieSearchSuccess(1, "Popular Movie").createResponse(request);
+                });
+
+        ExecutorService executor = Executors.newFixedThreadPool(concurrentCallers);
+        List<Future<TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>>> futures = new ArrayList<>();
+        try {
+            for (int index = 0; index < concurrentCallers; index++) {
+                futures.add(executor.submit(() -> {
+                    start.await();
+                    return tmdbClient.getPopularMovies(1, "en-US");
+                }));
+            }
+            start.countDown();
+            assertThat(requestStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            releaseResponse.countDown();
+            for (var future : futures) {
+                assertThat(future.get(5, TimeUnit.SECONDS).toOptional().orElseThrow().results())
+                        .extracting(TmdbMovieSearchResult::title).containsExactly("Popular Movie");
+            }
+        } finally {
+            releaseResponse.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        }
         mockServer.verify();
     }
 

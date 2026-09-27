@@ -39,4 +39,17 @@ class TmdbImageUrlBuilderTest {
         assertThat(TmdbImageUrlBuilder.posterUrl("alien.jpg"))
                 .isEqualTo("https://image.tmdb.org/t/p/w500/alien.jpg");
     }
+
+    @Test
+    @DisplayName("Should Build W300 Still URL - When TMDB Returns A Relative Path")
+    void shouldBuildW300StillUrlWhenTmdbReturnsRelativePath() {
+        assertThat(TmdbImageUrlBuilder.stillUrl("/episode.jpg"))
+                .isEqualTo("https://image.tmdb.org/t/p/w300/episode.jpg");
+    }
+
+    @Test
+    @DisplayName("Should Return Null Still URL - When TMDB Path Is Missing")
+    void shouldReturnNullStillUrlWhenTmdbPathIsMissing() {
+        assertThat(TmdbImageUrlBuilder.stillUrl(null)).isNull();
+    }
 }

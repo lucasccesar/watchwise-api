@@ -35,6 +35,7 @@ class TmdbClientTest {
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
     }
 
@@ -119,6 +120,129 @@ class TmdbClientTest {
         assertThat(result.totalResults()).isEqualTo(61);
         assertThat(result.results()).containsExactly(
                 new TmdbTvSearchResult("70523", "Dark", "/dark.jpg", "2017-12-01"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getPopularMovies] Should Parse Movie Page And Request Popular Endpoint - When TMDB Responds")
+    void shouldParseMoviePageAndRequestPopularEndpointWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
+                .andExpect(queryParam("page", "2"))
+                .andExpect(queryParam("language", "pt-BR"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":2,"total_pages":8,"total_results":150,"results":[
+                          {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getPopularMovies(2, "pt-BR").toOptional().orElseThrow();
+
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.results()).containsExactly(
+                new TmdbMovieSearchResult("603", "The Matrix", "/matrix.jpg", "1999-03-31"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTopRatedMovies] Should Parse Movie Page And Request Top Rated Endpoint - When TMDB Responds")
+    void shouldParseMoviePageAndRequestTopRatedEndpointWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/top_rated?")))
+                .andExpect(queryParam("page", "3"))
+                .andExpect(queryParam("language", "en-US"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":3,"total_pages":4,"total_results":75,"results":[
+                          {"id":680,"title":"Pulp Fiction","poster_path":"/pulp.jpg","release_date":"1994-09-10"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getTopRatedMovies(3, "en-US").toOptional().orElseThrow();
+
+        assertThat(result.results()).containsExactly(
+                new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getPopularSeries] Should Parse Series Page And Request Popular Endpoint - When TMDB Responds")
+    void shouldParseSeriesPageAndRequestPopularEndpointWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/popular?")))
+                .andExpect(queryParam("page", "4"))
+                .andExpect(queryParam("language", "de-DE"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":4,"total_pages":12,"total_results":230,"results":[
+                          {"id":70523,"name":"Dark","poster_path":"/dark.jpg","first_air_date":"2017-12-01"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getPopularSeries(4, "de-DE").toOptional().orElseThrow();
+
+        assertThat(result.results()).containsExactly(
+                new TmdbTvSearchResult("70523", "Dark", "/dark.jpg", "2017-12-01"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTopRatedSeries] Should Parse Series Page And Request Top Rated Endpoint - When TMDB Responds")
+    void shouldParseSeriesPageAndRequestTopRatedEndpointWhenTmdbResponds() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/top_rated?")))
+                .andExpect(queryParam("page", "5"))
+                .andExpect(queryParam("language", "en-US"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":5,"total_pages":7,"total_results":120,"results":[
+                          {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getTopRatedSeries(5, "en-US").toOptional().orElseThrow();
+
+        assertThat(result.results()).containsExactly(
+                new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTvContentRatings] Should Parse Regional Ratings And Request Language - When TMDB Responds")
+    void shouldParseRegionalRatingsAndRequestLanguageWhenTmdbResponds() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/content_ratings?language=pt-BR"))
+                .andRespond(withSuccess("""
+                        {"id":1396,"results":[
+                          {"iso_3166_1":"BR","rating":"16"},
+                          {"iso_3166_1":"US","rating":"TV-14"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getTvContentRatings("1396", "pt-BR").toOptional().orElseThrow();
+
+        assertThat(result.id()).isEqualTo("1396");
+        assertThat(result.results()).containsExactly(
+                new TmdbTvContentRating("BR", "16"),
+                new TmdbTvContentRating("US", "TV-14"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getPopularMovies] Should Return Unavailable After One Retry - When TMDB Fails Twice")
+    void shouldReturnUnavailableAfterOneRetryWhenPopularMoviesFailTwice() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
+                .andRespond(withServerError());
+
+        var result = tmdbClient.getPopularMovies(1, "en-US");
+
+        assertThat(result.isUnavailable()).isTrue();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTvContentRatings] Should Return NotFound Without Retrying - When TMDB Responds With 404")
+    void shouldReturnNotFoundWithoutRetryingWhenTvContentRatingsRespondWith404() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/999999999/content_ratings?language=en-US"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"status_message\":\"The resource you requested could not be found.\"}"));
+
+        var result = tmdbClient.getTvContentRatings("999999999", "en-US");
+
+        assertThat(result.isNotFound()).isTrue();
         mockServer.verify();
     }
 
@@ -609,5 +733,22 @@ class TmdbClientTest {
                         org.assertj.core.groups.Tuple.tuple(99999, "Random Grip"));
         assertThat(result.get().aggregateCredits().crew().get(0).jobs()).extracting("job")
                 .containsExactly("Director", "Executive Producer");
+    }
+
+    @Test
+    @DisplayName("[getTvFullDetails] Should Parse Networks - When TMDB Responds")
+    void shouldParseNetworksWhenTvFullDetailsResponds() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/tv/1396?append_to_response=aggregate_credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":"1396","name":"Breaking Bad","networks":[
+                          {"id":174,"name":"AMC","logo_path":"/amc.png","origin_country":"US"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getTvFullDetails("1396", "en-US").toOptional().orElseThrow();
+
+        assertThat(result.networks()).containsExactly(
+                new TmdbNetwork(174, "AMC", "/amc.png", "US"));
+        mockServer.verify();
     }
 }

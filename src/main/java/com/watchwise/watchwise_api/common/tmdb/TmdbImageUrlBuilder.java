@@ -5,6 +5,7 @@ public final class TmdbImageUrlBuilder {
     private static final String IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
     private static final String POSTER_SIZE = "w500";
     private static final String PROFILE_SIZE = "w185";
+    private static final String STILL_SIZE = "w300";
 
     private TmdbImageUrlBuilder() {
     }
@@ -15,6 +16,10 @@ public final class TmdbImageUrlBuilder {
 
     public static String profileUrl(String imagePath) {
         return build(imagePath, PROFILE_SIZE);
+    }
+
+    public static String stillUrl(String imagePath) {
+        return build(imagePath, STILL_SIZE);
     }
 
     private static String build(String imagePath, String size) {
