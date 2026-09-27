@@ -133,7 +133,6 @@ public class TmdbClient {
         return cachedLookup(tmdbTvContentRatingsCache, "tv-content-ratings|" + tmdbId + "|" + language,
                 () -> callWithRetry(() -> tmdbRestClient.get()
                                 .uri(uriBuilder -> uriBuilder.path("/tv/{id}/content_ratings")
-                                        .queryParam("language", language)
                                         .build(tmdbId))
                                 .retrieve()
                                 .body(TmdbTvContentRatings.class),
@@ -295,7 +294,6 @@ public class TmdbClient {
                         .uri(uriBuilder -> uriBuilder.path(path)
                                 .queryParam("page", page)
                                 .queryParam("language", language)
-                                .queryParam("include_adult", false)
                                 .build())
                         .retrieve()
                         .body(responseType),

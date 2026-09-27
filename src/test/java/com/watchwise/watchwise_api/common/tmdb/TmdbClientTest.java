@@ -5,13 +5,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.startsWith;
@@ -129,7 +132,6 @@ class TmdbClientTest {
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
                 .andExpect(queryParam("page", "2"))
                 .andExpect(queryParam("language", "pt-BR"))
-                .andExpect(queryParam("include_adult", "false"))
                 .andRespond(withSuccess("""
                         {"page":2,"total_pages":8,"total_results":150,"results":[
                           {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
@@ -149,7 +151,6 @@ class TmdbClientTest {
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/top_rated?")))
                 .andExpect(queryParam("page", "3"))
                 .andExpect(queryParam("language", "en-US"))
-                .andExpect(queryParam("include_adult", "false"))
                 .andRespond(withSuccess("""
                         {"page":3,"total_pages":4,"total_results":75,"results":[
                           {"id":680,"title":"Pulp Fiction","poster_path":"/pulp.jpg","release_date":"1994-09-10"}]}
@@ -168,7 +169,6 @@ class TmdbClientTest {
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/popular?")))
                 .andExpect(queryParam("page", "4"))
                 .andExpect(queryParam("language", "de-DE"))
-                .andExpect(queryParam("include_adult", "false"))
                 .andRespond(withSuccess("""
                         {"page":4,"total_pages":12,"total_results":230,"results":[
                           {"id":70523,"name":"Dark","poster_path":"/dark.jpg","first_air_date":"2017-12-01"}]}
@@ -187,7 +187,6 @@ class TmdbClientTest {
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/top_rated?")))
                 .andExpect(queryParam("page", "5"))
                 .andExpect(queryParam("language", "en-US"))
-                .andExpect(queryParam("include_adult", "false"))
                 .andRespond(withSuccess("""
                         {"page":5,"total_pages":7,"total_results":120,"results":[
                           {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
@@ -201,9 +200,9 @@ class TmdbClientTest {
     }
 
     @Test
-    @DisplayName("[getTvContentRatings] Should Parse Regional Ratings And Request Language - When TMDB Responds")
-    void shouldParseRegionalRatingsAndRequestLanguageWhenTmdbResponds() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/content_ratings?language=pt-BR"))
+    @DisplayName("[getTvContentRatings] Should Parse Regional Ratings - When TMDB Responds")
+    void shouldParseRegionalRatingsWhenTmdbResponds() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/content_ratings"))
                 .andRespond(withSuccess("""
                         {"id":1396,"results":[
                           {"iso_3166_1":"BR","rating":"16"},
@@ -219,31 +218,49 @@ class TmdbClientTest {
         mockServer.verify();
     }
 
-    @Test
-    @DisplayName("[getPopularMovies] Should Return Unavailable After One Retry - When TMDB Fails Twice")
-    void shouldReturnUnavailableAfterOneRetryWhenPopularMoviesFailTwice() {
-        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
-                .andRespond(withServerError());
-        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/movie/popular?")))
-                .andRespond(withServerError());
+    @ParameterizedTest
+    @MethodSource("newEndpointCases")
+    @DisplayName("[new TMDB endpoint] Should Retry Once And Recover - When The First Request Fails")
+    void shouldRetryOnceAndRecoverForEveryNewEndpoint(String method, String uri, String body) {
+        mockServer.expect(requestTo(uri)).andRespond(withServerError());
+        mockServer.expect(requestTo(uri)).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
-        var result = tmdbClient.getPopularMovies(1, "en-US");
-
-        assertThat(result.isUnavailable()).isTrue();
+        assertThat(invokeNewEndpoint(method).toOptional()).isPresent();
         mockServer.verify();
     }
 
-    @Test
-    @DisplayName("[getTvContentRatings] Should Return NotFound Without Retrying - When TMDB Responds With 404")
-    void shouldReturnNotFoundWithoutRetryingWhenTvContentRatingsRespondWith404() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/999999999/content_ratings?language=en-US"))
-                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
-                        .body("{\"status_message\":\"The resource you requested could not be found.\"}"));
+    @ParameterizedTest
+    @MethodSource("newEndpointCases")
+    @DisplayName("[new TMDB endpoint] Should Return NotFound Without Retrying - When TMDB Responds With 404")
+    void shouldReturnNotFoundWithoutRetryingForEveryNewEndpoint(String method, String uri, String body) {
+        mockServer.expect(requestTo(uri)).andRespond(withStatus(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"status_message\":\"The resource you requested could not be found.\"}"));
 
-        var result = tmdbClient.getTvContentRatings("999999999", "en-US");
-
-        assertThat(result.isNotFound()).isTrue();
+        assertThat(invokeNewEndpoint(method).isNotFound()).isTrue();
         mockServer.verify();
+    }
+
+    private static Stream<Arguments> newEndpointCases() {
+        String page = "{\"page\":1,\"total_pages\":1,\"total_results\":0,\"results\":[]}";
+        String ratings = "{\"id\":1396,\"results\":[]}";
+        return Stream.of(
+                Arguments.of("popular-movies", "https://api.themoviedb.org/3/movie/popular?page=1&language=en-US", page),
+                Arguments.of("top-rated-movies", "https://api.themoviedb.org/3/movie/top_rated?page=1&language=en-US", page),
+                Arguments.of("popular-series", "https://api.themoviedb.org/3/tv/popular?page=1&language=en-US", page),
+                Arguments.of("top-rated-series", "https://api.themoviedb.org/3/tv/top_rated?page=1&language=en-US", page),
+                Arguments.of("tv-content-ratings", "https://api.themoviedb.org/3/tv/1396/content_ratings", ratings));
+    }
+
+    private TmdbLookupResult<?> invokeNewEndpoint(String method) {
+        return switch (method) {
+            case "popular-movies" -> tmdbClient.getPopularMovies(1, "en-US");
+            case "top-rated-movies" -> tmdbClient.getTopRatedMovies(1, "en-US");
+            case "popular-series" -> tmdbClient.getPopularSeries(1, "en-US");
+            case "top-rated-series" -> tmdbClient.getTopRatedSeries(1, "en-US");
+            case "tv-content-ratings" -> tmdbClient.getTvContentRatings("1396", "en-US");
+            default -> throw new IllegalArgumentException("Unknown endpoint: " + method);
+        };
     }
 
     @Test

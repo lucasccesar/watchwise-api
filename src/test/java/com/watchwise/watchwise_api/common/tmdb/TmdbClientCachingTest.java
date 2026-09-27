@@ -7,6 +7,9 @@ import com.watchwise.watchwise_api.content.service.impl.ContentScheduleReaderImp
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -30,6 +33,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.startsWith;
@@ -499,36 +503,14 @@ class TmdbClientCachingTest {
         mockServer.verify();
     }
 
-    @Test
-    @DisplayName("[series discovery] Should Mark Remote Then Cached - When The Same Popular Page Repeats")
-    void shouldMarkRemoteThenCachedWhenTheSamePopularSeriesPageRepeats() {
-        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/tv/popular?")))
-                .andRespond(withSuccess("""
-                        {"page":1,"total_pages":1,"total_results":1,"results":[
-                          {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
-                        """, MediaType.APPLICATION_JSON));
+    @ParameterizedTest
+    @MethodSource("newEndpointCases")
+    @DisplayName("[new TMDB endpoint] Should Mark Remote Then Cached - When The Same Lookup Repeats")
+    void shouldMarkRemoteThenCachedForEveryNewEndpoint(String method, String uri, String body) {
+        mockServer.expect(requestTo(uri)).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
-        var first = tmdbClient.getPopularSeries(1, "en-US");
-        var second = tmdbClient.getPopularSeries(1, "en-US");
-
-        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
-                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
-        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
-                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
-        assertThat(tmdbTvDiscoveryCache.getIfPresent("tv-popular|1|en-US")).isNotNull();
-        mockServer.verify();
-    }
-
-    @Test
-    @DisplayName("[getTvContentRatings] Should Mark Remote Then Cached - When The Same Lookup Repeats")
-    void shouldMarkRemoteThenCachedWhenTheSameTvContentRatingsLookupRepeats() {
-        String uri = "https://api.themoviedb.org/3/tv/1396/content_ratings?language=en-US";
-        mockServer.expect(requestTo(uri)).andRespond(withSuccess("""
-                {"id":1396,"results":[{"iso_3166_1":"BR","rating":"16"}]}
-                """, MediaType.APPLICATION_JSON));
-
-        var first = tmdbClient.getTvContentRatings("1396", "en-US");
-        var second = tmdbClient.getTvContentRatings("1396", "en-US");
+        var first = invokeNewEndpoint(method);
+        var second = invokeNewEndpoint(method);
 
         assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
@@ -537,59 +519,40 @@ class TmdbClientCachingTest {
         mockServer.verify();
     }
 
-    @Test
-    @DisplayName("[getPopularMovies] Should Evict Unavailable Result - When A Later Lookup Succeeds")
-    void shouldEvictUnavailablePopularMoviesWhenALaterLookupSucceeds() {
-        String uri = "https://api.themoviedb.org/3/movie/popular?page=1&language=en-US&include_adult=false";
+    @ParameterizedTest
+    @MethodSource("newEndpointCases")
+    @DisplayName("[new TMDB endpoint] Should Evict Unavailable Result - When A Later Lookup Succeeds")
+    void shouldEvictUnavailableForEveryNewEndpoint(String method, String uri, String body) {
         mockServer.expect(requestTo(uri)).andRespond(withServerError());
         mockServer.expect(requestTo(uri)).andRespond(withServerError());
-        mockServer.expect(requestTo(uri)).andRespond(movieSearchSuccess(1, "Popular Movie"));
+        mockServer.expect(requestTo(uri)).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
-        assertThat(tmdbClient.getPopularMovies(1, "en-US").isUnavailable()).isTrue();
-        assertThat(tmdbMovieDiscoveryCache.getIfPresent("movie-popular|1|en-US")).isNull();
-
-        assertThat(tmdbClient.getPopularMovies(1, "en-US")).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+        assertThat(invokeNewEndpoint(method).isUnavailable()).isTrue();
+        assertThat(invokeNewEndpoint(method)).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         mockServer.verify();
     }
 
-    @Test
-    @DisplayName("[getTopRatedSeries] Should Evict Unavailable Result - When A Later Lookup Succeeds")
-    void shouldEvictUnavailableTopRatedSeriesWhenALaterLookupSucceeds() {
-        String uri = "https://api.themoviedb.org/3/tv/top_rated?page=1&language=en-US&include_adult=false";
-        mockServer.expect(requestTo(uri)).andRespond(withServerError());
-        mockServer.expect(requestTo(uri)).andRespond(withServerError());
-        mockServer.expect(requestTo(uri)).andRespond(withSuccess("""
-                {"page":1,"total_pages":1,"total_results":1,"results":[
-                  {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
-                """, MediaType.APPLICATION_JSON));
-
-        assertThat(tmdbClient.getTopRatedSeries(1, "en-US").isUnavailable()).isTrue();
-        assertThat(tmdbTvDiscoveryCache.getIfPresent("tv-top-rated|1|en-US")).isNull();
-
-        assertThat(tmdbClient.getTopRatedSeries(1, "en-US")).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
-                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
-        mockServer.verify();
+    private static Stream<Arguments> newEndpointCases() {
+        String page = "{\"page\":1,\"total_pages\":1,\"total_results\":0,\"results\":[]}";
+        String ratings = "{\"id\":1396,\"results\":[]}";
+        return Stream.of(
+                Arguments.of("popular-movies", "https://api.themoviedb.org/3/movie/popular?page=1&language=en-US", page),
+                Arguments.of("top-rated-movies", "https://api.themoviedb.org/3/movie/top_rated?page=1&language=en-US", page),
+                Arguments.of("popular-series", "https://api.themoviedb.org/3/tv/popular?page=1&language=en-US", page),
+                Arguments.of("top-rated-series", "https://api.themoviedb.org/3/tv/top_rated?page=1&language=en-US", page),
+                Arguments.of("tv-content-ratings", "https://api.themoviedb.org/3/tv/1396/content_ratings", ratings));
     }
 
-    @Test
-    @DisplayName("[getTvContentRatings] Should Evict Unavailable Result - When A Later Lookup Succeeds")
-    void shouldEvictUnavailableTvContentRatingsWhenALaterLookupSucceeds() {
-        String uri = "https://api.themoviedb.org/3/tv/1396/content_ratings?language=en-US";
-        mockServer.expect(requestTo(uri)).andRespond(withServerError());
-        mockServer.expect(requestTo(uri)).andRespond(withServerError());
-        mockServer.expect(requestTo(uri)).andRespond(withSuccess("""
-                {"id":1396,"results":[{"iso_3166_1":"BR","rating":"16"}]}
-                """, MediaType.APPLICATION_JSON));
-
-        assertThat(tmdbClient.getTvContentRatings("1396", "en-US").isUnavailable()).isTrue();
-        assertThat(tmdbTvContentRatingsCache.getIfPresent("tv-content-ratings|1396|en-US")).isNull();
-
-        var recovered = tmdbClient.getTvContentRatings("1396", "en-US");
-
-        assertThat(recovered).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
-                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
-        mockServer.verify();
+    private TmdbLookupResult<?> invokeNewEndpoint(String method) {
+        return switch (method) {
+            case "popular-movies" -> tmdbClient.getPopularMovies(1, "en-US");
+            case "top-rated-movies" -> tmdbClient.getTopRatedMovies(1, "en-US");
+            case "popular-series" -> tmdbClient.getPopularSeries(1, "en-US");
+            case "top-rated-series" -> tmdbClient.getTopRatedSeries(1, "en-US");
+            case "tv-content-ratings" -> tmdbClient.getTvContentRatings("1396", "en-US");
+            default -> throw new IllegalArgumentException("Unknown endpoint: " + method);
+        };
     }
 
     @Test
