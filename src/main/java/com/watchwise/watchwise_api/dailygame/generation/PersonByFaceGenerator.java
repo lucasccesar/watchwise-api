@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 public class PersonByFaceGenerator implements DailyChallengeGenerator {
@@ -35,6 +36,11 @@ public class PersonByFaceGenerator implements DailyChallengeGenerator {
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate) {
+        return generate(challengeDate, Set.of());
+    }
+
+    @Override
+    public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         Optional<TmdbMovieSearchResult> movie = DailyChallengeGenerationSupport.randomItem(
                 tmdbClient.getPopularMovies(DailyChallengeGenerationSupport.randomPage(),
                         TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
@@ -51,7 +57,8 @@ public class PersonByFaceGenerator implements DailyChallengeGenerator {
                         tmdbClient.getTvFullDetails(item.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
                 .ifPresent(details -> addSeriesPeople(people, details));
 
-        return DailyChallengeGenerationSupport.randomItem(new ArrayList<>(people.values()))
+        return DailyChallengeGenerationSupport.randomItem(new ArrayList<>(people.values()), person ->
+                        !excludedAnswerKeys.contains("PERSON:" + person.id()))
                 .map(person -> snapshotAssembler.person(DailyGameType.PERSON_BY_FACE, String.valueOf(person.id()),
                         person.name(), TmdbImageUrlBuilder.profileUrl(person.profilePath()), null, List.of()));
     }

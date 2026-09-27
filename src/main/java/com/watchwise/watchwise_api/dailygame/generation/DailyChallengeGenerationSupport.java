@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Predicate;
 
 final class DailyChallengeGenerationSupport {
 
@@ -22,10 +23,18 @@ final class DailyChallengeGenerationSupport {
     }
 
     static <T> Optional<T> randomItem(List<T> items) {
+        return randomItem(items, item -> true);
+    }
+
+    static <T> Optional<T> randomItem(List<T> items, Predicate<T> predicate) {
         if (items == null || items.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.ofNullable(items.get(ThreadLocalRandom.current().nextInt(items.size())));
+        List<T> eligibleItems = items.stream().filter(predicate).toList();
+        if (eligibleItems.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(eligibleItems.get(ThreadLocalRandom.current().nextInt(eligibleItems.size())));
     }
 
     static <T> Optional<T> value(TmdbLookupResult<T> lookup) {

@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -12,6 +13,7 @@ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository
 import com.watchwise.watchwise_api.dailygame.service.DailyChallengeGenerationService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,8 +21,10 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 @Slf4j
@@ -30,6 +34,7 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
     private final AdvisoryLock advisoryLock;
     private final DailyChallengeRepository challengeRepository;
     private final DailyChallengeHintRepository hintRepository;
+    private final NewTransactionExecutor newTransactionExecutor;
     private final Map<DailyGameType, DailyChallengeGenerator> generators;
     private final int generationMaxCandidates;
     private final Clock clock;
@@ -38,12 +43,14 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
             AdvisoryLock advisoryLock,
             DailyChallengeRepository challengeRepository,
             DailyChallengeHintRepository hintRepository,
+            NewTransactionExecutor newTransactionExecutor,
             List<DailyChallengeGenerator> generators,
             @Value("${app.daily-games.generation-max-candidates}") int generationMaxCandidates,
             Clock clock) {
         this.advisoryLock = advisoryLock;
         this.challengeRepository = challengeRepository;
         this.hintRepository = hintRepository;
+        this.newTransactionExecutor = newTransactionExecutor;
         this.generators = indexGenerators(generators);
         this.generationMaxCandidates = generationMaxCandidates;
         this.clock = clock;
@@ -66,18 +73,41 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
         if (generator == null) {
             throw new IllegalStateException("No generator registered for " + gameType);
         }
+        Set<String> rejectedAnswerKeys = new HashSet<>();
         for (int attempt = 0; attempt < generationMaxCandidates; attempt++) {
-            DailyChallengeCandidate candidate = generator.generate(challengeDate).orElse(null);
+            DailyChallengeCandidate candidate = generator.generate(challengeDate, rejectedAnswerKeys).orElse(null);
             if (!isValidCandidate(candidate, gameType)) {
+                addRejectedAnswerKey(rejectedAnswerKeys, candidate);
                 continue;
             }
             if (challengeRepository.existsByGameTypeAndAnswerKey(gameType, candidate.answerKey())) {
+                rejectedAnswerKeys.add(candidate.answerKey());
                 continue;
             }
-            persistChallenge(challengeDate, candidate);
-            return;
+            try {
+                newTransactionExecutor.runInNewTransaction(() -> {
+                    persistChallenge(challengeDate, candidate);
+                    return null;
+                });
+                return;
+            } catch (DataIntegrityViolationException exception) {
+                if (challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType).isPresent()) {
+                    return;
+                }
+                if (challengeRepository.existsByGameTypeAndAnswerKey(gameType, candidate.answerKey())) {
+                    rejectedAnswerKeys.add(candidate.answerKey());
+                    continue;
+                }
+                throw exception;
+            }
         }
         log.error("Daily game generation exhausted eligible candidates for {} on {}", gameType, challengeDate);
+    }
+
+    private void addRejectedAnswerKey(Set<String> rejectedAnswerKeys, DailyChallengeCandidate candidate) {
+        if (candidate != null && candidate.answerKey() != null && !candidate.answerKey().isBlank()) {
+            rejectedAnswerKeys.add(candidate.answerKey());
+        }
     }
 
     private void persistChallenge(LocalDate challengeDate, DailyChallengeCandidate candidate) {

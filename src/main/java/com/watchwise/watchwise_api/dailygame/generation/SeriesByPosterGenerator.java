@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.Optional;
 
 @Component
@@ -27,9 +28,16 @@ public class SeriesByPosterGenerator implements DailyChallengeGenerator {
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate) {
-        return DailyChallengeGenerationSupport.randomItem(
+        return generate(challengeDate, Set.of());
+    }
+
+    @Override
+    public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
+        return DailyChallengeGenerationSupport.value(
                         tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .flatMap(page -> DailyChallengeGenerationSupport.randomItem(page.results(), series ->
+                        series != null && !excludedAnswerKeys.contains("SERIES:" + series.id())))
                 .filter(this::isUsable)
                 .map(series -> snapshotAssembler.seriesPoster(series,
                         TmdbImageUrlBuilder.posterUrl(series.posterPath())));

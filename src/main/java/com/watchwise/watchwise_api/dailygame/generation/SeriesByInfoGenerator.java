@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 public class SeriesByInfoGenerator implements DailyChallengeGenerator {
@@ -33,10 +34,17 @@ public class SeriesByInfoGenerator implements DailyChallengeGenerator {
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate) {
-        return DailyChallengeGenerationSupport.randomItem(
+        return generate(challengeDate, Set.of());
+    }
+
+    @Override
+    public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
+        return DailyChallengeGenerationSupport.value(
                         tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .filter(series -> DailyChallengeGenerationSupport.validId(series.id()))
+                .flatMap(page -> DailyChallengeGenerationSupport.randomItem(page.results(), series ->
+                        series != null && DailyChallengeGenerationSupport.validId(series.id())
+                                && !excludedAnswerKeys.contains("SERIES:" + series.id())))
                 .flatMap(series -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getTvFullDetails(series.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
                 .filter(this::hasRequiredMetadata)
@@ -80,7 +88,9 @@ public class SeriesByInfoGenerator implements DailyChallengeGenerator {
             series.networks().stream().map(network -> network == null ? null : network.name()).forEach(names::add);
         }
         if (series.productionCompanies() != null) {
-            series.productionCompanies().stream().map(TmdbProductionCompany::name).forEach(names::add);
+            series.productionCompanies().stream()
+                    .map(company -> company == null ? null : company.name())
+                    .forEach(names::add);
         }
         return DailyChallengeGenerationSupport.joinNonBlank(names);
     }

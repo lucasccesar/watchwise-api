@@ -1,7 +1,9 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeCandidate;
@@ -12,7 +14,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
@@ -26,10 +30,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -51,9 +58,12 @@ class DailyChallengeGenerationServiceImplTest {
     @Mock
     private DailyChallengeHintRepository hintRepository;
 
+    @Mock
+    private NewTransactionExecutor newTransactionExecutor;
+
     @Test
-    @DisplayName("Generation locks the date, skips existing modalities and persists only missing ones")
-    void generationIsIdempotentPerDateAndGameType() {
+    @DisplayName("[ensureGenerated] Should Lock And Persist Only Missing Modalities - When The Same Date Is Generated Repeatedly")
+    void shouldLockAndPersistOnlyMissingModalitiesWhenTheSameDateIsGeneratedRepeatedly() {
         Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
         Set<DailyGameType> persistedTypes = new HashSet<>();
         when(challengeRepository.existsByChallengeDateAndGameType(eq(DATE), any())).thenAnswer(invocation -> {
@@ -76,11 +86,11 @@ class DailyChallengeGenerationServiceImplTest {
     }
 
     @Test
-    @DisplayName("Generation does not reuse an answer after candidate pool exhaustion")
-    void generationLeavesModalityAbsentAfterExhaustion() {
+    @DisplayName("[ensureGenerated] Should Leave A Modality Absent - When Every Candidate Answer Is Already Used")
+    void shouldLeaveAModalityAbsentWhenEveryCandidateAnswerIsAlreadyUsed() {
         DailyChallengeGenerator exhausted = mock(DailyChallengeGenerator.class);
         when(exhausted.gameType()).thenReturn(DailyGameType.MOVIE_BY_POSTER);
-        when(exhausted.generate(DATE)).thenReturn(Optional.of(candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550")));
+        when(exhausted.generate(eq(DATE), any())).thenReturn(Optional.of(candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550")));
         Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
         generators.put(DailyGameType.MOVIE_BY_POSTER, exhausted);
         when(challengeRepository.existsByChallengeDateAndGameType(DATE, DailyGameType.MOVIE_BY_POSTER)).thenReturn(false);
@@ -91,12 +101,12 @@ class DailyChallengeGenerationServiceImplTest {
         service(generators, 3).ensureGenerated(DATE);
 
         verify(challengeRepository, never()).saveAndFlush(any(DailyChallenge.class));
-        verify(exhausted, times(3)).generate(DATE);
+        verify(exhausted, times(3)).generate(eq(DATE), any());
     }
 
     @Test
-    @DisplayName("Persistence failures are not swallowed")
-    void persistenceFailureRollsBackThroughTheCaller() {
+    @DisplayName("[ensureGenerated] Should Propagate Persistence Failure - When Isolated Persistence Fails")
+    void shouldPropagatePersistenceFailureWhenIsolatedPersistenceFails() {
         Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
         when(challengeRepository.existsByChallengeDateAndGameType(any(), any())).thenReturn(false);
         when(challengeRepository.existsByGameTypeAndAnswerKey(any(), any())).thenReturn(false);
@@ -108,10 +118,84 @@ class DailyChallengeGenerationServiceImplTest {
         verify(hintRepository, never()).saveAllAndFlush(any());
     }
 
+    @Test
+    @DisplayName("[ensureGenerated] Should Persist The Next Candidate - When The First Candidate Answer Is Already Used")
+    void shouldPersistTheNextCandidateWhenTheFirstCandidateAnswerIsAlreadyUsed() {
+        DailyChallengeGenerator generator = mock(DailyChallengeGenerator.class);
+        DailyChallengeCandidate first = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550",
+                List.of(new DailyChallengeCandidate.HintSnapshot("FIRST", "first")));
+        DailyChallengeCandidate second = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:680",
+                List.of(new DailyChallengeCandidate.HintSnapshot("SECOND", "second"),
+                        new DailyChallengeCandidate.HintSnapshot("THIRD", "third")));
+        when(generator.gameType()).thenReturn(DailyGameType.MOVIE_BY_POSTER);
+        when(generator.generate(eq(DATE), any())).thenReturn(Optional.of(first), Optional.of(second));
+        Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
+        generators.put(DailyGameType.MOVIE_BY_POSTER, generator);
+        stubOnlyMovieIsMissing();
+        when(challengeRepository.existsByGameTypeAndAnswerKey(any(), any()))
+                .thenAnswer(invocation -> "MOVIE:550".equals(invocation.getArgument(1)));
+        when(challengeRepository.saveAndFlush(any(DailyChallenge.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service(generators, 2).ensureGenerated(DATE);
+
+        ArgumentCaptor<DailyChallenge> challengeCaptor = ArgumentCaptor.forClass(DailyChallenge.class);
+        verify(challengeRepository).saveAndFlush(challengeCaptor.capture());
+        assertThat(challengeCaptor.getValue().getAnswerKey()).isEqualTo("MOVIE:680");
+        assertThat(challengeCaptor.getValue().getAnswerSnapshot()).isSameAs(second.answerSnapshot());
+        assertThat(challengeCaptor.getValue().getDisplaySnapshot()).isSameAs(second.displaySnapshot());
+        ArgumentCaptor<List<DailyChallengeHint>> hintsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hintRepository).saveAllAndFlush(hintsCaptor.capture());
+        assertThat(hintsCaptor.getValue()).extracting(DailyChallengeHint::getPosition)
+                .containsExactly(1, 2);
+        assertThat(hintsCaptor.getValue()).extracting(DailyChallengeHint::getHintType)
+                .containsExactly("SECOND", "THIRD");
+    }
+
+    @Test
+    @DisplayName("[ensureGenerated] Should Retry After An Isolated Unique Conflict - When Another Date Claims The Answer")
+    void shouldRetryAfterAnIsolatedUniqueConflictWhenAnotherDateClaimsTheAnswer() {
+        DailyChallengeGenerator generator = mock(DailyChallengeGenerator.class);
+        DailyChallengeCandidate first = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:550");
+        DailyChallengeCandidate second = candidate(DailyGameType.MOVIE_BY_POSTER, "MOVIE:680");
+        when(generator.gameType()).thenReturn(DailyGameType.MOVIE_BY_POSTER);
+        when(generator.generate(eq(DATE), any())).thenReturn(Optional.of(first), Optional.of(second));
+        Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
+        generators.put(DailyGameType.MOVIE_BY_POSTER, generator);
+        stubOnlyMovieIsMissing();
+        java.util.concurrent.atomic.AtomicBoolean conflictObserved = new java.util.concurrent.atomic.AtomicBoolean();
+        when(challengeRepository.existsByGameTypeAndAnswerKey(any(), any())).thenAnswer(invocation ->
+                "MOVIE:550".equals(invocation.getArgument(1)) && conflictObserved.get());
+        when(challengeRepository.saveAndFlush(any(DailyChallenge.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        DataIntegrityViolationException conflict = new DataIntegrityViolationException("duplicate answer key");
+        DailyChallengeGenerationServiceImpl service = service(generators, 2);
+        doAnswer(invocation -> {
+                    conflictObserved.set(true);
+                    throw conflict;
+                })
+                .doAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get())
+                .when(newTransactionExecutor).runInNewTransaction(any());
+
+        service.ensureGenerated(DATE);
+
+        ArgumentCaptor<DailyChallenge> challengeCaptor = ArgumentCaptor.forClass(DailyChallenge.class);
+        verify(challengeRepository).saveAndFlush(challengeCaptor.capture());
+        assertThat(challengeCaptor.getValue().getAnswerKey()).isEqualTo("MOVIE:680");
+        verify(newTransactionExecutor, times(2)).runInNewTransaction(any());
+    }
+
     private DailyChallengeGenerationServiceImpl service(Map<DailyGameType, DailyChallengeGenerator> generators,
                                                         int maxCandidates) {
+        lenient().when(newTransactionExecutor.runInNewTransaction(any()))
+                .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
         return new DailyChallengeGenerationServiceImpl(advisoryLock, challengeRepository, hintRepository,
-                List.copyOf(generators.values()), maxCandidates, CLOCK);
+                newTransactionExecutor, List.copyOf(generators.values()), maxCandidates, CLOCK);
+    }
+
+    private void stubOnlyMovieIsMissing() {
+        when(challengeRepository.existsByChallengeDateAndGameType(eq(DATE), any())).thenAnswer(invocation ->
+                invocation.getArgument(1) != DailyGameType.MOVIE_BY_POSTER);
     }
 
     private Map<DailyGameType, DailyChallengeGenerator> generatorsReturningCandidates() {
@@ -126,12 +210,18 @@ class DailyChallengeGenerationServiceImplTest {
     }
 
     private static DailyChallengeCandidate candidate(DailyGameType type, String answerKey) {
+        return candidate(type, answerKey, List.of(new DailyChallengeCandidate.HintSnapshot("YEAR", "1999")));
+    }
+
+    private static DailyChallengeCandidate candidate(DailyGameType type, String answerKey,
+                                                     List<DailyChallengeCandidate.HintSnapshot> hints) {
         boolean episode = type.targetKind() == DailyGameTargetKind.EPISODE;
         ObjectMapper objectMapper = new ObjectMapper();
-        return new DailyChallengeCandidate(type, type.targetKind(), episode ? null : "550", episode ? "1396" : null,
+        String targetTmdbId = episode ? null : answerKey.substring(answerKey.indexOf(':') + 1);
+        return new DailyChallengeCandidate(type, type.targetKind(), targetTmdbId, episode ? "1396" : null,
                 episode ? 1 : null, episode ? 1 : null, null, answerKey, "/image.jpg",
                 objectMapper.createObjectNode().put("title", "Answer"), objectMapper.createObjectNode().put("imageUrl", "/image.jpg"),
-                List.of(new DailyChallengeCandidate.HintSnapshot("YEAR", "1999")));
+                hints);
     }
 
     private record StubGenerator(DailyGameType gameType, Optional<DailyChallengeCandidate> result)

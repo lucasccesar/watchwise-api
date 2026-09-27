@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 public class ActorByMovieFilmographyGenerator implements DailyChallengeGenerator {
@@ -29,23 +30,29 @@ public class ActorByMovieFilmographyGenerator implements DailyChallengeGenerator
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate) {
+        return generate(challengeDate, Set.of());
+    }
+
+    @Override
+    public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         return DailyChallengeGenerationSupport.randomItem(
                         tmdbClient.getTopRatedMovies(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .filter(movie -> DailyChallengeGenerationSupport.validId(movie.id()))
+                .filter(movie -> movie != null && DailyChallengeGenerationSupport.validId(movie.id()))
                 .flatMap(movie -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getMovieFullDetails(movie.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
-                .flatMap(movie -> eligibleActor(movie).map(actor -> snapshotAssembler.actorFromMovie(movie.id(), actor,
+                .flatMap(movie -> eligibleActor(movie, excludedAnswerKeys).map(actor -> snapshotAssembler.actorFromMovie(movie.id(), actor,
                         TmdbImageUrlBuilder.profileUrl(actor.profilePath()))));
     }
 
-    private Optional<TmdbCastMember> eligibleActor(TmdbMovieFullDetails movie) {
+    private Optional<TmdbCastMember> eligibleActor(TmdbMovieFullDetails movie, Set<String> excludedAnswerKeys) {
         if (movie.credits() == null || movie.credits().cast() == null) {
             return Optional.empty();
         }
         List<TmdbCastMember> cast = movie.credits().cast().stream()
                 .filter(actor -> actor != null && actor.id() != null && actor.name() != null && !actor.name().isBlank()
-                        && DailyChallengeGenerationSupport.validImage(actor.profilePath()))
+                        && DailyChallengeGenerationSupport.validImage(actor.profilePath())
+                        && !excludedAnswerKeys.contains("PERSON:" + actor.id()))
                 .toList();
         return DailyChallengeGenerationSupport.randomItem(cast);
     }

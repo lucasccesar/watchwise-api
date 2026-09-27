@@ -37,9 +37,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -64,8 +66,8 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Movie poster generator chooses a discovery page between 1 and 50")
-    void moviePosterGeneratorChoosesPageInSupportedRange() {
+    @DisplayName("[generate] Should Choose A Supported Discovery Page - When Generating A Movie Poster Challenge")
+    void shouldChooseASupportedDiscoveryPageWhenGeneratingAMoviePosterChallenge() {
         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
 
@@ -81,8 +83,8 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Movie poster generator rejects a result without a poster")
-    void moviePosterGeneratorRejectsMissingPoster() {
+    @DisplayName("[generate] Should Reject The Candidate - When A Movie Poster Is Missing")
+    void shouldRejectTheCandidateWhenAMoviePosterIsMissing() {
         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", null, "1999-10-15"))));
 
@@ -90,8 +92,23 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Series poster generator creates the series answer key")
-    void seriesPosterGeneratorCreatesSeriesAnswerKey() {
+    @DisplayName("[generate] Should Skip An Excluded Answer Key - When An Alternate Movie Is Available")
+    void shouldSkipAnExcludedAnswerKeyWhenAnAlternateMovieIsAvailable() {
+        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(new TmdbSearchPage<>(1, List.of(
+                        new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"),
+                        new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10")), 1, 2)));
+
+        DailyChallengeCandidate candidate = new MovieByPosterGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE, Set.of("MOVIE:550"))
+                .orElseThrow();
+
+        assertThat(candidate.answerKey()).isEqualTo("MOVIE:680");
+    }
+
+    @Test
+    @DisplayName("[generate] Should Create The Series Answer Key - When A Popular Series Is Eligible")
+    void shouldCreateTheSeriesAnswerKeyWhenAPopularSeriesIsEligible() {
         when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
 
@@ -104,8 +121,8 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Person by face deduplicates people from movie and series credits")
-    void personByFaceDeduplicatesPeopleFromBothMediaKinds() {
+    @DisplayName("[generate] Should Deduplicate People By ID - When Movie And Series Credits Overlap")
+    void shouldDeduplicatePeopleByIdWhenMovieAndSeriesCreditsOverlap() {
         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
         when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
@@ -127,8 +144,8 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Episode by frame skips specials, future episodes and missing stills")
-    void episodeGeneratorUsesCompositeIdentityAndFiltersEpisodes() {
+    @DisplayName("[generate] Should Use Composite Episode Identity - When Specials Future Episodes And Missing Stills Exist")
+    void shouldUseCompositeEpisodeIdentityWhenSpecialsFutureEpisodesAndMissingStillsExist() {
         when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(1, "Season 1", null, null, "2008-01-20", 1, List.of(
@@ -154,8 +171,8 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Movie info generator preserves clue order and omits missing certification")
-    void movieInfoGeneratorPreservesClueOrderAndOmitsMissingCertification() {
+    @DisplayName("[generate] Should Preserve Clue Order And Omit Certification - When BR Certification Is Missing")
+    void shouldPreserveClueOrderAndOmitCertificationWhenBRCertificationIsMissing() {
         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
@@ -174,8 +191,48 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Series info generator omits certification and movie-only financial hints")
-    void seriesInfoGeneratorOmitsCertificationAndFinancialHints() {
+    @DisplayName("[generate] Should Include BR Certification - When A BR Rating Exists")
+    void shouldIncludeBRCertificationWhenABRRatingExists() {
+        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                .thenReturn(found(movieDetailsWithInfo("550")));
+        when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+                .thenReturn(found(new TmdbMovieReleaseDates("550", List.of(
+                        new TmdbRegionReleaseDates("BR", List.of(new TmdbMovieReleaseDate("18", null, null, null, 3)))))));
+
+        DailyChallengeCandidate candidate = new MovieByInfoGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE)
+                .orElseThrow();
+
+        assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
+                .contains("CERTIFICATION");
+        assertThat(candidate.hints()).filteredOn(hint -> hint.hintType().equals("CERTIFICATION"))
+                .extracting(DailyChallengeCandidate.HintSnapshot::hintValue)
+                .containsExactly("18");
+    }
+
+    @Test
+    @DisplayName("[generate] Should Omit Null Nested Metadata - When TMDB Lists Contain Null Elements")
+    void shouldOmitNullNestedMetadataWhenTmdbListsContainNullElements() {
+        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                .thenReturn(found(movieDetailsWithNullNestedMetadata("550")));
+        when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+                .thenReturn(found(new TmdbMovieReleaseDates("550", Collections.singletonList(null))));
+
+        DailyChallengeCandidate candidate = new MovieByInfoGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE)
+                .orElseThrow();
+
+        assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
+                .containsExactly("GENRES", "YEAR");
+    }
+
+    @Test
+    @DisplayName("[generate] Should Omit Certification And Financial Hints - When Series Metadata Has No BR Rating")
+    void shouldOmitCertificationAndFinancialHintsWhenSeriesMetadataHasNoBRRating() {
         when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
@@ -195,8 +252,8 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Movie filmography generator uses the movie as source and person as answer")
-    void movieFilmographyGeneratorUsesMovieSourceAndPersonAnswer() {
+    @DisplayName("[generate] Should Use The Movie As Source - When An Eligible Movie Actor Exists")
+    void shouldUseTheMovieAsSourceWhenAnEligibleMovieActorExists() {
         when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10"))));
         when(tmdbClient.getMovieFullDetails("680", LANGUAGE))
@@ -212,8 +269,8 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("Series filmography generator uses aggregate cast and series source")
-    void seriesFilmographyGeneratorUsesAggregateCastAndSeriesSource() {
+    @DisplayName("[generate] Should Use Aggregate Cast And Series Source - When An Eligible Series Actor Exists")
+    void shouldUseAggregateCastAndSeriesSourceWhenAnEligibleSeriesActorExists() {
         when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
@@ -255,6 +312,13 @@ class DailyChallengeGeneratorTest {
                         List.of(new com.watchwise.watchwise_api.common.tmdb.TmdbProvider("Netflix", "/netflix.jpg")), List.of(), List.of()))),
                 null, 63000000L, 100853753L,
                 List.of(new TmdbProductionCompany(508, "Regency Enterprises", null, "US")), null);
+    }
+
+    private static TmdbMovieFullDetails movieDetailsWithNullNestedMetadata(String id) {
+        return new TmdbMovieFullDetails(id, "Fight Club", "Fight Club", null, "/fight.jpg", null, "1999-10-15", null,
+                List.of(new TmdbGenre(18, "Drama")), List.of(), new TmdbCredits(List.of(), List.of()),
+                new TmdbWatchProviders(Map.of("BR", new TmdbRegionProviders(Collections.singletonList(null), null, null))),
+                null, null, null, Collections.singletonList(null), null);
     }
 
     private static TmdbTvFullDetails seriesDetails(String id, String name, TmdbAggregateCredits credits) {

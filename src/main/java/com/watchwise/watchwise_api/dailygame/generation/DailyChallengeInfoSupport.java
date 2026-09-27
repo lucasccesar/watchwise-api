@@ -38,6 +38,7 @@ final class DailyChallengeInfoSupport {
         return releaseDates.results().stream()
                 .filter(result -> result != null && region.equals(result.isoCode()))
                 .flatMap(result -> result.releaseDates() == null ? java.util.stream.Stream.empty() : result.releaseDates().stream())
+                .filter(result -> result != null)
                 .map(com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDate::certification)
                 .filter(value -> value != null && !value.isBlank())
                 .findFirst();
@@ -56,7 +57,7 @@ final class DailyChallengeInfoSupport {
 
     private static void addProviderNames(List<String> names, List<TmdbProvider> providers) {
         if (providers != null) {
-            providers.stream().map(TmdbProvider::providerName).forEach(names::add);
+            providers.stream().filter(provider -> provider != null).map(TmdbProvider::providerName).forEach(names::add);
         }
     }
 }

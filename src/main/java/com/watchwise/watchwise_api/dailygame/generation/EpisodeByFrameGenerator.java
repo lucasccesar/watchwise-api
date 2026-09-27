@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
@@ -33,22 +34,28 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate) {
+        return generate(challengeDate, Set.of());
+    }
+
+    @Override
+    public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         return DailyChallengeGenerationSupport.randomItem(
                         tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .filter(series -> DailyChallengeGenerationSupport.validId(series.id()))
-                .flatMap(series -> findEpisode(series, challengeDate));
+                .filter(series -> series != null && DailyChallengeGenerationSupport.validId(series.id()))
+                .flatMap(series -> findEpisode(series, challengeDate, excludedAnswerKeys));
     }
 
-    private Optional<DailyChallengeCandidate> findEpisode(TmdbTvSearchResult series, LocalDate challengeDate) {
+    private Optional<DailyChallengeCandidate> findEpisode(TmdbTvSearchResult series, LocalDate challengeDate,
+                                                          Set<String> excludedAnswerKeys) {
         TmdbLookup<TmdbTvFullDetails> lookup = new TmdbLookup<>(tmdbClient.getTvFullDetails(series.id(),
                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
         return lookup.value()
-                .flatMap(details -> findEpisode(series.id(), details, challengeDate));
+                .flatMap(details -> findEpisode(series.id(), details, challengeDate, excludedAnswerKeys));
     }
 
     private Optional<DailyChallengeCandidate> findEpisode(String seriesTmdbId, TmdbTvFullDetails series,
-                                                          LocalDate challengeDate) {
+                                                          LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         if (series.seasons() == null) {
             return Optional.empty();
         }
@@ -59,7 +66,9 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
                                 tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(),
                                         TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                         .ifPresent(details -> addReleasedEpisodes(candidates, details, challengeDate)));
-        return DailyChallengeGenerationSupport.randomItem(candidates)
+        return DailyChallengeGenerationSupport.randomItem(candidates, episode ->
+                        !excludedAnswerKeys.contains("EPISODE:" + seriesTmdbId + ":" + episode.seasonNumber()
+                                + ":" + episode.episodeNumber()))
                 .map(episode -> snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(), episode.episodeNumber(),
                         episode.name(), TmdbImageUrlBuilder.stillUrl(episode.stillPath())));
     }

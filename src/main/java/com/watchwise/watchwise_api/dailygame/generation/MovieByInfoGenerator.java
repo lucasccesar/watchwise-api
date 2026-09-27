@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 public class MovieByInfoGenerator implements DailyChallengeGenerator {
@@ -32,10 +33,17 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate) {
-        return DailyChallengeGenerationSupport.randomItem(
+        return generate(challengeDate, Set.of());
+    }
+
+    @Override
+    public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
+        return DailyChallengeGenerationSupport.value(
                         tmdbClient.getPopularMovies(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .filter(movie -> DailyChallengeGenerationSupport.validId(movie.id()))
+                .flatMap(page -> DailyChallengeGenerationSupport.randomItem(page.results(), movie ->
+                        movie != null && DailyChallengeGenerationSupport.validId(movie.id())
+                                && !excludedAnswerKeys.contains("MOVIE:" + movie.id())))
                 .flatMap(movie -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getMovieFullDetails(movie.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
                 .filter(this::hasRequiredMetadata)
