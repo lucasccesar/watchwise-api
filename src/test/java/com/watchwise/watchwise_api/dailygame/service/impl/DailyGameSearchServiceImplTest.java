@@ -3,7 +3,6 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
-import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -24,13 +23,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -43,7 +40,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -58,9 +54,6 @@ class DailyGameSearchServiceImplTest {
 
     @Mock
     private TmdbClient tmdbClient;
-
-    @Mock
-    private RequestThrottler requestThrottler;
 
     @ParameterizedTest
     @EnumSource(value = DailyGameType.class, names = {"MOVIE_BY_POSTER", "MOVIE_BY_INFO"})
@@ -130,7 +123,7 @@ class DailyGameSearchServiceImplTest {
         assertThatThrownBy(() -> service().search(USER_ID, DailyGameType.EPISODE_BY_FRAME, "pilot", 1, 20))
                 .isInstanceOf(BadRequestException.class);
 
-        verifyNoInteractions(tmdbClient, requestThrottler);
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -153,7 +146,7 @@ class DailyGameSearchServiceImplTest {
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("q must be provided");
 
-        verifyNoInteractions(tmdbClient, requestThrottler);
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -165,7 +158,7 @@ class DailyGameSearchServiceImplTest {
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("q must be at most 100 characters");
 
-        verifyNoInteractions(tmdbClient, requestThrottler);
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -212,7 +205,7 @@ class DailyGameSearchServiceImplTest {
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("Page number must be greater than or equal to 0");
 
-        verifyNoInteractions(tmdbClient, requestThrottler);
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -234,7 +227,7 @@ class DailyGameSearchServiceImplTest {
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("Page size must be greater than 0");
 
-        verifyNoInteractions(tmdbClient, requestThrottler);
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -357,7 +350,7 @@ class DailyGameSearchServiceImplTest {
         assertThatThrownBy(() -> service().searchEpisodes(USER_ID, "abc", "pilot", 1, 20))
                 .isInstanceOf(BadRequestException.class);
 
-        verifyNoInteractions(tmdbClient, requestThrottler);
+        verifyNoInteractions(tmdbClient);
     }
 
     @Test
@@ -393,20 +386,8 @@ class DailyGameSearchServiceImplTest {
                 .hasMessage("TMDB is currently unavailable");
     }
 
-    @Test
-    @DisplayName("[searchEpisodes] Should Throttle Before Loading TMDB Data - When The Query Is Valid")
-    void shouldThrottleBeforeLoadingTmdbDataWhenTheQueryIsValid() {
-        when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
-
-        service().searchEpisodes(USER_ID, "1399", "pilot", 1, 20);
-
-        InOrder order = inOrder(requestThrottler, tmdbClient);
-        order.verify(requestThrottler).checkAllowed("daily-game-search|" + USER_ID, 30, Duration.ofMinutes(5));
-        order.verify(tmdbClient).getTvFullDetails("1399", LANGUAGE);
-    }
-
     private DailyGameSearchServiceImpl service() {
-        return new DailyGameSearchServiceImpl(tmdbClient, new PageRequestFactory(), requestThrottler, CLOCK);
+        return new DailyGameSearchServiceImpl(tmdbClient, new PageRequestFactory(), CLOCK);
     }
 
     private TmdbMovieSearchResult movie(String id, String title) {

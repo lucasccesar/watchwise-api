@@ -3,7 +3,6 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
-import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
@@ -19,14 +18,12 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -42,28 +39,18 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
     private static final int MAX_QUERY_LENGTH = 100;
     private static final int MAX_SEARCH_PAGE_SIZE = 100;
     private static final int TMDB_SEARCH_PAGE_SIZE = 20;
-    private static final String THROTTLE_KEY_PREFIX = "daily-game-search|";
     private static final String LANGUAGE = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
 
     private final TmdbClient tmdbClient;
     private final PageRequestFactory pageRequestFactory;
-    private final RequestThrottler requestThrottler;
     private final Clock clock;
-
-    @Value("${app.rate-limit.daily-game-search.max-requests:30}")
-    private int searchMaxRequests = 30;
-
-    @Value("${app.rate-limit.daily-game-search.window-minutes:5}")
-    private long searchWindowMinutes = 5;
 
     public DailyGameSearchServiceImpl(
             TmdbClient tmdbClient,
             PageRequestFactory pageRequestFactory,
-            RequestThrottler requestThrottler,
             Clock clock) {
         this.tmdbClient = tmdbClient;
         this.pageRequestFactory = pageRequestFactory;
-        this.requestThrottler = requestThrottler;
         this.clock = clock;
     }
 
@@ -79,7 +66,6 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
             throw new BadRequestException("Episode searches require the episode search endpoints");
         }
 
-        throttle(userId);
         return switch (type.targetKind()) {
             case MOVIE -> searchMovies(normalizedQuery, pageRequest);
             case SERIES -> searchSeries(normalizedQuery, pageRequest);
@@ -93,7 +79,6 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
             UUID userId, String query, Integer page, Integer size) {
         String normalizedQuery = normalizeQuery(query);
         PageRequest pageRequest = buildPageRequest(page, size);
-        throttle(userId);
         return searchSeries(normalizedQuery, pageRequest);
     }
 
@@ -103,8 +88,6 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
         String normalizedQuery = normalizeQuery(query);
         PageRequest pageRequest = buildPageRequest(page, size);
-        throttle(userId);
-
         TmdbTvFullDetails series = foundValueOrEmpty(
                 tmdbClient.getTvFullDetails(normalizedSeriesTmdbId, LANGUAGE));
         if (series == null || series.seasons() == null) {
@@ -310,13 +293,6 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
             throw new BadRequestException("seriesTmdbId must be a positive numeric identifier");
         }
         return trimmedValue;
-    }
-
-    private void throttle(UUID userId) {
-        requestThrottler.checkAllowed(
-                THROTTLE_KEY_PREFIX + userId,
-                searchMaxRequests,
-                Duration.ofMinutes(searchWindowMinutes));
     }
 
     private TmdbUnavailableException tmdbUnavailable() {
