@@ -12,9 +12,7 @@ public record DailyGameHistoryDTO(
         DailyGameTargetKind targetKind,
         int maxAttempts,
         int attemptsUsed,
-        int attemptsRemaining,
         DailyGameViewStatus status,
-        String imageUrl,
         int score,
         LocalDateTime completedAt,
         DailyGameAnswerDTO answer) {

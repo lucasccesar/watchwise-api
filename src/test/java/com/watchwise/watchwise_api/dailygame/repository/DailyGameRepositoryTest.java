@@ -473,8 +473,8 @@ class DailyGameRepositoryTest {
     }
 
     @Test
-    @DisplayName("[history] Should Exclude Current Date And Preserve Stable Ordering")
-    void shouldExcludeCurrentDateAndPreserveStableOrdering() {
+    @DisplayName("[findByChallengeDateBeforeOrderByChallengeDateDescGameTypeAscIdAsc] Should Exclude Current Date And Preserve Stable Ordering - When History Is Queried")
+    void shouldExcludeCurrentDateAndPreserveStableOrderingWhenHistoryIsQueried() {
         DailyChallenge today = challengeRepository.save(buildChallenge(
                 LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:today"));
         DailyChallenge olderMovie = challengeRepository.save(buildChallenge(
@@ -492,8 +492,8 @@ class DailyGameRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findRankingByGameType] Should Aggregate Final Results Exclude InProgress And Rank Ties")
-    void shouldAggregateFinalResultsExcludeInProgressAndRankTies() {
+    @DisplayName("[findRankingByGameType] Should Aggregate Final Results Exclude InProgress And Rank Ties - When Ranking All Game Types")
+    void shouldAggregateFinalResultsExcludeInProgressAndRankTiesWhenRankingAllGameTypes() {
         User first = userRepository.save(buildUser("ranking-first"));
         User second = userRepository.save(buildUser("ranking-second"));
         User third = userRepository.save(buildUser("ranking-third"));
@@ -521,15 +521,15 @@ class DailyGameRepositoryTest {
                 .containsExactly("ranking-second", "ranking-third", "ranking-first");
         assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getRank)
                 .containsExactly(1L, 1L, 3L);
-        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getTotalScore)
+        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getScore)
                 .containsExactly(5L, 5L, 5L);
-        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getTotalAttempts)
+        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getAttemptsUsed)
                 .containsExactly(3L, 3L, 12L);
     }
 
     @Test
-    @DisplayName("[findRankingByGameType] Should Aggregate Only The Requested Game Type")
-    void shouldAggregateOnlyTheRequestedGameType() {
+    @DisplayName("[findRankingByGameType] Should Aggregate Only The Requested Game Type - When Specific Ranking Is Queried")
+    void shouldAggregateOnlyTheRequestedGameTypeWhenSpecificRankingIsQueried() {
         User user = userRepository.save(buildUser("ranking-specific"));
         DailyChallenge requested = challengeRepository.save(
                 buildChallenge(LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "specific:movie"));
@@ -542,13 +542,13 @@ class DailyGameRepositoryTest {
                 .findRankingByGameType(DailyGameType.MOVIE_BY_POSTER.name(), PageRequest.of(0, 10))
                 .getContent().getFirst();
 
-        assertThat(projection.getTotalScore()).isEqualTo(4L);
-        assertThat(projection.getTotalAttempts()).isEqualTo(2L);
+        assertThat(projection.getScore()).isEqualTo(4L);
+        assertThat(projection.getAttemptsUsed()).isEqualTo(2L);
     }
 
     @Test
-    @DisplayName("[findRankingByGameType] Should Return An Empty Page Without Final Results")
-    void shouldReturnAnEmptyPageWithoutFinalResults() {
+    @DisplayName("[findRankingByGameType] Should Return An Empty Page Without Final Results - When Ranking Is Empty")
+    void shouldReturnAnEmptyPageWithoutFinalResultsWhenRankingIsEmpty() {
         assertThat(resultRepository.findRankingByGameType(null, PageRequest.of(0, 10))).isEmpty();
     }
 

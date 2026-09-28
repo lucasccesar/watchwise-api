@@ -58,8 +58,7 @@ public class DailyChallengeResponseAssembler {
         DailyGameView view = view(challenge, result, List.of());
         return new DailyGameHistoryDTO(
                 challengeDate, view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(),
-                view.attemptsRemaining(), view.status(), view.imageUrl(), view.score(), view.completedAt(),
-                answer(challenge));
+                view.status(), view.score(), view.completedAt(), answer(challenge));
     }
 
     private DailyGameStateDTO toState(

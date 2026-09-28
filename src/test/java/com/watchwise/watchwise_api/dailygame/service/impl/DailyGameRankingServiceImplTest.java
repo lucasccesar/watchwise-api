@@ -27,6 +27,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -66,6 +68,36 @@ class DailyGameRankingServiceImplTest {
     }
 
     @Test
+    @DisplayName("[DailyGameHistoryDTO] Should Match The Locked Contract - When The Record Is Inspected")
+    void shouldMatchTheLockedHistoryContractWhenTheRecordIsInspected() {
+        assertThat(Arrays.stream(DailyGameHistoryDTO.class.getRecordComponents())
+                .map(RecordComponent::getName)
+                .toList())
+                .containsExactly(
+                        "challengeDate", "gameType", "targetKind", "maxAttempts", "attemptsUsed",
+                        "status", "score", "completedAt", "answer");
+    }
+
+    @Test
+    @DisplayName("[DailyGameRankingEntryDTO] Should Match The Locked Contract - When The Record Is Inspected")
+    void shouldMatchTheLockedRankingContractWhenTheRecordIsInspected() {
+        assertThat(Arrays.stream(DailyGameRankingEntryDTO.class.getRecordComponents())
+                .map(RecordComponent::getName)
+                .toList())
+                .containsExactly("rank", "userId", "username", "profilePicture", "score", "attemptsUsed");
+    }
+
+    @Test
+    @DisplayName("[DailyGameRankingProjection] Should Expose The Locked Aggregate Names - When The Interface Is Inspected")
+    void shouldExposeTheLockedAggregateNamesWhenTheInterfaceIsInspected() {
+        assertThat(Arrays.stream(UserDailyGameResultRepository.DailyGameRankingProjection.class.getDeclaredMethods())
+                .map(method -> method.getName())
+                .toList())
+                .contains("getScore", "getAttemptsUsed")
+                .doesNotContain("getTotalScore", "getTotalAttempts");
+    }
+
+    @Test
     @DisplayName("[getHistory] Should Return NotPlayed History With Revealed Answer - When The User Has No Result")
     void shouldReturnNotPlayedHistoryWithRevealedAnswerWhenTheUserHasNoResult() {
         DailyChallenge challenge = challenge(TODAY.minusDays(1), DailyGameType.MOVIE_BY_POSTER);
@@ -79,7 +111,6 @@ class DailyGameRankingServiceImplTest {
         assertThat(history.challengeDate()).isEqualTo(TODAY.minusDays(1));
         assertThat(history.status()).isEqualTo(DailyGameViewStatus.NOT_PLAYED);
         assertThat(history.attemptsUsed()).isZero();
-        assertThat(history.attemptsRemaining()).isEqualTo(DailyGameType.MOVIE_BY_POSTER.maxAttempts());
         assertThat(history.score()).isZero();
         assertThat(history.completedAt()).isNull();
         assertThat(history.answer()).isNotNull();
@@ -176,8 +207,8 @@ class DailyGameRankingServiceImplTest {
         assertThat(entry.userId()).isEqualTo(USER_ID);
         assertThat(entry.username()).isEqualTo("lucas");
         assertThat(entry.profilePicture()).isEqualTo("lucas.png");
-        assertThat(entry.totalScore()).isEqualTo(18L);
-        assertThat(entry.totalAttempts()).isEqualTo(7L);
+        assertThat(entry.score()).isEqualTo(18L);
+        assertThat(entry.attemptsUsed()).isEqualTo(7L);
         verify(resultRepository).findRankingByGameType(null, PageRequest.of(0, 20));
     }
 
@@ -256,15 +287,15 @@ class DailyGameRankingServiceImplTest {
 
     private UserDailyGameResultRepository.DailyGameRankingProjection rankingProjection(
             Long rank, UUID userId, String username, String profilePicture,
-            Long totalScore, Long totalAttempts) {
+            Long score, Long attemptsUsed) {
         UserDailyGameResultRepository.DailyGameRankingProjection projection =
                 mock(UserDailyGameResultRepository.DailyGameRankingProjection.class);
         when(projection.getRank()).thenReturn(rank);
         when(projection.getUserId()).thenReturn(userId);
         when(projection.getUsername()).thenReturn(username);
         when(projection.getProfilePicture()).thenReturn(profilePicture);
-        when(projection.getTotalScore()).thenReturn(totalScore);
-        when(projection.getTotalAttempts()).thenReturn(totalAttempts);
+        when(projection.getScore()).thenReturn(score);
+        when(projection.getAttemptsUsed()).thenReturn(attemptsUsed);
         return projection;
     }
 }

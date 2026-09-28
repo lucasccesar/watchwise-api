@@ -7,6 +7,6 @@ public record DailyGameRankingEntryDTO(
         UUID userId,
         String username,
         String profilePicture,
-        long totalScore,
-        long totalAttempts) {
+        long score,
+        long attemptsUsed) {
 }
