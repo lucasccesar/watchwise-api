@@ -16,6 +16,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -36,6 +38,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 class DailyGameRepositoryTest {
+
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 27, 12, 0);
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -468,6 +472,86 @@ class DailyGameRepositoryTest {
                 .containsExactly(laterSeries.getId(), earlierInfo.getId(), earlierMovie.getId());
     }
 
+    @Test
+    @DisplayName("[history] Should Exclude Current Date And Preserve Stable Ordering")
+    void shouldExcludeCurrentDateAndPreserveStableOrdering() {
+        DailyChallenge today = challengeRepository.save(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "movie:today"));
+        DailyChallenge olderMovie = challengeRepository.save(buildChallenge(
+                LocalDate.of(2026, 9, 26), DailyGameType.MOVIE_BY_POSTER, "movie:older"));
+        DailyChallenge olderInfo = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 26), DailyGameType.MOVIE_BY_INFO, "movie:info"));
+
+        Page<DailyChallenge> page = challengeRepository
+                .findByChallengeDateBeforeOrderByChallengeDateDescGameTypeAscIdAsc(
+                        LocalDate.of(2026, 9, 27), PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).extracting(DailyChallenge::getId)
+                .containsExactly(olderInfo.getId(), olderMovie.getId());
+        assertThat(page.getContent()).doesNotContain(today);
+    }
+
+    @Test
+    @DisplayName("[findRankingByGameType] Should Aggregate Final Results Exclude InProgress And Rank Ties")
+    void shouldAggregateFinalResultsExcludeInProgressAndRankTies() {
+        User first = userRepository.save(buildUser("ranking-first"));
+        User second = userRepository.save(buildUser("ranking-second"));
+        User third = userRepository.save(buildUser("ranking-third"));
+        DailyChallenge firstCompleted = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "ranking:1"));
+        DailyChallenge firstFailed = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 28), DailyGameType.SERIES_BY_POSTER, "ranking:2"));
+        DailyChallenge firstInProgress = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 29), DailyGameType.PERSON_BY_FACE, "ranking:3"));
+        DailyChallenge secondCompleted = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 30), DailyGameType.MOVIE_BY_INFO, "ranking:4"));
+        DailyChallenge thirdCompleted = challengeRepository.saveAndFlush(
+                buildChallenge(LocalDate.of(2026, 10, 1), DailyGameType.EPISODE_BY_FRAME, "ranking:5"));
+
+        resultRepository.save(buildResult(first, firstCompleted, 2, 5, DailyGameResultStatus.COMPLETED));
+        resultRepository.save(buildResult(first, firstFailed, 10, 0, DailyGameResultStatus.FAILED));
+        resultRepository.save(buildResult(first, firstInProgress, 1, 99, DailyGameResultStatus.IN_PROGRESS));
+        resultRepository.save(buildResult(second, secondCompleted, 3, 5, DailyGameResultStatus.COMPLETED));
+        resultRepository.saveAndFlush(buildResult(third, thirdCompleted, 3, 5, DailyGameResultStatus.COMPLETED));
+
+        Page<UserDailyGameResultRepository.DailyGameRankingProjection> page = resultRepository
+                .findRankingByGameType(null, PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getUsername)
+                .containsExactly("ranking-second", "ranking-third", "ranking-first");
+        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getRank)
+                .containsExactly(1L, 1L, 3L);
+        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getTotalScore)
+                .containsExactly(5L, 5L, 5L);
+        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getTotalAttempts)
+                .containsExactly(3L, 3L, 12L);
+    }
+
+    @Test
+    @DisplayName("[findRankingByGameType] Should Aggregate Only The Requested Game Type")
+    void shouldAggregateOnlyTheRequestedGameType() {
+        User user = userRepository.save(buildUser("ranking-specific"));
+        DailyChallenge requested = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "specific:movie"));
+        DailyChallenge other = challengeRepository.saveAndFlush(
+                buildChallenge(LocalDate.of(2026, 9, 28), DailyGameType.SERIES_BY_POSTER, "specific:series"));
+        resultRepository.save(buildResult(user, requested, 2, 4, DailyGameResultStatus.COMPLETED));
+        resultRepository.saveAndFlush(buildResult(user, other, 10, 10, DailyGameResultStatus.COMPLETED));
+
+        UserDailyGameResultRepository.DailyGameRankingProjection projection = resultRepository
+                .findRankingByGameType(DailyGameType.MOVIE_BY_POSTER.name(), PageRequest.of(0, 10))
+                .getContent().getFirst();
+
+        assertThat(projection.getTotalScore()).isEqualTo(4L);
+        assertThat(projection.getTotalAttempts()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("[findRankingByGameType] Should Return An Empty Page Without Final Results")
+    void shouldReturnAnEmptyPageWithoutFinalResults() {
+        assertThat(resultRepository.findRankingByGameType(null, PageRequest.of(0, 10))).isEmpty();
+    }
+
     private DailyChallenge buildChallenge(LocalDate date, DailyGameType type, String answerKey) {
         boolean episode = type.targetKind() == DailyGameTargetKind.EPISODE;
         try {
@@ -547,13 +631,31 @@ class DailyGameRepositoryTest {
     }
 
     private User buildUser() {
+        return buildUser("daily-game-user");
+    }
+
+    private User buildUser(String username) {
         return User.builder()
-                .username("daily-game-user")
-                .email("daily-game-user@email.com")
+                .username(username)
+                .email(username + "@email.com")
                 .password("hashed_password")
                 .profilePicture("https://example.com/photo.png")
                 .createdAt(LocalDateTime.of(2026, 9, 27, 12, 0))
                 .updatedAt(LocalDateTime.of(2026, 9, 27, 12, 0))
+                .build();
+    }
+
+    private UserDailyGameResult buildResult(
+            User user, DailyChallenge challenge, int attempts, int score, DailyGameResultStatus status) {
+        return UserDailyGameResult.builder()
+                .user(user)
+                .dailyChallenge(challenge)
+                .attemptsUsed(attempts)
+                .score(score)
+                .status(status)
+                .completedAt(status == DailyGameResultStatus.IN_PROGRESS ? null : NOW)
+                .createdAt(NOW)
+                .updatedAt(NOW)
                 .build();
     }
 

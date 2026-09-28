@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHintDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
@@ -50,6 +51,15 @@ public class DailyChallengeResponseAssembler {
         return new DailyGameAttemptResponseDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer());
+    }
+
+    public DailyGameHistoryDTO toHistoryResponse(
+            LocalDate challengeDate, DailyChallenge challenge, UserDailyGameResult result) {
+        DailyGameView view = view(challenge, result, List.of());
+        return new DailyGameHistoryDTO(
+                challengeDate, view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(),
+                view.attemptsRemaining(), view.status(), view.imageUrl(), view.score(), view.completedAt(),
+                answer(challenge));
     }
 
     private DailyGameStateDTO toState(
