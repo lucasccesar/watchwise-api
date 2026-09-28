@@ -254,7 +254,7 @@ class DailyGameServiceImplTest {
     }
 
     @Test
-    @DisplayName("[answerKey] Should Normalize Every Supported Target Identity - When A Candidate Identity IsBuilt")
+    @DisplayName("[answerKey] Should Normalize Every Supported Target Identity - When A Candidate Identity Is Built")
     void shouldNormalizeEverySupportedTargetIdentityWhenACandidateIdentityIsBuilt() {
         assertThat(new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, "550", null, null, null, null)
                 .answerKey()).isEqualTo("MOVIE:550");

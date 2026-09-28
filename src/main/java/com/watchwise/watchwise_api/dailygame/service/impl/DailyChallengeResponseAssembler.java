@@ -107,11 +107,20 @@ public class DailyChallengeResponseAssembler {
     }
 
     private String imageUrl(DailyChallenge challenge) {
+        String imagePath = challenge.getImagePath();
+        if (isAbsoluteHttpUrl(imagePath)) {
+            return imagePath;
+        }
         return switch (challenge.getTargetKind()) {
-            case MOVIE, SERIES -> TmdbImageUrlBuilder.posterUrl(challenge.getImagePath());
-            case PERSON -> TmdbImageUrlBuilder.profileUrl(challenge.getImagePath());
-            case EPISODE -> TmdbImageUrlBuilder.stillUrl(challenge.getImagePath());
+            case MOVIE, SERIES -> TmdbImageUrlBuilder.posterUrl(imagePath);
+            case PERSON -> TmdbImageUrlBuilder.profileUrl(imagePath);
+            case EPISODE -> TmdbImageUrlBuilder.stillUrl(imagePath);
         };
+    }
+
+    private boolean isAbsoluteHttpUrl(String value) {
+        return value != null && (value.regionMatches(true, 0, "http://", 0, 7)
+                || value.regionMatches(true, 0, "https://", 0, 8));
     }
 
     private record DailyGameView(
