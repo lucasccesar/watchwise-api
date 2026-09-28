@@ -61,6 +61,23 @@ class GlobalExceptionHandlerTest {
         assertThat(apiError.path()).isEqualTo("/some/path");
     }
 
+    @Test
+    @DisplayName("[handleDailyGamesUnavailable] Should Return A Generic 503 ApiError - When The Daily Challenge Set Is Unavailable")
+    void shouldReturnAGeneric503ApiErrorWhenTheDailyChallengeSetIsUnavailable() {
+        HttpServletRequest servletRequest = new MockHttpServletRequest("GET", "/games/today");
+        DailyGamesUnavailableException exception = new DailyGamesUnavailableException();
+
+        ApiError apiError = handler.handleDailyGamesUnavailable(exception, servletRequest).getBody();
+
+        assertThat(apiError).isNotNull();
+        assertThat(apiError.status()).isEqualTo(503);
+        assertThat(apiError.error()).isEqualTo("Service Unavailable");
+        assertThat(apiError.message()).isEqualTo("Daily games are temporarily unavailable");
+        assertThat(apiError.message()).doesNotContain("SQL");
+        assertThat(apiError.message()).doesNotContain("TMDB");
+        assertThat(apiError.path()).isEqualTo("/games/today");
+    }
+
     private void dummyMethod(String argument) {
     }
 }
