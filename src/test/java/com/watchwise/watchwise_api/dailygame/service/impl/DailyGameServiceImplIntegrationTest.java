@@ -127,6 +127,7 @@ class DailyGameServiceImplIntegrationTest {
             Future<SubmissionOutcome> first = executor.submit(submission);
             awaitInsertAdvisoryLock();
             Future<SubmissionOutcome> second = executor.submit(submission);
+            awaitWaitingInsertAdvisoryLock();
             List<SubmissionOutcome> outcomes = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
 
             assertThat(outcomes).extracting(SubmissionOutcome::succeeded).containsExactlyInAnyOrder(true, false);
@@ -135,6 +136,9 @@ class DailyGameServiceImplIntegrationTest {
                     .allSatisfy(failure -> assertThat(failure).isInstanceOf(ConflictException.class));
         } finally {
             executor.shutdownNow();
+            if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Daily game race executor did not terminate");
+            }
         }
 
         List<UserDailyGameResult> results = resultRepository.findAll();
@@ -205,7 +209,7 @@ class DailyGameServiceImplIntegrationTest {
                 AS $$
                 BEGIN
                     PERFORM pg_advisory_xact_lock(hashtext('daily-game-test-insert'));
-                    PERFORM pg_sleep(1);
+                    PERFORM pg_sleep(2);
                     RETURN NEW;
                 END;
                 $$
@@ -227,6 +231,14 @@ class DailyGameServiceImplIntegrationTest {
     }
 
     private void awaitInsertAdvisoryLock() throws InterruptedException {
+        awaitAdvisoryLock(true, "granted");
+    }
+
+    private void awaitWaitingInsertAdvisoryLock() throws InterruptedException {
+        awaitAdvisoryLock(false, "waiting");
+    }
+
+    private void awaitAdvisoryLock(boolean granted, String state) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (System.nanoTime() < deadline) {
             Boolean locked = jdbcTemplate.queryForObject("""
@@ -234,18 +246,18 @@ class DailyGameServiceImplIntegrationTest {
                         SELECT 1
                         FROM pg_locks
                         WHERE locktype = 'advisory'
-                          AND granted
+                          AND granted = ?
                           AND classid = 0
                           AND objsubid = 1
                           AND (objid::bigint & 4294967295) = (hashtext('daily-game-test-insert')::bigint & 4294967295)
                     )
-                    """, Boolean.class);
+                    """, Boolean.class, granted);
             if (Boolean.TRUE.equals(locked)) {
                 return;
             }
             Thread.sleep(25);
         }
-        throw new IllegalStateException("Timed out waiting for the daily game insert advisory lock");
+        throw new IllegalStateException("Timed out waiting for the " + state + " daily game insert advisory lock");
     }
 
     private record SubmissionOutcome(boolean succeeded, Throwable failure) {
