@@ -30,6 +30,7 @@ import java.time.ZoneOffset;
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -263,9 +264,8 @@ class DailyGameRankingServiceImplTest {
                 .episodeNumber(episode ? 1 : null)
                 .answerKey(type.name() + ":answer")
                 .imagePath("https://example.com/image.jpg")
-                .answerSnapshot(new tools.jackson.databind.ObjectMapper().createObjectNode()
-                        .put("title", "Frozen answer"))
-                .displaySnapshot(new tools.jackson.databind.ObjectMapper().createObjectNode())
+                .answerSnapshot(Map.of("title", "Frozen answer"))
+                .displaySnapshot(Map.of())
                 .createdAt(NOW)
                 .updatedAt(NOW)
                 .build();

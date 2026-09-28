@@ -27,12 +27,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import tools.jackson.databind.ObjectMapper;
-
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -82,8 +81,6 @@ class DailyGameServiceImplIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
@@ -167,8 +164,8 @@ class DailyGameServiceImplIntegrationTest {
                 .targetTmdbId("550")
                 .answerKey("MOVIE:550")
                 .imagePath("https://image.tmdb.org/t/p/w500/fight-club.jpg")
-                .answerSnapshot(objectMapper.createObjectNode().put("title", "Fight Club"))
-                .displaySnapshot(objectMapper.createObjectNode())
+                .answerSnapshot(Map.of("title", "Fight Club"))
+                .displaySnapshot(Map.of())
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

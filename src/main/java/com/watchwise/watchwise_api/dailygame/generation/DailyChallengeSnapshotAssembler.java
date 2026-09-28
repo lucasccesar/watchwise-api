@@ -10,21 +10,14 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class DailyChallengeSnapshotAssembler {
-
-    private final ObjectMapper objectMapper;
-
-    public DailyChallengeSnapshotAssembler(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
 
     public DailyChallengeCandidate moviePoster(TmdbMovieSearchResult movie, String imagePath) {
         return candidate(DailyGameType.MOVIE_BY_POSTER, DailyGameTargetKind.MOVIE, movie.id(), null, null, null,
@@ -87,10 +80,10 @@ public class DailyChallengeSnapshotAssembler {
                 seriesTmdbId, List.of());
     }
 
-    public JsonNode answerSnapshot(DailyGameTargetKind targetKind, String targetTmdbId, String personTmdbId,
+    public Map<String, Object> answerSnapshot(DailyGameTargetKind targetKind, String targetTmdbId, String personTmdbId,
                                    String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, String title,
                                    String imagePath, String sourceTmdbId) {
-        ObjectNode snapshot = objectMapper.createObjectNode();
+        Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("targetKind", targetKind.name());
         put(snapshot, "tmdbId", targetTmdbId);
         put(snapshot, "personTmdbId", personTmdbId);
@@ -107,8 +100,8 @@ public class DailyChallengeSnapshotAssembler {
         return snapshot;
     }
 
-    public JsonNode displaySnapshot(String imagePath) {
-        ObjectNode snapshot = objectMapper.createObjectNode();
+    public Map<String, Object> displaySnapshot(String imagePath) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("imageUrl", imagePath);
         return snapshot;
     }
@@ -120,15 +113,16 @@ public class DailyChallengeSnapshotAssembler {
     private DailyChallengeCandidate candidate(DailyGameType gameType, DailyGameTargetKind targetKind,
                                               String targetTmdbId, String seriesTmdbId, Integer seasonNumber,
                                               Integer episodeNumber, String sourceTmdbId, String answerKey,
-                                              String imagePath, JsonNode answerSnapshot, JsonNode displaySnapshot,
+                                              String imagePath, Map<String, Object> answerSnapshot,
+                                              Map<String, Object> displaySnapshot,
                                               List<DailyChallengeCandidate.HintSnapshot> hints) {
         return new DailyChallengeCandidate(gameType, targetKind, targetTmdbId, seriesTmdbId, seasonNumber,
                 episodeNumber, sourceTmdbId, answerKey, imagePath, answerSnapshot, displaySnapshot, hints);
     }
 
-    private static void put(ObjectNode objectNode, String field, String value) {
+    private static void put(Map<String, Object> snapshot, String field, String value) {
         if (value != null && !value.isBlank()) {
-            objectNode.put(field, value);
+            snapshot.put(field, value);
         }
     }
 }

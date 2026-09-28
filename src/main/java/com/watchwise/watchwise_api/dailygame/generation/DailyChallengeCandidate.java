@@ -2,9 +2,9 @@ package com.watchwise.watchwise_api.dailygame.generation;
 
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
-import tools.jackson.databind.JsonNode;
 
 import java.util.List;
+import java.util.Map;
 
 public record DailyChallengeCandidate(
         DailyGameType gameType,
@@ -16,8 +16,8 @@ public record DailyChallengeCandidate(
         String sourceTmdbId,
         String answerKey,
         String imagePath,
-        JsonNode answerSnapshot,
-        JsonNode displaySnapshot,
+        Map<String, Object> answerSnapshot,
+        Map<String, Object> displaySnapshot,
         List<HintSnapshot> hints) {
 
     public DailyChallengeCandidate {

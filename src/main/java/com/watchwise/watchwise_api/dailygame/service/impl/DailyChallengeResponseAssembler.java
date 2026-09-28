@@ -14,7 +14,6 @@ import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -109,8 +108,8 @@ public class DailyChallengeResponseAssembler {
                 ? challenge.getTargetTmdbId() : null;
         String personTmdbId = targetKind == DailyGameTargetKind.PERSON ? challenge.getTargetTmdbId() : null;
         String seriesTmdbId = targetKind == DailyGameTargetKind.EPISODE ? challenge.getSeriesTmdbId() : null;
-        JsonNode snapshot = challenge.getAnswerSnapshot();
-        String title = snapshot == null ? null : snapshot.path("title").asText(null);
+        Map<String, Object> snapshot = challenge.getAnswerSnapshot();
+        String title = snapshot == null ? null : (String) snapshot.get("title");
         return new DailyGameAnswerDTO(targetKind, tmdbId, personTmdbId, seriesTmdbId,
                 challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, imageUrl(challenge));
     }

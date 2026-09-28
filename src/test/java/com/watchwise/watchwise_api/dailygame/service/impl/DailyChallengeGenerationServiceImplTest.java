@@ -19,8 +19,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
-
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -245,11 +243,10 @@ class DailyChallengeGenerationServiceImplTest {
     private static DailyChallengeCandidate candidate(DailyGameType type, String answerKey,
                                                      List<DailyChallengeCandidate.HintSnapshot> hints) {
         boolean episode = type.targetKind() == DailyGameTargetKind.EPISODE;
-        ObjectMapper objectMapper = new ObjectMapper();
         String targetTmdbId = episode ? null : answerKey.substring(answerKey.indexOf(':') + 1);
         return new DailyChallengeCandidate(type, type.targetKind(), targetTmdbId, episode ? "1396" : null,
                 episode ? 1 : null, episode ? 1 : null, null, answerKey, "/image.jpg",
-                objectMapper.createObjectNode().put("title", "Answer"), objectMapper.createObjectNode().put("imageUrl", "/image.jpg"),
+                Map.of("title", "Answer"), Map.of("imageUrl", "/image.jpg"),
                 hints);
     }
 

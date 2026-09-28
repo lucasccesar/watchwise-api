@@ -34,7 +34,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.util.Collections;
@@ -62,7 +61,7 @@ class DailyChallengeGeneratorTest {
 
     @BeforeEach
     void setUp() {
-        snapshotAssembler = new DailyChallengeSnapshotAssembler(new ObjectMapper());
+        snapshotAssembler = new DailyChallengeSnapshotAssembler();
     }
 
     @Test
@@ -140,7 +139,7 @@ class DailyChallengeGeneratorTest {
 
         assertThat(candidate.answerKey()).isEqualTo("PERSON:287");
         assertThat(candidate.targetTmdbId()).isEqualTo("287");
-        assertThat(candidate.answerSnapshot().get("title").asText()).isEqualTo("Brad Pitt");
+        assertThat(candidate.answerSnapshot().get("title")).isEqualTo("Brad Pitt");
     }
 
     @Test

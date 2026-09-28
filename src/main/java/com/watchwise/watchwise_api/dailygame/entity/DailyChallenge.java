@@ -16,10 +16,10 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
-import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -69,11 +69,11 @@ public class DailyChallenge {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "answer_snapshot", columnDefinition = "jsonb", nullable = false)
-    private JsonNode answerSnapshot;
+    private Map<String, Object> answerSnapshot;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "display_snapshot", columnDefinition = "jsonb", nullable = false)
-    private JsonNode displaySnapshot;
+    private Map<String, Object> displaySnapshot;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

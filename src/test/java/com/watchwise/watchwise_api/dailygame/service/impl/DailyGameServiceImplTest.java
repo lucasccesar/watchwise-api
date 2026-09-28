@@ -29,8 +29,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
-
 import java.lang.reflect.Method;
 import java.time.Clock;
 import java.time.Instant;
@@ -444,12 +442,12 @@ class DailyGameServiceImplTest {
                 .targetTmdbId(tmdbId)
                 .answerKey(type.targetKind().name() + ":" + tmdbId)
                 .imagePath("/image.jpg")
-                .answerSnapshot(new ObjectMapper().createObjectNode()
-                        .put("targetKind", type.targetKind().name())
-                        .put("tmdbId", tmdbId)
-                        .put("title", "Answer")
-                        .put("imageUrl", "/image.jpg"))
-                .displaySnapshot(new ObjectMapper().createObjectNode().put("imageUrl", "/image.jpg"))
+                .answerSnapshot(Map.of(
+                        "targetKind", type.targetKind().name(),
+                        "tmdbId", tmdbId,
+                        "title", "Answer",
+                        "imageUrl", "/image.jpg"))
+                .displaySnapshot(Map.of("imageUrl", "/image.jpg"))
                 .createdAt(NOW)
                 .updatedAt(NOW)
                 .build();
@@ -466,14 +464,14 @@ class DailyGameServiceImplTest {
                 .episodeNumber(episodeNumber)
                 .answerKey("EPISODE:" + seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber)
                 .imagePath("/still.jpg")
-                .answerSnapshot(new ObjectMapper().createObjectNode()
-                        .put("targetKind", "EPISODE")
-                        .put("seriesTmdbId", seriesTmdbId)
-                        .put("seasonNumber", seasonNumber)
-                        .put("episodeNumber", episodeNumber)
-                        .put("title", "Episode")
-                        .put("imageUrl", "/still.jpg"))
-                .displaySnapshot(new ObjectMapper().createObjectNode().put("imageUrl", "/still.jpg"))
+                .answerSnapshot(Map.of(
+                        "targetKind", "EPISODE",
+                        "seriesTmdbId", seriesTmdbId,
+                        "seasonNumber", seasonNumber,
+                        "episodeNumber", episodeNumber,
+                        "title", "Episode",
+                        "imageUrl", "/still.jpg"))
+                .displaySnapshot(Map.of("imageUrl", "/still.jpg"))
                 .createdAt(NOW)
                 .updatedAt(NOW)
                 .build();

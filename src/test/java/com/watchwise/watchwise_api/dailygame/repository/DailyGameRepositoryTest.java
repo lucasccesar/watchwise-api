@@ -24,11 +24,10 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import tools.jackson.databind.ObjectMapper;
-
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,8 +49,6 @@ class DailyGameRepositoryTest {
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
     }
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     private DailyChallengeRepository challengeRepository;
@@ -118,8 +115,8 @@ class DailyGameRepositoryTest {
 
         DailyChallenge reloaded = challengeRepository.findById(saved.getId()).orElseThrow();
 
-        assertThat(reloaded.getAnswerSnapshot().get("answer").asText()).isEqualTo("Fight Club");
-        assertThat(reloaded.getDisplaySnapshot().get("title").asText()).isEqualTo("Fight Club");
+        assertThat(reloaded.getAnswerSnapshot().get("answer")).isEqualTo("Fight Club");
+        assertThat(reloaded.getDisplaySnapshot().get("title")).isEqualTo("Fight Club");
     }
 
     @Test
@@ -160,7 +157,7 @@ class DailyGameRepositoryTest {
     @DisplayName("[save] Should Reject An Invalid Target Kind Enum Value")
     void shouldRejectAnInvalidTargetKindEnumValue() {
         assertThatThrownBy(() -> insertChallengeRow(
-                "MOVIE_BY_POSTER", "NOT_A_TARGET", "550", null, null, null))
+                "MOVIE_BY_POSTER", "INVALID", "550", null, null, null))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("ck_daily_challenges_target_kind");
     }
@@ -351,9 +348,9 @@ class DailyGameRepositoryTest {
                 .hintValue("1999")
                 .build());
 
+        entityManager.clear();
         challengeRepository.deleteById(challenge.getId());
         challengeRepository.flush();
-        entityManager.clear();
 
         assertThat(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).isEmpty();
     }
@@ -446,9 +443,9 @@ class DailyGameRepositoryTest {
         UserDailyGameResult result = resultRepository.saveAndFlush(buildResult(
                 user, challenge, LocalDateTime.of(2026, 9, 27, 12, 0)));
 
+        entityManager.clear();
         userRepository.deleteById(user.getId());
         userRepository.flush();
-        entityManager.clear();
 
         assertThat(resultRepository.findById(result.getId())).isEmpty();
     }
@@ -566,8 +563,8 @@ class DailyGameRepositoryTest {
                     .answerKey(answerKey)
                     .sourceTmdbId(null)
                     .imagePath("/fight-club.jpg")
-                    .answerSnapshot(objectMapper.readTree("{\"answer\":\"Fight Club\"}"))
-                    .displaySnapshot(objectMapper.readTree("{\"title\":\"Fight Club\"}"))
+                    .answerSnapshot(Map.of("answer", "Fight Club"))
+                    .displaySnapshot(Map.of("title", "Fight Club"))
                     .createdAt(LocalDateTime.of(2026, 9, 27, 12, 0))
                     .updatedAt(LocalDateTime.of(2026, 9, 27, 12, 0))
                     .build();
