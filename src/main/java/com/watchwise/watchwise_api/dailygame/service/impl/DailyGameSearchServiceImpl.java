@@ -29,15 +29,19 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.IntFunction;
 
 @Service
 public class DailyGameSearchServiceImpl implements DailyGameSearchService {
 
     private static final int MAX_QUERY_LENGTH = 100;
     private static final int MAX_SEARCH_PAGE_SIZE = 100;
+    private static final int TMDB_SEARCH_PAGE_SIZE = 20;
     private static final String THROTTLE_KEY_PREFIX = "daily-game-search|";
     private static final String LANGUAGE = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
 
@@ -76,11 +80,10 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         }
 
         throttle(userId);
-        int tmdbPage = pageRequest.getPageNumber() + 1;
         return switch (type.targetKind()) {
-            case MOVIE -> searchMovies(normalizedQuery, tmdbPage, pageRequest);
-            case SERIES -> searchSeries(normalizedQuery, tmdbPage, pageRequest);
-            case PERSON -> searchPeople(normalizedQuery, tmdbPage, pageRequest);
+            case MOVIE -> searchMovies(normalizedQuery, pageRequest);
+            case SERIES -> searchSeries(normalizedQuery, pageRequest);
+            case PERSON -> searchPeople(normalizedQuery, pageRequest);
             case EPISODE -> throw new BadRequestException("Episode searches require the episode search endpoints");
         };
     }
@@ -91,7 +94,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         String normalizedQuery = normalizeQuery(query);
         PageRequest pageRequest = buildPageRequest(page, size);
         throttle(userId);
-        return searchSeries(normalizedQuery, pageRequest.getPageNumber() + 1, pageRequest);
+        return searchSeries(normalizedQuery, pageRequest);
     }
 
     @Override
@@ -121,11 +124,11 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         return new PageImpl<>(candidates.subList(fromIndex, toIndex), pageRequest, candidates.size());
     }
 
-    private Page<DailyGameSearchResultDTO> searchMovies(String query, int page, PageRequest pageRequest) {
-        TmdbSearchPage<TmdbMovieSearchResult> searchPage = searchPageOrEmpty(
-                tmdbClient.searchMovies(query, LANGUAGE, page), page);
-        List<DailyGameSearchResultDTO> candidates = searchPage.results().stream()
-                .map(movie -> new DailyGameSearchResultDTO(
+    private Page<DailyGameSearchResultDTO> searchMovies(String query, PageRequest pageRequest) {
+        return searchExternal(
+                pageRequest,
+                remotePage -> tmdbClient.searchMovies(query, LANGUAGE, remotePage),
+                movie -> new DailyGameSearchResultDTO(
                         DailyGameTargetKind.MOVIE,
                         movie.id(),
                         null,
@@ -134,16 +137,14 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null,
                         movie.title(),
                         TmdbImageUrlBuilder.posterUrl(movie.posterPath()),
-                        parseDate(movie.releaseDate())))
-                .toList();
-        return externalPage(searchPage, pageRequest, candidates);
+                        parseDate(movie.releaseDate())));
     }
 
-    private Page<DailyGameSearchResultDTO> searchSeries(String query, int page, PageRequest pageRequest) {
-        TmdbSearchPage<TmdbTvSearchResult> searchPage = searchPageOrEmpty(
-                tmdbClient.searchTv(query, LANGUAGE, page), page);
-        List<DailyGameSearchResultDTO> candidates = searchPage.results().stream()
-                .map(series -> new DailyGameSearchResultDTO(
+    private Page<DailyGameSearchResultDTO> searchSeries(String query, PageRequest pageRequest) {
+        return searchExternal(
+                pageRequest,
+                remotePage -> tmdbClient.searchTv(query, LANGUAGE, remotePage),
+                series -> new DailyGameSearchResultDTO(
                         DailyGameTargetKind.SERIES,
                         series.id(),
                         null,
@@ -152,16 +153,14 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null,
                         series.name(),
                         TmdbImageUrlBuilder.posterUrl(series.posterPath()),
-                        parseDate(series.firstAirDate())))
-                .toList();
-        return externalPage(searchPage, pageRequest, candidates);
+                        parseDate(series.firstAirDate())));
     }
 
-    private Page<DailyGameSearchResultDTO> searchPeople(String query, int page, PageRequest pageRequest) {
-        TmdbSearchPage<TmdbPersonSearchResult> searchPage = searchPageOrEmpty(
-                tmdbClient.searchPeople(query, LANGUAGE, page), page);
-        List<DailyGameSearchResultDTO> candidates = searchPage.results().stream()
-                .map(person -> new DailyGameSearchResultDTO(
+    private Page<DailyGameSearchResultDTO> searchPeople(String query, PageRequest pageRequest) {
+        return searchExternal(
+                pageRequest,
+                remotePage -> tmdbClient.searchPeople(query, LANGUAGE, remotePage),
+                person -> new DailyGameSearchResultDTO(
                         DailyGameTargetKind.PERSON,
                         null,
                         person.id(),
@@ -170,9 +169,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null,
                         person.name(),
                         TmdbImageUrlBuilder.profileUrl(person.profilePath()),
-                        null))
-                .toList();
-        return externalPage(searchPage, pageRequest, candidates);
+                        null));
     }
 
     private List<DailyGameSearchResultDTO> seasonCandidates(
@@ -248,37 +245,45 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                 page.totalResults());
     }
 
-    private Page<DailyGameSearchResultDTO> externalPage(
-            TmdbSearchPage<?> searchPage, PageRequest pageRequest, List<DailyGameSearchResultDTO> candidates) {
-        List<DailyGameSearchResultDTO> content = candidates.size() > pageRequest.getPageSize()
-                ? candidates.subList(0, pageRequest.getPageSize())
-                : candidates;
-        return new PageImpl<>(content, pageRequest, searchPage.totalResults()) {
-            @Override
-            public long getTotalElements() {
-                return searchPage.totalResults();
-            }
+    private <T> Page<DailyGameSearchResultDTO> searchExternal(
+            PageRequest pageRequest,
+            IntFunction<TmdbLookupResult<TmdbSearchPage<T>>> remoteSearch,
+            Function<T, DailyGameSearchResultDTO> mapper) {
+        long start = pageRequest.getOffset();
+        long end = start + pageRequest.getPageSize() - 1L;
+        int firstRemotePage = remotePageFor(start);
+        TmdbSearchPage<T> firstPage = searchPageOrEmpty(remoteSearch.apply(firstRemotePage), firstRemotePage);
+        long totalResults = firstPage.totalResults();
 
-            @Override
-            public int getNumber() {
-                return Math.max(0, searchPage.page() - 1);
-            }
+        if (start >= totalResults) {
+            return new PageImpl<>(List.of(), pageRequest, totalResults);
+        }
 
-            @Override
-            public int getTotalPages() {
-                return searchPage.totalPages();
-            }
+        long effectiveEnd = Math.min(end, totalResults - 1);
+        int lastRemotePage = remotePageFor(effectiveEnd);
+        List<T> remoteResults = new ArrayList<>();
+        remoteResults.addAll(firstPage.results());
+        for (long remotePage = (long) firstRemotePage + 1; remotePage <= lastRemotePage; remotePage++) {
+            int requestedRemotePage = (int) remotePage;
+            remoteResults.addAll(searchPageOrEmpty(
+                    remoteSearch.apply(requestedRemotePage), requestedRemotePage).results());
+        }
 
-            @Override
-            public boolean hasNext() {
-                return searchPage.page() < searchPage.totalPages();
-            }
+        int firstLocalIndex = (int) (start - (long) (firstRemotePage - 1) * TMDB_SEARCH_PAGE_SIZE);
+        int fromIndex = Math.min(firstLocalIndex, remoteResults.size());
+        int toIndex = Math.min(fromIndex + pageRequest.getPageSize(), remoteResults.size());
+        List<DailyGameSearchResultDTO> content = remoteResults.subList(fromIndex, toIndex).stream()
+                .map(mapper)
+                .toList();
+        return new PageImpl<>(content, pageRequest, totalResults);
+    }
 
-            @Override
-            public boolean isLast() {
-                return !hasNext();
-            }
-        };
+    private int remotePageFor(long resultIndex) {
+        long page = resultIndex / TMDB_SEARCH_PAGE_SIZE + 1;
+        if (page > Integer.MAX_VALUE) {
+            throw new BadRequestException("Page number is too large for external search");
+        }
+        return (int) page;
     }
 
     private PageRequest buildPageRequest(Integer page, Integer size) {
@@ -301,7 +306,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
 
     private String normalizePositiveIdentifier(String value) {
         String trimmedValue = value == null ? null : value.trim();
-        if (trimmedValue == null || !trimmedValue.matches("[1-9]\\d{0,19}")) {
+        if (trimmedValue == null || !trimmedValue.matches("[1-9]\\d*")) {
             throw new BadRequestException("seriesTmdbId must be a positive numeric identifier");
         }
         return trimmedValue;

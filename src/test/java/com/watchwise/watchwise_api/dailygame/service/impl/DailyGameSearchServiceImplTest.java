@@ -22,6 +22,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -34,6 +36,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,8 +66,10 @@ class DailyGameSearchServiceImplTest {
     @EnumSource(value = DailyGameType.class, names = {"MOVIE_BY_POSTER", "MOVIE_BY_INFO"})
     @DisplayName("[search] Should Return Movie Candidates - When The Game Type Targets Movies")
     void shouldReturnMovieCandidatesWhenTheGameTypeTargetsMovies(DailyGameType gameType) {
-        when(tmdbClient.searchMovies("fight", LANGUAGE, 2)).thenReturn(new TmdbLookupResult.Found<>(
-                new TmdbSearchPage<>(2, List.of(new TmdbMovieSearchResult("550", "Fight Club", "/poster.jpg", "1999-10-15")), 3, 5)));
+        when(tmdbClient.searchMovies("fight", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, List.of(
+                        new TmdbMovieSearchResult("603", "The Matrix", "/matrix.jpg", "1999-03-31"),
+                        new TmdbMovieSearchResult("550", "Fight Club", "/poster.jpg", "1999-10-15")), 5, 5)));
 
         Page<DailyGameSearchResultDTO> result = service().search(USER_ID, gameType, "  fight  ", 2, 1);
 
@@ -74,7 +79,7 @@ class DailyGameSearchServiceImplTest {
         assertThat(result.getNumber()).isEqualTo(1);
         assertThat(result.getSize()).isEqualTo(1);
         assertThat(result.getTotalElements()).isEqualTo(5);
-        verify(tmdbClient).searchMovies("fight", LANGUAGE, 2);
+        verify(tmdbClient).searchMovies("fight", LANGUAGE, 1);
         verify(tmdbClient, never()).searchTv(anyString(), anyString(), anyInt());
         verify(tmdbClient, never()).searchPeople(anyString(), anyString(), anyInt());
     }
@@ -84,14 +89,17 @@ class DailyGameSearchServiceImplTest {
     @DisplayName("[search] Should Return Series Candidates - When The Game Type Targets Series")
     void shouldReturnSeriesCandidatesWhenTheGameTypeTargetsSeries(DailyGameType gameType) {
         when(tmdbClient.searchTv("breaking", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Found<>(
-                new TmdbSearchPage<>(1, List.of(new TmdbTvSearchResult("1399", "Breaking Bad", "/poster.jpg", "2008-01-20")), 1, 1)));
+                new TmdbSearchPage<>(1, List.of(
+                        new TmdbTvSearchResult("1399", "Breaking Bad", "/poster.jpg", "2008-01-20"),
+                        new TmdbTvSearchResult("94997", "House of the Dragon", "/dragon.jpg", "2022-08-21")), 1, 2)));
 
-        Page<DailyGameSearchResultDTO> result = service().search(USER_ID, gameType, "breaking", 1, 20);
+        Page<DailyGameSearchResultDTO> result = service().search(USER_ID, gameType, "breaking", 2, 1);
 
-        assertThat(result.getContent().getFirst()).isEqualTo(new DailyGameSearchResultDTO(
-                DailyGameTargetKind.SERIES, "1399", null, null, null, null,
-                "Breaking Bad", "https://image.tmdb.org/t/p/w500/poster.jpg", LocalDate.of(2008, 1, 20)));
+        assertThat(result.getContent()).containsExactly(new DailyGameSearchResultDTO(
+                DailyGameTargetKind.SERIES, "94997", null, null, null, null,
+                "House of the Dragon", "https://image.tmdb.org/t/p/w500/dragon.jpg", LocalDate.of(2022, 8, 21)));
         verify(tmdbClient).searchTv("breaking", LANGUAGE, 1);
+        verify(tmdbClient, never()).searchTv("breaking", LANGUAGE, 2);
         verify(tmdbClient, never()).searchMovies(anyString(), anyString(), anyInt());
         verify(tmdbClient, never()).searchPeople(anyString(), anyString(), anyInt());
     }
@@ -101,14 +109,17 @@ class DailyGameSearchServiceImplTest {
     @DisplayName("[search] Should Return Person Candidates - When The Game Type Targets People")
     void shouldReturnPersonCandidatesWhenTheGameTypeTargetsPeople(DailyGameType gameType) {
         when(tmdbClient.searchPeople("fincher", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Found<>(
-                new TmdbSearchPage<>(1, List.of(new TmdbPersonSearchResult("7467", "David Fincher", "/profile.jpg")), 1, 1)));
+                new TmdbSearchPage<>(1, List.of(
+                        new TmdbPersonSearchResult("7467", "David Fincher", "/profile.jpg"),
+                        new TmdbPersonSearchResult("500", "Actor", "/actor.jpg")), 1, 2)));
 
-        Page<DailyGameSearchResultDTO> result = service().search(USER_ID, gameType, "fincher", 1, 20);
+        Page<DailyGameSearchResultDTO> result = service().search(USER_ID, gameType, "fincher", 2, 1);
 
-        assertThat(result.getContent().getFirst()).isEqualTo(new DailyGameSearchResultDTO(
-                DailyGameTargetKind.PERSON, null, "7467", null, null, null,
-                "David Fincher", "https://image.tmdb.org/t/p/w185/profile.jpg", null));
+        assertThat(result.getContent()).containsExactly(new DailyGameSearchResultDTO(
+                DailyGameTargetKind.PERSON, null, "500", null, null, null,
+                "Actor", "https://image.tmdb.org/t/p/w185/actor.jpg", null));
         verify(tmdbClient).searchPeople("fincher", LANGUAGE, 1);
+        verify(tmdbClient, never()).searchPeople("fincher", LANGUAGE, 2);
         verify(tmdbClient, never()).searchMovies(anyString(), anyString(), anyInt());
         verify(tmdbClient, never()).searchTv(anyString(), anyString(), anyInt());
     }
@@ -167,6 +178,134 @@ class DailyGameSearchServiceImplTest {
                 USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 101);
 
         assertThat(result.getSize()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("[search] Should Use The Maximum Page Size - When The Requested Size Is At The Safe Maximum")
+    void shouldUseTheMaximumPageSizeWhenTheRequestedSizeIsAtTheSafeMaximum() {
+        stubMovieSearchPage("fight", 1, List.of(movie("550", "Fight Club")), 1, 1);
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 100);
+
+        assertThat(result.getSize()).isEqualTo(100);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(ints = 0)
+    @DisplayName("[search] Should Use The First Page - When The Page Number Is Null Or Zero")
+    void shouldUseTheFirstPageWhenThePageNumberIsNullOrZero(Integer page) {
+        stubMovieSearchPage("fight", 1, List.of(movie("550", "Fight Club")), 1, 1);
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", page, 1);
+
+        assertThat(result.getNumber()).isZero();
+        verify(tmdbClient).searchMovies("fight", LANGUAGE, 1);
+    }
+
+    @Test
+    @DisplayName("[search] Should Reject Negative Page Number - When The Page Number Is Negative")
+    void shouldRejectNegativePageNumberWhenThePageNumberIsNegative() {
+        assertThatThrownBy(() -> service().search(USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", -1, 20))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Page number must be greater than or equal to 0");
+
+        verifyNoInteractions(tmdbClient, requestThrottler);
+    }
+
+    @Test
+    @DisplayName("[search] Should Use The Default Page Size - When The Page Size Is Null")
+    void shouldUseTheDefaultPageSizeWhenThePageSizeIsNull() {
+        stubMovieSearchPage("fight", 1, List.of(movie("550", "Fight Club")), 1, 1);
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, null);
+
+        assertThat(result.getSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1})
+    @DisplayName("[search] Should Reject Invalid Page Size - When The Page Size Is Zero Or Negative")
+    void shouldRejectInvalidPageSizeWhenThePageSizeIsZeroOrNegative(Integer size) {
+        assertThatThrownBy(() -> service().search(USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, size))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Page size must be greater than 0");
+
+        verifyNoInteractions(tmdbClient, requestThrottler);
+    }
+
+    @Test
+    @DisplayName("[search] Should Fetch All Remote Pages Covering The Requested Slice - When The Page Size Exceeds Remote Capacity")
+    void shouldFetchAllRemotePagesCoveringTheRequestedSliceWhenThePageSizeExceedsRemoteCapacity() {
+        List<TmdbMovieSearchResult> firstRemotePage = IntStream.rangeClosed(1, 20)
+                .mapToObj(index -> movie(String.valueOf(index), "Movie " + index))
+                .toList();
+        stubMovieSearchPage("movie", 1, firstRemotePage, 2, 21);
+        stubMovieSearchPage("movie", 2, List.of(movie("21", "Movie 21")), 2, 21);
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "movie", 1, 21);
+
+        assertThat(result.getContent()).hasSize(21);
+        assertThat(result.getContent().getLast().tmdbId()).isEqualTo("21");
+        assertThat(result.getTotalElements()).isEqualTo(21);
+        assertThat(result.getTotalPages()).isEqualTo(1);
+        verify(tmdbClient).searchMovies("movie", LANGUAGE, 1);
+        verify(tmdbClient).searchMovies("movie", LANGUAGE, 2);
+    }
+
+    @Test
+    @DisplayName("[search] Should Return The Exact Global Slice And Metadata - When Page Two Requests One Result")
+    void shouldReturnTheExactGlobalSliceAndMetadataWhenPageTwoRequestsOneResult() {
+        stubMovieSearchPage("fight", 1, List.of(
+                movie("603", "The Matrix"), movie("550", "Fight Club")), 5, 5);
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 2, 1);
+
+        assertThat(result.getContent()).extracting(DailyGameSearchResultDTO::tmdbId)
+                .containsExactly("550");
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(1);
+        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getTotalPages()).isEqualTo(5);
+        assertThat(result.hasNext()).isTrue();
+        verify(tmdbClient).searchMovies("fight", LANGUAGE, 1);
+        verify(tmdbClient, never()).searchMovies("fight", LANGUAGE, 2);
+    }
+
+    @Test
+    @DisplayName("[searchEpisodeSeries] Should Return The Exact Global Slice - When Page Two Requests One Result")
+    void shouldReturnTheExactGlobalSliceWhenEpisodeSeriesPageTwoRequestsOneResult() {
+        when(tmdbClient.searchTv("office", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, List.of(
+                        new TmdbTvSearchResult("2316", "The Office", "/office.jpg", "2005-03-24"),
+                        new TmdbTvSearchResult("400", "The Office UK", "/office-uk.jpg", "2001-07-09")), 2, 2)));
+
+        Page<DailyGameSearchResultDTO> result = service().searchEpisodeSeries(USER_ID, "office", 2, 1);
+
+        assertThat(result.getContent()).extracting(DailyGameSearchResultDTO::tmdbId)
+                .containsExactly("400");
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        verify(tmdbClient).searchTv("office", LANGUAGE, 1);
+        verify(tmdbClient, never()).searchTv("office", LANGUAGE, 2);
+    }
+
+    @Test
+    @DisplayName("[search] Should Accept Long Positive Numeric Series Identifier - When The Identifier Exceeds Twenty Digits")
+    void shouldAcceptLongPositiveNumericSeriesIdentifierWhenTheIdentifierExceedsTwentyDigits() {
+        String seriesTmdbId = "123456789012345678901";
+        when(tmdbClient.getTvFullDetails(seriesTmdbId, LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        Page<DailyGameSearchResultDTO> result = service().searchEpisodes(
+                USER_ID, seriesTmdbId, "pilot", 1, 20);
+
+        assertThat(result.getContent()).isEmpty();
+        verify(tmdbClient).getTvFullDetails(seriesTmdbId, LANGUAGE);
     }
 
     @Test
@@ -268,6 +407,16 @@ class DailyGameSearchServiceImplTest {
 
     private DailyGameSearchServiceImpl service() {
         return new DailyGameSearchServiceImpl(tmdbClient, new PageRequestFactory(), requestThrottler, CLOCK);
+    }
+
+    private TmdbMovieSearchResult movie(String id, String title) {
+        return new TmdbMovieSearchResult(id, title, "/poster.jpg", "1999-10-15");
+    }
+
+    private void stubMovieSearchPage(String query, int page, List<TmdbMovieSearchResult> results,
+                                     int totalPages, long totalResults) {
+        when(tmdbClient.searchMovies(query, LANGUAGE, page)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(page, results, totalPages, totalResults)));
     }
 
     private TmdbTvFullDetails seriesWithSeasons(TmdbSeasonSummary... seasons) {
