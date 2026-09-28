@@ -36,7 +36,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -107,12 +106,8 @@ class DailyGameServiceImplIntegrationTest {
         User user = userRepository.saveAndFlush(user());
         DailyChallenge challenge = persistChallenge();
 
-        CyclicBarrier barrier = new CyclicBarrier(2);
         when(challengeRepository.findByChallengeDateAndGameType(LocalDate.now(clock), DailyGameType.MOVIE_BY_POSTER))
-                .thenAnswer(invocation -> {
-                    barrier.await();
-                    return Optional.of(challenge);
-                });
+                .thenReturn(Optional.of(challenge));
         when(candidateValidator.validate(DailyGameType.MOVIE_BY_POSTER,
                 new DailyGameAttemptRequest("550", null, null, null, null)))
                 .thenReturn(new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, "550", null, null, null, null));
@@ -130,6 +125,7 @@ class DailyGameServiceImplIntegrationTest {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<SubmissionOutcome> first = executor.submit(submission);
+            awaitInsertAdvisoryLock();
             Future<SubmissionOutcome> second = executor.submit(submission);
             List<SubmissionOutcome> outcomes = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
 
@@ -208,7 +204,8 @@ class DailyGameServiceImplIntegrationTest {
                 LANGUAGE plpgsql
                 AS $$
                 BEGIN
-                    PERFORM pg_sleep(0.25);
+                    PERFORM pg_advisory_xact_lock(hashtext('daily-game-test-insert'));
+                    PERFORM pg_sleep(1);
                     RETURN NEW;
                 END;
                 $$
@@ -227,6 +224,28 @@ class DailyGameServiceImplIntegrationTest {
         } finally {
             jdbcTemplate.execute("DROP FUNCTION IF EXISTS daily_game_result_insert_delay()");
         }
+    }
+
+    private void awaitInsertAdvisoryLock() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            Boolean locked = jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_locks
+                        WHERE locktype = 'advisory'
+                          AND granted
+                          AND classid = 0
+                          AND objsubid = 1
+                          AND (objid::bigint & 4294967295) = (hashtext('daily-game-test-insert')::bigint & 4294967295)
+                    )
+                    """, Boolean.class);
+            if (Boolean.TRUE.equals(locked)) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        throw new IllegalStateException("Timed out waiting for the daily game insert advisory lock");
     }
 
     private record SubmissionOutcome(boolean succeeded, Throwable failure) {
