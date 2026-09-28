@@ -14,14 +14,13 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
-import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -83,20 +82,23 @@ class DailyGameServiceImplIntegrationTest {
     private DailyGameCandidateValidator candidateValidator;
 
     @Autowired
-    private EntityManager entityManager;
-
-    @Autowired
-    private PlatformTransactionManager transactionManager;
+    private JdbcTemplate jdbcTemplate;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
+        removeInsertDelay();
         resultRepository.deleteAll();
         hintRepository.deleteAll();
-        transactionTemplate().executeWithoutResult(status ->
-                entityManager.createQuery("delete from DailyChallenge").executeUpdate());
+        jdbcTemplate.update("DELETE FROM daily_challenges");
         userRepository.deleteAll();
+        installInsertDelay();
+    }
+
+    @AfterEach
+    void tearDown() {
+        removeInsertDelay();
     }
 
     @Test
@@ -173,16 +175,58 @@ class DailyGameServiceImplIntegrationTest {
     }
 
     private DailyChallenge persistChallenge() {
-        DailyChallenge challenge = challenge();
-        transactionTemplate().executeWithoutResult(status -> {
-            entityManager.persist(challenge);
-            entityManager.flush();
-        });
+        DailyChallenge challenge = challenge().toBuilder().id(UUID.randomUUID()).build();
+        jdbcTemplate.update("""
+                INSERT INTO daily_challenges (
+                    id, challenge_date, game_type, target_kind, target_tmdb_id, series_tmdb_id,
+                    season_number, episode_number, answer_key, source_tmdb_id, image_path,
+                    answer_snapshot, display_snapshot, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)
+                """,
+                challenge.getId(),
+                challenge.getChallengeDate(),
+                challenge.getGameType().name(),
+                challenge.getTargetKind().name(),
+                challenge.getTargetTmdbId(),
+                challenge.getSeriesTmdbId(),
+                challenge.getSeasonNumber(),
+                challenge.getEpisodeNumber(),
+                challenge.getAnswerKey(),
+                challenge.getSourceTmdbId(),
+                challenge.getImagePath(),
+                "{}",
+                "{}",
+                challenge.getCreatedAt(),
+                challenge.getUpdatedAt());
         return challenge;
     }
 
-    private TransactionTemplate transactionTemplate() {
-        return new TransactionTemplate(transactionManager);
+    private void installInsertDelay() {
+        jdbcTemplate.execute("""
+                CREATE OR REPLACE FUNCTION daily_game_result_insert_delay()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    PERFORM pg_sleep(0.25);
+                    RETURN NEW;
+                END;
+                $$
+                """);
+        jdbcTemplate.execute("""
+                CREATE TRIGGER daily_game_result_insert_delay_trigger
+                BEFORE INSERT ON user_daily_game_results
+                FOR EACH ROW
+                EXECUTE FUNCTION daily_game_result_insert_delay()
+                """);
+    }
+
+    private void removeInsertDelay() {
+        try {
+            jdbcTemplate.execute("DROP TRIGGER IF EXISTS daily_game_result_insert_delay_trigger ON user_daily_game_results");
+        } finally {
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS daily_game_result_insert_delay()");
+        }
     }
 
     private record SubmissionOutcome(boolean succeeded, Throwable failure) {
