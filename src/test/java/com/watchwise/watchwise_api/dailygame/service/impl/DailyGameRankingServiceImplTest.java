@@ -74,8 +74,8 @@ class DailyGameRankingServiceImplTest {
                 .map(RecordComponent::getName)
                 .toList())
                 .containsExactly(
-                        "challengeDate", "gameType", "targetKind", "maxAttempts", "attemptsUsed",
-                        "status", "score", "completedAt", "answer");
+                        "challengeDate", "gameType", "targetKind", "maxAttempts", "status",
+                        "attemptsUsed", "score", "completedAt", "answer");
     }
 
     @Test

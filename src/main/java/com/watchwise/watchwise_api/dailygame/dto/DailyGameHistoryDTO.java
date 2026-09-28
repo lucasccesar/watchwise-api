@@ -11,8 +11,8 @@ public record DailyGameHistoryDTO(
         DailyGameType gameType,
         DailyGameTargetKind targetKind,
         int maxAttempts,
-        int attemptsUsed,
         DailyGameViewStatus status,
+        int attemptsUsed,
         int score,
         LocalDateTime completedAt,
         DailyGameAnswerDTO answer) {

@@ -492,7 +492,7 @@ class DailyGameRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findRankingByGameType] Should Aggregate Final Results Exclude InProgress And Rank Ties - When Ranking All Game Types")
+    @DisplayName("[findRankingByGameType] Should Aggregate Final Results Exclude In Progress And Rank Ties - When Ranking All Game Types")
     void shouldAggregateFinalResultsExcludeInProgressAndRankTiesWhenRankingAllGameTypes() {
         User first = userRepository.save(buildUser("ranking-first"));
         User second = userRepository.save(buildUser("ranking-second"));
