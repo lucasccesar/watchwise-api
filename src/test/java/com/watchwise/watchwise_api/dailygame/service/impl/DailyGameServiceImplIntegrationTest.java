@@ -1,9 +1,6 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.ConflictException;
-import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
-import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -12,14 +9,19 @@ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintRepository;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -32,6 +34,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
@@ -41,7 +44,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
@@ -62,7 +64,7 @@ class DailyGameServiceImplIntegrationTest {
     @Autowired
     private DailyGameService dailyGameService;
 
-    @Autowired
+    @MockitoBean
     private DailyChallengeRepository challengeRepository;
 
     @Autowired
@@ -78,7 +80,13 @@ class DailyGameServiceImplIntegrationTest {
     private Clock clock;
 
     @MockitoBean
-    private TmdbClient tmdbClient;
+    private DailyGameCandidateValidator candidateValidator;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -86,7 +94,8 @@ class DailyGameServiceImplIntegrationTest {
     void setUp() {
         resultRepository.deleteAll();
         hintRepository.deleteAll();
-        challengeRepository.deleteAll();
+        transactionTemplate().executeWithoutResult(status ->
+                entityManager.createQuery("delete from DailyChallenge").executeUpdate());
         userRepository.deleteAll();
     }
 
@@ -94,13 +103,19 @@ class DailyGameServiceImplIntegrationTest {
     @DisplayName("[submitAttempt] Should Create One Result And Consume One Attempt - When Two First Submissions Race")
     void shouldCreateOneResultAndConsumeOneAttemptWhenTwoFirstSubmissionsRace() throws Exception {
         User user = userRepository.saveAndFlush(user());
-        DailyChallenge challenge = challengeRepository.saveAndFlush(challenge());
-        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbMovieFullDetails.class)));
+        DailyChallenge challenge = persistChallenge();
 
         CyclicBarrier barrier = new CyclicBarrier(2);
+        when(challengeRepository.findByChallengeDateAndGameType(LocalDate.now(clock), DailyGameType.MOVIE_BY_POSTER))
+                .thenAnswer(invocation -> {
+                    barrier.await();
+                    return Optional.of(challenge);
+                });
+        when(candidateValidator.validate(DailyGameType.MOVIE_BY_POSTER,
+                new DailyGameAttemptRequest("550", null, null, null, null)))
+                .thenReturn(new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, "550", null, null, null, null));
+
         Callable<SubmissionOutcome> submission = () -> {
-            barrier.await();
             try {
                 dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER,
                         new DailyGameAttemptRequest("550", null, null, null, null));
@@ -155,6 +170,19 @@ class DailyGameServiceImplIntegrationTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
+    }
+
+    private DailyChallenge persistChallenge() {
+        DailyChallenge challenge = challenge();
+        transactionTemplate().executeWithoutResult(status -> {
+            entityManager.persist(challenge);
+            entityManager.flush();
+        });
+        return challenge;
+    }
+
+    private TransactionTemplate transactionTemplate() {
+        return new TransactionTemplate(transactionManager);
     }
 
     private record SubmissionOutcome(boolean succeeded, Throwable failure) {
