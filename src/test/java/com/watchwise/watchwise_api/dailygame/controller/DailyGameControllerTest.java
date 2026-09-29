@@ -163,6 +163,8 @@ class DailyGameControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.gameType").value(GAME_TYPE.name()))
                 .andExpect(jsonPath("$.attemptsUsed").value(1))
+                .andExpect(jsonPath("$.shareOnCompletion").value(false))
+                .andExpect(jsonPath("$.sharedToFeed").value(false))
                 .andExpect(jsonPath("$.answer").doesNotExist());
 
         verify(requestThrottler).checkAllowed(

@@ -51,6 +51,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -214,6 +215,30 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.answer").doesNotExist());
 
         verify(dailyGameService).submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true));
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Bind Sharing Toggle And Return Shared Terminal State - When Toggle Is Enabled")
+    void shouldBindSharingToggleAndReturnSharedTerminalStateWhenToggleIsEnabled() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollershare");
+        DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
+                DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
+                DailyGameViewStatus.COMPLETED, "/hint.jpg", List.of(), 10, LocalDateTime.now(),
+                answer(), true, true);
+        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+                .thenReturn(response);
+
+        mockMvc.perform(attemptRequest(
+                        user, DailyGameType.MOVIE_BY_INFO, "{\"tmdbId\":\"550\",\"shareOnCompletion\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.shareOnCompletion").value(true))
+                .andExpect(jsonPath("$.sharedToFeed").value(true))
+                .andExpect(jsonPath("$.answer.tmdbId").value("550"));
+
+        verify(dailyGameService).submitAttempt(
+                eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO),
+                argThat(request -> Boolean.TRUE.equals(request.shareOnCompletion())));
     }
 
     @Test
