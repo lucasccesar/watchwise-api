@@ -15,5 +15,6 @@ public record DailyGameHistoryDTO(
         int attemptsUsed,
         int score,
         LocalDateTime completedAt,
-        DailyGameAnswerDTO answer) {
+        DailyGameAnswerDTO answer,
+        boolean sharedToFeed) {
 }

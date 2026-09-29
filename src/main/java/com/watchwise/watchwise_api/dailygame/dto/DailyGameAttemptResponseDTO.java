@@ -23,7 +23,50 @@ public record DailyGameAttemptResponseDTO(
         List<DailyGameAttemptDTO> attempts,
         DailyGameAttemptDTO currentAttempt,
         DailyGameFilmographyStateDTO filmography,
-        DailyGameGuessFeedbackDTO guessFeedback) {
+        DailyGameGuessFeedbackDTO guessFeedback,
+        boolean shareOnCompletion,
+        boolean sharedToFeed) {
+
+    public DailyGameAttemptResponseDTO(
+            DailyGameType gameType,
+            DailyGameTargetKind targetKind,
+            int maxAttempts,
+            int attemptsUsed,
+            int attemptsRemaining,
+            DailyGameViewStatus status,
+            String imageUrl,
+            List<DailyGameHintDTO> hints,
+            int score,
+            LocalDateTime completedAt,
+            DailyGameAnswerDTO answer,
+            List<String> visibleImageUrls,
+            List<String> imageUrls,
+            List<DailyGameAttemptDTO> attempts,
+            DailyGameAttemptDTO currentAttempt,
+            DailyGameFilmographyStateDTO filmography,
+            DailyGameGuessFeedbackDTO guessFeedback) {
+        this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
+                score, completedAt, answer, visibleImageUrls, imageUrls, attempts, currentAttempt, filmography,
+                guessFeedback, false, false);
+    }
+
+    public DailyGameAttemptResponseDTO(
+            DailyGameType gameType,
+            DailyGameTargetKind targetKind,
+            int maxAttempts,
+            int attemptsUsed,
+            int attemptsRemaining,
+            DailyGameViewStatus status,
+            String imageUrl,
+            List<DailyGameHintDTO> hints,
+            int score,
+            LocalDateTime completedAt,
+            DailyGameAnswerDTO answer,
+            boolean shareOnCompletion,
+            boolean sharedToFeed) {
+        this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
+                score, completedAt, answer, null, null, null, null, null, null, shareOnCompletion, sharedToFeed);
+    }
 
     public DailyGameAttemptResponseDTO(
             DailyGameType gameType,

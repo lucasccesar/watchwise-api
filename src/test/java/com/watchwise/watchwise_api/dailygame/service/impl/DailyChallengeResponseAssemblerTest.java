@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameActorGuessDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
@@ -235,6 +236,41 @@ class DailyChallengeResponseAssemblerTest {
         DailyGameComparisonCellDTO match = new DailyGameComparisonCellDTO(
                 DailyGameComparisonStatus.MATCH, null, "value", List.of(), null);
         return new DailyGameInfoFeedbackDTO(match, match, match, match, match, match, match, match);
+    }
+
+    @Test
+    @DisplayName("[sharing state] Should Default Sharing Flags To False - When No Result Exists")
+    void shouldDefaultSharingFlagsToFalseWhenNoResultExists() {
+        DailyChallenge challenge = challenge("/fight-club.jpg");
+
+        DailyGameStateDTO state = assembler.toTodayResponse(
+                LocalDate.of(2026, 9, 27), List.of(challenge), Map.of(), Map.of()).games().getFirst();
+
+        assertThat(state.shareOnCompletion()).isFalse();
+        assertThat(state.sharedToFeed()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[sharing state] Should Expose Persisted Sharing Flags - When A Result Exists")
+    void shouldExposePersistedSharingFlagsWhenAResultExists() {
+        DailyChallenge challenge = challenge("/fight-club.jpg");
+        UserDailyGameResult result = result();
+        result.setStatus(DailyGameResultStatus.COMPLETED);
+        result.setCompletedAt(LocalDateTime.of(2026, 9, 27, 12, 0));
+        result.setShareOnCompletion(true);
+        result.markSharedAt(LocalDateTime.of(2026, 9, 27, 12, 0));
+
+        DailyGameStateDTO state = assembler.toTodayResponse(
+                LocalDate.of(2026, 9, 27), List.of(challenge), Map.of(challenge.getId(), result), Map.of())
+                .games().getFirst();
+        DailyGameAttemptResponseDTO attempt = assembler.toAttemptResponse(challenge, result);
+        DailyGameHistoryDTO history = assembler.toHistoryResponse(LocalDate.of(2026, 9, 27), challenge, result);
+
+        assertThat(state.shareOnCompletion()).isTrue();
+        assertThat(state.sharedToFeed()).isTrue();
+        assertThat(attempt.shareOnCompletion()).isTrue();
+        assertThat(attempt.sharedToFeed()).isTrue();
+        assertThat(history.sharedToFeed()).isTrue();
     }
 
     private DailyChallenge challenge(String imagePath) {

@@ -13,5 +13,15 @@ public record DailyGameAttemptRequest(
         @Min(value = 1, message = "must be greater than zero")
         Integer seasonNumber,
         @Min(value = 1, message = "must be greater than zero")
-        Integer episodeNumber) {
+        Integer episodeNumber,
+        Boolean shareOnCompletion) {
+
+    public DailyGameAttemptRequest(
+            String tmdbId,
+            String personTmdbId,
+            String seriesTmdbId,
+            Integer seasonNumber,
+            Integer episodeNumber) {
+        this(tmdbId, personTmdbId, seriesTmdbId, seasonNumber, episodeNumber, null);
+    }
 }

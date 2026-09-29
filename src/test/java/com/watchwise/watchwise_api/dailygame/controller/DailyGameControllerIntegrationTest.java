@@ -114,7 +114,7 @@ class DailyGameControllerIntegrationTest {
         RegisteredUser user = registerUser("dailycontrollerstate");
         DailyGameStateDTO game = new DailyGameStateDTO(
                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
-                DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null);
+                DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null, false, false);
         when(dailyGameService.getToday(user.id()))
                 .thenReturn(new DailyGameTodayResponseDTO(LocalDate.of(2026, 9, 28), List.of(game)));
 
@@ -204,7 +204,7 @@ class DailyGameControllerIntegrationTest {
         RegisteredUser user = registerUser("dailycontrollerattempt");
         DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
-                DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null);
+                DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null, false, false);
         when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true)))
                 .thenReturn(response);
 
@@ -396,7 +396,7 @@ class DailyGameControllerIntegrationTest {
         RegisteredUser user = registerUser("dailycontrollerpages");
         DailyGameHistoryDTO history = new DailyGameHistoryDTO(
                 LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE,
-                10, DailyGameViewStatus.COMPLETED, 1, 10, LocalDateTime.now(), answer());
+                10, DailyGameViewStatus.COMPLETED, 1, 10, LocalDateTime.now(), answer(), false);
         DailyGameRankingEntryDTO ranking = new DailyGameRankingEntryDTO(
                 1, user.id(), "dailycontrollerpages", null, 10, 1);
         when(dailyGameRankingService.getHistory(user.id(), null, 1, 20))
@@ -454,7 +454,7 @@ class DailyGameControllerIntegrationTest {
         RegisteredUser user = registerUser("dailycontrollerattemptlimit");
         DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
-                DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null);
+                DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null, false, false);
         when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true)))
                 .thenReturn(response);
 

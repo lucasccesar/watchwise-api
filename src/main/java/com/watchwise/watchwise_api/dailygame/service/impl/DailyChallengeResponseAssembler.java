@@ -98,7 +98,8 @@ public class DailyChallengeResponseAssembler {
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
                 view.visibleImageUrls(), view.imageUrls(), attempts, null,
-                filmography(challenge, attempts, true), guessFeedback);
+                filmography(challenge, attempts, true), guessFeedback,
+                view.shareOnCompletion(), view.sharedToFeed());
     }
 
     public DailyGameAttemptResponseDTO toAttemptResponse(
@@ -126,7 +127,8 @@ public class DailyChallengeResponseAssembler {
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
                 view.visibleImageUrls(), view.imageUrls(), attempts, currentAttempt,
-                filmography(challenge, attempts, majorRoles), guessFeedback);
+                filmography(challenge, attempts, majorRoles), guessFeedback,
+                view.shareOnCompletion(), view.sharedToFeed());
     }
 
     public DailyGameHistoryDTO toHistoryResponse(
@@ -134,7 +136,7 @@ public class DailyChallengeResponseAssembler {
         DailyGameView view = view(challenge, result, List.of());
         return new DailyGameHistoryDTO(
                 challengeDate, view.gameType(), view.targetKind(), view.maxAttempts(), view.status(),
-                view.attemptsUsed(), view.score(), view.completedAt(), view.answer());
+                view.attemptsUsed(), view.score(), view.completedAt(), view.answer(), view.sharedToFeed());
     }
 
     private DailyGameStateDTO toState(
@@ -154,7 +156,8 @@ public class DailyChallengeResponseAssembler {
         return new DailyGameStateDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, true));
+                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, true),
+                view.shareOnCompletion(), view.sharedToFeed());
     }
 
     public DailyGameStateDTO toState(
@@ -168,7 +171,8 @@ public class DailyChallengeResponseAssembler {
         return new DailyGameStateDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, majorRoles));
+                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, majorRoles),
+                view.shareOnCompletion(), view.sharedToFeed());
     }
 
     private DailyGameView view(
@@ -201,7 +205,8 @@ public class DailyChallengeResponseAssembler {
                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
                 status, imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
                 result == null ? null : result.getCompletedAt(), terminal ? answer(challenge) : null,
-                visibleImageUrls, imageUrls);
+                visibleImageUrls, imageUrls, result != null && result.isShareOnCompletion(),
+                result != null && result.getSharedAt() != null);
     }
 
     private List<DailyGameAttemptDTO> attempts(UserDailyGameResult result, boolean includeAttempts) {
@@ -387,6 +392,8 @@ public class DailyChallengeResponseAssembler {
             java.time.LocalDateTime completedAt,
             DailyGameAnswerDTO answer,
             List<String> visibleImageUrls,
-            List<String> imageUrls) {
+            List<String> imageUrls,
+            boolean shareOnCompletion,
+            boolean sharedToFeed) {
     }
 }

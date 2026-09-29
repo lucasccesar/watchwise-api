@@ -281,7 +281,7 @@ class DailyGameControllerTest {
     void shouldWrapHistoryAndRankingPages() throws Exception {
         DailyGameHistoryDTO history = new DailyGameHistoryDTO(
                 LocalDate.of(2026, 9, 27), GAME_TYPE, DailyGameTargetKind.MOVIE, 10,
-                DailyGameViewStatus.COMPLETED, 1, 10, LocalDateTime.now(), answer());
+                DailyGameViewStatus.COMPLETED, 1, 10, LocalDateTime.now(), answer(), false);
         DailyGameRankingEntryDTO ranking = new DailyGameRankingEntryDTO(
                 1, CURRENT_USER_ID, "lucas", "/profile.jpg", 10, 1);
         when(dailyGameRankingService.getHistory(CURRENT_USER_ID, null, 2, 5)).thenReturn(page(history));
@@ -321,7 +321,7 @@ class DailyGameControllerTest {
     private DailyGameAttemptResponseDTO attemptResponse() {
         return new DailyGameAttemptResponseDTO(
                 GAME_TYPE, DailyGameTargetKind.MOVIE, 10, 1, 9, DailyGameViewStatus.IN_PROGRESS,
-                "/hint.jpg", List.of(), 0, null, null);
+                "/hint.jpg", List.of(), 0, null, null, false, false);
     }
 
     private DailyGameAnswerDTO answer() {

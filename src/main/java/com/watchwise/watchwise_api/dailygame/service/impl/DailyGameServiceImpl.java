@@ -240,6 +240,9 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
                 .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
         assertOpenAndHasAttempts(result, gameType);
+        if (request.shareOnCompletion() != null) {
+            result.setShareOnCompletion(request.shareOnCompletion());
+        }
         int attemptNumber = result.getAttemptsUsed() + 1;
         result.setAttemptsUsed(attemptNumber);
         result.setUpdatedAt(now);
@@ -255,6 +258,9 @@ public class DailyGameServiceImpl implements DailyGameService {
             result.setScore(0);
             result.setStatus(DailyGameResultStatus.IN_PROGRESS);
             result.setCompletedAt(null);
+        }
+        if (result.getStatus() != DailyGameResultStatus.IN_PROGRESS && result.isShareOnCompletion()) {
+            result.markSharedAt(now);
         }
         appendAttemptDetails(challenge, result, attemptNumber, candidate, episodeFeedback, infoFeedback,
                 filmographyFeedback);
@@ -294,6 +300,9 @@ public class DailyGameServiceImpl implements DailyGameService {
         result.setScore(0);
         result.setCompletedAt(now);
         result.setUpdatedAt(now);
+        if (result.isShareOnCompletion()) {
+            result.markSharedAt(now);
+        }
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
         return responseAssembler.toAttemptResponse(
                 challenge, result, hints, null, challengeDate.equals(LocalDate.now(clock)));

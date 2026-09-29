@@ -223,6 +223,98 @@ class DailyGameServiceImplTest {
     }
 
     @Test
+    @DisplayName("[submitAttempt] Should Share Completed Result - When Sharing Is Enabled On The Final Attempt")
+    void shouldShareCompletedResultWhenToggleIsEnabledOnFinalAttempt() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
+                request("550", null, null, null, null, true));
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.COMPLETED);
+        assertThat(response.sharedToFeed()).isTrue();
+        assertThat(result.getSharedAt()).isEqualTo(NOW);
+        assertThat(result.isShareOnCompletion()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Share Failed Result - When Sharing Is Enabled On The Final Attempt")
+    void shouldShareFailedResultWhenToggleIsEnabledOnFinalAttempt() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 9, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getMovieFullDetails("680", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
+                request("680", null, null, null, null, true));
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.FAILED);
+        assertThat(response.sharedToFeed()).isTrue();
+        assertThat(result.getSharedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Persist Sharing Preference Until Terminal - When A Later Request Omits It")
+    void shouldPersistToggleUntilTheResultBecomesTerminal() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getMovieFullDetails("680", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+
+        DailyGameAttemptResponseDTO firstResponse = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
+                request("680", null, null, null, null, true));
+        DailyGameAttemptResponseDTO finalResponse = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
+                request("550", null, null, null, null, null));
+
+        assertThat(firstResponse.status()).isEqualTo(DailyGameViewStatus.IN_PROGRESS);
+        assertThat(firstResponse.sharedToFeed()).isFalse();
+        assertThat(finalResponse.sharedToFeed()).isTrue();
+        assertThat(result.getSharedAt()).isEqualTo(NOW);
+        assertThat(result.isShareOnCompletion()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Not Share Terminal Result - When Sharing Is Disabled On The Final Attempt")
+    void shouldNotShareTerminalResultWhenToggleIsDisabled() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
+                request("550", null, null, null, null, false));
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.COMPLETED);
+        assertThat(response.sharedToFeed()).isFalse();
+        assertThat(result.getSharedAt()).isNull();
+        assertThat(result.isShareOnCompletion()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Leave Sharing Preference Untouched - When Candidate Validation Fails")
+    void shouldLeaveSharingPreferenceUntouchedWhenCandidateIsInvalid() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+
+        assertThatThrownBy(() -> service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER,
+                request(null, "287", null, null, null, true)))
+                .isInstanceOf(BadRequestException.class);
+
+        assertThat(result.isShareOnCompletion()).isFalse();
+        assertThat(result.getSharedAt()).isNull();
+        assertThat(result.getAttemptsUsed()).isZero();
+    }
+
+    @Test
     @DisplayName("[submitAttempt] Should Assign Ten Points On The First Correct Info Guess - When The Candidate Matches A Ten Attempt Game")
     void shouldAssignTenPointsOnTheFirstCorrectInfoGuessWhenTheCandidateMatchesATenAttemptGame() {
         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
@@ -836,5 +928,11 @@ class DailyGameServiceImplTest {
     private DailyGameAttemptRequest request(String tmdbId, String personTmdbId, String seriesTmdbId,
                                             Integer seasonNumber, Integer episodeNumber) {
         return new DailyGameAttemptRequest(tmdbId, personTmdbId, seriesTmdbId, seasonNumber, episodeNumber);
+    }
+
+    private DailyGameAttemptRequest request(String tmdbId, String personTmdbId, String seriesTmdbId,
+                                            Integer seasonNumber, Integer episodeNumber, Boolean shareOnCompletion) {
+        return new DailyGameAttemptRequest(
+                tmdbId, personTmdbId, seriesTmdbId, seasonNumber, episodeNumber, shareOnCompletion);
     }
 }
