@@ -3,7 +3,11 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -159,14 +163,36 @@ class DailyChallengeResponseAssemblerTest {
                 new DailyGameCandidateDTO(
                         DailyGameTargetKind.MOVIE, "680", null, null, null, null,
                         "The Secret Guess", "/guess.jpg", LocalDate.of(2000, 1, 1)),
-                new DailyGameGuessFeedbackDTO(false, false, false, false), null, null);
+                new DailyGameGuessFeedbackDTO(false, false, false, false), infoFeedback(), null);
         result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null, attempt));
 
         DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(
                 challenge, result, List.of(), null, true);
 
         assertThat(response.attempts()).containsExactly(attempt);
+        assertThat(response.attempts().getFirst().infoFeedback()).isEqualTo(infoFeedback());
         assertThat(response.answer()).isNull();
+    }
+
+    @Test
+    @DisplayName("[state] Should Expose Typed Info Feedback - When Current Day Attempts Are Requested")
+    void shouldExposeTypedInfoFeedbackWhenCurrentDayAttemptsAreRequested() {
+        DailyChallenge challenge = challenge("/fight-club.jpg");
+        UserDailyGameResult result = result();
+        result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null,
+                new DailyGameAttemptDTO(1, null, null, infoFeedback(), null)));
+
+        DailyGameStateDTO state = assembler.toState(challenge, result, List.of(), true);
+
+        assertThat(state.attempts()).hasSize(1);
+        assertThat(state.attempts().getFirst().infoFeedback()).isEqualTo(infoFeedback());
+        assertThat(state.answer()).isNull();
+    }
+
+    private DailyGameInfoFeedbackDTO infoFeedback() {
+        DailyGameComparisonCellDTO match = new DailyGameComparisonCellDTO(
+                DailyGameComparisonStatus.MATCH, null, "value", List.of(), null);
+        return new DailyGameInfoFeedbackDTO(match, match, match, match, match, match, match, match);
     }
 
     private DailyChallenge challenge(String imagePath) {

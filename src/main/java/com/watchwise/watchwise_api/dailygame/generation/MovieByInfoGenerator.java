@@ -58,10 +58,11 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
                 movie.genres().stream().map(genre -> genre == null ? null : genre.name()).toList()));
         addHint(hints, "YEAR", DailyChallengeGenerationSupport.date(movie.releaseDate())
                 .map(date -> String.valueOf(date.getYear())).orElse(null));
-        DailyChallengeInfoSupport.movieCertification(
+        String certification = DailyChallengeInfoSupport.movieCertification(
                         DailyChallengeGenerationSupport.value(tmdbClient.getMovieReleaseDates(movie.id(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)).orElse(null), RATING_REGION)
-                .ifPresent(certification -> addHint(hints, "CERTIFICATION", certification));
+                .orElse(null);
+        addHint(hints, "CERTIFICATION", certification);
         addHint(hints, "DIRECTOR", director(movie));
         addHint(hints, "CAST", movie.credits() == null || movie.credits().cast() == null ? null
                 : DailyChallengeGenerationSupport.joinNonBlank(movie.credits().cast().stream()
@@ -74,7 +75,7 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
         if (hints.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(snapshotAssembler.movieInfo(movie, imagePath, hints));
+        return Optional.of(snapshotAssembler.movieInfo(movie, imagePath, hints, certification));
     }
 
     private boolean hasRequiredMetadata(TmdbMovieFullDetails movie) {

@@ -3,10 +3,14 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
@@ -20,6 +24,7 @@ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintReposi
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -73,6 +78,9 @@ class DailyGameServiceImplTest {
 
     @Mock
     private TmdbClient tmdbClient;
+
+    @Mock
+    private DailyGameInfoComparisonService infoComparisonService;
 
     @Test
     @DisplayName("[getToday] Should Return Eight NotPlayed States Without Creating Results - When The User Has No Results")
@@ -183,12 +191,36 @@ class DailyGameServiceImplTest {
         stubOpenSubmission(challenge, result);
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Found<>(mock()));
+        when(infoComparisonService.compare(eq(challenge), any())).thenReturn(infoFeedback());
 
         DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
                 request("550", null, null, null, null));
 
         assertThat(response.score()).isEqualTo(10);
         assertThat(response.status()).isEqualTo(DailyGameViewStatus.COMPLETED);
+        assertThat(response.attempts()).hasSize(1);
+        assertThat(response.attempts().getFirst().infoFeedback()).isEqualTo(infoFeedback());
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Preserve Attempts And Details - When Info Comparison Cannot Reach TMDB")
+    void shouldPreserveAttemptsAndDetailsWhenInfoComparisonCannotReachTmdb() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        Map<String, Object> existingDetails = Map.of("attempts", List.of("existing"));
+        result.setAttemptDetails(existingDetails);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getMovieFullDetails("680", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+        when(infoComparisonService.compare(eq(challenge), any()))
+                .thenThrow(new TmdbUnavailableException("TMDB is temporarily unavailable"));
+
+        assertThatThrownBy(() -> service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_INFO,
+                request("680", null, null, null, null)))
+                .isInstanceOf(TmdbUnavailableException.class);
+
+        assertThat(result.getAttemptsUsed()).isZero();
+        assertThat(result.getAttemptDetails()).isSameAs(existingDetails);
     }
 
     @Test
@@ -572,7 +604,14 @@ class DailyGameServiceImplTest {
                 resultRepository,
                 new com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator(tmdbClient),
                 new DailyChallengeResponseAssembler(),
+                infoComparisonService,
                 CLOCK);
+    }
+
+    private DailyGameInfoFeedbackDTO infoFeedback() {
+        DailyGameComparisonCellDTO match = new DailyGameComparisonCellDTO(
+                DailyGameComparisonStatus.MATCH, null, "value", List.of(), null);
+        return new DailyGameInfoFeedbackDTO(match, match, match, match, match, match, match, match);
     }
 
     private void stubOpenSubmission(DailyChallenge challenge, UserDailyGameResult result) {

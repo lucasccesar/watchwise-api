@@ -302,6 +302,15 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
                 .containsExactly("PLATFORM", "GENRES", "YEAR", "DIRECTOR", "CAST", "PRODUCTION_COMPANIES", "REVENUE");
         assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("CERTIFICATION"));
+        assertThat(candidate.answerSnapshot())
+                .containsEntry("platforms", List.of("Netflix"))
+                .containsEntry("genres", List.of("Drama", "Thriller"))
+                .containsEntry("year", 1999)
+                .containsEntry("director", "David Fincher")
+                .containsEntry("cast", List.of("Brad Pitt"))
+                .containsEntry("productionCompanies", List.of("Regency Enterprises"))
+                .containsEntry("revenue", 100853753L)
+                .doesNotContainKey("certification");
     }
 
     @Test
@@ -324,6 +333,7 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.hints()).filteredOn(hint -> hint.hintType().equals("CERTIFICATION"))
                 .extracting(DailyChallengeCandidate.HintSnapshot::hintValue)
                 .containsExactly("18");
+        assertThat(candidate.answerSnapshot()).containsEntry("certification", "18");
     }
 
     @Test
@@ -363,6 +373,16 @@ class DailyChallengeGeneratorTest {
                 .containsExactly("PLATFORM", "GENRES", "YEAR", "CREATOR", "CAST", "NETWORKS_PRODUCTION_COMPANIES", "COUNTS");
         assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("REVENUE"));
         assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("CERTIFICATION"));
+        assertThat(candidate.answerSnapshot())
+                .containsEntry("platforms", List.of("Netflix"))
+                .containsEntry("genres", List.of("Drama"))
+                .containsEntry("year", 2008)
+                .containsEntry("creators", List.of("Vince Gilligan"))
+                .containsEntry("cast", List.of("Bryan Cranston"))
+                .containsEntry("productionCompanies", List.of("Sony Pictures Television"))
+                .containsEntry("seasons", 5)
+                .doesNotContainKey("certification")
+                .doesNotContainKey("revenue");
     }
 
     @Test

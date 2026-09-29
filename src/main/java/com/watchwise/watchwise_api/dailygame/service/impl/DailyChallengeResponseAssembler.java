@@ -88,8 +88,7 @@ public class DailyChallengeResponseAssembler {
             DailyGameGuessFeedbackDTO guessFeedback,
             boolean includeAttempts) {
         DailyGameView view = view(challenge, result, allHints);
-        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
-                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
+        List<DailyGameAttemptDTO> attempts = attempts(result, includeAttempts);
         return new DailyGameAttemptResponseDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
@@ -117,8 +116,7 @@ public class DailyChallengeResponseAssembler {
             List<DailyChallengeHint> allHints,
             boolean includeAttempts) {
         DailyGameView view = view(challenge, result, allHints);
-        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
-                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
+        List<DailyGameAttemptDTO> attempts = attempts(result, includeAttempts);
         return new DailyGameStateDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
@@ -156,6 +154,10 @@ public class DailyChallengeResponseAssembler {
                 status, imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
                 result == null ? null : result.getCompletedAt(), terminal ? answer(challenge) : null,
                 visibleImageUrls, imageUrls);
+    }
+
+    private List<DailyGameAttemptDTO> attempts(UserDailyGameResult result, boolean includeAttempts) {
+        return includeAttempts && result != null ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
     }
 
     private DailyGameViewStatus status(UserDailyGameResult result) {

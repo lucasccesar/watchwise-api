@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
@@ -22,6 +23,7 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +48,7 @@ public class DailyGameServiceImpl implements DailyGameService {
     private final DailyGameCandidateValidator candidateValidator;
     private final DailyChallengeResponseAssembler responseAssembler;
     private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
+    private final DailyGameInfoComparisonService infoComparisonService;
     private final Clock clock;
 
     public DailyGameServiceImpl(
@@ -56,7 +59,19 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyChallengeResponseAssembler responseAssembler,
             Clock clock) {
         this(challengeRepository, hintRepository, resultRepository, candidateValidator,
-                responseAssembler, new DailyGameAttemptDetailsCodec(), clock);
+                responseAssembler, new DailyGameAttemptDetailsCodec(), null, clock);
+    }
+
+    public DailyGameServiceImpl(
+            DailyChallengeRepository challengeRepository,
+            DailyChallengeHintRepository hintRepository,
+            UserDailyGameResultRepository resultRepository,
+            DailyGameCandidateValidator candidateValidator,
+            DailyChallengeResponseAssembler responseAssembler,
+            DailyGameInfoComparisonService infoComparisonService,
+            Clock clock) {
+        this(challengeRepository, hintRepository, resultRepository, candidateValidator,
+                responseAssembler, new DailyGameAttemptDetailsCodec(), infoComparisonService, clock);
     }
 
     @Autowired
@@ -67,6 +82,7 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyGameCandidateValidator candidateValidator,
             DailyChallengeResponseAssembler responseAssembler,
             DailyGameAttemptDetailsCodec attemptDetailsCodec,
+            DailyGameInfoComparisonService infoComparisonService,
             Clock clock) {
         this.challengeRepository = challengeRepository;
         this.hintRepository = hintRepository;
@@ -74,6 +90,7 @@ public class DailyGameServiceImpl implements DailyGameService {
         this.candidateValidator = candidateValidator;
         this.responseAssembler = responseAssembler;
         this.attemptDetailsCodec = attemptDetailsCodec;
+        this.infoComparisonService = infoComparisonService;
         this.clock = clock;
     }
 
@@ -142,6 +159,8 @@ public class DailyGameServiceImpl implements DailyGameService {
         assertOpenAndHasAttempts(result, gameType);
 
         DailyGameCandidateIdentity candidate = candidateValidator.validate(gameType, request);
+        DailyGameGuessFeedbackDTO episodeFeedback = guessFeedback(gameType, challenge, candidate);
+        DailyGameInfoFeedbackDTO infoFeedback = infoFeedback(gameType, challenge, candidate);
         int attemptNumber = result.getAttemptsUsed() + 1;
         result.setAttemptsUsed(attemptNumber);
         result.setUpdatedAt(now);
@@ -158,10 +177,10 @@ public class DailyGameServiceImpl implements DailyGameService {
             result.setStatus(DailyGameResultStatus.IN_PROGRESS);
             result.setCompletedAt(null);
         }
-        appendAttemptDetails(challenge, result, attemptNumber, candidate, guessFeedback(gameType, challenge, candidate));
+        appendAttemptDetails(challenge, result, attemptNumber, candidate, episodeFeedback, infoFeedback);
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
         return responseAssembler.toAttemptResponse(challenge, result, hints,
-                guessFeedback(gameType, challenge, candidate), challengeDate.equals(LocalDate.now(clock)));
+                episodeFeedback, challengeDate.equals(LocalDate.now(clock)));
     }
 
     @Override
@@ -197,7 +216,8 @@ public class DailyGameServiceImpl implements DailyGameService {
             UserDailyGameResult result,
             int attemptNumber,
             DailyGameCandidateIdentity candidate,
-            DailyGameGuessFeedbackDTO episodeFeedback) {
+            DailyGameGuessFeedbackDTO episodeFeedback,
+            DailyGameInfoFeedbackDTO infoFeedback) {
         if (!challenge.getChallengeDate().equals(LocalDate.now(clock))) {
             return;
         }
@@ -206,7 +226,7 @@ public class DailyGameServiceImpl implements DailyGameService {
                 candidate.seasonNumber(), candidate.episodeNumber(), null, null, null);
         result.setAttemptDetails(attemptDetailsCodec.append(
                 result.getAttemptDetails(),
-                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, null, null)));
+                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, infoFeedback, null)));
     }
 
     private void requireGameType(DailyGameType gameType) {
@@ -226,6 +246,15 @@ public class DailyGameServiceImpl implements DailyGameService {
         return new DailyGameGuessFeedbackDTO(
                 seriesCorrect, seasonCorrect, episodeCorrect,
                 seriesCorrect && seasonCorrect && episodeCorrect);
+    }
+
+    private DailyGameInfoFeedbackDTO infoFeedback(
+            DailyGameType gameType, DailyChallenge challenge, DailyGameCandidateIdentity candidate) {
+        if (infoComparisonService == null
+                || (gameType != DailyGameType.MOVIE_BY_INFO && gameType != DailyGameType.SERIES_BY_INFO)) {
+            return null;
+        }
+        return infoComparisonService.compare(challenge, candidate);
     }
 
     private void assertAvailableDate(LocalDate challengeDate) {

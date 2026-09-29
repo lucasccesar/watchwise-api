@@ -59,10 +59,11 @@ public class SeriesByInfoGenerator implements DailyChallengeGenerator {
                 series.genres().stream().map(genre -> genre == null ? null : genre.name()).toList()));
         addHint(hints, "YEAR", DailyChallengeGenerationSupport.date(series.firstAirDate())
                 .map(date -> String.valueOf(date.getYear())).orElse(null));
-        DailyChallengeInfoSupport.tvCertification(
+        String certification = DailyChallengeInfoSupport.tvCertification(
                         DailyChallengeGenerationSupport.value(tmdbClient.getTvContentRatings(series.id(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)).orElse(null), RATING_REGION)
-                .ifPresent(certification -> addHint(hints, "CERTIFICATION", certification));
+                .orElse(null);
+        addHint(hints, "CERTIFICATION", certification);
         addHint(hints, "CREATOR", series.createdBy() == null ? null : DailyChallengeGenerationSupport.joinNonBlank(
                 series.createdBy().stream().map(creator -> creator == null ? null : creator.name()).toList()));
         addHint(hints, "CAST", series.aggregateCredits() == null || series.aggregateCredits().cast() == null ? null
@@ -73,7 +74,7 @@ public class SeriesByInfoGenerator implements DailyChallengeGenerator {
         if (hints.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(snapshotAssembler.seriesInfo(series, imagePath, hints));
+        return Optional.of(snapshotAssembler.seriesInfo(series, imagePath, hints, certification));
     }
 
     private boolean hasRequiredMetadata(TmdbTvFullDetails series) {
