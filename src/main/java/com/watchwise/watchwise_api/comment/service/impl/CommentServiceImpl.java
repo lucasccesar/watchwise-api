@@ -19,6 +19,8 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
+import com.watchwise.watchwise_api.notification.service.SocialNotificationService;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
@@ -56,6 +58,7 @@ public class CommentServiceImpl implements CommentService {
     private final FollowerRepository followerRepository;
     private final CommentMapper commentMapper;
     private final LikeService likeService;
+    private final SocialNotificationService socialNotificationService;
     private final PageRequestFactory pageRequestFactory;
 
     @Override
@@ -166,7 +169,9 @@ public class CommentServiceImpl implements CommentService {
                 .list(list)
                 .build();
 
-        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+        Comment savedComment = commentRepository.save(comment);
+        notifyCommentReceived(userId, list.getUser().getId(), NotificationTargetType.USER_LIST, listId);
+        return commentMapper.commentToResponseDto(savedComment, false);
     }
 
     @Override
@@ -183,7 +188,9 @@ public class CommentServiceImpl implements CommentService {
                 .diaryEntry(diaryEntry)
                 .build();
 
-        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+        Comment savedComment = commentRepository.save(comment);
+        notifyCommentReceived(userId, diaryEntry.getUser().getId(), NotificationTargetType.DIARY_ENTRY, diaryEntryId);
+        return commentMapper.commentToResponseDto(savedComment, false);
     }
 
     @Override
@@ -201,7 +208,9 @@ public class CommentServiceImpl implements CommentService {
                 .droppedEntry(droppedEntry)
                 .build();
 
-        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+        Comment savedComment = commentRepository.save(comment);
+        notifyCommentReceived(userId, droppedEntry.getUser().getId(), NotificationTargetType.DROPPED_ENTRY, droppedEntryId);
+        return commentMapper.commentToResponseDto(savedComment, false);
     }
 
     @Override
@@ -214,7 +223,9 @@ public class CommentServiceImpl implements CommentService {
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .pick(pick)
                 .build();
-        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+        Comment savedComment = commentRepository.save(comment);
+        notifyCommentReceived(userId, pick.getUser().getId(), NotificationTargetType.PICK, pickId);
+        return commentMapper.commentToResponseDto(savedComment, false);
     }
 
     @Override
@@ -226,7 +237,15 @@ public class CommentServiceImpl implements CommentService {
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .picksTemplate(template)
                 .build();
-        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+        Comment savedComment = commentRepository.save(comment);
+        if (template.getCreator() != null) {
+            notifyCommentReceived(
+                    userId,
+                    template.getCreator().getId(),
+                    NotificationTargetType.PICKS_TEMPLATE,
+                    templateId);
+        }
+        return commentMapper.commentToResponseDto(savedComment, false);
     }
 
     @Override
@@ -336,6 +355,16 @@ public class CommentServiceImpl implements CommentService {
     private Comment findParentComment(UUID parentCommentId) {
         return commentRepository.findById(parentCommentId)
                 .orElseThrow(() -> new NotFoundException("Parent comment not found"));
+    }
+
+    private void notifyCommentReceived(
+            UUID actorId,
+            UUID recipientId,
+            NotificationTargetType targetType,
+            UUID targetId) {
+        if (!actorId.equals(recipientId)) {
+            socialNotificationService.notifyCommentReceived(actorId, recipientId, targetType, targetId);
+        }
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList list) {

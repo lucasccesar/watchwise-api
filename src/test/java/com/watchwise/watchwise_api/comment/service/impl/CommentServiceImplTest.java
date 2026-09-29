@@ -19,6 +19,14 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
+import com.watchwise.watchwise_api.notification.service.SocialNotificationService;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -32,6 +40,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -76,6 +85,12 @@ class CommentServiceImplTest {
     private DroppedEntryRepository droppedEntryRepository;
 
     @Mock
+    private PickRepository pickRepository;
+
+    @Mock
+    private PicksTemplateRepository picksTemplateRepository;
+
+    @Mock
     private FollowerRepository followerRepository;
 
     @Mock
@@ -83,6 +98,9 @@ class CommentServiceImplTest {
 
     @Mock
     private LikeService likeService;
+
+    @Mock
+    private SocialNotificationService socialNotificationService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -106,6 +124,10 @@ class CommentServiceImplTest {
     private UserList scifi;
     private UUID diaryEntryId;
     private DiaryEntry diaryEntry;
+    private UUID pickId;
+    private Pick pick;
+    private UUID templateId;
+    private PicksTemplate template;
     private CommentResponseDTO responseDto;
 
     @BeforeEach
@@ -158,6 +180,26 @@ class CommentServiceImplTest {
                 .user(marina)
                 .content(fightClub)
                 .watchNumber(1)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        templateId = UUID.randomUUID();
+        template = PicksTemplate.builder()
+                .id(templateId)
+                .creator(marina)
+                .origin(PickOrigin.COMMUNITY)
+                .name("Awards")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        pickId = UUID.randomUUID();
+        pick = Pick.builder()
+                .id(pickId)
+                .picksTemplate(template)
+                .user(marina)
+                .visibility(PickVisibility.PUBLIC)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -591,6 +633,7 @@ class CommentServiceImplTest {
         assertThat(saved.getUser()).isEqualTo(lucas);
         assertThat(saved.getText()).isEqualTo("Great movie!");
         assertThat(saved.getContainsSpoiler()).isFalse();
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -688,12 +731,15 @@ class CommentServiceImplTest {
                 lucasId, listId, new CommentCreationDTO("Nice picks", null, null));
 
         assertThat(result).isEqualTo(responseDto);
-        verify(commentRepository).save(commentCaptor.capture());
+        InOrder notificationOrder = inOrder(commentRepository, socialNotificationService);
+        notificationOrder.verify(commentRepository).save(commentCaptor.capture());
         Comment saved = commentCaptor.getValue();
         assertThat(saved.getList()).isEqualTo(scifi);
         assertThat(saved.getContent()).isNull();
         assertThat(saved.getDiaryEntry()).isNull();
         assertThat(saved.getUser()).isEqualTo(lucas);
+        notificationOrder.verify(socialNotificationService).notifyCommentReceived(
+                lucasId, marinaId, NotificationTargetType.USER_LIST, listId);
     }
 
     @Test
@@ -722,6 +768,7 @@ class CommentServiceImplTest {
         commentService.createCommentOnList(marinaId, listId, new CommentCreationDTO("My own list", null, null));
 
         verify(commentRepository).save(any(Comment.class));
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -755,6 +802,7 @@ class CommentServiceImplTest {
                 .hasMessage("This list is private");
 
         verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -840,6 +888,7 @@ class CommentServiceImplTest {
                 .hasMessage("Parent comment must target the same list");
 
         verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     // ---------- createCommentOnDiaryEntry ----------
@@ -856,12 +905,15 @@ class CommentServiceImplTest {
                 lucasId, diaryEntryId, new CommentCreationDTO("Agreed", null, null));
 
         assertThat(result).isEqualTo(responseDto);
-        verify(commentRepository).save(commentCaptor.capture());
+        InOrder notificationOrder = inOrder(commentRepository, socialNotificationService);
+        notificationOrder.verify(commentRepository).save(commentCaptor.capture());
         Comment saved = commentCaptor.getValue();
         assertThat(saved.getDiaryEntry()).isEqualTo(diaryEntry);
         assertThat(saved.getContent()).isNull();
         assertThat(saved.getList()).isNull();
         assertThat(saved.getUser()).isEqualTo(lucas);
+        notificationOrder.verify(socialNotificationService).notifyCommentReceived(
+                lucasId, marinaId, NotificationTargetType.DIARY_ENTRY, diaryEntryId);
     }
 
     @Test
@@ -870,12 +922,13 @@ class CommentServiceImplTest {
         UUID droppedEntryId = UUID.randomUUID();
         DroppedEntry droppedEntry = DroppedEntry.builder()
                 .id(droppedEntryId)
-                .user(lucas)
+                .user(marina)
                 .content(fightClub)
                 .type(ContentType.MOVIE)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+
         when(droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)).thenReturn(Optional.of(droppedEntry));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -885,11 +938,114 @@ class CommentServiceImplTest {
                 lucasId, droppedEntryId, new CommentCreationDTO("Stopped halfway", null, null));
 
         assertThat(result).isEqualTo(responseDto);
-        verify(commentRepository).save(commentCaptor.capture());
+        InOrder notificationOrder = inOrder(commentRepository, socialNotificationService);
+        notificationOrder.verify(commentRepository).save(commentCaptor.capture());
         Comment saved = commentCaptor.getValue();
         assertThat(saved.getDroppedEntry()).isEqualTo(droppedEntry);
         assertThat(saved.getDiaryEntry()).isNull();
         assertThat(saved.getContent()).isNull();
+        notificationOrder.verify(socialNotificationService).notifyCommentReceived(
+                lucasId, marinaId, NotificationTargetType.DROPPED_ENTRY, droppedEntryId);
+    }
+
+    @Test
+    @DisplayName("[createCommentOnPick] Should Save Comment Targeting Pick - When Pick Is Public")
+    void shouldSaveCommentTargetingPickWhenPickIsPublic() {
+        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
+
+        CommentResponseDTO result = commentService.createCommentOnPick(
+                lucasId, pickId, new CommentCreationDTO("Great choice", null, null));
+
+        assertThat(result).isEqualTo(responseDto);
+        InOrder notificationOrder = inOrder(commentRepository, socialNotificationService);
+        notificationOrder.verify(commentRepository).save(commentCaptor.capture());
+        Comment saved = commentCaptor.getValue();
+        assertThat(saved.getPick()).isEqualTo(pick);
+        assertThat(saved.getContent()).isNull();
+        assertThat(saved.getList()).isNull();
+        assertThat(saved.getDiaryEntry()).isNull();
+        assertThat(saved.getDroppedEntry()).isNull();
+        assertThat(saved.getPicksTemplate()).isNull();
+        notificationOrder.verify(socialNotificationService).notifyCommentReceived(
+                lucasId, marinaId, NotificationTargetType.PICK, pickId);
+    }
+
+    @Test
+    @DisplayName("[createCommentOnPicksTemplate] Should Save Comment Targeting Template - When Creator Exists")
+    void shouldSaveCommentTargetingTemplateWhenCreatorExists() {
+        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(template));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
+
+        CommentResponseDTO result = commentService.createCommentOnPicksTemplate(
+                lucasId, templateId, new CommentCreationDTO("Useful template", null, null));
+
+        assertThat(result).isEqualTo(responseDto);
+        InOrder notificationOrder = inOrder(commentRepository, socialNotificationService);
+        notificationOrder.verify(commentRepository).save(commentCaptor.capture());
+        Comment saved = commentCaptor.getValue();
+        assertThat(saved.getPicksTemplate()).isEqualTo(template);
+        assertThat(saved.getContent()).isNull();
+        assertThat(saved.getList()).isNull();
+        assertThat(saved.getDiaryEntry()).isNull();
+        assertThat(saved.getDroppedEntry()).isNull();
+        assertThat(saved.getPick()).isNull();
+        notificationOrder.verify(socialNotificationService).notifyCommentReceived(
+                lucasId, marinaId, NotificationTargetType.PICKS_TEMPLATE, templateId);
+    }
+
+    @Test
+    @DisplayName("[createCommentOnPicksTemplate] Should Save Official Template Comment Without Notification - When Creator Is Null")
+    void shouldSaveOfficialTemplateCommentWithoutNotificationWhenCreatorIsNull() {
+        PicksTemplate officialTemplate = PicksTemplate.builder()
+                .id(templateId)
+                .creator(null)
+                .origin(PickOrigin.OFFICIAL)
+                .name("Official awards")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(officialTemplate));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
+
+        commentService.createCommentOnPicksTemplate(
+                lucasId, templateId, new CommentCreationDTO("Looks useful", null, null));
+
+        verify(commentRepository).save(commentCaptor.capture());
+        assertThat(commentCaptor.getValue().getPicksTemplate()).isEqualTo(officialTemplate);
+        verifyNoInteractions(socialNotificationService);
+    }
+
+    @Test
+    @DisplayName("[createCommentOnPicksTemplate] Should Notify Creator - When Official Template Has Creator")
+    void shouldNotifyCreatorWhenOfficialTemplateHasCreator() {
+        PicksTemplate officialTemplate = PicksTemplate.builder()
+                .id(templateId)
+                .creator(marina)
+                .origin(PickOrigin.OFFICIAL)
+                .name("Official awards")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(officialTemplate));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
+
+        commentService.createCommentOnPicksTemplate(
+                lucasId, templateId, new CommentCreationDTO("Looks useful", null, null));
+
+        InOrder notificationOrder = inOrder(commentRepository, socialNotificationService);
+        notificationOrder.verify(commentRepository).save(commentCaptor.capture());
+        assertThat(commentCaptor.getValue().getPicksTemplate()).isEqualTo(officialTemplate);
+        notificationOrder.verify(socialNotificationService).notifyCommentReceived(
+                lucasId, marinaId, NotificationTargetType.PICKS_TEMPLATE, templateId);
     }
 
     @Test
@@ -917,6 +1073,7 @@ class CommentServiceImplTest {
         commentService.createCommentOnDiaryEntry(marinaId, diaryEntryId, new CommentCreationDTO("My own entry", null, null));
 
         verify(commentRepository).save(any(Comment.class));
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -949,6 +1106,7 @@ class CommentServiceImplTest {
                 .hasMessage("This diary entry is private");
 
         verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -964,8 +1122,11 @@ class CommentServiceImplTest {
         commentService.createCommentOnDiaryEntry(
                 lucasId, diaryEntryId, new CommentCreationDTO("Totally agree", parent.getId(), null));
 
-        verify(commentRepository).save(commentCaptor.capture());
+        InOrder notificationOrder = inOrder(commentRepository, socialNotificationService);
+        notificationOrder.verify(commentRepository).save(commentCaptor.capture());
         assertThat(commentCaptor.getValue().getParentComment()).isEqualTo(parent);
+        notificationOrder.verify(socialNotificationService).notifyCommentReceived(
+                lucasId, marinaId, NotificationTargetType.DIARY_ENTRY, diaryEntryId);
     }
 
     @Test
@@ -1004,6 +1165,7 @@ class CommentServiceImplTest {
                 .hasMessage("Parent comment must target the same diary entry");
 
         verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     // ---------- deleteComment ----------
