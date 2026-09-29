@@ -188,6 +188,19 @@ class DailyGameControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[search] Should Return Unauthorized - When Episode Dropdown Access Token Is Missing")
+    void shouldReturnUnauthorizedWhenEpisodeDropdownAccessTokenIsMissing() throws Exception {
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
+                        .param("seriesTmdbId", "1399"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(dailyGameSearchService);
+    }
+
+    @Test
     @DisplayName("[submitAttempt] Should Return Ok - When Access And Csrf Cookies Are Valid")
     void shouldReturnOkWhenAccessAndCsrfCookiesAreValid() throws Exception {
         RegisteredUser user = registerUser("dailycontrollerattempt");
@@ -221,6 +234,41 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.instance").doesNotExist());
 
         verifyNoInteractions(dailyGameSearchService);
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Episode Series Identifier Is Invalid")
+    void shouldReturnBadRequestApiErrorWhenEpisodeSeriesIdentifierIsInvalid() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollerepisodeseriesid");
+        when(dailyGameSearchService.listEpisodeSeasons(user.id(), "abc"))
+                .thenThrow(new BadRequestException("seriesTmdbId must be a positive numeric identifier"));
+
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
+                        .param("seriesTmdbId", "abc").cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("seriesTmdbId must be a positive numeric identifier"))
+                .andExpect(jsonPath("$.path").value("/games/EPISODE_BY_FRAME/search/seasons"));
+
+        verify(dailyGameSearchService).listEpisodeSeasons(user.id(), "abc");
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadRequest ApiError - When Episode Season Coordinate Is Invalid")
+    void shouldReturnBadRequestApiErrorWhenEpisodeSeasonCoordinateIsInvalid() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollerepisodeseason");
+        when(dailyGameSearchService.listEpisodeEpisodes(user.id(), "1399", 0))
+                .thenThrow(new BadRequestException("seasonNumber must be a positive integer"));
+
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/episodes")
+                        .param("seriesTmdbId", "1399").param("seasonNumber", "0")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("seasonNumber must be a positive integer"))
+                .andExpect(jsonPath("$.path").value("/games/EPISODE_BY_FRAME/search/episodes"));
+
+        verify(dailyGameSearchService).listEpisodeEpisodes(user.id(), "1399", 0);
     }
 
     @Test
@@ -313,6 +361,21 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(502))
                 .andExpect(jsonPath("$.error").value("Bad Gateway"))
                 .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/search"));
+    }
+
+    @Test
+    @DisplayName("[search] Should Return BadGateway - When Episode Dropdown TMDB Is Unavailable")
+    void shouldReturnBadGatewayWhenEpisodeDropdownTmdbIsUnavailable() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollerepisodetmdb");
+        when(dailyGameSearchService.listEpisodeSeasons(user.id(), "1399"))
+                .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
+
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
+                        .param("seriesTmdbId", "1399").cookie(user.accessToken()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.status").value(502))
+                .andExpect(jsonPath("$.error").value("Bad Gateway"))
+                .andExpect(jsonPath("$.path").value("/games/EPISODE_BY_FRAME/search/seasons"));
     }
 
     @Test

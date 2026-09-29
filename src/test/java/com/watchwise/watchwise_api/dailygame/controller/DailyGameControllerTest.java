@@ -6,9 +6,11 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
@@ -214,20 +216,23 @@ class DailyGameControllerTest {
     }
 
     @Test
-    @DisplayName("[search] Should Delegate All Search Routes - When Candidates Are Requested")
+    @DisplayName("[search] Should Delegate All Search Routes - When Candidates And Episode Dropdowns Are Requested")
     void shouldDelegateAllSearchRoutesAndApplyOneSearchLimitPerRequest() throws Exception {
         DailyGameSearchResultDTO movie = new DailyGameSearchResultDTO(
                 DailyGameTargetKind.MOVIE, "550", null, null, null, null, "Fight Club", "/fight.jpg", null);
         DailyGameSearchResultDTO series = new DailyGameSearchResultDTO(
                 DailyGameTargetKind.SERIES, "1399", null, null, null, null, "Game of Thrones", "/got.jpg", null);
-        DailyGameSearchResultDTO episode = new DailyGameSearchResultDTO(
-                DailyGameTargetKind.EPISODE, null, null, "1399", 1, 1, "Winter Is Coming", "/episode.jpg", LocalDate.now());
+        DailyGameSeasonOptionDTO season = new DailyGameSeasonOptionDTO(1, "Season 1", 10);
+        DailyGameEpisodeOptionDTO episode = new DailyGameEpisodeOptionDTO(
+                "1399", 1, 1, "Winter Is Coming", LocalDate.of(2011, 4, 17));
         when(dailyGameSearchService.search(CURRENT_USER_ID, GAME_TYPE, "fight", 2, 5))
                 .thenReturn(page(movie));
         when(dailyGameSearchService.searchEpisodeSeries(CURRENT_USER_ID, "game", 1, 10))
                 .thenReturn(page(series));
-        when(dailyGameSearchService.searchEpisodes(CURRENT_USER_ID, "1399", "winter", 1, 10))
-                .thenReturn(page(episode));
+        when(dailyGameSearchService.listEpisodeSeasons(CURRENT_USER_ID, "1399"))
+                .thenReturn(List.of(season));
+        when(dailyGameSearchService.listEpisodeEpisodes(CURRENT_USER_ID, "1399", 1))
+                .thenReturn(List.of(episode));
 
         mockMvc.perform(get("/games/{gameType}/search", GAME_TYPE)
                         .param("q", "fight").param("page", "2").param("size", "5"))
@@ -239,17 +244,24 @@ class DailyGameControllerTest {
                         .param("q", "game").param("page", "1").param("size", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].tmdbId").value("1399"));
-        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/episodes")
-                        .param("seriesTmdbId", "1399").param("q", "winter")
-                        .param("page", "1").param("size", "10"))
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
+                        .param("seriesTmdbId", "1399"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].seriesTmdbId").value("1399"))
-                .andExpect(jsonPath("$.content[0].episodeNumber").value(1));
+                .andExpect(jsonPath("$[0].seasonNumber").value(1))
+                .andExpect(jsonPath("$[0].episodeCount").value(10))
+                .andExpect(jsonPath("$[0].imageUrl").doesNotExist());
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/episodes")
+                        .param("seriesTmdbId", "1399").param("seasonNumber", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$[0].episodeNumber").value(1))
+                .andExpect(jsonPath("$[0].imageUrl").doesNotExist());
 
         verify(dailyGameSearchService).search(CURRENT_USER_ID, GAME_TYPE, "fight", 2, 5);
         verify(dailyGameSearchService).searchEpisodeSeries(CURRENT_USER_ID, "game", 1, 10);
-        verify(dailyGameSearchService).searchEpisodes(CURRENT_USER_ID, "1399", "winter", 1, 10);
-        verify(requestThrottler, org.mockito.Mockito.times(3)).checkAllowed(
+        verify(dailyGameSearchService).listEpisodeSeasons(CURRENT_USER_ID, "1399");
+        verify(dailyGameSearchService).listEpisodeEpisodes(CURRENT_USER_ID, "1399", 1);
+        verify(requestThrottler, org.mockito.Mockito.times(4)).checkAllowed(
                 eq("daily-game-search|" + CURRENT_USER_ID), eq(30), eq(Duration.ofMinutes(5)));
     }
 

@@ -14,6 +14,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
@@ -28,7 +30,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -83,28 +84,46 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
     }
 
     @Override
-    public Page<DailyGameSearchResultDTO> searchEpisodes(
-            UUID userId, String seriesTmdbId, String query, Integer page, Integer size) {
+    public List<DailyGameSeasonOptionDTO> listEpisodeSeasons(UUID userId, String seriesTmdbId) {
         String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
-        String normalizedQuery = normalizeQuery(query);
-        PageRequest pageRequest = buildPageRequest(page, size);
         TmdbTvFullDetails series = foundValueOrEmpty(
                 tmdbClient.getTvFullDetails(normalizedSeriesTmdbId, LANGUAGE));
         if (series == null || series.seasons() == null) {
-            return new PageImpl<>(List.of(), pageRequest, 0);
+            return List.of();
+        }
+
+        return series.seasons().stream()
+                .filter(this::isRegularSeason)
+                .map(season -> new DailyGameSeasonOptionDTO(
+                        season.seasonNumber(), season.name(), season.episodeCount()))
+                .toList();
+    }
+
+    @Override
+    public List<DailyGameEpisodeOptionDTO> listEpisodeEpisodes(
+            UUID userId, String seriesTmdbId, Integer seasonNumber) {
+        String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
+        int normalizedSeasonNumber = normalizePositiveSeasonNumber(seasonNumber);
+        TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(
+                normalizedSeriesTmdbId, normalizedSeasonNumber, LANGUAGE);
+        if (lookup == null || lookup.isUnavailable()) {
+            throw tmdbUnavailable();
+        }
+        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)
+                || found.value() == null || found.value().episodes() == null) {
+            return List.of();
         }
 
         LocalDate today = LocalDate.now(clock);
-        String queryLowerCase = normalizedQuery.toLowerCase(Locale.ROOT);
-        List<DailyGameSearchResultDTO> candidates = series.seasons().stream()
-                .filter(this::isRegularSeason)
-                .flatMap(season -> seasonCandidates(
-                        normalizedSeriesTmdbId, season.seasonNumber(), queryLowerCase, today).stream())
+        return found.value().episodes().stream()
+                .filter(episode -> isReleasedEpisode(episode, today))
+                .map(episode -> new DailyGameEpisodeOptionDTO(
+                        normalizedSeriesTmdbId,
+                        normalizedSeasonNumber,
+                        episode.episodeNumber(),
+                        episode.name(),
+                        parseDate(episode.airDate())))
                 .toList();
-
-        int fromIndex = Math.min((int) pageRequest.getOffset(), candidates.size());
-        int toIndex = Math.min(fromIndex + pageRequest.getPageSize(), candidates.size());
-        return new PageImpl<>(candidates.subList(fromIndex, toIndex), pageRequest, candidates.size());
     }
 
     private Page<DailyGameSearchResultDTO> searchMovies(String query, PageRequest pageRequest) {
@@ -155,23 +174,6 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null));
     }
 
-    private List<DailyGameSearchResultDTO> seasonCandidates(
-            String seriesTmdbId, Integer seasonNumber, String query, LocalDate today) {
-        TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(
-                seriesTmdbId, seasonNumber, LANGUAGE);
-        if (lookup == null || lookup.isUnavailable()) {
-            throw tmdbUnavailable();
-        }
-        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)
-                || found.value() == null || found.value().episodes() == null) {
-            return List.of();
-        }
-        return found.value().episodes().stream()
-                .filter(episode -> isReleasedMatchingEpisode(episode, query, today))
-                .map(episode -> toEpisodeResult(seriesTmdbId, seasonNumber, episode))
-                .toList();
-    }
-
     private TmdbTvFullDetails foundValueOrEmpty(TmdbLookupResult<TmdbTvFullDetails> lookup) {
         if (lookup == null || lookup.isUnavailable()) {
             throw tmdbUnavailable();
@@ -186,29 +188,13 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         return season != null && season.seasonNumber() != null && season.seasonNumber() > 0;
     }
 
-    private boolean isReleasedMatchingEpisode(TmdbEpisodeSummary episode, String query, LocalDate today) {
+    private boolean isReleasedEpisode(TmdbEpisodeSummary episode, LocalDate today) {
         if (episode == null || episode.episodeNumber() == null || episode.episodeNumber() < 1
-                || episode.name() == null || episode.name().isBlank()
-                || episode.stillPath() == null || episode.stillPath().isBlank()) {
+                || episode.name() == null || episode.name().isBlank()) {
             return false;
         }
         LocalDate airDate = parseDate(episode.airDate());
-        return airDate != null && !airDate.isAfter(today)
-                && episode.name().toLowerCase(Locale.ROOT).contains(query);
-    }
-
-    private DailyGameSearchResultDTO toEpisodeResult(
-            String seriesTmdbId, Integer seasonNumber, TmdbEpisodeSummary episode) {
-        return new DailyGameSearchResultDTO(
-                DailyGameTargetKind.EPISODE,
-                null,
-                null,
-                seriesTmdbId,
-                seasonNumber,
-                episode.episodeNumber(),
-                episode.name(),
-                TmdbImageUrlBuilder.stillUrl(episode.stillPath()),
-                parseDate(episode.airDate()));
+        return airDate != null && !airDate.isAfter(today);
     }
 
     private <T> TmdbSearchPage<T> searchPageOrEmpty(
@@ -293,6 +279,13 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
             throw new BadRequestException("seriesTmdbId must be a positive numeric identifier");
         }
         return trimmedValue;
+    }
+
+    private int normalizePositiveSeasonNumber(Integer value) {
+        if (value == null || value <= 0) {
+            throw new BadRequestException("seasonNumber must be a positive integer");
+        }
+        return value;
     }
 
     private TmdbUnavailableException tmdbUnavailable() {

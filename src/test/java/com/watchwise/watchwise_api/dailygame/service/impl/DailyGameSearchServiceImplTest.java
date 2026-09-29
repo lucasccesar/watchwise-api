@@ -13,6 +13,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
@@ -289,15 +291,14 @@ class DailyGameSearchServiceImplTest {
     }
 
     @Test
-    @DisplayName("[search] Should Accept Long Positive Numeric Series Identifier - When The Identifier Exceeds Twenty Digits")
-    void shouldAcceptLongPositiveNumericSeriesIdentifierWhenTheIdentifierExceedsTwentyDigits() {
+    @DisplayName("[listEpisodeSeasons] Should Accept Long Positive Numeric Series Identifier - When The Identifier Exceeds Twenty Digits")
+    void shouldAcceptLongPositiveNumericSeriesIdentifierWhenListingEpisodeSeasons() {
         String seriesTmdbId = "123456789012345678901";
         when(tmdbClient.getTvFullDetails(seriesTmdbId, LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
 
-        Page<DailyGameSearchResultDTO> result = service().searchEpisodes(
-                USER_ID, seriesTmdbId, "pilot", 1, 20);
+        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, seriesTmdbId);
 
-        assertThat(result.getContent()).isEmpty();
+        assertThat(result).isEmpty();
         verify(tmdbClient).getTvFullDetails(seriesTmdbId, LANGUAGE);
     }
 
@@ -317,51 +318,75 @@ class DailyGameSearchServiceImplTest {
     }
 
     @Test
-    @DisplayName("[searchEpisodes] Should Return Released Matching Episodes With Composite Identity - When The Series Has Regular And Future Episodes")
-    void shouldReturnReleasedMatchingEpisodesWithCompositeIdentityWhenTheSeriesHasRegularAndFutureEpisodes() {
+    @DisplayName("[listEpisodeSeasons] Should Omit Specials And Map Only Dropdown Fields - When The Series Has Regular And Special Seasons")
+    void shouldOmitSpecialsAndMapOnlyDropdownFieldsWhenListingEpisodeSeasons() {
         when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(seriesWithSeasons(
                 new TmdbSeasonSummary(0, "Specials", null, "2008-01-01", 1, "/special.jpg"),
                 new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 4, "/season-1.jpg"),
+                new TmdbSeasonSummary(-1, "Other Specials", null, "2007-01-01", 2, "/other-special.jpg"),
                 new TmdbSeasonSummary(2, "Season 2", null, "2027-01-01", 1, "/season-2.jpg"))));
+
+        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, "1399");
+
+        assertThat(result).containsExactly(
+                new DailyGameSeasonOptionDTO(1, "Season 1", 4),
+                new DailyGameSeasonOptionDTO(2, "Season 2", 1));
+        verify(tmdbClient).getTvFullDetails("1399", LANGUAGE);
+    }
+
+    @Test
+    @DisplayName("[listEpisodeEpisodes] Should Return Released Episodes Without Image Fields - When A Season Has Future And Image-less Episodes")
+    void shouldReturnReleasedEpisodesWithoutImageFieldsWhenASeasonHasFutureAndImageLessEpisodes() {
         when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(season(1,
                 new TmdbEpisodeSummary(1, "Pilot", null, "2020-01-01", 45, "/pilot.jpg", null),
                 new TmdbEpisodeSummary(2, "Future Fight", null, "2026-09-28", 45, "/future.jpg", null),
                 new TmdbEpisodeSummary(3, "No Still Fight", null, "2020-02-01", 45, null, null),
-                new TmdbEpisodeSummary(4, "Finale Fight", null, "2020-03-01", 45, "/finale.jpg", null))));
-        when(tmdbClient.getSeasonFullDetails("1399", 2, LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(season(2,
-                new TmdbEpisodeSummary(1, "Other Fight", null, "2020-04-01", 45, "/other.jpg", null))));
+                new TmdbEpisodeSummary(4, "Unaired", null, null, 45, "/unaired.jpg", null))));
 
-        Page<DailyGameSearchResultDTO> result = service().searchEpisodes(USER_ID, "1399", "  fIgHt ", 1, 1);
+        List<DailyGameEpisodeOptionDTO> result = service().listEpisodeEpisodes(USER_ID, "1399", 1);
 
-        assertThat(result.getContent()).containsExactly(new DailyGameSearchResultDTO(
-                DailyGameTargetKind.EPISODE, null, null, "1399", 1, 4,
-                "Finale Fight", "https://image.tmdb.org/t/p/w300/finale.jpg", LocalDate.of(2020, 3, 1)));
-        assertThat(result.getTotalElements()).isEqualTo(2);
-        assertThat(result.getTotalPages()).isEqualTo(2);
-        verify(tmdbClient).getTvFullDetails("1399", LANGUAGE);
+        assertThat(result).containsExactly(
+                new DailyGameEpisodeOptionDTO("1399", 1, 1, "Pilot", LocalDate.of(2020, 1, 1)),
+                new DailyGameEpisodeOptionDTO("1399", 1, 3, "No Still Fight", LocalDate.of(2020, 2, 1)));
         verify(tmdbClient).getSeasonFullDetails("1399", 1, LANGUAGE);
-        verify(tmdbClient).getSeasonFullDetails("1399", 2, LANGUAGE);
-        verify(tmdbClient, never()).getSeasonFullDetails("1399", 0, LANGUAGE);
     }
 
     @Test
-    @DisplayName("[searchEpisodes] Should Reject Invalid Series Identifier - When The Identifier Is Not Positive Numeric")
-    void shouldRejectInvalidSeriesIdentifierWhenTheIdentifierIsNotPositiveNumeric() {
-        assertThatThrownBy(() -> service().searchEpisodes(USER_ID, "abc", "pilot", 1, 20))
+    @DisplayName("[listEpisodeSeasons] Should Reject Invalid Series Identifier - When The Identifier Is Not Positive Numeric")
+    void shouldRejectInvalidSeriesIdentifierWhenListingEpisodeSeasons() {
+        assertThatThrownBy(() -> service().listEpisodeSeasons(USER_ID, "abc"))
                 .isInstanceOf(BadRequestException.class);
 
         verifyNoInteractions(tmdbClient);
     }
 
     @Test
-    @DisplayName("[searchEpisodes] Should Return Empty Page - When The Series Or Season Is Not Found")
-    void shouldReturnEmptyPageWhenTheSeriesOrSeasonIsNotFound() {
+    @DisplayName("[listEpisodeEpisodes] Should Reject Invalid Season Coordinate - When The Season Number Is Not Positive")
+    void shouldRejectInvalidSeasonCoordinateWhenTheSeasonNumberIsNotPositive() {
+        assertThatThrownBy(() -> service().listEpisodeEpisodes(USER_ID, "1399", 0))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[listEpisodeSeasons] Should Return Empty List - When The Series Is Not Found")
+    void shouldReturnEmptyListWhenTheSeriesIsNotFound() {
         when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
 
-        Page<DailyGameSearchResultDTO> result = service().searchEpisodes(USER_ID, "1399", "pilot", 1, 20);
+        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, "1399");
 
-        assertThat(result.getContent()).isEmpty();
-        assertThat(result.getTotalElements()).isZero();
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[listEpisodeEpisodes] Should Return Empty List - When The Season Is Not Found")
+    void shouldReturnEmptyListWhenTheSeasonIsNotFound() {
+        when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
+
+        List<DailyGameEpisodeOptionDTO> result = service().listEpisodeEpisodes(USER_ID, "1399", 1);
+
+        assertThat(result).isEmpty();
     }
 
     @Test
@@ -375,13 +400,11 @@ class DailyGameSearchServiceImplTest {
     }
 
     @Test
-    @DisplayName("[searchEpisodes] Should Propagate TMDB Unavailable - When A Season Lookup Is Unavailable")
+    @DisplayName("[listEpisodeEpisodes] Should Propagate TMDB Unavailable - When A Season Lookup Is Unavailable")
     void shouldPropagateTmdbUnavailableWhenASeasonLookupIsUnavailable() {
-        when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.Found<>(seriesWithSeasons(
-                new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, "/season.jpg"))));
         when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE)).thenReturn(new TmdbLookupResult.Unavailable<>());
 
-        assertThatThrownBy(() -> service().searchEpisodes(USER_ID, "1399", "pilot", 1, 20))
+        assertThatThrownBy(() -> service().listEpisodeEpisodes(USER_ID, "1399", 1))
                 .isInstanceOf(TmdbUnavailableException.class)
                 .hasMessage("TMDB is currently unavailable");
     }

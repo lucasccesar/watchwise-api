@@ -5,9 +5,11 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
@@ -31,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -107,17 +110,22 @@ public class DailyGameController {
         return ResponseEntity.ok(PageResponseDTO.of(results));
     }
 
-    @GetMapping("/games/EPISODE_BY_FRAME/search/episodes")
-    public ResponseEntity<PageResponseDTO<DailyGameSearchResultDTO>> searchEpisodes(
-            @RequestParam("seriesTmdbId") String seriesTmdbId,
-            @RequestParam("q") String query,
-            @RequestParam(value = "page", required = false) Integer page,
-            @RequestParam(value = "size", required = false) Integer size) {
+    @GetMapping("/games/EPISODE_BY_FRAME/search/seasons")
+    public ResponseEntity<List<DailyGameSeasonOptionDTO>> listEpisodeSeasons(
+            @RequestParam("seriesTmdbId") String seriesTmdbId) {
         UUID userId = currentUserId();
         throttleSearch(userId);
-        Page<DailyGameSearchResultDTO> results = dailyGameSearchService.searchEpisodes(
-                userId, seriesTmdbId, query, page, size);
-        return ResponseEntity.ok(PageResponseDTO.of(results));
+        return ResponseEntity.ok(dailyGameSearchService.listEpisodeSeasons(userId, seriesTmdbId));
+    }
+
+    @GetMapping("/games/EPISODE_BY_FRAME/search/episodes")
+    public ResponseEntity<List<DailyGameEpisodeOptionDTO>> listEpisodeEpisodes(
+            @RequestParam("seriesTmdbId") String seriesTmdbId,
+            @RequestParam("seasonNumber") Integer seasonNumber) {
+        UUID userId = currentUserId();
+        throttleSearch(userId);
+        return ResponseEntity.ok(dailyGameSearchService.listEpisodeEpisodes(
+                userId, seriesTmdbId, seasonNumber));
     }
 
     @PostMapping("/games/{gameType}/attempt")
