@@ -12,6 +12,15 @@ import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
+import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
+import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
+import com.watchwise.watchwise_api.dailygame.service.impl.DailyChallengeResponseAssembler;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.feed.dto.FeedEventType;
@@ -46,9 +55,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.Set;
@@ -121,7 +132,7 @@ class FeedServiceImplTest {
 
         FeedItemDTO item = new FeedItemDTO(
                 FeedEventType.PICK_CREATED, pickId, null, null, null, null, null, null, null, null,
-                pickPreview, templatePreview, createdAt);
+                pickPreview, templatePreview, null, createdAt);
 
         assertThat(item.pick()).isEqualTo(pickPreview);
         assertThat(item.picksTemplate()).isEqualTo(templatePreview);
@@ -136,7 +147,7 @@ class FeedServiceImplTest {
 
         FeedItemDTO item = new FeedItemDTO(
                 FeedEventType.PICKS_TEMPLATE_CREATED, templateId, null, null, null, null, null, null, null, null,
-                null, templatePreview, LocalDateTime.now());
+                null, templatePreview, null, LocalDateTime.now());
 
         assertThat(item.pick()).isNull();
         assertThat(item.picksTemplate()).isEqualTo(templatePreview);
@@ -194,6 +205,74 @@ class FeedServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getFeed] Should Merge DailyGameResult With Existing Sources - When A Result Is Shared")
+    void shouldMergeDailyGameResultWithExistingSources() {
+        stubFollowedIds();
+
+        LocalDateTime sharedAt = LocalDateTime.of(2026, 9, 29, 12, 0);
+        DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult sharedResult = buildDailyGameResult(
+                challenge, sharedAt, 4, 0, DailyGameResultStatus.FAILED);
+        DiaryEntry diaryEntry = buildDiaryEntry(sharedAt.minusMinutes(1));
+
+        stubEmptySources(21);
+        when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(diaryEntry));
+        when(dailyGameResultRepository.findFeedCandidates(
+                eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(sharedResult));
+        when(likeService.getLikedDiaryEntryIds(eq(viewerId), eq(List.of(diaryEntry.getId())))).thenReturn(Set.of());
+
+        CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, null);
+
+        assertThat(result.content()).extracting(FeedItemDTO::eventType)
+                .containsExactly(FeedEventType.DAILY_GAME_RESULT, FeedEventType.DIARY_ENTRY);
+        FeedItemDTO item = result.content().getFirst();
+        assertThat(item.id()).isEqualTo(sharedResult.getId());
+        assertThat(item.dailyGameResult().challengeDate()).isEqualTo(challenge.getChallengeDate());
+        assertThat(item.dailyGameResult().gameType()).isEqualTo(DailyGameType.MOVIE_BY_INFO);
+        assertThat(item.dailyGameResult().targetKind()).isEqualTo(DailyGameTargetKind.MOVIE);
+        assertThat(item.dailyGameResult().status()).isEqualTo(DailyGameViewStatus.FAILED);
+        assertThat(item.dailyGameResult().attemptsUsed()).isEqualTo(4);
+        assertThat(item.dailyGameResult().score()).isZero();
+        assertThat(item.dailyGameResult().answer().title()).isEqualTo("Fight Club");
+        assertThat(item.content()).isNull();
+        assertThat(item.score()).isNull();
+        assertThat(item.comment()).isNull();
+        assertThat(item.likesCount()).isNull();
+        assertThat(item.likedByMe()).isNull();
+        assertThat(item.watchedWith()).isNull();
+        assertThat(item.pick()).isNull();
+        assertThat(item.picksTemplate()).isNull();
+        assertThat(item.createdAt()).isEqualTo(sharedAt);
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Report HasNext - When DailyGame Source Has More Candidates")
+    void shouldReportHasNextWhenDailyGameSourceHasMoreCandidates() {
+        stubFollowedIds();
+
+        LocalDateTime now = LocalDateTime.of(2026, 9, 29, 12, 0);
+        DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult first = buildDailyGameResult(
+                challenge, now, 1, 9, DailyGameResultStatus.COMPLETED);
+        UserDailyGameResult beyondLimit = buildDailyGameResult(
+                challenge, now.minusMinutes(1), 2, 8, DailyGameResultStatus.COMPLETED);
+
+        stubEmptySources(2);
+        when(dailyGameResultRepository.findFeedCandidates(
+                eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 2))))
+                .thenReturn(List.of(first, beyondLimit));
+
+        CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, 1);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().getFirst().id()).isEqualTo(first.getId());
+        assertThat(result.hasNext()).isTrue();
+        assertThat(result.nextCursor()).isNotNull();
+    }
+
+    @Test
     @DisplayName("[getFeed] Should Report HasNext - When Pick Source Has More Candidates")
     void shouldReportHasNextWhenPickSourceHasMoreCandidates() {
         stubFollowedIds();
@@ -237,6 +316,7 @@ class FeedServiceImplTest {
 
     @Mock
     private UserContentPosterService userContentPosterService;
+    private UserDailyGameResultRepository dailyGameResultRepository;
 
     @Mock
     private PickRepository pickRepository;
@@ -255,6 +335,9 @@ class FeedServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private DailyChallengeResponseAssembler dailyChallengeResponseAssembler;
 
     @Mock
     private PickPreviewAssembler pickPreviewAssembler;
@@ -287,6 +370,9 @@ class FeedServiceImplTest {
                             null, null, content.getCreatedAt(), content.getUpdatedAt());
                 });
         lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
+        lenient().when(dailyChallengeResponseAssembler.toAnswer(any(DailyChallenge.class)))
+                .thenReturn(new DailyGameAnswerDTO(
+                        DailyGameTargetKind.MOVIE, "550", null, null, null, null, "Fight Club", "image.jpg"));
     }
 
     @Test
@@ -552,11 +638,16 @@ class FeedServiceImplTest {
         when(top5EntryRepository.findFeedCandidates(
                 eq(List.of(followedId)), eq(cursorCreatedAt), eq(cursorId), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of());
+        when(dailyGameResultRepository.findFeedCandidates(
+                eq(List.of(followedId)), eq(cursorCreatedAt), eq(cursorId), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of());
 
         CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, cursor, null);
 
         assertThat(result.content()).isEmpty();
         verify(diaryEntryRepository).findFeedCandidates(
+                eq(List.of(followedId)), eq(cursorCreatedAt), eq(cursorId), eq(PageRequest.of(0, 21)));
+        verify(dailyGameResultRepository).findFeedCandidates(
                 eq(List.of(followedId)), eq(cursorCreatedAt), eq(cursorId), eq(PageRequest.of(0, 21)));
     }
 
@@ -710,7 +801,7 @@ class FeedServiceImplTest {
     }
 
     private void stubEmptySources(int expectedFetchLimit) {
-        when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+        lenient().when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
                 .thenReturn(List.of());
         when(droppedEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
                 .thenReturn(List.of());
@@ -720,12 +811,16 @@ class FeedServiceImplTest {
                 .thenReturn(List.of());
         when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
                 .thenReturn(List.of());
+        lenient().when(dailyGameResultRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+                .thenReturn(List.of());
     }
 
     private void stubEmptyDroppedAndTop5(int expectedFetchLimit) {
         when(droppedEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
                 .thenReturn(List.of());
         when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+                .thenReturn(List.of());
+        when(dailyGameResultRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
                 .thenReturn(List.of());
     }
 
@@ -785,6 +880,46 @@ class FeedServiceImplTest {
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
                 .build();
+    }
+
+    private DailyChallenge buildChallenge(DailyGameType gameType, String targetTmdbId) {
+        Map<String, Object> answerSnapshot = new HashMap<>();
+        answerSnapshot.put("title", "Fight Club");
+        return DailyChallenge.builder()
+                .id(UUID.randomUUID())
+                .challengeDate(LocalDate.of(2026, 9, 29))
+                .gameType(gameType)
+                .targetKind(gameType.targetKind())
+                .targetTmdbId(targetTmdbId)
+                .answerKey("movie:" + targetTmdbId)
+                .imagePath("fight-club.jpg")
+                .answerSnapshot(answerSnapshot)
+                .displaySnapshot(Map.of())
+                .createdAt(LocalDateTime.of(2026, 9, 28, 12, 0))
+                .updatedAt(LocalDateTime.of(2026, 9, 28, 12, 0))
+                .build();
+    }
+
+    private UserDailyGameResult buildDailyGameResult(
+            DailyChallenge challenge,
+            LocalDateTime sharedAt,
+            int attemptsUsed,
+            int score,
+            DailyGameResultStatus status) {
+        UserDailyGameResult result = UserDailyGameResult.builder()
+                .id(UUID.randomUUID())
+                .user(followedUser)
+                .dailyChallenge(challenge)
+                .attemptsUsed(attemptsUsed)
+                .score(score)
+                .status(status)
+                .completedAt(sharedAt)
+                .createdAt(sharedAt.minusMinutes(5))
+                .updatedAt(sharedAt)
+                .build();
+        result.setShareOnCompletion(true);
+        result.markSharedAt(sharedAt);
+        return result;
     }
 
     private PicksTemplate buildTemplate(LocalDateTime createdAt) {

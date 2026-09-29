@@ -204,7 +204,7 @@ public class DailyChallengeResponseAssembler {
         return new DailyGameView(
                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
                 status, imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
-                result == null ? null : result.getCompletedAt(), terminal ? answer(challenge) : null,
+                result == null ? null : result.getCompletedAt(), terminal ? toAnswer(challenge) : null,
                 visibleImageUrls, imageUrls, result != null && result.isShareOnCompletion(),
                 result != null && result.getSharedAt() != null);
     }
@@ -289,7 +289,7 @@ public class DailyChallengeResponseAssembler {
         };
     }
 
-    private DailyGameAnswerDTO answer(DailyChallenge challenge) {
+    public DailyGameAnswerDTO toAnswer(DailyChallenge challenge) {
         DailyGameTargetKind targetKind = challenge.getTargetKind();
         String tmdbId = targetKind == DailyGameTargetKind.MOVIE || targetKind == DailyGameTargetKind.SERIES
                 ? challenge.getTargetTmdbId() : null;

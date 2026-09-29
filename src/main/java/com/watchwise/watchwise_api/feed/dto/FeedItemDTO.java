@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.feed.dto;
 import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameResultPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
@@ -27,6 +28,7 @@ public record FeedItemDTO(
         List<UserPreviewDTO> watchedWith,
         PickPreviewDTO pick,
         PicksTemplatePreviewDTO picksTemplate,
+        DailyGameResultPreviewDTO dailyGameResult,
         LocalDateTime createdAt,
         List<Top5EntryResponseDTO> top5
 ) {
@@ -36,7 +38,7 @@ public record FeedItemDTO(
             List<UserPreviewDTO> watchedWith, PickPreviewDTO pick, PicksTemplatePreviewDTO picksTemplate,
             LocalDateTime createdAt) {
         this(eventType, id, user, content, top5Type, score, comment, likesCount, likedByMe, null, null,
-                watchedWith, pick, picksTemplate, createdAt, null);
+                watchedWith, pick, picksTemplate, null, createdAt, null);
     }
 
     public FeedItemDTO(FeedEventType eventType, UUID id, UserPreviewDTO user, ContentRefDTO content,
@@ -44,6 +46,14 @@ public record FeedItemDTO(
             List<UserPreviewDTO> watchedWith, PickPreviewDTO pick, PicksTemplatePreviewDTO picksTemplate,
             LocalDateTime createdAt, List<Top5EntryResponseDTO> top5) {
         this(eventType, id, user, content, top5Type, score, comment, likesCount, likedByMe, null, null,
-                watchedWith, pick, picksTemplate, createdAt, top5);
+                watchedWith, pick, picksTemplate, null, createdAt, top5);
+    }
+
+    public FeedItemDTO(FeedEventType eventType, UUID id, UserPreviewDTO user, ContentRefDTO content,
+            ContentType top5Type, Integer score, String comment, Integer likesCount, Boolean likedByMe,
+            List<UserPreviewDTO> watchedWith, PickPreviewDTO pick, PicksTemplatePreviewDTO picksTemplate,
+            DailyGameResultPreviewDTO dailyGameResult, LocalDateTime createdAt) {
+        this(eventType, id, user, content, top5Type, score, comment, likesCount, likedByMe, null, null,
+                watchedWith, pick, picksTemplate, dailyGameResult, createdAt, null);
     }
 }
