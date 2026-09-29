@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +21,8 @@ import java.util.Set;
 
 @Component
 public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
+
+    private static final int MINIMUM_STILL_COUNT = 6;
 
     private final TmdbClient tmdbClient;
     private final DailyChallengeSnapshotAssembler snapshotAssembler;
@@ -41,11 +44,16 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
-        return DailyChallengeGenerationSupport.randomItem(
+        List<TmdbTvSearchResult> series = DailyChallengeGenerationSupport.value(
                         tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .filter(series -> series != null && DailyChallengeGenerationSupport.validId(series.id()))
-                .flatMap(series -> findEpisode(series, challengeDate, excludedAnswerKeys));
+                .map(page -> shuffled(page.results()))
+                .orElse(List.of());
+        return series.stream()
+                .filter(item -> item != null && DailyChallengeGenerationSupport.validId(item.id()))
+                .map(item -> findEpisode(item, challengeDate, excludedAnswerKeys))
+                .flatMap(Optional::stream)
+                .findFirst();
     }
 
     private Optional<DailyChallengeCandidate> findEpisode(TmdbTvSearchResult series, LocalDate challengeDate,
@@ -61,18 +69,32 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
         if (series.seasons() == null) {
             return Optional.empty();
         }
-        List<EpisodeCandidate> candidates = new ArrayList<>();
-        series.seasons().stream()
+        for (TmdbSeasonSummary season : shuffled(series.seasons().stream()
                 .filter(this::isRegularSeason)
-                .forEach(season -> DailyChallengeGenerationSupport.value(
-                                tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(),
-                                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                        .ifPresent(details -> addReleasedEpisodes(candidates, details, challengeDate)));
-        return DailyChallengeGenerationSupport.randomItem(candidates, episode ->
-                        !excludedAnswerKeys.contains("EPISODE:" + seriesTmdbId + ":" + episode.seasonNumber()
-                                + ":" + episode.episodeNumber()))
-                .map(episode -> snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(), episode.episodeNumber(),
-                        episode.name(), imagePaths(seriesTmdbId, episode)));
+                .toList())) {
+            Optional<TmdbSeasonFullDetails> seasonDetails = DailyChallengeGenerationSupport.value(
+                    tmdbClient.getSeasonFullDetails(seriesTmdbId, season.seasonNumber(),
+                            TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+            if (seasonDetails.isEmpty()) {
+                continue;
+            }
+            List<EpisodeCandidate> episodes = new ArrayList<>();
+            addReleasedEpisodes(episodes, seasonDetails.get(), challengeDate);
+            for (EpisodeCandidate episode : shuffled(episodes)) {
+                String answerKey = "EPISODE:" + seriesTmdbId + ":" + episode.seasonNumber()
+                        + ":" + episode.episodeNumber();
+                if (excludedAnswerKeys != null && excludedAnswerKeys.contains(answerKey)) {
+                    continue;
+                }
+                List<String> paths = imagePaths(seriesTmdbId, episode);
+                if (paths.size() >= MINIMUM_STILL_COUNT) {
+                    return Optional.of(snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(),
+                            episode.episodeNumber(), episode.name(), series.name(), series.posterPath(),
+                            seriesYear(series.firstAirDate()), paths));
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     private List<String> imagePaths(String seriesTmdbId, EpisodeCandidate episode) {
@@ -86,11 +108,8 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
                 .map(TmdbStill::filePath)
                 .map(String::trim)
                 .forEach(paths::add);
-        if (paths.isEmpty()) {
-            paths.add(episode.stillPath());
-        }
         List<String> ordered = new ArrayList<>(paths);
-        java.util.Collections.reverse(ordered);
+        Collections.reverse(ordered);
         return List.copyOf(ordered);
     }
 
@@ -106,18 +125,30 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
         season.episodes().stream()
                 .filter(episode -> isReleasedEpisode(episode, challengeDate))
                 .forEach(episode -> candidates.add(new EpisodeCandidate(season.seasonNumber(), episode.episodeNumber(),
-                        episode.name(), episode.stillPath())));
+                        episode.name())));
     }
 
     private boolean isReleasedEpisode(TmdbEpisodeSummary episode, LocalDate challengeDate) {
         return episode != null && episode.episodeNumber() != null && episode.episodeNumber() > 0
                 && episode.name() != null && !episode.name().isBlank()
-                && DailyChallengeGenerationSupport.validImage(episode.stillPath())
                 && DailyChallengeGenerationSupport.date(episode.airDate())
                 .map(releaseDate -> !releaseDate.isAfter(challengeDate)).orElse(false);
     }
 
-    private record EpisodeCandidate(Integer seasonNumber, Integer episodeNumber, String name, String stillPath) {
+    private Integer seriesYear(String firstAirDate) {
+        return DailyChallengeGenerationSupport.date(firstAirDate).map(LocalDate::getYear).orElse(null);
+    }
+
+    private <T> List<T> shuffled(List<T> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        List<T> shuffled = new ArrayList<>(values);
+        Collections.shuffle(shuffled);
+        return shuffled;
+    }
+
+    private record EpisodeCandidate(Integer seasonNumber, Integer episodeNumber, String name) {
     }
 
     private record TmdbLookup<T>(com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult<T> result) {

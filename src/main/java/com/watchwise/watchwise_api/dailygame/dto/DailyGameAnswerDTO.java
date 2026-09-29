@@ -10,5 +10,21 @@ public record DailyGameAnswerDTO(
         Integer seasonNumber,
         Integer episodeNumber,
         String title,
-        String imageUrl) {
+        String imageUrl,
+        String seriesName,
+        String seriesPosterUrl,
+        Integer seriesYear) {
+
+    public DailyGameAnswerDTO(
+            DailyGameTargetKind targetKind,
+            String tmdbId,
+            String personTmdbId,
+            String seriesTmdbId,
+            Integer seasonNumber,
+            Integer episodeNumber,
+            String title,
+            String imageUrl) {
+        this(targetKind, tmdbId, personTmdbId, seriesTmdbId, seasonNumber, episodeNumber, title, imageUrl,
+                null, null, null);
+    }
 }

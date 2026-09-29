@@ -398,6 +398,28 @@ class DailyGameServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getGame] Should Assemble A Terminal Episode Answer From The Snapshot - Without Calling TMDB")
+    void shouldAssembleATerminalEpisodeAnswerFromTheSnapshotWithoutCallingTmdb() {
+        DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME, "1396", 1, 1);
+        UserDailyGameResult result = result(challenge, 1, 6, DailyGameResultStatus.COMPLETED, NOW);
+        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.EPISODE_BY_FRAME))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+                .thenReturn(List.of(result));
+        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+
+        DailyGameStateDTO response = service().getGame(
+                USER_ID, TODAY, DailyGameType.EPISODE_BY_FRAME, false);
+
+        assertThat(response.answer()).satisfies(answer -> {
+            assertThat(answer.seriesName()).isEqualTo("Breaking Bad");
+            assertThat(answer.seriesPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/poster.jpg");
+            assertThat(answer.seriesYear()).isEqualTo(2008);
+        });
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
     @DisplayName("[submitAttempt] Should Use The Composite Episode Identity - When The Candidate Is Valid")
     void shouldUseTheCompositeEpisodeIdentityWhenTheCandidateIsValid() {
         DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME, "1396", 1, 1);
@@ -614,6 +636,10 @@ class DailyGameServiceImplTest {
                         "seriesTmdbId", seriesTmdbId,
                         "seasonNumber", seasonNumber,
                         "episodeNumber", episodeNumber,
+                        "seriesName", "Breaking Bad",
+                        "seriesPosterPath", "/poster.jpg",
+                        "seriesYear", 2008,
+                        "episodeName", "Episode",
                         "title", "Episode",
                         "imageUrl", "/still.jpg"))
                 .displaySnapshot(Map.of("imageUrl", "/still.jpg"))

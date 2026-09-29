@@ -60,6 +60,48 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     @Test
+    @DisplayName("[answer] Should Expose Frozen Series Metadata - When The Episode Result Is Terminal")
+    void shouldExposeFrozenSeriesMetadataWhenTheEpisodeResultIsTerminal() {
+        DailyChallenge challenge = DailyChallenge.builder()
+                .id(UUID.randomUUID())
+                .challengeDate(LocalDate.of(2026, 9, 27))
+                .gameType(DailyGameType.EPISODE_BY_FRAME)
+                .targetKind(DailyGameTargetKind.EPISODE)
+                .seriesTmdbId("1396")
+                .seasonNumber(1)
+                .episodeNumber(3)
+                .answerKey("EPISODE:1396:1:3")
+                .imagePath("/third.jpg")
+                .answerSnapshot(Map.of(
+                        "seriesTmdbId", "1396",
+                        "seriesName", "Breaking Bad",
+                        "seriesPosterPath", "/poster.jpg",
+                        "seriesYear", 2008,
+                        "episodeName", "Pilot",
+                        "seasonNumber", 1,
+                        "episodeNumber", 3,
+                        "title", "Pilot",
+                        "imageUrl", "/third.jpg"))
+                .displaySnapshot(Map.of("imagePaths", List.of("/third.jpg", "/second.jpg", "/first.jpg")))
+                .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+                .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+                .build();
+
+        DailyGameAttemptResponseDTO open = assembler.toAttemptResponse(
+                challenge, result(1, DailyGameResultStatus.IN_PROGRESS));
+        DailyGameAttemptResponseDTO terminal = assembler.toAttemptResponse(
+                challenge, result(1, DailyGameResultStatus.COMPLETED));
+
+        assertThat(open.answer()).isNull();
+        assertThat(terminal.answer()).satisfies(answer -> {
+            assertThat(answer.seriesName()).isEqualTo("Breaking Bad");
+            assertThat(answer.seriesPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/poster.jpg");
+            assertThat(answer.seriesYear()).isEqualTo(2008);
+            assertThat(answer.title()).isEqualTo("Pilot");
+        });
+    }
+
+    @Test
     @DisplayName("[images] Should Repeat Only The Last Image - When The Episode Has Fewer Than Six Stills")
     void shouldRepeatOnlyTheLastImageWhenTheEpisodeHasFewerThanSixStills() {
         DailyChallenge challenge = DailyChallenge.builder()

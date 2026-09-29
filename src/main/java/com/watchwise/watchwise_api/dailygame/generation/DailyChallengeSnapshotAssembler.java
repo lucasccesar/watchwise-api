@@ -44,12 +44,23 @@ public class DailyChallengeSnapshotAssembler {
 
     public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
                                            String name, List<String> imagePaths) {
+        return episode(seriesTmdbId, seasonNumber, episodeNumber, name, null, null, null, imagePaths);
+    }
+
+    public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
+                                           String name, String seriesName, String seriesPosterPath, Integer seriesYear,
+                                           List<String> imagePaths) {
         String imagePath = imagePaths.getFirst();
+        Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.EPISODE, null, null,
+                seriesTmdbId, seasonNumber, episodeNumber, name, imagePath, seriesTmdbId);
+        put(answerSnapshot, "seriesName", seriesName);
+        put(answerSnapshot, "seriesPosterPath", seriesPosterPath);
+        put(answerSnapshot, "seriesYear", seriesYear);
+        put(answerSnapshot, "episodeName", name);
         return candidate(DailyGameType.EPISODE_BY_FRAME, DailyGameTargetKind.EPISODE, null, seriesTmdbId,
                 seasonNumber, episodeNumber, seriesTmdbId,
                 "EPISODE:" + seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber, imagePath,
-                answerSnapshot(DailyGameTargetKind.EPISODE, null, null, seriesTmdbId, seasonNumber, episodeNumber,
-                        name, imagePath, seriesTmdbId),
+                answerSnapshot,
                 displaySnapshot(imagePaths), List.of());
     }
 
@@ -129,6 +140,12 @@ public class DailyChallengeSnapshotAssembler {
 
     private static void put(Map<String, Object> snapshot, String field, String value) {
         if (value != null && !value.isBlank()) {
+            snapshot.put(field, value);
+        }
+    }
+
+    private static void put(Map<String, Object> snapshot, String field, Object value) {
+        if (value != null) {
             snapshot.put(field, value);
         }
     }

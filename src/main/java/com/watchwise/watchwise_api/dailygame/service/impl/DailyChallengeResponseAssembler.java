@@ -176,9 +176,19 @@ public class DailyChallengeResponseAssembler {
         String personTmdbId = targetKind == DailyGameTargetKind.PERSON ? challenge.getTargetTmdbId() : null;
         String seriesTmdbId = targetKind == DailyGameTargetKind.EPISODE ? challenge.getSeriesTmdbId() : null;
         Map<String, Object> snapshot = challenge.getAnswerSnapshot();
-        String title = snapshot == null ? null : (String) snapshot.get("title");
+        String title = snapshotValue(snapshot, "episodeName");
+        if (title == null) {
+            title = snapshotValue(snapshot, "title");
+        }
+        String seriesName = targetKind == DailyGameTargetKind.EPISODE
+                ? snapshotValue(snapshot, "seriesName") : null;
+        String seriesPosterPath = targetKind == DailyGameTargetKind.EPISODE
+                ? snapshotValue(snapshot, "seriesPosterPath") : null;
+        Integer seriesYear = targetKind == DailyGameTargetKind.EPISODE
+                ? snapshotInteger(snapshot, "seriesYear") : null;
         return new DailyGameAnswerDTO(targetKind, tmdbId, personTmdbId, seriesTmdbId,
-                challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, imageUrl(challenge));
+                challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, imageUrl(challenge), seriesName,
+                posterUrl(seriesPosterPath), seriesYear);
     }
 
     private String imageUrl(DailyChallenge challenge) {
@@ -194,6 +204,39 @@ public class DailyChallengeResponseAssembler {
             case PERSON -> TmdbImageUrlBuilder.profileUrl(imagePath);
             case EPISODE -> TmdbImageUrlBuilder.stillUrl(imagePath);
         };
+    }
+
+    private String posterUrl(String imagePath) {
+        if (isAbsoluteHttpUrl(imagePath)) {
+            return imagePath;
+        }
+        return TmdbImageUrlBuilder.posterUrl(imagePath);
+    }
+
+    private String snapshotValue(Map<String, Object> snapshot, String key) {
+        if (snapshot == null) {
+            return null;
+        }
+        Object value = snapshot.get(key);
+        return value instanceof String string && !string.isBlank() ? string : null;
+    }
+
+    private Integer snapshotInteger(Map<String, Object> snapshot, String key) {
+        if (snapshot == null) {
+            return null;
+        }
+        Object value = snapshot.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String string) {
+            try {
+                return Integer.valueOf(string);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private List<String> imagePaths(DailyChallenge challenge) {

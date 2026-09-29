@@ -47,6 +47,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.intThat;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -168,7 +169,10 @@ class DailyChallengeGeneratorTest {
         when(tmdbClient.getEpisodeImages("1396", 1, 3)).thenReturn(found(new TmdbEpisodeImages(List.of(
                 new TmdbStill("/first.jpg"),
                 new TmdbStill("/second.jpg"),
-                new TmdbStill("/third.jpg")))));
+                new TmdbStill("/third.jpg"),
+                new TmdbStill("/fourth.jpg"),
+                new TmdbStill("/fifth.jpg"),
+                new TmdbStill("/sixth.jpg")))));
 
         DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE)
@@ -179,9 +183,105 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.seriesTmdbId()).isEqualTo("1396");
         assertThat(candidate.seasonNumber()).isEqualTo(1);
         assertThat(candidate.episodeNumber()).isEqualTo(3);
-        assertThat(candidate.imagePath()).isEqualTo("/third.jpg");
+        assertThat(candidate.imagePath()).isEqualTo("/sixth.jpg");
         assertThat(candidate.displaySnapshot().get("imagePaths"))
-                .isEqualTo(List.of("/third.jpg", "/second.jpg", "/first.jpg"));
+                .isEqualTo(List.of("/sixth.jpg", "/fifth.jpg", "/fourth.jpg", "/third.jpg", "/second.jpg", "/first.jpg"));
+        assertThat(candidate.answerSnapshot())
+                .containsEntry("seriesName", "Breaking Bad")
+                .containsEntry("seriesPosterPath", "/poster.jpg")
+                .containsEntry("seriesYear", 2008)
+                .containsEntry("episodeName", "Valid")
+                .containsEntry("seasonNumber", 1)
+                .containsEntry("episodeNumber", 3);
+    }
+
+    @Test
+    @DisplayName("[generate] Should Reject The Episode - When It Has Fewer Than Six Unique Still Images")
+    void shouldRejectTheEpisodeWhenItHasFewerThanSixUniqueStillImages() {
+        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)))));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
+                episode(1, "Too Few", "/summary.jpg"))));
+        when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(new TmdbEpisodeImages(List.of(
+                new TmdbStill("/one.jpg"), new TmdbStill("/two.jpg"), new TmdbStill("/three.jpg"),
+                new TmdbStill("/four.jpg"), new TmdbStill("/five.jpg"), new TmdbStill("/five.jpg"),
+                new TmdbStill("  ")))));
+
+        assertThat(new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler).generate(CHALLENGE_DATE))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("[generate] Should Choose The Second Episode - When The First Episode Has Too Few Stills")
+    void shouldChooseTheSecondEpisodeWhenTheFirstEpisodeHasTooFewStills() {
+        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null)))));
+        when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
+                episode(1, "Too Few", "/first-summary.jpg"),
+                episode(2, "Second Episode", null))));
+        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(stills(5)));
+        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 2)).thenReturn(found(stills(6)));
+
+        DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE)
+                .orElseThrow();
+
+        assertThat(candidate.answerKey()).isEqualTo("EPISODE:1396:1:2");
+    }
+
+    @Test
+    @DisplayName("[generate] Should Choose The Second Season - When The First Season Has No Eligible Episode")
+    void shouldChooseTheSecondSeasonWhenTheFirstSeasonHasNoEligibleEpisode() {
+        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
+                List.of(
+                        new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null),
+                        new TmdbSeasonSummary(2, "Season 2", null, "2009-03-08", 1, null)))));
+        lenient().when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
+                episode(1, "First Season", "/first-season-summary.jpg"))));
+        lenient().when(tmdbClient.getSeasonFullDetails("1396", 2, LANGUAGE)).thenReturn(found(season(2,
+                episode(1, "Second Season", null))));
+        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(stills(5)));
+        lenient().when(tmdbClient.getEpisodeImages("1396", 2, 1)).thenReturn(found(stills(6)));
+
+        DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE)
+                .orElseThrow();
+
+        assertThat(candidate.answerKey()).isEqualTo("EPISODE:1396:2:1");
+    }
+
+    @Test
+    @DisplayName("[generate] Should Attempt A New Series - When The Previous Series Has No Eligible Episode")
+    void shouldAttemptANewSeriesWhenThePreviousSeriesHasNoEligibleEpisode() {
+        TmdbTvSearchResult firstSeries = new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20");
+        TmdbTvSearchResult secondSeries = new TmdbTvSearchResult("66732", "Stranger Things", "/stranger-things.jpg", "2016-07-15");
+        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(new TmdbSearchPage<>(1, List.of(firstSeries, secondSeries), 1, 2)));
+        lenient().when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)))));
+        lenient().when(tmdbClient.getTvFullDetails("66732", LANGUAGE)).thenReturn(found(new TmdbTvFullDetails(
+                "66732", "Stranger Things", "Stranger Things", null, "/stranger-things.jpg", null, "2016-07-15",
+                List.of(), List.of(), List.of(), List.of(),
+                List.of(new TmdbSeasonSummary(1, "Season 1", null, "2016-07-15", 1, null)),
+                null, null, null, null, 1, 1, List.of(), null, "Ended")));
+        lenient().when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season(1,
+                episode(1, "Breaking Bad Episode", "/breaking-bad-episode.jpg"))));
+        lenient().when(tmdbClient.getSeasonFullDetails("66732", 1, LANGUAGE)).thenReturn(found(season(1,
+                episode(1, "Stranger Things Episode", null))));
+        lenient().when(tmdbClient.getEpisodeImages("1396", 1, 1)).thenReturn(found(stills(5)));
+        lenient().when(tmdbClient.getEpisodeImages("66732", 1, 1)).thenReturn(found(stills(6)));
+
+        DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE)
+                .orElseThrow();
+
+        assertThat(candidate.answerKey()).isEqualTo("EPISODE:66732:1:1");
     }
 
     @Test
@@ -309,6 +409,21 @@ class DailyChallengeGeneratorTest {
 
     private static TmdbSearchPage<TmdbTvSearchResult> seriesPage(TmdbTvSearchResult result) {
         return new TmdbSearchPage<>(1, List.of(result), 1, 1);
+    }
+
+    private static TmdbSeasonFullDetails season(int seasonNumber, TmdbEpisodeSummary... episodes) {
+        return new TmdbSeasonFullDetails(seasonNumber, "Season " + seasonNumber, null, null,
+                "2008-01-20", seasonNumber, List.of(episodes), null, null);
+    }
+
+    private static TmdbEpisodeSummary episode(int episodeNumber, String name, String stillPath) {
+        return new TmdbEpisodeSummary(episodeNumber, name, null, "2026-09-27", 45, stillPath, List.of());
+    }
+
+    private static TmdbEpisodeImages stills(int count) {
+        return new TmdbEpisodeImages(java.util.stream.IntStream.rangeClosed(1, count)
+                .mapToObj(index -> new TmdbStill("/still-" + index + ".jpg"))
+                .toList());
     }
 
     private static TmdbMovieFullDetails movieDetails(String id, String title, TmdbCredits credits) {
