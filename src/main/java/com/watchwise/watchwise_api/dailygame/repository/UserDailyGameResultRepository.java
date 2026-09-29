@@ -56,6 +56,27 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
             """, nativeQuery = true)
     int clearAttemptDetailsBefore(@Param("currentDate") LocalDate currentDate);
 
+    @Query("""
+            SELECT result FROM UserDailyGameResult result
+            JOIN FETCH result.user
+            JOIN FETCH result.dailyChallenge
+            WHERE result.user.id IN :userIds
+              AND result.sharedAt IS NOT NULL
+              AND (
+                  CAST(:cursorCreatedAt AS timestamp) IS NULL
+                  OR result.sharedAt < :cursorCreatedAt
+                  OR (result.sharedAt = :cursorCreatedAt
+                      AND :cursorId IS NOT NULL
+                      AND result.id < :cursorId)
+              )
+            ORDER BY result.sharedAt DESC, result.id DESC
+            """)
+    List<UserDailyGameResult> findFeedCandidates(
+            @Param("userIds") Collection<UUID> userIds,
+            @Param("cursorCreatedAt") LocalDateTime cursorCreatedAt,
+            @Param("cursorId") UUID cursorId,
+            Pageable pageable);
+
     @Query(value = """
             SELECT ranked.rank AS rank,
                    ranked.user_id AS userId,

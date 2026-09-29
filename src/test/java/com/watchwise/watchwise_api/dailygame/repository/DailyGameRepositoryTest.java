@@ -444,6 +444,62 @@ class DailyGameRepositoryTest {
     }
 
     @Test
+    @DisplayName("[sharing] Should Default Sharing Fields For A New Result")
+    void shouldDefaultSharingFieldsForNewResult() {
+        User user = userRepository.saveAndFlush(buildUser());
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "sharing:default"));
+
+        UserDailyGameResult result = resultRepository.saveAndFlush(buildResult(user, challenge, NOW));
+
+        assertThat(result.isShareOnCompletion()).isFalse();
+        assertThat(result.getSharedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("[findFeedCandidates] Should Find Only Shared Results For Supplied Users")
+    void shouldFindOnlySharedResultsForFeed() {
+        User followedUser = userRepository.save(buildUser("sharing-followed"));
+        User otherUser = userRepository.saveAndFlush(buildUser("sharing-other"));
+        DailyChallenge sharedChallenge = challengeRepository.save(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "sharing:shared"));
+        DailyChallenge unsharedChallenge = challengeRepository.save(buildChallenge(
+                LocalDate.of(2026, 9, 28), DailyGameType.MOVIE_BY_POSTER, "sharing:unshared"));
+        DailyChallenge otherChallenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 29), DailyGameType.MOVIE_BY_POSTER, "sharing:other"));
+        UserDailyGameResult sharedResult = buildResult(
+                followedUser, sharedChallenge, 2, 5, DailyGameResultStatus.COMPLETED);
+        sharedResult.setShareOnCompletion(true);
+        sharedResult.markSharedAt(NOW);
+        resultRepository.save(sharedResult);
+        resultRepository.save(buildResult(
+                followedUser, unsharedChallenge, 2, 5, DailyGameResultStatus.COMPLETED));
+        UserDailyGameResult otherSharedResult = buildResult(
+                otherUser, otherChallenge, 2, 5, DailyGameResultStatus.FAILED);
+        otherSharedResult.setShareOnCompletion(true);
+        otherSharedResult.markSharedAt(NOW);
+        resultRepository.saveAndFlush(otherSharedResult);
+
+        List<UserDailyGameResult> candidates = resultRepository.findFeedCandidates(
+                List.of(followedUser.getId()), null, null, PageRequest.of(0, 10));
+
+        assertThat(candidates).extracting(UserDailyGameResult::getId)
+                .containsExactly(sharedResult.getId());
+    }
+
+    @Test
+    @DisplayName("[sharing] Should Reject A Shared In-Progress Result")
+    void shouldRejectSharedInProgressResult() {
+        User user = userRepository.saveAndFlush(buildUser());
+        DailyChallenge challenge = challengeRepository.saveAndFlush(buildChallenge(
+                LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "sharing:in-progress"));
+
+        assertThatThrownBy(() -> insertSharedInProgressResultRow(user.getId(), challenge.getId()))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_user_daily_game_results_shared_terminal");
+    }
+
+    @Test
     @DisplayName("[insertIfAbsent] Should Ignore A Concurrently Existing User Result")
     void shouldIgnoreAConcurrentlyExistingUserResult() {
         User user = userRepository.saveAndFlush(buildUser());
@@ -660,6 +716,21 @@ class DailyGameRepositoryTest {
                 status,
                 LocalDateTime.of(2026, 9, 27, 12, 0),
                 LocalDateTime.of(2026, 9, 27, 12, 0));
+    }
+
+    private void insertSharedInProgressResultRow(UUID userId, UUID challengeId) {
+        jdbcTemplate.update("""
+                INSERT INTO user_daily_game_results (
+                    id, user_id, daily_challenge_id, attempts_used, score, status,
+                    completed_at, shared_at, created_at, updated_at
+                ) VALUES (?, ?, ?, 0, 0, 'IN_PROGRESS', NULL, ?, ?, ?)
+                """,
+                UUID.randomUUID(),
+                userId,
+                challengeId,
+                NOW,
+                NOW,
+                NOW);
     }
 
     private User buildUser() {

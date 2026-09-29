@@ -71,10 +71,29 @@ public class UserDailyGameResult {
     @Setter
     private LocalDateTime completedAt;
 
+    @Column(name = "share_on_completion", nullable = false)
+    @Builder.Default
+    private boolean shareOnCompletion = false;
+
+    @Column(name = "shared_at")
+    private LocalDateTime sharedAt;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
     @Setter
     private LocalDateTime updatedAt;
+
+    public void setShareOnCompletion(boolean shareOnCompletion) {
+        if (sharedAt == null) {
+            this.shareOnCompletion = shareOnCompletion;
+        }
+    }
+
+    public void markSharedAt(LocalDateTime timestamp) {
+        if (sharedAt == null) {
+            this.sharedAt = timestamp;
+        }
+    }
 }
