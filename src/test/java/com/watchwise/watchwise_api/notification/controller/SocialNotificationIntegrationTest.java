@@ -156,6 +156,7 @@ class SocialNotificationIntegrationTest {
                 .andExpect(status().isNoContent());
 
         Notification replacement = findSocialNotification(owner.id(), NotificationType.LIKE_RECEIVED, review.getId());
+        assertThat(replacement.getId()).isNotNull();
         assertThat(replacement.getId()).isNotEqualTo(first.getId());
         assertThat(replacement.getInteractionCount()).isEqualTo(1);
         assertThat(replacement.getIsRead()).isFalse();
@@ -193,6 +194,7 @@ class SocialNotificationIntegrationTest {
                 .andExpect(status().isCreated());
 
         Notification replacement = findSocialNotification(owner.id(), NotificationType.COMMENT_RECEIVED, review.getId());
+        assertThat(replacement.getId()).isNotNull();
         assertThat(replacement.getId()).isNotEqualTo(first.getId());
         assertThat(replacement.getInteractionCount()).isEqualTo(1);
         assertThat(replacement.getIsRead()).isFalse();

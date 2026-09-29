@@ -98,7 +98,6 @@ public class SocialNotificationServiceImpl implements SocialNotificationService 
             notificationRepository.delete(aggregate);
             notificationRepository.flush();
             Notification replacement = Notification.builder()
-                    .id(UUID.randomUUID())
                     .user(aggregate.getUser())
                     .type(notificationType)
                     .message(messageFor(actor.getUsername(), 1, notificationType, targetType))
