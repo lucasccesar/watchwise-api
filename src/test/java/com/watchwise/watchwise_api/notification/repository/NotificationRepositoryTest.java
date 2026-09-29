@@ -158,16 +158,32 @@ class NotificationRepositoryTest {
                 NotificationType.LIKE_RECEIVED, false, cutoff.minusSeconds(1)));
         Notification atCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
                 NotificationType.COMMENT_RECEIVED, false, cutoff));
-        Notification systemNotification = notificationRepository.saveAndFlush(buildNotification(cutoff.minusDays(1)));
+        Notification[] systemNotifications = {
+                notificationRepository.saveAndFlush(buildSystemNotification(
+                        NotificationType.RELEASE, cutoff.minusDays(1))),
+                notificationRepository.saveAndFlush(buildSystemNotification(
+                        NotificationType.ANNOUNCED_DATE, cutoff.minusDays(1))),
+                notificationRepository.saveAndFlush(buildSystemNotification(
+                        NotificationType.CANCELLED, cutoff.minusDays(1))),
+                notificationRepository.saveAndFlush(buildSystemNotification(
+                        NotificationType.RENEWED, cutoff.minusDays(1))),
+                notificationRepository.saveAndFlush(buildSystemNotification(
+                        NotificationType.NEW_EPISODE, cutoff.minusDays(1))),
+                notificationRepository.saveAndFlush(buildSystemNotification(
+                        NotificationType.FOLLOWED_PERSON_NEW_CREDIT, cutoff.minusDays(1)))
+        };
 
         int deleted = notificationRepository.deleteExpiredSocialNotifications(false, cutoff, 2);
 
         assertThat(deleted).isEqualTo(2);
+        entityManager.clear();
         assertThat(notificationRepository.findById(oldest.getId())).isEmpty();
         assertThat(notificationRepository.findById(secondOldest.getId())).isEmpty();
         assertThat(notificationRepository.findById(remainingExpired.getId())).isPresent();
         assertThat(notificationRepository.findById(atCutoff.getId())).isPresent();
-        assertThat(notificationRepository.findById(systemNotification.getId())).isPresent();
+        for (Notification systemNotification : systemNotifications) {
+            assertThat(notificationRepository.findById(systemNotification.getId())).isPresent();
+        }
     }
 
     @Test
@@ -188,6 +204,7 @@ class NotificationRepositoryTest {
 
         assertThat(deletedRead).isEqualTo(1);
         assertThat(deletedUnread).isEqualTo(1);
+        entityManager.clear();
         assertThat(notificationRepository.findById(expiredRead.getId())).isEmpty();
         assertThat(notificationRepository.findById(readAtCutoff.getId())).isPresent();
         assertThat(notificationRepository.findById(expiredUnread.getId())).isEmpty();
@@ -219,9 +236,13 @@ class NotificationRepositoryTest {
     }
 
     private Notification buildNotification(LocalDateTime createdAt) {
+        return buildSystemNotification(NotificationType.RELEASE, createdAt);
+    }
+
+    private Notification buildSystemNotification(NotificationType type, LocalDateTime createdAt) {
         return Notification.builder()
                 .user(lucas)
-                .type(NotificationType.RELEASE)
+                .type(type)
                 .message("The Matrix is out now")
                 .content(movie)
                 .isRead(false)
