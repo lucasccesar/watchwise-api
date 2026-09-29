@@ -25,6 +25,10 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     @EntityGraph(attributePaths = {"content", "latestActor"})
     Page<Notification> findByUserIdAndIsReadOrderByCreatedAtDesc(UUID userId, boolean isRead, Pageable pageable);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT n FROM Notification n WHERE n.id = :id")
+    Optional<Notification> findByIdForUpdate(@Param("id") UUID id);
+
     @Modifying
     @Query(value = "INSERT INTO notifications (id, user_id, type, message, content_id, person_tmdb_id, "
             + "actor_user_id, target_type, target_id, interaction_count, is_read, created_at, updated_at) "

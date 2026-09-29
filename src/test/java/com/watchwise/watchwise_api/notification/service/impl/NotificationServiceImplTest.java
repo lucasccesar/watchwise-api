@@ -256,18 +256,22 @@ class NotificationServiceImplTest {
     @Test
     @DisplayName("[markAsRead] Should Set isRead True And Save - When Notification Belongs To The User")
     void shouldSetIsReadTrueAndSaveWhenNotificationBelongsToTheUser() {
-        when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
+        LocalDateTime originalUpdatedAt = notification.getUpdatedAt();
+        when(notificationRepository.findByIdForUpdate(notification.getId())).thenReturn(Optional.of(notification));
 
         notificationService.markAsRead(userId, notification.getId());
 
         assertThat(notification.getIsRead()).isTrue();
+        assertThat(notification.getUpdatedAt()).isAfterOrEqualTo(originalUpdatedAt);
+        verify(notificationRepository).findByIdForUpdate(notification.getId());
+        verify(notificationRepository, never()).findById(notification.getId());
         verify(notificationRepository).save(notification);
     }
 
     @Test
     @DisplayName("[markAsRead] Should Throw NotFoundException - When Notification Does Not Exist")
     void shouldThrowNotFoundExceptionWhenNotificationDoesNotExist() {
-        when(notificationRepository.findById(notification.getId())).thenReturn(Optional.empty());
+        when(notificationRepository.findByIdForUpdate(notification.getId())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> notificationService.markAsRead(userId, notification.getId()))
                 .isInstanceOf(NotFoundException.class);
@@ -276,7 +280,7 @@ class NotificationServiceImplTest {
     @Test
     @DisplayName("[markAsRead] Should Throw ForbiddenException - When Notification Belongs To A Different User")
     void shouldThrowForbiddenExceptionWhenNotificationBelongsToADifferentUser() {
-        when(notificationRepository.findById(notification.getId())).thenReturn(Optional.of(notification));
+        when(notificationRepository.findByIdForUpdate(notification.getId())).thenReturn(Optional.of(notification));
 
         assertThatThrownBy(() -> notificationService.markAsRead(UUID.randomUUID(), notification.getId()))
                 .isInstanceOf(ForbiddenException.class);
