@@ -24,9 +24,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @RestController
@@ -53,6 +55,12 @@ public class DailyGameController {
     @GetMapping("/games/today")
     public ResponseEntity<DailyGameTodayResponseDTO> getToday() {
         return ResponseEntity.ok(dailyGameService.getToday(currentUserId()));
+    }
+
+    @GetMapping("/games/{challengeDate}")
+    public ResponseEntity<DailyGameTodayResponseDTO> getDay(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate) {
+        return ResponseEntity.ok(dailyGameService.getDay(currentUserId(), challengeDate));
     }
 
     @GetMapping("/games/{gameType}/search")
@@ -104,6 +112,19 @@ public class DailyGameController {
                 attemptMaxRequests,
                 Duration.ofMinutes(attemptWindowMinutes));
         return ResponseEntity.ok(dailyGameService.submitAttempt(userId, gameType, request));
+    }
+
+    @PostMapping("/games/{challengeDate}/{gameType}/attempt")
+    public ResponseEntity<DailyGameAttemptResponseDTO> submitHistoricalAttempt(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate,
+            @PathVariable("gameType") DailyGameType gameType,
+            @Valid @RequestBody DailyGameAttemptRequest request) {
+        UUID userId = currentUserId();
+        requestThrottler.checkAllowed(
+                "daily-game-attempt|" + userId,
+                attemptMaxRequests,
+                Duration.ofMinutes(attemptWindowMinutes));
+        return ResponseEntity.ok(dailyGameService.submitAttempt(userId, challengeDate, gameType, request));
     }
 
     @GetMapping("/games/history")

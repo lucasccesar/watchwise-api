@@ -91,7 +91,7 @@ class DailyGameRepositoryTest {
         assertThat(DailyGameType.MOVIE_BY_POSTER.maxAttempts()).isEqualTo(6);
         assertThat(DailyGameType.SERIES_BY_POSTER.maxAttempts()).isEqualTo(6);
         assertThat(DailyGameType.PERSON_BY_FACE.maxAttempts()).isEqualTo(6);
-        assertThat(DailyGameType.EPISODE_BY_FRAME.maxAttempts()).isEqualTo(10);
+        assertThat(DailyGameType.EPISODE_BY_FRAME.maxAttempts()).isEqualTo(6);
         assertThat(DailyGameType.MOVIE_BY_INFO.maxAttempts()).isEqualTo(10);
         assertThat(DailyGameType.SERIES_BY_INFO.maxAttempts()).isEqualTo(10);
         assertThat(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY.maxAttempts()).isEqualTo(10);
@@ -520,8 +520,8 @@ class DailyGameRepositoryTest {
                 .containsExactly(1L, 1L, 3L);
         assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getScore)
                 .containsExactly(5L, 5L, 5L);
-        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getAttemptsUsed)
-                .containsExactly(3L, 3L, 12L);
+        assertThat(page.getContent()).extracting(UserDailyGameResultRepository.DailyGameRankingProjection::getGamesPlayed)
+                .containsExactly(1L, 1L, 2L);
     }
 
     @Test
@@ -540,7 +540,7 @@ class DailyGameRepositoryTest {
                 .getContent().getFirst();
 
         assertThat(projection.getScore()).isEqualTo(4L);
-        assertThat(projection.getAttemptsUsed()).isEqualTo(2L);
+        assertThat(projection.getGamesPlayed()).isEqualTo(1L);
     }
 
     @Test

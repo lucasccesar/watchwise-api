@@ -2,7 +2,8 @@ package com.watchwise.watchwise_api.dailygame.generation;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeImages;
+import com.watchwise.watchwise_api.common.tmdb.TmdbStill;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -70,7 +72,26 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
                         !excludedAnswerKeys.contains("EPISODE:" + seriesTmdbId + ":" + episode.seasonNumber()
                                 + ":" + episode.episodeNumber()))
                 .map(episode -> snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(), episode.episodeNumber(),
-                        episode.name(), TmdbImageUrlBuilder.stillUrl(episode.stillPath())));
+                        episode.name(), imagePaths(seriesTmdbId, episode)));
+    }
+
+    private List<String> imagePaths(String seriesTmdbId, EpisodeCandidate episode) {
+        LinkedHashSet<String> paths = new LinkedHashSet<>();
+        DailyChallengeGenerationSupport.value(tmdbClient.getEpisodeImages(
+                        seriesTmdbId, episode.seasonNumber(), episode.episodeNumber()))
+                .map(TmdbEpisodeImages::stills)
+                .orElse(List.of())
+                .stream()
+                .filter(still -> still != null && still.filePath() != null && !still.filePath().isBlank())
+                .map(TmdbStill::filePath)
+                .map(String::trim)
+                .forEach(paths::add);
+        if (paths.isEmpty()) {
+            paths.add(episode.stillPath());
+        }
+        List<String> ordered = new ArrayList<>(paths);
+        java.util.Collections.reverse(ordered);
+        return List.copyOf(ordered);
     }
 
     private boolean isRegularSeason(TmdbSeasonSummary season) {

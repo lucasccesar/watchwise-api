@@ -30,7 +30,7 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
 
         Long getScore();
 
-        Long getAttemptsUsed();
+        Long getGamesPlayed();
     }
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -51,6 +51,7 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
                    ranked.username AS username,
                    ranked.profile_picture AS profilePicture,
                    ranked.score AS score,
+                   ranked.games_played AS gamesPlayed,
                    ranked.attempts_used AS attemptsUsed
             FROM (
                 SELECT u.id AS user_id,
@@ -60,6 +61,7 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
                            ORDER BY SUM(r.score) DESC, SUM(r.attempts_used) ASC
                        ) AS rank,
                        SUM(r.score) AS score,
+                       COUNT(*) AS games_played,
                        SUM(r.attempts_used) AS attempts_used
                 FROM user_daily_game_results r
                 JOIN daily_challenges c ON c.id = r.daily_challenge_id

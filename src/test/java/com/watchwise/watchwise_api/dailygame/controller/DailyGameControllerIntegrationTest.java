@@ -292,7 +292,8 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].gameType").value("MOVIE_BY_INFO"));
         mockMvc.perform(get("/games/rankings/general").param("page", "1").param("size", "20")
                         .cookie(user.accessToken()))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].username").value("dailycontrollerpages"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].username").value("dailycontrollerpages"))
+                .andExpect(jsonPath("$.content[0].gamesPlayed").value(1));
         mockMvc.perform(get("/games/{gameType}/ranking", DailyGameType.MOVIE_BY_INFO)
                         .param("page", "1").param("size", "20").cookie(user.accessToken()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1));

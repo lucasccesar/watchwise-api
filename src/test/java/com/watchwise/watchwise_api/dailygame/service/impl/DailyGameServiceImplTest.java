@@ -98,6 +98,30 @@ class DailyGameServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDay] Should Return A Historical Daily Set - When The Requested Date Is In The Past")
+    void shouldReturnAHistoricalDailySetWhenTheRequestedDateIsInThePast() {
+        LocalDate historicalDate = TODAY.minusDays(1);
+        List<DailyChallenge> challenges = allChallenges();
+        when(challengeRepository.findByChallengeDateOrderByGameTypeAsc(historicalDate)).thenReturn(challenges);
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), any())).thenReturn(List.of());
+        when(hintRepository.findByDailyChallengeIdInOrderByDailyChallengeIdAscPositionAsc(any()))
+                .thenReturn(allHints(challenges));
+
+        DailyGameTodayResponseDTO response = service().getDay(USER_ID, historicalDate);
+
+        assertThat(response.date()).isEqualTo(historicalDate);
+        assertThat(response.games()).hasSize(8);
+    }
+
+    @Test
+    @DisplayName("[getDay] Should Reject A Future Date - When The User Requests An Unavailable Day")
+    void shouldRejectAFutureDateWhenTheUserRequestsAnUnavailableDay() {
+        assertThatThrownBy(() -> service().getDay(USER_ID, TODAY.plusDays(1)))
+                .isInstanceOf(BadRequestException.class);
+        verifyNoInteractions(challengeRepository, resultRepository, hintRepository);
+    }
+
+    @Test
     @DisplayName("[getToday] Should Reject An Incomplete Daily Set - When Any Challenge Is Missing")
     void shouldRejectAnIncompleteDailySetWhenAnyChallengeIsMissing() {
         List<DailyChallenge> challenges = allChallenges().subList(0, 7);
@@ -128,6 +152,27 @@ class DailyGameServiceImplTest {
         assertThat(result.getAttemptsUsed()).isOne();
         assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.COMPLETED);
         assertThat(result.getCompletedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Accept A Historical Date - When The User Has Not Finished That Game")
+    void shouldAcceptAHistoricalDateWhenTheUserHasNotFinishedThatGame() {
+        LocalDate historicalDate = TODAY.minusDays(1);
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        when(challengeRepository.findByChallengeDateAndGameType(historicalDate, DailyGameType.MOVIE_BY_POSTER))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
+        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+                .thenReturn(Optional.of(result));
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(
+                USER_ID, historicalDate, DailyGameType.MOVIE_BY_POSTER,
+                request("550", null, null, null, null));
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.COMPLETED);
     }
 
     @Test
@@ -305,7 +350,34 @@ class DailyGameServiceImplTest {
         assertThat(response.answer().seriesTmdbId()).isEqualTo("1396");
         assertThat(response.answer().seasonNumber()).isEqualTo(1);
         assertThat(response.answer().episodeNumber()).isEqualTo(1);
+        assertThat(response.guessFeedback()).satisfies(feedback -> {
+            assertThat(feedback.seriesCorrect()).isTrue();
+            assertThat(feedback.seasonCorrect()).isTrue();
+            assertThat(feedback.episodeCorrect()).isTrue();
+            assertThat(feedback.exactMatch()).isTrue();
+        });
         verify(tmdbClient).getEpisodeFullDetails("1396", 1, 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Report Independent Episode Field Matches - When The Composite Guess Is Partially Correct")
+    void shouldReportIndependentEpisodeFieldMatchesWhenTheCompositeGuessIsPartiallyCorrect() {
+        DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME, "1396", 1, 1);
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getEpisodeFullDetails("999", 1, 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.EPISODE_BY_FRAME,
+                request(null, null, "999", 1, 1));
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.IN_PROGRESS);
+        assertThat(response.guessFeedback()).satisfies(feedback -> {
+            assertThat(feedback.seriesCorrect()).isFalse();
+            assertThat(feedback.seasonCorrect()).isTrue();
+            assertThat(feedback.episodeCorrect()).isTrue();
+            assertThat(feedback.exactMatch()).isFalse();
+        });
     }
 
     @Test

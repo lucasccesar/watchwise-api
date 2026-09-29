@@ -43,13 +43,14 @@ public class DailyChallengeSnapshotAssembler {
     }
 
     public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
-                                           String name, String imagePath) {
+                                           String name, List<String> imagePaths) {
+        String imagePath = imagePaths.getFirst();
         return candidate(DailyGameType.EPISODE_BY_FRAME, DailyGameTargetKind.EPISODE, null, seriesTmdbId,
                 seasonNumber, episodeNumber, seriesTmdbId,
                 "EPISODE:" + seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber, imagePath,
                 answerSnapshot(DailyGameTargetKind.EPISODE, null, null, seriesTmdbId, seasonNumber, episodeNumber,
                         name, imagePath, seriesTmdbId),
-                displaySnapshot(imagePath), List.of());
+                displaySnapshot(imagePaths), List.of());
     }
 
     public DailyChallengeCandidate movieInfo(TmdbMovieFullDetails movie, String imagePath,
@@ -103,6 +104,12 @@ public class DailyChallengeSnapshotAssembler {
     public Map<String, Object> displaySnapshot(String imagePath) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("imageUrl", imagePath);
+        return snapshot;
+    }
+
+    public Map<String, Object> displaySnapshot(List<String> imagePaths) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("imagePaths", List.copyOf(imagePaths));
         return snapshot;
     }
 

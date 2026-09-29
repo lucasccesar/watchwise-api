@@ -83,6 +83,6 @@ public class DailyGameRankingServiceImpl implements DailyGameRankingService {
         return resultRepository.findRankingByGameType(gameType, pageable)
                 .map(projection -> new DailyGameRankingEntryDTO(
                         projection.getRank(), projection.getUserId(), projection.getUsername(),
-                        projection.getProfilePicture(), projection.getScore(), projection.getAttemptsUsed()));
+                        projection.getProfilePicture(), projection.getScore(), projection.getGamesPlayed()));
     }
 }

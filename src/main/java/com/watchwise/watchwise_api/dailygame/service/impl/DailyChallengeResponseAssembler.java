@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHintDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
@@ -19,6 +20,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 @Component
 public class DailyChallengeResponseAssembler {
@@ -46,10 +48,19 @@ public class DailyChallengeResponseAssembler {
             DailyChallenge challenge,
             UserDailyGameResult result,
             List<DailyChallengeHint> allHints) {
+        return toAttemptResponse(challenge, result, allHints, null);
+    }
+
+    public DailyGameAttemptResponseDTO toAttemptResponse(
+            DailyChallenge challenge,
+            UserDailyGameResult result,
+            List<DailyChallengeHint> allHints,
+            DailyGameGuessFeedbackDTO guessFeedback) {
         DailyGameView view = view(challenge, result, allHints);
         return new DailyGameAttemptResponseDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
-                view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer());
+                view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
+                view.visibleImageUrls(), view.imageUrls(), guessFeedback);
     }
 
     public DailyGameHistoryDTO toHistoryResponse(
@@ -67,7 +78,8 @@ public class DailyChallengeResponseAssembler {
         DailyGameView view = view(challenge, result, allHints);
         return new DailyGameStateDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
-                view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer());
+                view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
+                view.visibleImageUrls(), view.imageUrls());
     }
 
     private DailyGameView view(
@@ -85,10 +97,22 @@ public class DailyChallengeResponseAssembler {
                 .limit(visibleHintCount)
                 .map(hint -> new DailyGameHintDTO(hint.getPosition(), hint.getHintType(), hint.getHintValue()))
                 .toList();
+        List<String> imagePaths = imagePaths(challenge);
+        int currentImageIndex = Math.min(attemptsUsed, imagePaths.size() - 1);
+        int visiblePositions = challenge.getTargetKind() == DailyGameTargetKind.EPISODE
+                ? attemptsUsed + 1 : 1;
+        List<String> visibleImageUrls = IntStream.range(0, visiblePositions)
+                .mapToObj(index -> imageUrl(challenge, imagePaths.get(Math.min(index, imagePaths.size() - 1))))
+                .toList();
+        List<String> imageUrls = status == DailyGameViewStatus.COMPLETED
+                && challenge.getTargetKind() == DailyGameTargetKind.EPISODE
+                ? imagePaths.stream().map(path -> imageUrl(challenge, path)).toList()
+                : null;
         return new DailyGameView(
                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
-                status, imageUrl(challenge), hints, score, result == null ? null : result.getCompletedAt(),
-                terminal ? answer(challenge) : null);
+                status, imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
+                result == null ? null : result.getCompletedAt(), terminal ? answer(challenge) : null,
+                visibleImageUrls, imageUrls);
     }
 
     private DailyGameViewStatus status(UserDailyGameResult result) {
@@ -115,7 +139,10 @@ public class DailyChallengeResponseAssembler {
     }
 
     private String imageUrl(DailyChallenge challenge) {
-        String imagePath = challenge.getImagePath();
+        return imageUrl(challenge, challenge.getImagePath());
+    }
+
+    private String imageUrl(DailyChallenge challenge, String imagePath) {
         if (isAbsoluteHttpUrl(imagePath)) {
             return imagePath;
         }
@@ -124,6 +151,21 @@ public class DailyChallengeResponseAssembler {
             case PERSON -> TmdbImageUrlBuilder.profileUrl(imagePath);
             case EPISODE -> TmdbImageUrlBuilder.stillUrl(imagePath);
         };
+    }
+
+    private List<String> imagePaths(DailyChallenge challenge) {
+        Map<String, Object> snapshot = challenge.getDisplaySnapshot();
+        if (snapshot != null && snapshot.get("imagePaths") instanceof List<?> paths) {
+            List<String> validPaths = paths.stream()
+                    .filter(String.class::isInstance)
+                    .map(String.class::cast)
+                    .filter(path -> !path.isBlank())
+                    .toList();
+            if (!validPaths.isEmpty()) {
+                return validPaths;
+            }
+        }
+        return List.of(challenge.getImagePath());
     }
 
     private boolean isAbsoluteHttpUrl(String value) {
@@ -142,6 +184,8 @@ public class DailyChallengeResponseAssembler {
             List<DailyGameHintDTO> hints,
             int score,
             java.time.LocalDateTime completedAt,
-            DailyGameAnswerDTO answer) {
+            DailyGameAnswerDTO answer,
+            List<String> visibleImageUrls,
+            List<String> imageUrls) {
     }
 }

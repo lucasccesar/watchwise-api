@@ -41,6 +41,12 @@ public class TmdbCacheConfig {
     }
 
     @Bean
+    public Cache<String, TmdbLookupResult<TmdbEpisodeImages>> tmdbEpisodeImagesCache(
+            @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours) {
+        return newCache(ttlHours);
+    }
+
+    @Bean
     public Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache(
             @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours,
             @Value("${app.tmdb.person-aggregate-cache-max-size}") long maximumSize) {

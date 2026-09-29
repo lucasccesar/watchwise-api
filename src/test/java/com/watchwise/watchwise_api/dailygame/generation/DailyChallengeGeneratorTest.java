@@ -25,6 +25,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeImages;
+import com.watchwise.watchwise_api.common.tmdb.TmdbStill;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
@@ -62,6 +64,12 @@ class DailyChallengeGeneratorTest {
     @BeforeEach
     void setUp() {
         snapshotAssembler = new DailyChallengeSnapshotAssembler();
+    }
+
+    @Test
+    @DisplayName("[maxAttempts] Should Allow Six Guesses - When Playing The Episode Frame Game")
+    void shouldAllowSixGuessesWhenPlayingTheEpisodeFrameGame() {
+        assertThat(DailyGameType.EPISODE_BY_FRAME.maxAttempts()).isEqualTo(6);
     }
 
     @Test
@@ -157,6 +165,10 @@ class DailyChallengeGeneratorTest {
                 new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 4, null)));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(series));
         when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season));
+        when(tmdbClient.getEpisodeImages("1396", 1, 3)).thenReturn(found(new TmdbEpisodeImages(List.of(
+                new TmdbStill("/first.jpg"),
+                new TmdbStill("/second.jpg"),
+                new TmdbStill("/third.jpg")))));
 
         DailyChallengeCandidate candidate = new EpisodeByFrameGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE)
@@ -167,6 +179,9 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.seriesTmdbId()).isEqualTo("1396");
         assertThat(candidate.seasonNumber()).isEqualTo(1);
         assertThat(candidate.episodeNumber()).isEqualTo(3);
+        assertThat(candidate.imagePath()).isEqualTo("/third.jpg");
+        assertThat(candidate.displaySnapshot().get("imagePaths"))
+                .isEqualTo(List.of("/third.jpg", "/second.jpg", "/first.jpg"));
     }
 
     @Test

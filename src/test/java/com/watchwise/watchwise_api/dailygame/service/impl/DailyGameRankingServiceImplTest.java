@@ -85,7 +85,7 @@ class DailyGameRankingServiceImplTest {
         assertThat(Arrays.stream(DailyGameRankingEntryDTO.class.getRecordComponents())
                 .map(RecordComponent::getName)
                 .toList())
-                .containsExactly("rank", "userId", "username", "profilePicture", "score", "attemptsUsed");
+                .containsExactly("rank", "userId", "username", "profilePicture", "score", "gamesPlayed");
     }
 
     @Test
@@ -94,7 +94,7 @@ class DailyGameRankingServiceImplTest {
         assertThat(Arrays.stream(UserDailyGameResultRepository.DailyGameRankingProjection.class.getDeclaredMethods())
                 .map(method -> method.getName())
                 .toList())
-                .contains("getScore", "getAttemptsUsed")
+                .contains("getScore", "getGamesPlayed")
                 .doesNotContain("getTotalScore", "getTotalAttempts");
     }
 
@@ -209,7 +209,7 @@ class DailyGameRankingServiceImplTest {
         assertThat(entry.username()).isEqualTo("lucas");
         assertThat(entry.profilePicture()).isEqualTo("lucas.png");
         assertThat(entry.score()).isEqualTo(18L);
-        assertThat(entry.attemptsUsed()).isEqualTo(7L);
+        assertThat(entry.gamesPlayed()).isEqualTo(7L);
         verify(resultRepository).findRankingByGameType(null, PageRequest.of(0, 20));
     }
 
@@ -287,7 +287,7 @@ class DailyGameRankingServiceImplTest {
 
     private UserDailyGameResultRepository.DailyGameRankingProjection rankingProjection(
             Long rank, UUID userId, String username, String profilePicture,
-            Long score, Long attemptsUsed) {
+            Long score, Long gamesPlayed) {
         UserDailyGameResultRepository.DailyGameRankingProjection projection =
                 mock(UserDailyGameResultRepository.DailyGameRankingProjection.class);
         when(projection.getRank()).thenReturn(rank);
@@ -295,7 +295,7 @@ class DailyGameRankingServiceImplTest {
         when(projection.getUsername()).thenReturn(username);
         when(projection.getProfilePicture()).thenReturn(profilePicture);
         when(projection.getScore()).thenReturn(score);
-        when(projection.getAttemptsUsed()).thenReturn(attemptsUsed);
+        when(projection.getGamesPlayed()).thenReturn(gamesPlayed);
         return projection;
     }
 }

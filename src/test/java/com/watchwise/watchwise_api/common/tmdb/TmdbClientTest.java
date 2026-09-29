@@ -35,11 +35,27 @@ class TmdbClientTest {
         mockServer = MockRestServiceServer.bindTo(builder).build();
         tmdbClient = new TmdbClient(builder.build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
+    }
+
+    @Test
+    @DisplayName("[getEpisodeImages] Should Parse All Stills - When The Episode Images Endpoint Returns Them")
+    void shouldParseAllStillsWhenTheEpisodeImagesEndpointReturnsThem() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1/episode/3/images"))
+                .andRespond(withSuccess("""
+                        {"id":123,"stills":[{"file_path":"/first.jpg"},{"file_path":"/second.jpg"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        TmdbEpisodeImages images = tmdbClient.getEpisodeImages("1396", 1, 3).toOptional().orElseThrow();
+
+        assertThat(images.stills()).extracting(TmdbStill::filePath)
+                .containsExactly("/first.jpg", "/second.jpg");
+        mockServer.verify();
     }
 
     @Test

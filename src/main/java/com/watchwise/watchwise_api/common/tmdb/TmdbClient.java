@@ -25,6 +25,7 @@ public class TmdbClient {
     private final Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
+    private final Cache<String, TmdbLookupResult<TmdbEpisodeImages>> tmdbEpisodeImagesCache;
     private final Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache;
     private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbCalendarSeasonDetailsCache;
     private final Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache;
@@ -282,6 +283,18 @@ public class TmdbClient {
                                 .retrieve()
                                 .body(TmdbEpisodeFullDetails.class),
                         "episode full details " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber));
+    }
+
+    public TmdbLookupResult<TmdbEpisodeImages> getEpisodeImages(
+            String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        return cachedLookup(tmdbEpisodeImagesCache,
+                seriesTmdbId + "|" + seasonNumber + "|" + episodeNumber,
+                () -> callWithRetry(() -> tmdbRestClient.get()
+                                .uri("/tv/{seriesId}/season/{seasonNumber}/episode/{episodeNumber}/images",
+                                        seriesTmdbId, seasonNumber, episodeNumber)
+                                .retrieve()
+                                .body(TmdbEpisodeImages.class),
+                        "episode images " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber));
     }
 
     private <T> TmdbLookupResult<TmdbSearchPage<T>> loadDiscoveryPage(

@@ -99,6 +99,20 @@ class DailyGameControllerTest {
     }
 
     @Test
+    @DisplayName("[getDay] Should Delegate A Historical Date - When A Past Daily Set Is Requested")
+    void shouldDelegateAHistoricalDateWhenAPastDailySetIsRequested() throws Exception {
+        LocalDate historicalDate = LocalDate.of(2026, 9, 27);
+        when(dailyGameService.getDay(CURRENT_USER_ID, historicalDate))
+                .thenReturn(new DailyGameTodayResponseDTO(historicalDate, List.of()));
+
+        mockMvc.perform(get("/games/{challengeDate}", historicalDate))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.date").value("2026-09-27"));
+
+        verify(dailyGameService).getDay(CURRENT_USER_ID, historicalDate);
+    }
+
+    @Test
     @DisplayName("[submitAttempt] Should Delegate And Return Response - When Attempt Is Valid")
     void shouldSubmitAttemptWithCurrentUserAndRateLimit() throws Exception {
         DailyGameAttemptResponseDTO response = attemptResponse();
@@ -116,6 +130,25 @@ class DailyGameControllerTest {
         verify(requestThrottler).checkAllowed(
                 "daily-game-attempt|" + CURRENT_USER_ID, 20, Duration.ofMinutes(5));
         verify(dailyGameService).submitAttempt(eq(CURRENT_USER_ID), eq(GAME_TYPE), any(DailyGameAttemptRequest.class));
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Delegate A Historical Date - When A Past Game Is Played")
+    void shouldDelegateAHistoricalDateWhenAPastGameIsPlayed() throws Exception {
+        LocalDate historicalDate = LocalDate.of(2026, 9, 27);
+        DailyGameAttemptResponseDTO response = attemptResponse();
+        when(dailyGameService.submitAttempt(
+                eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class)))
+                .thenReturn(response);
+
+        mockMvc.perform(post("/games/{challengeDate}/{gameType}/attempt", historicalDate, GAME_TYPE)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tmdbId\":\"550\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.gameType").value(GAME_TYPE.name()));
+
+        verify(dailyGameService).submitAttempt(
+                eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class));
     }
 
     @Test
@@ -187,7 +220,8 @@ class DailyGameControllerTest {
         mockMvc.perform(get("/games/{gameType}/history", GAME_TYPE).param("page", "1").param("size", "5"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].gameType").value(GAME_TYPE.name()));
         mockMvc.perform(get("/games/rankings/general").param("page", "1").param("size", "5"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].username").value("lucas"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].username").value("lucas"))
+                .andExpect(jsonPath("$.content[0].gamesPlayed").value(1));
         mockMvc.perform(get("/games/{gameType}/ranking", GAME_TYPE).param("page", "2").param("size", "5"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(6));
 

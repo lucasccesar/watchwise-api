@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -57,8 +59,13 @@ public class DailyGameServiceImpl implements DailyGameService {
 
     @Override
     public DailyGameTodayResponseDTO getToday(UUID userId) {
-        LocalDate today = LocalDate.now(clock);
-        List<DailyChallenge> challenges = challengeRepository.findByChallengeDateOrderByGameTypeAsc(today);
+        return getDay(userId, LocalDate.now(clock));
+    }
+
+    @Override
+    public DailyGameTodayResponseDTO getDay(UUID userId, LocalDate challengeDate) {
+        assertAvailableDate(challengeDate);
+        List<DailyChallenge> challenges = challengeRepository.findByChallengeDateOrderByGameTypeAsc(challengeDate);
         requireCompleteDailySet(challenges);
 
         List<UUID> challengeIds = challenges.stream().map(DailyChallenge::getId).toList();
@@ -71,19 +78,26 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .stream()
                 .collect(Collectors.groupingBy(hint -> hint.getDailyChallenge().getId()));
 
-        return responseAssembler.toTodayResponse(today, challenges, results, hints);
+        return responseAssembler.toTodayResponse(challengeDate, challenges, results, hints);
     }
 
     @Override
     @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request) {
+        return submitAttempt(userId, LocalDate.now(clock), gameType, request);
+    }
+
+    @Override
+    @Transactional
+    public DailyGameAttemptResponseDTO submitAttempt(
+            UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request) {
         if (gameType == null) {
             throw new BadRequestException("A daily game type is required");
         }
-        LocalDate today = LocalDate.now(clock);
+        assertAvailableDate(challengeDate);
         LocalDateTime now = LocalDateTime.now(clock);
-        DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(today, gameType)
+        DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
                 .orElseThrow(DailyGamesUnavailableException::new);
 
         resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now);
@@ -110,7 +124,27 @@ public class DailyGameServiceImpl implements DailyGameService {
             result.setCompletedAt(null);
         }
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
-        return responseAssembler.toAttemptResponse(challenge, result, hints);
+        return responseAssembler.toAttemptResponse(challenge, result, hints,
+                guessFeedback(gameType, challenge, candidate));
+    }
+
+    private DailyGameGuessFeedbackDTO guessFeedback(
+            DailyGameType gameType, DailyChallenge challenge, DailyGameCandidateIdentity candidate) {
+        if (gameType != DailyGameType.EPISODE_BY_FRAME) {
+            return null;
+        }
+        boolean seriesCorrect = Objects.equals(challenge.getSeriesTmdbId(), candidate.seriesTmdbId());
+        boolean seasonCorrect = Objects.equals(challenge.getSeasonNumber(), candidate.seasonNumber());
+        boolean episodeCorrect = Objects.equals(challenge.getEpisodeNumber(), candidate.episodeNumber());
+        return new DailyGameGuessFeedbackDTO(
+                seriesCorrect, seasonCorrect, episodeCorrect,
+                seriesCorrect && seasonCorrect && episodeCorrect);
+    }
+
+    private void assertAvailableDate(LocalDate challengeDate) {
+        if (challengeDate == null || challengeDate.isAfter(LocalDate.now(clock))) {
+            throw new BadRequestException("Daily games are not available for a future date");
+        }
     }
 
     private void requireCompleteDailySet(List<DailyChallenge> challenges) {

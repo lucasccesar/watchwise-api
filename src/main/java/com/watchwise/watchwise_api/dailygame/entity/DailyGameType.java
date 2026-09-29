@@ -4,7 +4,7 @@ public enum DailyGameType {
     MOVIE_BY_POSTER(6, DailyGameTargetKind.MOVIE),
     SERIES_BY_POSTER(6, DailyGameTargetKind.SERIES),
     PERSON_BY_FACE(6, DailyGameTargetKind.PERSON),
-    EPISODE_BY_FRAME(10, DailyGameTargetKind.EPISODE),
+    EPISODE_BY_FRAME(6, DailyGameTargetKind.EPISODE),
     MOVIE_BY_INFO(10, DailyGameTargetKind.MOVIE),
     SERIES_BY_INFO(10, DailyGameTargetKind.SERIES),
     ACTOR_BY_MOVIE_FILMOGRAPHY(10, DailyGameTargetKind.PERSON),

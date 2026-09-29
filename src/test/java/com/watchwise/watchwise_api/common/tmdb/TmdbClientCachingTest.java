@@ -84,6 +84,7 @@ class TmdbClientCachingTest {
                 Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache,
+                Cache<String, TmdbLookupResult<TmdbEpisodeImages>> tmdbEpisodeImagesCache,
                 Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache,
                 Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbCalendarSeasonDetailsCache,
                 Cache<TmdbSearchCacheKey, TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> tmdbMovieSearchCache,
@@ -97,6 +98,7 @@ class TmdbClientCachingTest {
                 Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
                     tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
+                    tmdbEpisodeImagesCache,
                     tmdbMovieReleaseDatesCache, tmdbCalendarSeasonDetailsCache,
                     tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache,
                     tmdbMovieDiscoveryCache, tmdbTvDiscoveryCache, tmdbTvContentRatingsCache,
@@ -121,6 +123,9 @@ class TmdbClientCachingTest {
 
     @Autowired
     private Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbEpisodeImages>> tmdbEpisodeImagesCache;
 
     @Autowired
     private Cache<String, TmdbLookupResult<TmdbMovieReleaseDates>> tmdbMovieReleaseDatesCache;
@@ -162,6 +167,7 @@ class TmdbClientCachingTest {
         tmdbTvFullDetailsCache.invalidateAll();
         tmdbSeasonFullDetailsCache.invalidateAll();
         tmdbEpisodeFullDetailsCache.invalidateAll();
+        tmdbEpisodeImagesCache.invalidateAll();
         tmdbMovieReleaseDatesCache.invalidateAll();
         tmdbCalendarSeasonDetailsCache.invalidateAll();
         tmdbMovieSearchCache.invalidateAll();
@@ -482,6 +488,27 @@ class TmdbClientCachingTest {
         var recovered = tmdbClient.searchMovies("Matrix", "en-US", 1).toOptional().orElseThrow();
 
         assertThat(recovered.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getEpisodeImages] Should Mark Remote Then Cached - When The Same Episode Lookup Repeats")
+    void shouldMarkRemoteThenCachedWhenTheSameEpisodeLookupRepeats() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396/season/1/episode/3/images"))
+                .andRespond(withSuccess("""
+                        {"id":123,"stills":[{"file_path":"/first.jpg"},{"file_path":"/second.jpg"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var first = tmdbClient.getEpisodeImages("1396", 1, 3);
+        var second = tmdbClient.getEpisodeImages("1396", 1, 3);
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(second.toOptional().orElseThrow().stills())
+                .extracting(TmdbStill::filePath)
+                .containsExactly("/first.jpg", "/second.jpg");
         mockServer.verify();
     }
 
