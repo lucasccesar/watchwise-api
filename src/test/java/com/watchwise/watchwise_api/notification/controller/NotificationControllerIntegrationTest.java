@@ -151,11 +151,19 @@ class NotificationControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].isRead").value(false))
                 .andExpect(jsonPath("$.content[0].content.tmdbId").value("603"))
                 .andExpect(jsonPath("$.content[0].personTmdbId").value("6193"))
+                .andExpect(jsonPath("$.content[0].latestActor").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].targetType").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].targetId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].interactionCount").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.content[1].type").value("RELEASE"))
                 .andExpect(jsonPath("$.content[1].message").value("The Matrix is out now"))
                 .andExpect(jsonPath("$.content[1].isRead").value(false))
                 .andExpect(jsonPath("$.content[1].content.tmdbId").value("603"))
-                .andExpect(jsonPath("$.content[1].personTmdbId").value(org.hamcrest.Matchers.nullValue()));
+                .andExpect(jsonPath("$.content[1].personTmdbId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[1].latestActor").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[1].targetType").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[1].targetId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[1].interactionCount").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

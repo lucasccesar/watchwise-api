@@ -187,20 +187,31 @@ class NotificationRepositoryTest {
     }
 
     @Test
-    @DisplayName("[deleteExpiredSocialNotifications] Should Use Strict Cutoff For Read And Unread Rows")
-    void shouldUseStrictCutoffForReadAndUnreadRows() {
-        LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
+    @DisplayName("[deleteExpiredSocialNotifications] Should Use Seven-Day Read And Thirty-Day Unread Cutoffs")
+    void shouldUseSevenDayReadAndThirtyDayUnreadCutoffs() {
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        LocalDateTime readCutoff = now.minusDays(7);
+        LocalDateTime unreadCutoff = now.minusDays(30);
         Notification expiredRead = notificationRepository.saveAndFlush(buildSocialNotification(
-                NotificationType.LIKE_RECEIVED, true, cutoff.minusSeconds(1)));
+                NotificationType.LIKE_RECEIVED, true, readCutoff.minusSeconds(1)));
         Notification readAtCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
-                NotificationType.COMMENT_RECEIVED, true, cutoff));
+                NotificationType.COMMENT_RECEIVED, true, readCutoff));
         Notification expiredUnread = notificationRepository.saveAndFlush(buildSocialNotification(
-                NotificationType.LIKE_RECEIVED, false, cutoff.minusSeconds(1)));
+                NotificationType.LIKE_RECEIVED, false, unreadCutoff.minusSeconds(1)));
         Notification unreadAtCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
-                NotificationType.COMMENT_RECEIVED, false, cutoff));
+                NotificationType.COMMENT_RECEIVED, false, unreadCutoff));
+        Notification[] systemNotifications = {
+                notificationRepository.saveAndFlush(buildSystemNotification(NotificationType.RELEASE, now.minusDays(60))),
+                notificationRepository.saveAndFlush(buildSystemNotification(NotificationType.ANNOUNCED_DATE, now.minusDays(60))),
+                notificationRepository.saveAndFlush(buildSystemNotification(NotificationType.CANCELLED, now.minusDays(60))),
+                notificationRepository.saveAndFlush(buildSystemNotification(NotificationType.RENEWED, now.minusDays(60))),
+                notificationRepository.saveAndFlush(buildSystemNotification(NotificationType.NEW_EPISODE, now.minusDays(60))),
+                notificationRepository.saveAndFlush(buildSystemNotification(
+                        NotificationType.FOLLOWED_PERSON_NEW_CREDIT, now.minusDays(60)))
+        };
 
-        int deletedRead = notificationRepository.deleteExpiredSocialNotifications(true, cutoff, 500);
-        int deletedUnread = notificationRepository.deleteExpiredSocialNotifications(false, cutoff, 500);
+        int deletedRead = notificationRepository.deleteExpiredSocialNotifications(true, readCutoff, 500);
+        int deletedUnread = notificationRepository.deleteExpiredSocialNotifications(false, unreadCutoff, 500);
 
         assertThat(deletedRead).isEqualTo(1);
         assertThat(deletedUnread).isEqualTo(1);
@@ -209,6 +220,9 @@ class NotificationRepositoryTest {
         assertThat(notificationRepository.findById(readAtCutoff.getId())).isPresent();
         assertThat(notificationRepository.findById(expiredUnread.getId())).isEmpty();
         assertThat(notificationRepository.findById(unreadAtCutoff.getId())).isPresent();
+        for (Notification systemNotification : systemNotifications) {
+            assertThat(notificationRepository.findById(systemNotification.getId())).isPresent();
+        }
     }
 
     @Test
