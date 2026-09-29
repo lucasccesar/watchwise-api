@@ -9,11 +9,14 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.notification.dto.NotificationResponseDTO;
 import com.watchwise.watchwise_api.notification.entity.Notification;
+import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.mapper.NotificationMapper;
 import com.watchwise.watchwise_api.notification.mapper.NotificationMapperImpl;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
+import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -63,6 +66,8 @@ class NotificationServiceImplTest {
 
     private UUID userId;
     private Notification notification;
+    private User latestActor;
+    private UUID socialTargetId;
 
     @BeforeEach
     void setUp() {
@@ -75,6 +80,10 @@ class NotificationServiceImplTest {
                 .id(UUID.randomUUID()).user(user).type(NotificationType.RELEASE)
                 .message("The Matrix is out now").content(content).isRead(false)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        latestActor = User.builder().id(UUID.randomUUID()).username("actor").email("actor@email.com")
+                .password("hashed").profilePicture("https://example.com/actor.png").isProfilePublic(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        socialTargetId = UUID.randomUUID();
     }
 
     @Test
@@ -86,6 +95,36 @@ class NotificationServiceImplTest {
         Page<NotificationResponseDTO> result = notificationService.getNotifications(userId, null, 1, 10);
 
         assertThat(result.getContent()).extracting(NotificationResponseDTO::id).containsExactly(notification.getId());
+    }
+
+    @Test
+    @DisplayName("[getNotifications] Should Map Social Fields And Hide Them For Legacy Notifications")
+    void shouldMapSocialFieldsAndHideThemForLegacyNotifications() {
+        Notification socialNotification = Notification.builder()
+                .id(UUID.randomUUID()).user(notification.getUser()).type(NotificationType.COMMENT_RECEIVED)
+                .message("Someone commented on your review").content(null).latestActor(latestActor)
+                .targetType(NotificationTargetType.DIARY_ENTRY).targetId(socialTargetId).interactionCount(2)
+                .isRead(false).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(notificationRepository.findByUserIdOrderByCreatedAtDesc(eq(userId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(socialNotification, notification)));
+
+        notification.setLatestActor(latestActor);
+
+        Page<NotificationResponseDTO> result = notificationService.getNotifications(userId, null, 1, 10);
+
+        NotificationResponseDTO socialResponse = result.getContent().get(0);
+        UserPreviewDTO actorResponse = socialResponse.latestActor();
+        assertThat(actorResponse.id()).isEqualTo(latestActor.getId());
+        assertThat(actorResponse.username()).isEqualTo(latestActor.getUsername());
+        assertThat(socialResponse.targetType()).isEqualTo(NotificationTargetType.DIARY_ENTRY);
+        assertThat(socialResponse.targetId()).isEqualTo(socialTargetId);
+        assertThat(socialResponse.interactionCount()).isEqualTo(2);
+
+        NotificationResponseDTO legacyResponse = result.getContent().get(1);
+        assertThat(legacyResponse.latestActor()).isNull();
+        assertThat(legacyResponse.targetType()).isNull();
+        assertThat(legacyResponse.targetId()).isNull();
+        assertThat(legacyResponse.interactionCount()).isNull();
     }
 
     @Test
@@ -252,6 +291,7 @@ class NotificationServiceImplTest {
     private static NotificationMapper buildRealNotificationMapper() {
         NotificationMapperImpl mapper = new NotificationMapperImpl();
         ReflectionTestUtils.setField(mapper, "contentMapper", Mappers.getMapper(ContentMapper.class));
+        ReflectionTestUtils.setField(mapper, "userMapper", Mappers.getMapper(UserMapper.class));
         return mapper;
     }
 }

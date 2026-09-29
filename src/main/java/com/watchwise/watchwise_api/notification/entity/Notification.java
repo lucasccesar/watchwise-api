@@ -34,9 +34,28 @@ public class Notification {
     @Setter
     private String message;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "content_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "content_id")
     private Content content;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "actor_user_id")
+    @Setter
+    private User latestActor;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "target_type", length = 30)
+    @Setter
+    private NotificationTargetType targetType;
+
+    @Column(name = "target_id")
+    @Setter
+    private UUID targetId;
+
+    @Column(name = "interaction_count", nullable = false)
+    @Builder.Default
+    @Setter
+    private Integer interactionCount = 1;
 
     @Column(name = "person_tmdb_id", length = 20)
     @Setter
