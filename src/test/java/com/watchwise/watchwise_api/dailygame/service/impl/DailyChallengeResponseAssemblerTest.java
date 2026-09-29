@@ -1,11 +1,15 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -101,6 +105,26 @@ class DailyChallengeResponseAssemblerTest {
         DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(challenge("/fight-club.jpg"), result());
 
         assertThat(response.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/fight-club.jpg");
+    }
+
+    @Test
+    @DisplayName("[attempts] Should Expose Current Day Attempts Without Revealing The Answer - When The Result Is Open")
+    void shouldExposeCurrentDayAttemptsWithoutRevealingTheAnswerWhenTheResultIsOpen() {
+        DailyChallenge challenge = challenge("/fight-club.jpg");
+        UserDailyGameResult result = result();
+        DailyGameAttemptDTO attempt = new DailyGameAttemptDTO(
+                1,
+                new DailyGameCandidateDTO(
+                        DailyGameTargetKind.MOVIE, "680", null, null, null, null,
+                        "The Secret Guess", "/guess.jpg", LocalDate.of(2000, 1, 1)),
+                new DailyGameGuessFeedbackDTO(false, false, false, false), null, null);
+        result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null, attempt));
+
+        DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(
+                challenge, result, List.of(), null, true);
+
+        assertThat(response.attempts()).containsExactly(attempt);
+        assertThat(response.answer()).isNull();
     }
 
     private DailyChallenge challenge(String imagePath) {

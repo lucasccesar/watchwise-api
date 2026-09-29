@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.dailygame.controller;
 
 import com.watchwise.watchwise_api.common.exception.GlobalExceptionHandler;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
@@ -8,6 +9,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -113,6 +115,39 @@ class DailyGameControllerTest {
     }
 
     @Test
+    @DisplayName("[getGame] Should Delegate The Specific Game - When A Game Type Is Requested For Today")
+    void shouldDelegateTheSpecificGameWhenAGameTypeIsRequestedForToday() throws Exception {
+        when(dailyGameService.getGame(eq(CURRENT_USER_ID), any(LocalDate.class), eq(GAME_TYPE), eq(true)))
+                .thenReturn(new DailyGameStateDTO(
+                        GAME_TYPE, DailyGameTargetKind.MOVIE, 10, 0, 10, DailyGameViewStatus.NOT_PLAYED,
+                        "/poster.jpg", List.of(), 0, null, null));
+
+        mockMvc.perform(get("/games/{gameType}/today", GAME_TYPE))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("NOT_PLAYED"));
+
+        verify(dailyGameService).getGame(eq(CURRENT_USER_ID), any(LocalDate.class), eq(GAME_TYPE), eq(true));
+        verifyNoInteractions(dailyGameRankingService, dailyGameSearchService);
+    }
+
+    @Test
+    @DisplayName("[getGame] Should Preserve The Major Roles Toggle - When A Historical Game Is Requested")
+    void shouldPreserveTheMajorRolesToggleWhenAHistoricalGameIsRequested() throws Exception {
+        LocalDate historicalDate = LocalDate.of(2026, 9, 27);
+        when(dailyGameService.getGame(CURRENT_USER_ID, historicalDate, GAME_TYPE, false))
+                .thenReturn(new DailyGameStateDTO(
+                        GAME_TYPE, DailyGameTargetKind.MOVIE, 10, 0, 10, DailyGameViewStatus.NOT_PLAYED,
+                        "/poster.jpg", List.of(), 0, null, null));
+
+        mockMvc.perform(get("/games/{challengeDate}/{gameType}", historicalDate, GAME_TYPE)
+                        .param("majorRoles", "false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("NOT_PLAYED"));
+
+        verify(dailyGameService).getGame(CURRENT_USER_ID, historicalDate, GAME_TYPE, false);
+    }
+
+    @Test
     @DisplayName("[submitAttempt] Should Delegate And Return Response - When Attempt Is Valid")
     void shouldSubmitAttemptWithCurrentUserAndRateLimit() throws Exception {
         DailyGameAttemptResponseDTO response = attemptResponse();
@@ -149,6 +184,33 @@ class DailyGameControllerTest {
 
         verify(dailyGameService).submitAttempt(
                 eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class));
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Delegate And Apply The Attempt Limit - When The Current Game Is Abandoned")
+    void shouldDelegateAndApplyTheAttemptLimitWhenTheCurrentGameIsAbandoned() throws Exception {
+        when(dailyGameService.giveUp(CURRENT_USER_ID, GAME_TYPE)).thenReturn(attemptResponse());
+
+        mockMvc.perform(post("/games/{gameType}/give-up", GAME_TYPE))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
+
+        verify(requestThrottler).checkAllowed(
+                "daily-game-attempt|" + CURRENT_USER_ID, 20, Duration.ofMinutes(5));
+        verify(dailyGameService).giveUp(CURRENT_USER_ID, GAME_TYPE);
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Return An ApiError Conflict - When The Game Is Already Terminal")
+    void shouldReturnAnApiErrorConflictWhenTheGameIsAlreadyTerminal() throws Exception {
+        when(dailyGameService.giveUp(CURRENT_USER_ID, GAME_TYPE))
+                .thenThrow(new ConflictException("Daily game attempt is already finished"));
+
+        mockMvc.perform(post("/games/{gameType}/give-up", GAME_TYPE))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/give-up"));
     }
 
     @Test

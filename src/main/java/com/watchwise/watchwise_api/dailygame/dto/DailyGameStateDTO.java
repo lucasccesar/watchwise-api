@@ -19,7 +19,9 @@ public record DailyGameStateDTO(
         LocalDateTime completedAt,
         DailyGameAnswerDTO answer,
         List<String> visibleImageUrls,
-        List<String> imageUrls) {
+        List<String> imageUrls,
+        List<DailyGameAttemptDTO> attempts,
+        DailyGameFilmographyStateDTO filmography) {
 
     public DailyGameStateDTO(
             DailyGameType gameType,
@@ -35,5 +37,23 @@ public record DailyGameStateDTO(
             DailyGameAnswerDTO answer) {
         this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
                 score, completedAt, answer, null, null);
+    }
+
+    public DailyGameStateDTO(
+            DailyGameType gameType,
+            DailyGameTargetKind targetKind,
+            int maxAttempts,
+            int attemptsUsed,
+            int attemptsRemaining,
+            DailyGameViewStatus status,
+            String imageUrl,
+            List<DailyGameHintDTO> hints,
+            int score,
+            LocalDateTime completedAt,
+            DailyGameAnswerDTO answer,
+            List<String> visibleImageUrls,
+            List<String> imageUrls) {
+        this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
+                score, completedAt, answer, visibleImageUrls, imageUrls, null, null);
     }
 }

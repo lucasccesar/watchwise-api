@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 @RestController
@@ -61,6 +63,22 @@ public class DailyGameController {
     public ResponseEntity<DailyGameTodayResponseDTO> getDay(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate) {
         return ResponseEntity.ok(dailyGameService.getDay(currentUserId(), challengeDate));
+    }
+
+    @GetMapping("/games/{gameType}/today")
+    public ResponseEntity<DailyGameStateDTO> getGameToday(
+        @PathVariable("gameType") DailyGameType gameType,
+            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles) {
+        return ResponseEntity.ok(dailyGameService.getGame(
+                currentUserId(), LocalDate.now(ZoneOffset.UTC), gameType, majorRoles));
+    }
+
+    @GetMapping("/games/{challengeDate}/{gameType}")
+    public ResponseEntity<DailyGameStateDTO> getGame(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate,
+            @PathVariable("gameType") DailyGameType gameType,
+            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles) {
+        return ResponseEntity.ok(dailyGameService.getGame(currentUserId(), challengeDate, gameType, majorRoles));
     }
 
     @GetMapping("/games/{gameType}/search")
@@ -107,10 +125,7 @@ public class DailyGameController {
             @PathVariable("gameType") DailyGameType gameType,
             @Valid @RequestBody DailyGameAttemptRequest request) {
         UUID userId = currentUserId();
-        requestThrottler.checkAllowed(
-                "daily-game-attempt|" + userId,
-                attemptMaxRequests,
-                Duration.ofMinutes(attemptWindowMinutes));
+        throttleAttempt(userId);
         return ResponseEntity.ok(dailyGameService.submitAttempt(userId, gameType, request));
     }
 
@@ -120,11 +135,25 @@ public class DailyGameController {
             @PathVariable("gameType") DailyGameType gameType,
             @Valid @RequestBody DailyGameAttemptRequest request) {
         UUID userId = currentUserId();
-        requestThrottler.checkAllowed(
-                "daily-game-attempt|" + userId,
-                attemptMaxRequests,
-                Duration.ofMinutes(attemptWindowMinutes));
+        throttleAttempt(userId);
         return ResponseEntity.ok(dailyGameService.submitAttempt(userId, challengeDate, gameType, request));
+    }
+
+    @PostMapping("/games/{gameType}/give-up")
+    public ResponseEntity<DailyGameAttemptResponseDTO> giveUp(
+            @PathVariable("gameType") DailyGameType gameType) {
+        UUID userId = currentUserId();
+        throttleAttempt(userId);
+        return ResponseEntity.ok(dailyGameService.giveUp(userId, gameType));
+    }
+
+    @PostMapping("/games/{challengeDate}/{gameType}/give-up")
+    public ResponseEntity<DailyGameAttemptResponseDTO> giveUpHistorical(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate,
+            @PathVariable("gameType") DailyGameType gameType) {
+        UUID userId = currentUserId();
+        throttleAttempt(userId);
+        return ResponseEntity.ok(dailyGameService.giveUp(userId, challengeDate, gameType));
     }
 
     @GetMapping("/games/history")
@@ -167,6 +196,13 @@ public class DailyGameController {
                 "daily-game-search|" + userId,
                 searchMaxRequests,
                 Duration.ofMinutes(searchWindowMinutes));
+    }
+
+    private void throttleAttempt(UUID userId) {
+        requestThrottler.checkAllowed(
+                "daily-game-attempt|" + userId,
+                attemptMaxRequests,
+                Duration.ofMinutes(attemptWindowMinutes));
     }
 
     private UUID currentUserId() {

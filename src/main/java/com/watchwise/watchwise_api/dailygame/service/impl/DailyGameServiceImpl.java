@@ -4,9 +4,12 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
@@ -17,7 +20,9 @@ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository
 import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +45,7 @@ public class DailyGameServiceImpl implements DailyGameService {
     private final UserDailyGameResultRepository resultRepository;
     private final DailyGameCandidateValidator candidateValidator;
     private final DailyChallengeResponseAssembler responseAssembler;
+    private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
     private final Clock clock;
 
     public DailyGameServiceImpl(
@@ -49,11 +55,25 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyGameCandidateValidator candidateValidator,
             DailyChallengeResponseAssembler responseAssembler,
             Clock clock) {
+        this(challengeRepository, hintRepository, resultRepository, candidateValidator,
+                responseAssembler, new DailyGameAttemptDetailsCodec(), clock);
+    }
+
+    @Autowired
+    public DailyGameServiceImpl(
+            DailyChallengeRepository challengeRepository,
+            DailyChallengeHintRepository hintRepository,
+            UserDailyGameResultRepository resultRepository,
+            DailyGameCandidateValidator candidateValidator,
+            DailyChallengeResponseAssembler responseAssembler,
+            DailyGameAttemptDetailsCodec attemptDetailsCodec,
+            Clock clock) {
         this.challengeRepository = challengeRepository;
         this.hintRepository = hintRepository;
         this.resultRepository = resultRepository;
         this.candidateValidator = candidateValidator;
         this.responseAssembler = responseAssembler;
+        this.attemptDetailsCodec = attemptDetailsCodec;
         this.clock = clock;
     }
 
@@ -78,7 +98,24 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .stream()
                 .collect(Collectors.groupingBy(hint -> hint.getDailyChallenge().getId()));
 
-        return responseAssembler.toTodayResponse(challengeDate, challenges, results, hints);
+        return responseAssembler.toTodayResponse(challengeDate, LocalDate.now(clock), challenges, results, hints);
+    }
+
+    @Override
+    public DailyGameStateDTO getGame(
+            UUID userId, LocalDate challengeDate, DailyGameType gameType, boolean majorRoles) {
+        requireGameType(gameType);
+        assertAvailableDate(challengeDate);
+        DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
+                .orElseThrow(DailyGamesUnavailableException::new);
+        UserDailyGameResult result = resultRepository
+                .findByUserIdAndDailyChallengeIdIn(userId, List.of(challenge.getId()))
+                .stream()
+                .findFirst()
+                .orElse(null);
+        List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
+        return responseAssembler.toState(
+                challenge, result, hints, challengeDate.equals(LocalDate.now(clock)));
     }
 
     @Override
@@ -92,9 +129,7 @@ public class DailyGameServiceImpl implements DailyGameService {
     @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request) {
-        if (gameType == null) {
-            throw new BadRequestException("A daily game type is required");
-        }
+        requireGameType(gameType);
         assertAvailableDate(challengeDate);
         LocalDateTime now = LocalDateTime.now(clock);
         DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
@@ -123,9 +158,61 @@ public class DailyGameServiceImpl implements DailyGameService {
             result.setStatus(DailyGameResultStatus.IN_PROGRESS);
             result.setCompletedAt(null);
         }
+        appendAttemptDetails(challenge, result, attemptNumber, candidate, guessFeedback(gameType, challenge, candidate));
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
         return responseAssembler.toAttemptResponse(challenge, result, hints,
-                guessFeedback(gameType, challenge, candidate));
+                guessFeedback(gameType, challenge, candidate), challengeDate.equals(LocalDate.now(clock)));
+    }
+
+    @Override
+    @Transactional
+    public DailyGameAttemptResponseDTO giveUp(UUID userId, DailyGameType gameType) {
+        return giveUp(userId, LocalDate.now(clock), gameType);
+    }
+
+    @Override
+    @Transactional
+    public DailyGameAttemptResponseDTO giveUp(UUID userId, LocalDate challengeDate, DailyGameType gameType) {
+        requireGameType(gameType);
+        assertAvailableDate(challengeDate);
+        LocalDateTime now = LocalDateTime.now(clock);
+        DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
+                .orElseThrow(DailyGamesUnavailableException::new);
+        resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now);
+        UserDailyGameResult result = resultRepository
+                .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
+                .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
+        assertOpenAndHasAttempts(result, gameType);
+        result.setStatus(DailyGameResultStatus.FAILED);
+        result.setScore(0);
+        result.setCompletedAt(now);
+        result.setUpdatedAt(now);
+        List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
+        return responseAssembler.toAttemptResponse(
+                challenge, result, hints, null, challengeDate.equals(LocalDate.now(clock)));
+    }
+
+    private void appendAttemptDetails(
+            DailyChallenge challenge,
+            UserDailyGameResult result,
+            int attemptNumber,
+            DailyGameCandidateIdentity candidate,
+            DailyGameGuessFeedbackDTO episodeFeedback) {
+        if (!challenge.getChallengeDate().equals(LocalDate.now(clock))) {
+            return;
+        }
+        DailyGameCandidateDTO candidateDto = new DailyGameCandidateDTO(
+                candidate.targetKind(), candidate.tmdbId(), candidate.personTmdbId(), candidate.seriesTmdbId(),
+                candidate.seasonNumber(), candidate.episodeNumber(), null, null, null);
+        result.setAttemptDetails(attemptDetailsCodec.append(
+                result.getAttemptDetails(),
+                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, null, null)));
+    }
+
+    private void requireGameType(DailyGameType gameType) {
+        if (gameType == null) {
+            throw new BadRequestException("A daily game type is required");
+        }
     }
 
     private DailyGameGuessFeedbackDTO guessFeedback(

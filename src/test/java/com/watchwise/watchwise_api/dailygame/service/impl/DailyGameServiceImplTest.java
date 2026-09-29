@@ -254,6 +254,8 @@ class DailyGameServiceImplTest {
     void shouldRejectTheCandidateWithoutConsumingAnAttemptWhenTheRequestContainsAMismatchedField() {
         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        Map<String, Object> existingDetails = Map.of("attempts", List.of("existing"));
+        result.setAttemptDetails(existingDetails);
         stubOpenSubmission(challenge, result);
 
         assertThatThrownBy(() -> service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER,
@@ -261,7 +263,28 @@ class DailyGameServiceImplTest {
                 .isInstanceOf(BadRequestException.class);
 
         assertThat(result.getAttemptsUsed()).isZero();
+        assertThat(result.getAttemptDetails()).isSameAs(existingDetails);
         verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Reject A Terminal Result - When The User Gives Up After Finishing")
+    void shouldRejectAGiveUpWhenTheResultIsAlreadyTerminal() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 1, 10, DailyGameResultStatus.COMPLETED, NOW);
+        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(0);
+        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+                .thenReturn(Optional.of(result));
+
+        assertThatThrownBy(() -> service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO))
+                .isInstanceOf(ConflictException.class);
+
+        assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.COMPLETED);
+        assertThat(result.getAttemptsUsed()).isOne();
+        assertThat(result.getScore()).isEqualTo(10);
+        verifyNoInteractions(hintRepository);
     }
 
     @Test
@@ -332,6 +355,46 @@ class DailyGameServiceImplTest {
                 request("550", null, null, null, null)))
                 .isInstanceOf(DailyGamesUnavailableException.class);
         verifyNoInteractions(resultRepository, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Fail Without Consuming An Attempt - When The User Gives Up Before Playing")
+    void shouldFailWithoutConsumingAnAttemptWhenTheUserGivesUp() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
+        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+                .thenReturn(Optional.of(result));
+        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+
+        DailyGameAttemptResponseDTO response = service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO);
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.FAILED);
+        assertThat(response.attemptsUsed()).isZero();
+        assertThat(response.score()).isZero();
+        assertThat(response.answer()).isNotNull();
+        assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.FAILED);
+        assertThat(result.getCompletedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    @DisplayName("[getGame] Should Return A NotPlayed State - When The User Has No Result For The Game")
+    void shouldReturnANotPlayedStateWhenTheUserHasNoResultForTheGame() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), eq(List.of(challenge.getId()))))
+                .thenReturn(List.of());
+        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+
+        DailyGameStateDTO response = service().getGame(
+                USER_ID, TODAY, DailyGameType.MOVIE_BY_INFO, true);
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.NOT_PLAYED);
+        assertThat(response.attemptsUsed()).isZero();
+        assertThat(response.answer()).isNull();
     }
 
     @Test
@@ -464,6 +527,16 @@ class DailyGameServiceImplTest {
     void shouldRequireATransactionWhenTheSubmissionMethodIsInspected() throws NoSuchMethodException {
         Method method = DailyGameServiceImpl.class.getMethod("submitAttempt", UUID.class, DailyGameType.class,
                 com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest.class);
+        Transactional transactional = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
+
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRED);
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Require A Transaction - When The Give Up Method Is Inspected")
+    void shouldRequireATransactionWhenTheGiveUpMethodIsInspected() throws NoSuchMethodException {
+        Method method = DailyGameServiceImpl.class.getMethod("giveUp", UUID.class, DailyGameType.class);
         Transactional transactional = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
 
         assertThat(transactional).isNotNull();

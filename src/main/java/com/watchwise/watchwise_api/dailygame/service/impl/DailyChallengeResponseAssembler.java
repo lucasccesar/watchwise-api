@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHintDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
@@ -14,6 +15,7 @@ import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -25,8 +27,27 @@ import java.util.stream.IntStream;
 @Component
 public class DailyChallengeResponseAssembler {
 
+    private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
+
+    public DailyChallengeResponseAssembler() {
+        this(new DailyGameAttemptDetailsCodec());
+    }
+
+    public DailyChallengeResponseAssembler(DailyGameAttemptDetailsCodec attemptDetailsCodec) {
+        this.attemptDetailsCodec = attemptDetailsCodec;
+    }
+
     public DailyGameTodayResponseDTO toTodayResponse(
             LocalDate date,
+            List<DailyChallenge> challenges,
+            Map<UUID, UserDailyGameResult> resultsByChallengeId,
+            Map<UUID, List<DailyChallengeHint>> hintsByChallengeId) {
+        return toTodayResponse(date, null, challenges, resultsByChallengeId, hintsByChallengeId);
+    }
+
+    public DailyGameTodayResponseDTO toTodayResponse(
+            LocalDate date,
+            LocalDate currentDate,
             List<DailyChallenge> challenges,
             Map<UUID, UserDailyGameResult> resultsByChallengeId,
             Map<UUID, List<DailyChallengeHint>> hintsByChallengeId) {
@@ -34,7 +55,8 @@ public class DailyChallengeResponseAssembler {
                 .map(challenge -> toState(
                         challenge,
                         resultsByChallengeId.get(challenge.getId()),
-                        hintsByChallengeId.getOrDefault(challenge.getId(), List.of())))
+                        hintsByChallengeId.getOrDefault(challenge.getId(), List.of()),
+                        date.equals(currentDate)))
                 .toList();
         return new DailyGameTodayResponseDTO(date, games);
     }
@@ -56,11 +78,22 @@ public class DailyChallengeResponseAssembler {
             UserDailyGameResult result,
             List<DailyChallengeHint> allHints,
             DailyGameGuessFeedbackDTO guessFeedback) {
+        return toAttemptResponse(challenge, result, allHints, guessFeedback, false);
+    }
+
+    public DailyGameAttemptResponseDTO toAttemptResponse(
+            DailyChallenge challenge,
+            UserDailyGameResult result,
+            List<DailyChallengeHint> allHints,
+            DailyGameGuessFeedbackDTO guessFeedback,
+            boolean includeAttempts) {
         DailyGameView view = view(challenge, result, allHints);
+        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
+                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
         return new DailyGameAttemptResponseDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), guessFeedback);
+                view.visibleImageUrls(), view.imageUrls(), attempts, null, guessFeedback);
     }
 
     public DailyGameHistoryDTO toHistoryResponse(
@@ -75,11 +108,21 @@ public class DailyChallengeResponseAssembler {
             DailyChallenge challenge,
             UserDailyGameResult result,
             List<DailyChallengeHint> allHints) {
+        return toState(challenge, result, allHints, false);
+    }
+
+    public DailyGameStateDTO toState(
+            DailyChallenge challenge,
+            UserDailyGameResult result,
+            List<DailyChallengeHint> allHints,
+            boolean includeAttempts) {
         DailyGameView view = view(challenge, result, allHints);
+        List<DailyGameAttemptDTO> attempts = includeAttempts && result != null
+                ? attemptDetailsCodec.read(result.getAttemptDetails()) : null;
         return new DailyGameStateDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls());
+                view.visibleImageUrls(), view.imageUrls(), attempts, null);
     }
 
     private DailyGameView view(

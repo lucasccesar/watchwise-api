@@ -51,6 +51,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -125,6 +126,26 @@ class DailyGameControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getGame] Should Resolve The Specific Route - When A Game Type Is Requested After The Aggregate Route")
+    void shouldResolveTheSpecificRouteWhenAGameTypeIsRequestedAfterTheAggregateRoute() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollerspecific");
+        DailyGameStateDTO game = new DailyGameStateDTO(
+                DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 0, 10,
+                DailyGameViewStatus.NOT_PLAYED, "/hint.jpg", List.of(), 0, null, null);
+        when(dailyGameService.getGame(eq(user.id()), any(LocalDate.class),
+                eq(DailyGameType.MOVIE_BY_INFO), eq(true))).thenReturn(game);
+
+        mockMvc.perform(get("/games/{gameType}/today", DailyGameType.MOVIE_BY_INFO)
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("NOT_PLAYED"));
+
+        verify(dailyGameService).getGame(eq(user.id()), any(LocalDate.class),
+                eq(DailyGameType.MOVIE_BY_INFO), eq(true));
+        verify(dailyGameService, never()).getToday(user.id());
+    }
+
+    @Test
     @DisplayName("[getToday] Should Return Unauthorized - When Access Token Is Missing")
     void shouldReturnUnauthorizedWhenAccessTokenIsMissing() throws Exception {
         mockMvc.perform(get("/games/today"))
@@ -149,6 +170,19 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(403))
                 .andExpect(jsonPath("$.detail").doesNotExist())
                 .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(dailyGameService);
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Return Forbidden - When Csrf Header Is Missing")
+    void shouldReturnForbiddenWhenGiveUpCsrfHeaderIsMissing() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollergiveupcsrf");
+
+        mockMvc.perform(post("/games/{gameType}/give-up", DailyGameType.MOVIE_BY_INFO)
+                        .cookie(user.accessToken()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
 
         verifyNoInteractions(dailyGameService);
     }
@@ -235,6 +269,22 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(409))
                 .andExpect(jsonPath("$.error").value("Conflict"))
                 .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/attempt"));
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Return Conflict ApiError - When The Game Is Already Completed")
+    void shouldReturnConflictApiErrorWhenGiveUpGameIsAlreadyCompleted() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollergiveupconflict");
+        when(dailyGameService.giveUp(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO)))
+                .thenThrow(new ConflictException("Daily game attempt is already finished"));
+
+        mockMvc.perform(post("/games/{gameType}/give-up", DailyGameType.MOVIE_BY_INFO)
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.error").value("Conflict"))
+                .andExpect(jsonPath("$.path").value("/games/MOVIE_BY_INFO/give-up"));
     }
 
     @Test
