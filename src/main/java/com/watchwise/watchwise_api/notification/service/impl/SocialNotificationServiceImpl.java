@@ -15,11 +15,14 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class SocialNotificationServiceImpl implements SocialNotificationService {
+
+    private static final int MAX_AGGREGATE_ATTEMPTS = 2;
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
@@ -56,54 +59,62 @@ public class SocialNotificationServiceImpl implements SocialNotificationService 
         }
 
         User actor = userRepository.getReferenceById(actorId);
-        LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneId.systemDefault());
-        UUID insertedId = UUID.randomUUID();
-        notificationRepository.insertSocialAggregateIfAbsent(
-                insertedId,
-                recipientId,
-                notificationType.name(),
-                messageFor(actor.getUsername(), 1, notificationType, targetType),
-                actorId,
-                targetType.name(),
-                targetId,
-                now);
+        for (int attempt = 0; attempt < MAX_AGGREGATE_ATTEMPTS; attempt++) {
+            LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneId.systemDefault());
+            UUID insertedId = UUID.randomUUID();
+            notificationRepository.insertSocialAggregateIfAbsent(
+                    insertedId,
+                    recipientId,
+                    notificationType.name(),
+                    messageFor(actor.getUsername(), 1, notificationType, targetType),
+                    actorId,
+                    targetType.name(),
+                    targetId,
+                    now);
 
-        Notification aggregate = notificationRepository.findSocialAggregateForUpdate(
-                        recipientId, notificationType, targetType, targetId)
-                .orElseThrow(() -> new IllegalStateException("Social notification aggregate was not created"));
+            Optional<Notification> aggregateOptional = notificationRepository.findSocialAggregateForUpdate(
+                    recipientId, notificationType, targetType, targetId);
+            if (aggregateOptional.isEmpty()) {
+                continue;
+            }
 
-        if (Objects.equals(insertedId, aggregate.getId())) {
+            Notification aggregate = aggregateOptional.get();
+            if (Objects.equals(insertedId, aggregate.getId())) {
+                return;
+            }
+
+            if (Boolean.FALSE.equals(aggregate.getIsRead())) {
+                int interactionCount = aggregate.getInteractionCount() + 1;
+                aggregate.setInteractionCount(interactionCount);
+                aggregate.setLatestActor(actor);
+                aggregate.setMessage(messageFor(actor.getUsername(), interactionCount, notificationType, targetType));
+                aggregate.setCreatedAt(now);
+                aggregate.setUpdatedAt(now);
+                aggregate.setIsRead(false);
+                notificationRepository.save(aggregate);
+                return;
+            }
+
+            notificationRepository.delete(aggregate);
+            notificationRepository.flush();
+            Notification replacement = Notification.builder()
+                    .id(UUID.randomUUID())
+                    .user(aggregate.getUser())
+                    .type(notificationType)
+                    .message(messageFor(actor.getUsername(), 1, notificationType, targetType))
+                    .latestActor(actor)
+                    .targetType(targetType)
+                    .targetId(targetId)
+                    .interactionCount(1)
+                    .isRead(false)
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
+            notificationRepository.saveAndFlush(replacement);
             return;
         }
 
-        if (Boolean.FALSE.equals(aggregate.getIsRead())) {
-            int interactionCount = aggregate.getInteractionCount() + 1;
-            aggregate.setInteractionCount(interactionCount);
-            aggregate.setLatestActor(actor);
-            aggregate.setMessage(messageFor(actor.getUsername(), interactionCount, notificationType, targetType));
-            aggregate.setCreatedAt(now);
-            aggregate.setUpdatedAt(now);
-            aggregate.setIsRead(false);
-            notificationRepository.save(aggregate);
-            return;
-        }
-
-        notificationRepository.delete(aggregate);
-        notificationRepository.flush();
-        Notification replacement = Notification.builder()
-                .id(UUID.randomUUID())
-                .user(aggregate.getUser())
-                .type(notificationType)
-                .message(messageFor(actor.getUsername(), 1, notificationType, targetType))
-                .latestActor(actor)
-                .targetType(targetType)
-                .targetId(targetId)
-                .interactionCount(1)
-                .isRead(false)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-        notificationRepository.saveAndFlush(replacement);
+        throw new IllegalStateException("Social notification aggregate was not created");
     }
 
     private String messageFor(

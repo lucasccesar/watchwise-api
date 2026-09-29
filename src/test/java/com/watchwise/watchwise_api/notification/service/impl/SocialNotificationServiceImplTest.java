@@ -22,6 +22,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -214,6 +215,47 @@ class SocialNotificationServiceImplTest {
         inOrder.verify(notificationRepository).findSocialAggregateForUpdate(
                 eq(recipientId), eq(NotificationType.LIKE_RECEIVED),
                 eq(NotificationTargetType.DIARY_ENTRY), eq(targetId));
+    }
+
+    @Test
+    @DisplayName("Should Retry Insert And Locked Lookup - When Cleanup Removes Aggregate Before First Lookup")
+    void shouldRetryInsertAndLockedLookupWhenCleanupRemovesAggregateBeforeFirstLookup() {
+        when(userRepository.getReferenceById(joao.getId())).thenReturn(joao);
+        when(notificationRepository.insertSocialAggregateIfAbsent(
+                any(), any(), any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+                    insertedId = invocation.getArgument(0, UUID.class);
+                    return 1;
+                });
+
+        AtomicInteger lookupCount = new AtomicInteger();
+        when(notificationRepository.findSocialAggregateForUpdate(
+                eq(recipientId), eq(NotificationType.LIKE_RECEIVED),
+                eq(NotificationTargetType.DIARY_ENTRY), eq(targetId))).thenAnswer(invocation -> {
+            if (lookupCount.getAndIncrement() == 0) {
+                return Optional.empty();
+            }
+            return Optional.of(existingAggregate(
+                    insertedId, joao, NotificationType.LIKE_RECEIVED, false, 1,
+                    "Joao liked your review", now(), now()));
+        });
+
+        socialNotificationService.notifyLikeReceived(
+                joao.getId(), recipientId, NotificationTargetType.DIARY_ENTRY, targetId);
+
+        ArgumentCaptor<UUID> idCaptor = ArgumentCaptor.forClass(UUID.class);
+        ArgumentCaptor<LocalDateTime> nowCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(notificationRepository, org.mockito.Mockito.times(2)).insertSocialAggregateIfAbsent(
+                idCaptor.capture(), eq(recipientId), eq(NotificationType.LIKE_RECEIVED.name()),
+                eq("Joao liked your review"), eq(joao.getId()),
+                eq(NotificationTargetType.DIARY_ENTRY.name()), eq(targetId), nowCaptor.capture());
+        verify(notificationRepository, org.mockito.Mockito.times(2)).findSocialAggregateForUpdate(
+                eq(recipientId), eq(NotificationType.LIKE_RECEIVED),
+                eq(NotificationTargetType.DIARY_ENTRY), eq(targetId));
+
+        assertThat(idCaptor.getAllValues()).doesNotHaveDuplicates();
+        assertThat(nowCaptor.getAllValues()).containsExactly(now(), now());
+        verify(notificationRepository, never()).save(any());
+        verify(notificationRepository, never()).saveAndFlush(any());
     }
 
     private void stubNewAggregate(User actor) {
