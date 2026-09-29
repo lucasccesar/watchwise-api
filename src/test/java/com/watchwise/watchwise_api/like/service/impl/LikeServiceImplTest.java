@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
+import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
+import com.watchwise.watchwise_api.notification.service.SocialNotificationService;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
@@ -35,6 +37,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -50,6 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -91,6 +95,9 @@ class LikeServiceImplTest {
 
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
+
+    @Mock
+    private SocialNotificationService socialNotificationService;
 
     @InjectMocks
     private LikeServiceImpl likeService;
@@ -262,12 +269,15 @@ class LikeServiceImplTest {
 
         likeService.likeComment(lucasId, commentId);
 
-        verify(likeRepository).saveAndFlush(likeCaptor.capture());
+        InOrder notificationOrder = inOrder(likeRepository, commentRepository, socialNotificationService);
+        notificationOrder.verify(likeRepository).saveAndFlush(likeCaptor.capture());
         assertThat(likeCaptor.getValue().getUser()).isEqualTo(lucas);
         assertThat(likeCaptor.getValue().getComment()).isNotNull();
         assertThat(likeCaptor.getValue().getDiaryEntry()).isNull();
         assertThat(likeCaptor.getValue().getCreatedAt()).isNotNull();
-        verify(commentRepository).incrementLikesCount(commentId);
+        notificationOrder.verify(commentRepository).incrementLikesCount(commentId);
+        notificationOrder.verify(socialNotificationService).notifyLikeReceived(
+                lucasId, marinaId, NotificationTargetType.COMMENT, commentId);
     }
 
     @Test
@@ -291,6 +301,7 @@ class LikeServiceImplTest {
         likeService.likeComment(lucasId, commentId);
 
         verify(likeRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(socialNotificationService);
         verifyNoInteractions(commentRepository);
     }
 
@@ -308,6 +319,7 @@ class LikeServiceImplTest {
         likeService.likeComment(lucasId, commentId);
 
         verify(commentRepository, never()).incrementLikesCount(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -462,6 +474,7 @@ class LikeServiceImplTest {
         when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
 
         assertThatCode(() -> likeService.likeComment(lucasId, commentId)).doesNotThrowAnyException();
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -497,6 +510,7 @@ class LikeServiceImplTest {
         likeService.unlikeComment(lucasId, commentId);
 
         verify(commentRepository, never()).decrementLikesCount(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     // ---------- likeDiaryEntry ----------
@@ -517,6 +531,8 @@ class LikeServiceImplTest {
         assertThat(likeCaptor.getValue().getComment()).isNull();
         assertThat(likeCaptor.getValue().getCreatedAt()).isNotNull();
         verify(diaryEntryRepository).incrementLikesCount(diaryEntryId);
+        verify(socialNotificationService).notifyLikeReceived(
+                lucasId, marinaId, NotificationTargetType.DIARY_ENTRY, diaryEntryId);
     }
 
     @Test
@@ -541,6 +557,7 @@ class LikeServiceImplTest {
 
         verify(likeRepository, never()).saveAndFlush(any());
         verifyNoInteractions(diaryEntryRepository);
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -557,6 +574,7 @@ class LikeServiceImplTest {
         likeService.likeDiaryEntry(lucasId, diaryEntryId);
 
         verify(diaryEntryRepository, never()).incrementLikesCount(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -631,6 +649,7 @@ class LikeServiceImplTest {
         when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
 
         assertThatCode(() -> likeService.likeDiaryEntry(lucasId, diaryEntryId)).doesNotThrowAnyException();
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -674,7 +693,7 @@ class LikeServiceImplTest {
         UUID droppedEntryId = UUID.randomUUID();
         DroppedEntry droppedEntry = DroppedEntry.builder()
                 .id(droppedEntryId)
-                .user(lucas)
+                .user(marina)
                 .content(fightClub)
                 .type(ContentType.MOVIE)
                 .createdAt(LocalDateTime.now())
@@ -690,6 +709,8 @@ class LikeServiceImplTest {
         verify(likeRepository).saveAndFlush(likeCaptor.capture());
         assertThat(likeCaptor.getValue().getDroppedEntry()).isEqualTo(droppedEntry);
         verify(droppedEntryRepository).incrementLikesCount(droppedEntryId);
+        verify(socialNotificationService).notifyLikeReceived(
+                lucasId, marinaId, NotificationTargetType.DROPPED_ENTRY, droppedEntryId);
     }
 
     @Test
@@ -735,6 +756,8 @@ class LikeServiceImplTest {
         assertThat(likeCaptor.getValue().getDiaryEntry()).isNull();
         assertThat(likeCaptor.getValue().getCreatedAt()).isNotNull();
         verify(userListRepository).incrementLikesCount(listId);
+        verify(socialNotificationService).notifyLikeReceived(
+                lucasId, marinaId, NotificationTargetType.USER_LIST, listId);
     }
 
     @Test
@@ -760,6 +783,7 @@ class LikeServiceImplTest {
 
         verify(likeRepository, never()).saveAndFlush(any());
         verifyNoInteractions(userListRepository);
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -864,6 +888,7 @@ class LikeServiceImplTest {
         when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
 
         assertThatCode(() -> likeService.likeList(lucasId, listId)).doesNotThrowAnyException();
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -895,6 +920,7 @@ class LikeServiceImplTest {
         likeService.likeList(lucasId, listId);
 
         verify(userListRepository, never()).incrementLikesCount(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     // ---------- unlikeList ----------
@@ -917,6 +943,7 @@ class LikeServiceImplTest {
         likeService.unlikeList(lucasId, listId);
 
         verify(userListRepository, never()).decrementLikesCount(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     // ---------- getLikedCommentIds / getLikedDiaryEntryIds / getLikedListIds ----------
@@ -934,9 +961,12 @@ class LikeServiceImplTest {
 
         likeService.likePick(lucasId, pickId);
 
-        verify(likeRepository).saveAndFlush(likeCaptor.capture());
+        InOrder notificationOrder = inOrder(likeRepository, commentRepository, socialNotificationService);
+        notificationOrder.verify(likeRepository).saveAndFlush(likeCaptor.capture());
         assertThat(likeCaptor.getValue().getPick()).isEqualTo(pick);
         assertThat(pick.getLikesCount()).isEqualTo(1);
+        verify(socialNotificationService).notifyLikeReceived(
+                lucasId, marinaId, NotificationTargetType.PICK, pickId);
     }
 
     @Test
@@ -954,6 +984,7 @@ class LikeServiceImplTest {
         likeService.likePick(lucasId, pickId);
 
         assertThat(pick.getLikesCount()).isZero();
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -1002,6 +1033,7 @@ class LikeServiceImplTest {
                 .hasMessage("This Pick is private");
 
         verify(likeRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test
@@ -1030,6 +1062,31 @@ class LikeServiceImplTest {
         verify(likeRepository).saveAndFlush(likeCaptor.capture());
         assertThat(likeCaptor.getValue().getPicksTemplate()).isEqualTo(template);
         assertThat(template.getLikesCount()).isEqualTo(1);
+        verify(socialNotificationService).notifyLikeReceived(
+                lucasId, marinaId, NotificationTargetType.PICKS_TEMPLATE, templateId);
+    }
+
+    @Test
+    @DisplayName("[likePicksTemplate] Should Like Template Without Notification - When Creator Is Null")
+    void shouldLikeTemplateWithoutNotificationWhenCreatorIsNull() {
+        template = PicksTemplate.builder()
+                .id(templateId)
+                .creator(null)
+                .origin(PickOrigin.OFFICIAL)
+                .name("Awards")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        when(likeRepository.existsByUserIdAndPicksTemplateId(lucasId, templateId)).thenReturn(false);
+        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(template));
+        when(picksTemplateRepository.findByIdForUpdate(templateId)).thenReturn(Optional.of(template));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        likeService.likePicksTemplate(lucasId, templateId);
+
+        assertThat(template.getLikesCount()).isEqualTo(1);
+        verifyNoInteractions(socialNotificationService);
     }
 
     @Test

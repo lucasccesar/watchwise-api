@@ -78,7 +78,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
     Page<Comment> findByPicksTemplateIdOrderByCreatedAtAsc(@Param("templateId") UUID templateId, Pageable pageable);
 
     @Query("""
-            SELECT c FROM Comment c
+            SELECT c FROM Comment c JOIN FETCH c.user
             LEFT JOIN FETCH c.list l LEFT JOIN FETCH l.user
             LEFT JOIN FETCH c.diaryEntry d LEFT JOIN FETCH d.user
             LEFT JOIN FETCH c.droppedEntry de LEFT JOIN FETCH de.user

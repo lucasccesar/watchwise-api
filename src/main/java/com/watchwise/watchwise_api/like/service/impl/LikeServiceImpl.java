@@ -15,6 +15,8 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
+import com.watchwise.watchwise_api.notification.service.SocialNotificationService;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
@@ -49,6 +51,7 @@ public class LikeServiceImpl implements LikeService {
     private final PickRepository pickRepository;
     private final PicksTemplateRepository picksTemplateRepository;
     private final NewTransactionExecutor newTransactionExecutor;
+    private final SocialNotificationService socialNotificationService;
 
     @Override
     public void likeComment(UUID userId, UUID commentId) {
@@ -70,6 +73,8 @@ public class LikeServiceImpl implements LikeService {
                         .build();
                 Like saved = likeRepository.saveAndFlush(like);
                 commentRepository.incrementLikesCount(commentId);
+                socialNotificationService.notifyLikeReceived(
+                        userId, comment.getUser().getId(), NotificationTargetType.COMMENT, commentId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -107,6 +112,8 @@ public class LikeServiceImpl implements LikeService {
                         .build();
                 Like saved = likeRepository.saveAndFlush(like);
                 diaryEntryRepository.incrementLikesCount(diaryEntryId);
+                socialNotificationService.notifyLikeReceived(
+                        userId, diaryEntry.getUser().getId(), NotificationTargetType.DIARY_ENTRY, diaryEntryId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -144,6 +151,8 @@ public class LikeServiceImpl implements LikeService {
                         .build();
                 Like saved = likeRepository.saveAndFlush(like);
                 droppedEntryRepository.incrementLikesCount(droppedEntryId);
+                socialNotificationService.notifyLikeReceived(
+                        userId, droppedEntry.getUser().getId(), NotificationTargetType.DROPPED_ENTRY, droppedEntryId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -182,6 +191,8 @@ public class LikeServiceImpl implements LikeService {
                         .build();
                 Like saved = likeRepository.saveAndFlush(like);
                 userListRepository.incrementLikesCount(listId);
+                socialNotificationService.notifyLikeReceived(
+                        userId, list.getUser().getId(), NotificationTargetType.USER_LIST, listId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -220,6 +231,8 @@ public class LikeServiceImpl implements LikeService {
                         .build();
                 Like saved = likeRepository.saveAndFlush(like);
                 lockedPick.setLikesCount((lockedPick.getLikesCount() == null ? 0 : lockedPick.getLikesCount()) + 1);
+                socialNotificationService.notifyLikeReceived(
+                        userId, lockedPick.getUser().getId(), NotificationTargetType.PICK, pickId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -259,6 +272,13 @@ public class LikeServiceImpl implements LikeService {
                         .build();
                 Like saved = likeRepository.saveAndFlush(like);
                 lockedTemplate.setLikesCount((lockedTemplate.getLikesCount() == null ? 0 : lockedTemplate.getLikesCount()) + 1);
+                if (lockedTemplate.getCreator() != null) {
+                    socialNotificationService.notifyLikeReceived(
+                            userId,
+                            lockedTemplate.getCreator().getId(),
+                            NotificationTargetType.PICKS_TEMPLATE,
+                            templateId);
+                }
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
