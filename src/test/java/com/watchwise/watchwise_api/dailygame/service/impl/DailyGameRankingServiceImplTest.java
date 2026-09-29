@@ -99,8 +99,8 @@ class DailyGameRankingServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getHistory] Should Return NotPlayed History With Revealed Answer - When The User Has No Result")
-    void shouldReturnNotPlayedHistoryWithRevealedAnswerWhenTheUserHasNoResult() {
+    @DisplayName("[getHistory] Should Redact NotPlayed History Answer - When The User Has No Result")
+    void shouldRedactNotPlayedHistoryAnswerWhenTheUserHasNoResult() {
         DailyChallenge challenge = challenge(TODAY.minusDays(1), DailyGameType.MOVIE_BY_POSTER);
         when(challengeRepository.findByChallengeDateBeforeOrderByChallengeDateDescGameTypeAscIdAsc(
                 eq(TODAY), any())).thenReturn(new PageImpl<>(List.of(challenge), PageRequest.of(0, 20), 1));
@@ -114,9 +114,7 @@ class DailyGameRankingServiceImplTest {
         assertThat(history.attemptsUsed()).isZero();
         assertThat(history.score()).isZero();
         assertThat(history.completedAt()).isNull();
-        assertThat(history.answer()).isNotNull();
-        assertThat(history.answer().tmdbId()).isEqualTo("550");
-        assertThat(history.answer().title()).isEqualTo("Frozen answer");
+        assertThat(history.answer()).isNull();
     }
 
     @Test
