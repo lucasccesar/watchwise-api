@@ -147,6 +147,54 @@ class NotificationRepositoryTest {
     }
 
     @Test
+    @DisplayName("[deleteExpiredSocialNotifications] Should Delete Oldest Social Rows Up To Batch Size")
+    void shouldDeleteOldestSocialRowsUpToBatchSize() {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
+        Notification oldest = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.LIKE_RECEIVED, false, cutoff.minusSeconds(3)));
+        Notification secondOldest = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.COMMENT_RECEIVED, false, cutoff.minusSeconds(2)));
+        Notification remainingExpired = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.LIKE_RECEIVED, false, cutoff.minusSeconds(1)));
+        Notification atCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.COMMENT_RECEIVED, false, cutoff));
+        Notification systemNotification = notificationRepository.saveAndFlush(buildNotification(cutoff.minusDays(1)));
+
+        int deleted = notificationRepository.deleteExpiredSocialNotifications(false, cutoff, 2);
+
+        assertThat(deleted).isEqualTo(2);
+        assertThat(notificationRepository.findById(oldest.getId())).isEmpty();
+        assertThat(notificationRepository.findById(secondOldest.getId())).isEmpty();
+        assertThat(notificationRepository.findById(remainingExpired.getId())).isPresent();
+        assertThat(notificationRepository.findById(atCutoff.getId())).isPresent();
+        assertThat(notificationRepository.findById(systemNotification.getId())).isPresent();
+    }
+
+    @Test
+    @DisplayName("[deleteExpiredSocialNotifications] Should Use Strict Cutoff For Read And Unread Rows")
+    void shouldUseStrictCutoffForReadAndUnreadRows() {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
+        Notification expiredRead = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.LIKE_RECEIVED, true, cutoff.minusSeconds(1)));
+        Notification readAtCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.COMMENT_RECEIVED, true, cutoff));
+        Notification expiredUnread = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.LIKE_RECEIVED, false, cutoff.minusSeconds(1)));
+        Notification unreadAtCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
+                NotificationType.COMMENT_RECEIVED, false, cutoff));
+
+        int deletedRead = notificationRepository.deleteExpiredSocialNotifications(true, cutoff, 500);
+        int deletedUnread = notificationRepository.deleteExpiredSocialNotifications(false, cutoff, 500);
+
+        assertThat(deletedRead).isEqualTo(1);
+        assertThat(deletedUnread).isEqualTo(1);
+        assertThat(notificationRepository.findById(expiredRead.getId())).isEmpty();
+        assertThat(notificationRepository.findById(readAtCutoff.getId())).isPresent();
+        assertThat(notificationRepository.findById(expiredUnread.getId())).isEmpty();
+        assertThat(notificationRepository.findById(unreadAtCutoff.getId())).isPresent();
+    }
+
+    @Test
     @DisplayName("[deleteAll] Should Cascade Delete - When The User Is Deleted")
     void shouldCascadeDeleteWhenTheUserIsDeleted() {
         Notification notification = notificationRepository.saveAndFlush(buildNotification(LocalDateTime.now()));
@@ -194,6 +242,20 @@ class NotificationRepositoryTest {
                 .isRead(false)
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
+                .build();
+    }
+
+    private Notification buildSocialNotification(NotificationType type, boolean isRead, LocalDateTime updatedAt) {
+        return Notification.builder()
+                .user(lucas)
+                .type(type)
+                .message("Someone interacted with your review")
+                .latestActor(lucas)
+                .targetType(NotificationTargetType.DIARY_ENTRY)
+                .targetId(UUID.randomUUID())
+                .isRead(isRead)
+                .createdAt(updatedAt)
+                .updatedAt(updatedAt)
                 .build();
     }
 }

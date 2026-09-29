@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
@@ -45,6 +47,27 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
             @Param("targetType") String targetType,
             @Param("targetId") UUID targetId,
             @Param("now") LocalDateTime now);
+
+    @Modifying
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Query(value = """
+            WITH expired AS (
+                SELECT id
+                FROM notifications
+                WHERE type IN ('LIKE_RECEIVED', 'COMMENT_RECEIVED')
+                  AND is_read = :isRead
+                  AND updated_at < :cutoff
+                ORDER BY updated_at ASC, id ASC
+                LIMIT :batchSize
+            )
+            DELETE FROM notifications n
+            USING expired
+            WHERE n.id = expired.id
+            """, nativeQuery = true)
+    int deleteExpiredSocialNotifications(
+            @Param("isRead") boolean isRead,
+            @Param("cutoff") LocalDateTime cutoff,
+            @Param("batchSize") int batchSize);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT n FROM Notification n WHERE n.user.id = :recipientId AND n.type = :type "
