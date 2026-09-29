@@ -370,6 +370,41 @@ class DailyGameRepositoryTest {
     }
 
     @Test
+    @DisplayName("[clearAttemptDetailsBefore] Should Clear Attempt Details Only Before The Current GMT Date")
+    void shouldClearAttemptDetailsOnlyBeforeTheCurrentGmtDate() {
+        User user = userRepository.saveAndFlush(buildUser());
+        DailyChallenge expiredChallenge = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 29), DailyGameType.MOVIE_BY_POSTER, "movie:expired"));
+        DailyChallenge currentChallenge = challengeRepository.saveAndFlush(
+                buildChallenge(LocalDate.of(2026, 9, 30), DailyGameType.SERIES_BY_POSTER, "series:current"));
+        UserDailyGameResult expiredResult = resultRepository.save(UserDailyGameResult.builder()
+                .user(user)
+                .dailyChallenge(expiredChallenge)
+                .attemptDetails(Map.of("attempts", 2))
+                .createdAt(NOW)
+                .updatedAt(NOW)
+                .build());
+        UserDailyGameResult currentResult = resultRepository.saveAndFlush(UserDailyGameResult.builder()
+                .user(user)
+                .dailyChallenge(currentChallenge)
+                .attemptDetails(Map.of("attempts", 1))
+                .createdAt(NOW)
+                .updatedAt(NOW)
+                .build());
+        resultRepository.flush();
+        UUID expiredResultId = expiredResult.getId();
+        UUID currentResultId = currentResult.getId();
+        entityManager.clear();
+
+        int cleared = resultRepository.clearAttemptDetailsBefore(LocalDate.of(2026, 9, 30));
+
+        assertThat(cleared).isEqualTo(1);
+        assertThat(resultRepository.findById(expiredResultId).orElseThrow().getAttemptDetails()).isNull();
+        assertThat(resultRepository.findById(currentResultId).orElseThrow().getAttemptDetails())
+                .containsKey("attempts");
+    }
+
+    @Test
     @DisplayName("[save] Should Reject Negative Attempts")
     void shouldRejectNegativeAttempts() {
         User user = userRepository.saveAndFlush(buildUser());

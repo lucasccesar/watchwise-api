@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -44,6 +45,16 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
 
     List<UserDailyGameResult> findByUserIdAndDailyChallengeIdIn(
             UUID userId, Collection<UUID> dailyChallengeIds);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            UPDATE user_daily_game_results result
+            SET attempt_details = NULL
+            FROM daily_challenges challenge
+            WHERE challenge.id = result.daily_challenge_id
+              AND challenge.challenge_date < :currentDate
+            """, nativeQuery = true)
+    int clearAttemptDetailsBefore(@Param("currentDate") LocalDate currentDate);
 
     @Query(value = """
             SELECT ranked.rank AS rank,

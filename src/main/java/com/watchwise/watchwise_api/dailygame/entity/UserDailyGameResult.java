@@ -18,8 +18,11 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -52,6 +55,11 @@ public class UserDailyGameResult {
     @Setter
     @Builder.Default
     private Integer score = 0;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "attempt_details", columnDefinition = "jsonb")
+    @Setter
+    private Map<String, Object> attemptDetails;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
