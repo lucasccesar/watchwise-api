@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
@@ -162,14 +163,15 @@ class DiaryEntryControllerTest {
     void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingReviewsForContent() {
         UUID contentId = UUID.randomUUID();
         DiaryEntryResponseDTO dto = buildResponseDto();
+        ContentReviewResponseDTO review = ContentReviewResponseDTO.fromDiary(dto);
         when(diaryEntryService.getReviewsForContent(currentUserId, contentId, 1, 10))
-                .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
+                .thenReturn(new PageImpl<>(List.of(review), PageRequest.of(0, 10), 1));
 
-        ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> result =
+        ResponseEntity<PageResponseDTO<ContentReviewResponseDTO>> result =
                 diaryEntryController.getReviewsForContent(contentId, 1, 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(result.getBody().content()).containsExactly(dto);
+        assertThat(result.getBody().content()).containsExactly(review);
     }
 
     @Test

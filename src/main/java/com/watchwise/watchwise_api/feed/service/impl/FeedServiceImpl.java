@@ -102,6 +102,8 @@ public class FeedServiceImpl implements FeedService {
 
         Set<UUID> likedDiaryEntryIds = likeService.getLikedDiaryEntryIds(
                 userId, diaryEntries.stream().map(DiaryEntry::getId).toList());
+        Set<UUID> likedDroppedEntryIds = likeService.getLikedDroppedEntryIds(
+                userId, droppedEntries.stream().map(DroppedEntry::getId).toList());
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = watchCompanionRepository
                 .findByDiaryEntryIdIn(diaryEntries.stream().map(DiaryEntry::getId).toList()).stream()
                 .collect(Collectors.groupingBy(wc -> wc.getDiaryEntry().getId(),
@@ -120,7 +122,8 @@ public class FeedServiceImpl implements FeedService {
                             watchedWithByEntryId.getOrDefault(entry.getId(), List.of()))));
         }
         for (DroppedEntry entry : droppedEntries) {
-            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(), toDroppedFeedItem(entry)));
+            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
+                    toDroppedFeedItem(entry, likedDroppedEntryIds.contains(entry.getId()))));
         }
         for (Top5Entry entry : top5Entries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(), toTop5FeedItem(entry)));
@@ -180,7 +183,7 @@ public class FeedServiceImpl implements FeedService {
                 entry.getCreatedAt());
     }
 
-    private FeedItemDTO toDroppedFeedItem(DroppedEntry entry) {
+    private FeedItemDTO toDroppedFeedItem(DroppedEntry entry, boolean likedByMe) {
         return new FeedItemDTO(
                 FeedEventType.DROPPED,
                 entry.getId(),
@@ -189,8 +192,8 @@ public class FeedServiceImpl implements FeedService {
                 null,
                 null,
                 entry.getComment(),
-                null,
-                null,
+                entry.getLikesCount(),
+                likedByMe,
                 null,
                 null,
                 null,

@@ -38,6 +38,18 @@ public class LikeController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/dropped/{droppedEntryId}/like")
+    public ResponseEntity<Void> likeDroppedEntry(@PathVariable UUID droppedEntryId) {
+        likeService.likeDroppedEntry(getCurrentUserId(), droppedEntryId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/dropped/{droppedEntryId}/like")
+    public ResponseEntity<Void> unlikeDroppedEntry(@PathVariable UUID droppedEntryId) {
+        likeService.unlikeDroppedEntry(getCurrentUserId(), droppedEntryId);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/lists/{listId}/like")
     public ResponseEntity<Void> likeList(@PathVariable UUID listId) {
         likeService.likeList(getCurrentUserId(), listId);

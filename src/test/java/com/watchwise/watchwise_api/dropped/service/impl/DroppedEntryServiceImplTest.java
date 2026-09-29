@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.dropped.mapper.DroppedEntryMapper;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
@@ -69,6 +70,9 @@ class DroppedEntryServiceImplTest {
 
     @Mock
     private DroppedEntryMapper droppedEntryMapper;
+
+    @Mock
+    private LikeService likeService;
 
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
@@ -123,7 +127,8 @@ class DroppedEntryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(entry)));
-        when(droppedEntryMapper.droppedEntryToResponseDto(entry)).thenReturn(dto);
+        when(likeService.getLikedDroppedEntryIds(lucasId, List.of(entry.getId()))).thenReturn(java.util.Set.of());
+        when(droppedEntryMapper.droppedEntryToResponseDto(entry, false)).thenReturn(dto);
 
         Page<DroppedEntryResponseDTO> result = droppedEntryService.getDropped(lucasId, lucasId, ContentType.MOVIE, 1, 10);
 

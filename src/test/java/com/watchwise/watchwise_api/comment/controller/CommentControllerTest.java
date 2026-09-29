@@ -213,6 +213,38 @@ class CommentControllerTest {
     }
 
     @Test
+    @DisplayName("[getCommentsForDroppedEntry] Should Return Page Envelope With Content - When Called")
+    void shouldReturnPageEnvelopeWithContentWhenGettingCommentsForDroppedEntry() {
+        UUID droppedEntryId = UUID.randomUUID();
+        CommentResponseDTO dto = buildResponseDto();
+        when(commentService.getCommentsForDroppedEntry(currentUserId, droppedEntryId, 1, 10))
+                .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
+
+        ResponseEntity<PageResponseDTO<CommentResponseDTO>> result =
+                commentController.getCommentsForDroppedEntry(droppedEntryId, 1, 10);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody().content()).containsExactly(dto);
+        verify(commentService).getCommentsForDroppedEntry(currentUserId, droppedEntryId, 1, 10);
+    }
+
+    @Test
+    @DisplayName("[createCommentOnDroppedEntry] Should Return Created - When Called")
+    void shouldReturnCreatedWhenCreatingCommentOnDroppedEntry() {
+        UUID droppedEntryId = UUID.randomUUID();
+        CommentCreationDTO creationDTO = new CommentCreationDTO("Agreed", null, null);
+        CommentResponseDTO dto = buildResponseDto();
+        when(commentService.createCommentOnDroppedEntry(currentUserId, droppedEntryId, creationDTO)).thenReturn(dto);
+
+        ResponseEntity<CommentResponseDTO> result =
+                commentController.createCommentOnDroppedEntry(droppedEntryId, creationDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(result.getBody()).isEqualTo(dto);
+        verify(commentService).createCommentOnDroppedEntry(currentUserId, droppedEntryId, creationDTO);
+    }
+
+    @Test
     @DisplayName("[deleteComment] Should Return NoContent - When Called")
     void shouldReturnNoContentWhenDeletingComment() {
         UUID commentId = UUID.randomUUID();

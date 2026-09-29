@@ -308,8 +308,8 @@ class FeedServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getFeed] Should Map DroppedEntry With Null Like Fields - When Building Feed Item")
-    void shouldMapDroppedEntryWithNullLikeFieldsWhenBuildingFeedItem() {
+    @DisplayName("[getFeed] Should Map DroppedEntry With Like Fields - When Building Feed Item")
+    void shouldMapDroppedEntryWithLikeFieldsWhenBuildingFeedItem() {
         stubFollowedIds();
         stubEmptyDiaryAndTop5(21);
 
@@ -325,8 +325,8 @@ class FeedServiceImplTest {
         assertThat(item.eventType()).isEqualTo(FeedEventType.DROPPED);
         assertThat(item.comment()).isEqualTo("Couldn't finish it");
         assertThat(item.score()).isNull();
-        assertThat(item.likesCount()).isNull();
-        assertThat(item.likedByMe()).isNull();
+        assertThat(item.likesCount()).isZero();
+        assertThat(item.likedByMe()).isFalse();
     }
 
     @Test

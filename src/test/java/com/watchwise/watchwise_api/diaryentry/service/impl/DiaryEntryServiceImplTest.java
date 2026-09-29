@@ -20,11 +20,14 @@ import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewSource;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
@@ -101,6 +104,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -121,6 +125,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private ContentService contentService;
+
+    @Mock
+    private ContentMapper contentMapper;
 
     @Mock
     private UserContentPosterService userContentPosterService;
@@ -1400,7 +1407,7 @@ class DiaryEntryServiceImplTest {
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("Content not found");
 
-        verify(diaryEntryRepository, never()).findReviewsByContentId(any(), any(), any());
+        verify(diaryEntryRepository, never()).findContentReviewKeys(any(), any(), any());
     }
 
     @Test
@@ -1410,13 +1417,58 @@ class DiaryEntryServiceImplTest {
         entry.setComment("Great movie");
         DiaryEntryResponseDTO dto = buildResponseDto(entry);
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
-        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(entry)));
+        DiaryEntryRepository.ContentReviewKey reviewKey = reviewKey(entry, ContentReviewSource.DIARY);
+        when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(reviewKey)));
+        when(diaryEntryRepository.findByIdInWithContentAndUser(List.of(entry.getId())))
+                .thenReturn(List.of(entry));
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(dto);
 
-        Page<DiaryEntryResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
+        Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
 
-        assertThat(result.getContent()).containsExactly(dto);
+        assertThat(result.getContent()).containsExactly(ContentReviewResponseDTO.fromDiary(dto));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Include Dropped Review With Its Source And Like State")
+    void shouldIncludeDroppedReviewWithItsSourceAndLikeState() {
+        UUID droppedEntryId = UUID.randomUUID();
+        DroppedEntry droppedEntry = DroppedEntry.builder()
+                .id(droppedEntryId)
+                .user(marina)
+                .content(fightClub)
+                .type(ContentType.MOVIE)
+                .comment("Stopped halfway")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .likesCount(2)
+                .build();
+        ContentReviewSource source = ContentReviewSource.DROPPED;
+        DiaryEntryRepository.ContentReviewKey reviewKey = mock(DiaryEntryRepository.ContentReviewKey.class);
+        when(reviewKey.getReviewId()).thenReturn(droppedEntryId);
+        when(reviewKey.getSource()).thenReturn(source.name());
+        ContentRefDTO contentRef = new ContentRefDTO(fightClub.getId(), "550", ContentType.MOVIE,
+                null, null, null, null, null, null, null);
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(reviewKey)));
+        when(droppedEntryRepository.findByIdInWithUserAndContent(List.of(droppedEntryId)))
+                .thenReturn(List.of(droppedEntry));
+        when(contentMapper.contentToContentRefDto(fightClub)).thenReturn(contentRef);
+        when(likeService.getLikedDroppedEntryIds(lucasId, List.of(droppedEntryId)))
+                .thenReturn(Set.of(droppedEntryId));
+
+        Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(
+                lucasId, fightClub.getId(), 1, 10);
+
+        assertThat(result.getContent()).singleElement().satisfies(review -> {
+            assertThat(review.source()).isEqualTo(ContentReviewSource.DROPPED);
+            assertThat(review.id()).isEqualTo(droppedEntryId);
+            assertThat(review.comment()).isEqualTo("Stopped halfway");
+            assertThat(review.likesCount()).isEqualTo(2);
+            assertThat(review.likedByMe()).isTrue();
+            assertThat(review.score()).isNull();
+        });
     }
 
     @Test
@@ -1433,17 +1485,21 @@ class DiaryEntryServiceImplTest {
         UserContentPosterService.UserContentPosterKey secondKey =
                 new UserContentPosterService.UserContentPosterKey(marinaId, fightClub.getId());
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
-        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(firstEntry, secondEntry)));
+        DiaryEntryRepository.ContentReviewKey firstKeyRow = reviewKey(firstEntry, ContentReviewSource.DIARY);
+        DiaryEntryRepository.ContentReviewKey secondKeyRow = reviewKey(secondEntry, ContentReviewSource.DIARY);
+        when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(firstKeyRow, secondKeyRow)));
+        when(diaryEntryRepository.findByIdInWithContentAndUser(List.of(firstEntry.getId(), secondEntry.getId())))
+                .thenReturn(List.of(firstEntry, secondEntry));
         when(diaryEntryMapper.diaryEntryToResponseDto(firstEntry, false, List.of())).thenReturn(firstMapped);
         when(diaryEntryMapper.diaryEntryToResponseDto(secondEntry, false, List.of())).thenReturn(secondMapped);
         when(userContentPosterService.findByUserAndContentPairs(List.of(firstKey, secondKey)))
                 .thenReturn(Map.of(firstKey, firstPoster, secondKey, secondPoster));
 
-        Page<DiaryEntryResponseDTO> result = diaryEntryService.getReviewsForContent(
+        Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(
                 lucasId, fightClub.getId(), 1, 10);
 
-        assertThat(result.getContent()).extracting(DiaryEntryResponseDTO::customPosterUrl)
+        assertThat(result.getContent()).extracting(ContentReviewResponseDTO::customPosterUrl)
                 .containsExactly(firstPoster, secondPoster);
         verify(userContentPosterService).findByUserAndContentPairs(List.of(firstKey, secondKey));
         verify(userContentPosterService, never()).findByUserAndContentIds(any(), any());
@@ -1453,10 +1509,10 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[getReviewsForContent] Should Return Empty Page - When Content Has No Visible Reviews")
     void shouldReturnEmptyPageWhenContentHasNoVisibleReviews() {
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
-        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+        when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        Page<DiaryEntryResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
+        Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
 
         assertThat(result.getContent()).isEmpty();
     }
@@ -1465,12 +1521,12 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[getReviewsForContent] Should Use Default Page - When Page Number Is Null")
     void shouldUseDefaultPageWhenPageNumberIsNullForReviews() {
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
-        when(diaryEntryRepository.findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+        when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), null, 10);
 
-        verify(diaryEntryRepository).findReviewsByContentId(eq(fightClub.getId()), eq(lucasId), pageRequestCaptor.capture());
+        verify(diaryEntryRepository).findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isZero();
     }
 
@@ -5602,5 +5658,12 @@ class DiaryEntryServiceImplTest {
         inOrder.verify(diaryEntryRepository).delete(queryEntry);
         inOrder.verify(diaryEntryRepository).flush();
         inOrder.verify(diaryEntryRepository).findEpisodeEntriesInSeriesByWatchNumber(lucasId, "tt1", 1);
+    }
+
+    private DiaryEntryRepository.ContentReviewKey reviewKey(DiaryEntry entry, ContentReviewSource source) {
+        DiaryEntryRepository.ContentReviewKey key = mock(DiaryEntryRepository.ContentReviewKey.class);
+        when(key.getReviewId()).thenReturn(entry.getId());
+        when(key.getSource()).thenReturn(source.name());
+        return key;
     }
 }

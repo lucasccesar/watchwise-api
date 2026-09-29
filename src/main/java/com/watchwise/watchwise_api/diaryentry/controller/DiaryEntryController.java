@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
@@ -62,12 +63,12 @@ public class DiaryEntryController {
     }
 
     @GetMapping("/contents/{contentId}/reviews")
-    public ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> getReviewsForContent(
+    public ResponseEntity<PageResponseDTO<ContentReviewResponseDTO>> getReviewsForContent(
             @PathVariable UUID contentId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
-        Page<DiaryEntryResponseDTO> reviews = diaryEntryService.getReviewsForContent(getCurrentUserId(), contentId, page, size);
+        Page<ContentReviewResponseDTO> reviews = diaryEntryService.getReviewsForContent(getCurrentUserId(), contentId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(reviews));
     }
 

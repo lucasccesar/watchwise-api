@@ -75,6 +75,78 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.user WHERE d.id = :id")
     Optional<DiaryEntry> findByIdWithUser(@Param("id") UUID id);
 
+    @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user WHERE d.id IN :ids")
+    List<DiaryEntry> findByIdInWithContentAndUser(@Param("ids") Collection<UUID> ids);
+
+    interface ContentReviewKey {
+        UUID getReviewId();
+        String getSource();
+    }
+
+    @Query(value = """
+            SELECT review_id, source
+            FROM (
+                SELECT d.id AS review_id, 'DIARY' AS source, d.created_at AS created_at
+                FROM diary_entries d
+                JOIN users u ON u.id = d.user_id
+                WHERE d.content_id = :contentId
+                  AND d.comment IS NOT NULL
+                  AND (u.is_profile_public = true
+                       OR u.id = :viewerId
+                       OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
+                UNION ALL
+                SELECT d.id AS review_id, 'DROPPED' AS source, d.created_at AS created_at
+                FROM dropped_entries d
+                JOIN users u ON u.id = d.user_id
+                WHERE d.content_id = :contentId
+                  AND d.comment IS NOT NULL
+                  AND (u.is_profile_public = true
+                       OR u.id = :viewerId
+                       OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
+            ) reviews
+            ORDER BY created_at DESC, review_id DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*)
+            FROM (
+                SELECT d.id
+                FROM diary_entries d
+                JOIN users u ON u.id = d.user_id
+                WHERE d.content_id = :contentId
+                  AND d.comment IS NOT NULL
+                  AND (u.is_profile_public = true
+                       OR u.id = :viewerId
+                       OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
+                UNION ALL
+                SELECT d.id
+                FROM dropped_entries d
+                JOIN users u ON u.id = d.user_id
+                WHERE d.content_id = :contentId
+                  AND d.comment IS NOT NULL
+                  AND (u.is_profile_public = true
+                       OR u.id = :viewerId
+                       OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
+            ) reviews
+            """, nativeQuery = true)
+    Page<ContentReviewKey> findContentReviewKeys(
+            @Param("contentId") UUID contentId, @Param("viewerId") UUID viewerId, Pageable pageable);
+
     @Query("""
             SELECT COALESCE(MAX(de.watchNumber), 0) FROM DiaryEntry de
             WHERE de.user.id = :userId

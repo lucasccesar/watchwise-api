@@ -24,6 +24,10 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
     int deleteByUserIdAndDiaryEntryId(@Param("userId") UUID userId, @Param("diaryEntryId") UUID diaryEntryId);
 
     @Modifying
+    @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.droppedEntry.id = :droppedEntryId")
+    int deleteByUserIdAndDroppedEntryId(@Param("userId") UUID userId, @Param("droppedEntryId") UUID droppedEntryId);
+
+    @Modifying
     @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.list.id = :listId")
     int deleteByUserIdAndListId(@Param("userId") UUID userId, @Param("listId") UUID listId);
 
@@ -39,6 +43,8 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
 
     boolean existsByUserIdAndDiaryEntryId(UUID userId, UUID diaryEntryId);
 
+    boolean existsByUserIdAndDroppedEntryId(UUID userId, UUID droppedEntryId);
+
     boolean existsByUserIdAndListId(UUID userId, UUID listId);
 
     boolean existsByUserIdAndPickId(UUID userId, UUID pickId);
@@ -50,6 +56,9 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
 
     @Query("SELECT l.diaryEntry.id FROM Like l WHERE l.user.id = :userId AND l.diaryEntry.id IN :diaryEntryIds")
     Set<UUID> findLikedDiaryEntryIds(@Param("userId") UUID userId, @Param("diaryEntryIds") Collection<UUID> diaryEntryIds);
+
+    @Query("SELECT l.droppedEntry.id FROM Like l WHERE l.user.id = :userId AND l.droppedEntry.id IN :droppedEntryIds")
+    Set<UUID> findLikedDroppedEntryIds(@Param("userId") UUID userId, @Param("droppedEntryIds") Collection<UUID> droppedEntryIds);
 
     @Query("SELECT l.list.id FROM Like l WHERE l.user.id = :userId AND l.list.id IN :listIds")
     Set<UUID> findLikedListIds(@Param("userId") UUID userId, @Param("listIds") Collection<UUID> listIds);

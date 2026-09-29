@@ -14,6 +14,8 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
@@ -69,6 +71,9 @@ class CommentServiceImplTest {
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
+    private DroppedEntryRepository droppedEntryRepository;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -857,6 +862,34 @@ class CommentServiceImplTest {
         assertThat(saved.getContent()).isNull();
         assertThat(saved.getList()).isNull();
         assertThat(saved.getUser()).isEqualTo(lucas);
+    }
+
+    @Test
+    @DisplayName("[createCommentOnDroppedEntry] Should Save Comment Targeting Dropped Entry")
+    void shouldSaveCommentTargetingDroppedEntry() {
+        UUID droppedEntryId = UUID.randomUUID();
+        DroppedEntry droppedEntry = DroppedEntry.builder()
+                .id(droppedEntryId)
+                .user(lucas)
+                .content(fightClub)
+                .type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        when(droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)).thenReturn(Optional.of(droppedEntry));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
+
+        CommentResponseDTO result = commentService.createCommentOnDroppedEntry(
+                lucasId, droppedEntryId, new CommentCreationDTO("Stopped halfway", null, null));
+
+        assertThat(result).isEqualTo(responseDto);
+        verify(commentRepository).save(commentCaptor.capture());
+        Comment saved = commentCaptor.getValue();
+        assertThat(saved.getDroppedEntry()).isEqualTo(droppedEntry);
+        assertThat(saved.getDiaryEntry()).isNull();
+        assertThat(saved.getContent()).isNull();
     }
 
     @Test

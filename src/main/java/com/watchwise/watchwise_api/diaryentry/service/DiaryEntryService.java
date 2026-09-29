@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.diaryentry.service;
 
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
@@ -32,7 +33,7 @@ public interface DiaryEntryService {
             SeriesProgressReadRepository.SeriesProgressSort sortBy,
             Sort.Direction direction);
 
-    Page<DiaryEntryResponseDTO> getReviewsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize);
+    Page<ContentReviewResponseDTO> getReviewsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize);
 
     DiaryEntryCreationResultDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO);
 

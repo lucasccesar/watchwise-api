@@ -10,6 +10,8 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
@@ -68,6 +70,9 @@ class LikeServiceImplTest {
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
+    private DroppedEntryRepository droppedEntryRepository;
 
     @Mock
     private PickRepository pickRepository;
@@ -661,6 +666,53 @@ class LikeServiceImplTest {
         likeService.unlikeDiaryEntry(lucasId, diaryEntryId);
 
         verify(diaryEntryRepository, never()).decrementLikesCount(any());
+    }
+
+    @Test
+    @DisplayName("[likeDroppedEntry] Should Save New Like And Increment Count - When Entry Is Visible")
+    void shouldSaveNewLikeAndIncrementCountWhenDroppedEntryIsVisible() {
+        UUID droppedEntryId = UUID.randomUUID();
+        DroppedEntry droppedEntry = DroppedEntry.builder()
+                .id(droppedEntryId)
+                .user(lucas)
+                .content(fightClub)
+                .type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        when(likeRepository.existsByUserIdAndDroppedEntryId(lucasId, droppedEntryId)).thenReturn(false);
+        when(droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)).thenReturn(Optional.of(droppedEntry));
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(droppedEntryRepository.getReferenceById(droppedEntryId)).thenReturn(droppedEntry);
+
+        likeService.likeDroppedEntry(lucasId, droppedEntryId);
+
+        verify(likeRepository).saveAndFlush(likeCaptor.capture());
+        assertThat(likeCaptor.getValue().getDroppedEntry()).isEqualTo(droppedEntry);
+        verify(droppedEntryRepository).incrementLikesCount(droppedEntryId);
+    }
+
+    @Test
+    @DisplayName("[likeDroppedEntry] Should Throw NotFoundException - When Entry Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenDroppedEntryDoesNotExist() {
+        UUID droppedEntryId = UUID.randomUUID();
+        when(likeRepository.existsByUserIdAndDroppedEntryId(lucasId, droppedEntryId)).thenReturn(false);
+        when(droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> likeService.likeDroppedEntry(lucasId, droppedEntryId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Dropped entry not found");
+    }
+
+    @Test
+    @DisplayName("[unlikeDroppedEntry] Should Decrement Count - When A Row Was Deleted")
+    void shouldDecrementCountWhenUnlikeDroppedEntryDeletesARow() {
+        UUID droppedEntryId = UUID.randomUUID();
+        when(likeRepository.deleteByUserIdAndDroppedEntryId(lucasId, droppedEntryId)).thenReturn(1);
+
+        likeService.unlikeDroppedEntry(lucasId, droppedEntryId);
+
+        verify(droppedEntryRepository).decrementLikesCount(droppedEntryId);
     }
 
     // ---------- likeList ----------

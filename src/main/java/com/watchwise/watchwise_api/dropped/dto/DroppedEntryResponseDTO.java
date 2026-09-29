@@ -12,6 +12,12 @@ public record DroppedEntryResponseDTO(
         ContentRefDTO content,
         String comment,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        Integer likesCount,
+        Boolean likedByMe
 ) {
+    public DroppedEntryResponseDTO(UUID id, ContentType type, ContentRefDTO content, String comment,
+            LocalDateTime createdAt, LocalDateTime updatedAt) {
+        this(id, type, content, comment, createdAt, updatedAt, 0, false);
+    }
 }

@@ -17,12 +17,16 @@ import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewSource;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
@@ -54,6 +58,7 @@ import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -88,6 +93,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final UserRepository userRepository;
     private final ContentRepository contentRepository;
     private final ContentService contentService;
+    private final ContentMapper contentMapper;
     private final UserContentPosterService userContentPosterService;
     private final FollowerRepository followerRepository;
     private final DiaryEntryMapper diaryEntryMapper;
@@ -404,18 +410,38 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     @Override
-    public Page<DiaryEntryResponseDTO> getReviewsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize) {
+    public Page<ContentReviewResponseDTO> getReviewsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize) {
         if (!contentRepository.existsById(contentId)) {
             throw new NotFoundException("Content not found");
         }
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        Page<DiaryEntry> reviews = diaryEntryRepository.findReviewsByContentId(contentId, viewerId, pageRequest);
+        Page<DiaryEntryRepository.ContentReviewKey> reviewKeys = diaryEntryRepository.findContentReviewKeys(
+                contentId, viewerId, pageRequest);
 
-        List<UUID> entryIds = reviews.getContent().stream().map(DiaryEntry::getId).toList();
-        Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
-        Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(entryIds);
-        List<UserContentPosterService.UserContentPosterKey> posterKeys = reviews.getContent().stream()
+        List<UUID> diaryIds = reviewKeys.getContent().stream()
+                .filter(key -> ContentReviewSource.DIARY.name().equals(key.getSource()))
+                .map(DiaryEntryRepository.ContentReviewKey::getReviewId)
+                .toList();
+        List<UUID> droppedIds = reviewKeys.getContent().stream()
+                .filter(key -> ContentReviewSource.DROPPED.name().equals(key.getSource()))
+                .map(DiaryEntryRepository.ContentReviewKey::getReviewId)
+                .toList();
+
+        Map<UUID, DiaryEntry> diaryById = diaryIds.isEmpty()
+                ? Map.of()
+                : diaryEntryRepository.findByIdInWithContentAndUser(diaryIds).stream()
+                        .collect(Collectors.toMap(DiaryEntry::getId, entry -> entry));
+        Map<UUID, DroppedEntry> droppedById = droppedIds.isEmpty()
+                ? Map.of()
+                : droppedEntryRepository.findByIdInWithUserAndContent(droppedIds).stream()
+                        .collect(Collectors.toMap(DroppedEntry::getId, entry -> entry));
+
+        Set<UUID> likedDiaryIds = likeService.getLikedDiaryEntryIds(viewerId, diaryIds);
+        Set<UUID> likedDroppedIds = likeService.getLikedDroppedEntryIds(viewerId, droppedIds);
+        Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(diaryIds);
+        List<UserContentPosterService.UserContentPosterKey> posterKeys = diaryIds.stream()
+                .map(diaryById::get)
                 .map(entry -> new UserContentPosterService.UserContentPosterKey(
                         entry.getUser().getId(), entry.getContent().getId()))
                 .distinct()
@@ -424,15 +450,40 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 ? Map.of()
                 : userContentPosterService.findByUserAndContentPairs(posterKeys);
 
-        return reviews.map(entry -> {
+        List<ContentReviewResponseDTO> reviews = reviewKeys.getContent().stream()
+                .map(key -> toContentReviewResponse(key, diaryById, droppedById, likedDiaryIds, likedDroppedIds,
+                        watchedWithByEntryId, customPosterByAuthorAndContent))
+                .toList();
+
+        return new PageImpl<>(reviews, pageRequest, reviewKeys.getTotalElements());
+    }
+
+    private ContentReviewResponseDTO toContentReviewResponse(
+            DiaryEntryRepository.ContentReviewKey key,
+            Map<UUID, DiaryEntry> diaryById,
+            Map<UUID, DroppedEntry> droppedById,
+            Set<UUID> likedDiaryIds,
+            Set<UUID> likedDroppedIds,
+            Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId,
+            Map<UserContentPosterService.UserContentPosterKey, String> customPosterByAuthorAndContent) {
+        if (ContentReviewSource.DIARY.name().equals(key.getSource())) {
+            DiaryEntry entry = diaryById.get(key.getReviewId());
             UserContentPosterService.UserContentPosterKey posterKey = new UserContentPosterService.UserContentPosterKey(
                     entry.getUser().getId(), entry.getContent().getId());
-            return enrichDiaryEntryResponse(
+            DiaryEntryResponseDTO diaryResponse = enrichDiaryEntryResponse(
                     entry,
-                    likedEntryIds.contains(entry.getId()),
+                    likedDiaryIds.contains(entry.getId()),
                     watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
                     customPosterByAuthorAndContent.get(posterKey));
-        });
+            return ContentReviewResponseDTO.fromDiary(diaryResponse);
+        }
+
+        DroppedEntry entry = droppedById.get(key.getReviewId());
+        return new ContentReviewResponseDTO(
+                entry.getId(), ContentReviewSource.DROPPED, entry.getUser().getId(),
+                contentMapper.contentToContentRefDto(entry.getContent()), entry.getComment(), null, null, null, null,
+                null, null, null, entry.getCreatedAt(), entry.getUpdatedAt(), entry.getLikesCount(),
+                likedDroppedIds.contains(entry.getId()), List.of());
     }
 
     private void assertCanViewDiary(UUID viewerId, UUID targetUserId, User target) {

@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.like.entity;
 
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -36,6 +37,10 @@ public class Like {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "diary_entry_id")
     private DiaryEntry diaryEntry;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dropped_entry_id")
+    private DroppedEntry droppedEntry;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "list_id")

@@ -126,6 +126,28 @@ class LikeControllerTest {
     }
 
     @Test
+    @DisplayName("[likeDroppedEntry] Should Return NoContent And Resolve The Current User - When Called")
+    void shouldReturnNoContentAndResolveTheCurrentUserWhenLikingDroppedEntry() {
+        UUID droppedEntryId = UUID.randomUUID();
+
+        ResponseEntity<Void> result = likeController.likeDroppedEntry(droppedEntryId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(likeService).likeDroppedEntry(currentUserId, droppedEntryId);
+    }
+
+    @Test
+    @DisplayName("[unlikeDroppedEntry] Should Return NoContent And Resolve The Current User - When Called")
+    void shouldReturnNoContentAndResolveTheCurrentUserWhenUnlikingDroppedEntry() {
+        UUID droppedEntryId = UUID.randomUUID();
+
+        ResponseEntity<Void> result = likeController.unlikeDroppedEntry(droppedEntryId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+        verify(likeService).unlikeDroppedEntry(currentUserId, droppedEntryId);
+    }
+
+    @Test
     @DisplayName("[likeList] Should Return NoContent - When Called")
     void shouldReturnNoContentWhenLikingList() {
         UUID listId = UUID.randomUUID();

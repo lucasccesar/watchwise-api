@@ -14,6 +14,10 @@ public interface LikeService {
 
     void unlikeDiaryEntry(UUID userId, UUID diaryEntryId);
 
+    void likeDroppedEntry(UUID userId, UUID droppedEntryId);
+
+    void unlikeDroppedEntry(UUID userId, UUID droppedEntryId);
+
     void likeList(UUID userId, UUID listId);
 
     void unlikeList(UUID userId, UUID listId);
@@ -29,6 +33,8 @@ public interface LikeService {
     Set<UUID> getLikedCommentIds(UUID userId, Collection<UUID> commentIds);
 
     Set<UUID> getLikedDiaryEntryIds(UUID userId, Collection<UUID> diaryEntryIds);
+
+    Set<UUID> getLikedDroppedEntryIds(UUID userId, Collection<UUID> droppedEntryIds);
 
     Set<UUID> getLikedListIds(UUID userId, Collection<UUID> listIds);
 

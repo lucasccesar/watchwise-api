@@ -77,6 +77,27 @@ public class CommentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
+    @GetMapping("/dropped/{droppedEntryId}/comments")
+    public ResponseEntity<PageResponseDTO<CommentResponseDTO>> getCommentsForDroppedEntry(
+            @PathVariable UUID droppedEntryId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<CommentResponseDTO> comments = commentService.getCommentsForDroppedEntry(
+                getCurrentUserId(), droppedEntryId, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(comments));
+    }
+
+    @PostMapping("/dropped/{droppedEntryId}/comments")
+    public ResponseEntity<CommentResponseDTO> createCommentOnDroppedEntry(
+            @PathVariable UUID droppedEntryId,
+            @Valid @RequestBody CommentCreationDTO commentCreationDTO
+    ) {
+        CommentResponseDTO created = commentService.createCommentOnDroppedEntry(
+                getCurrentUserId(), droppedEntryId, commentCreationDTO);
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
+    }
+
     @GetMapping("/picks/{pickId}/comments")
     public ResponseEntity<PageResponseDTO<CommentResponseDTO>> getCommentsForPick(
             @PathVariable UUID pickId,

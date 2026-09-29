@@ -14,6 +14,8 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
@@ -48,6 +50,7 @@ public class CommentServiceImpl implements CommentService {
     private final UserListRepository userListRepository;
     private final UserListItemRepository userListItemRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final DroppedEntryRepository droppedEntryRepository;
     private final PickRepository pickRepository;
     private final PicksTemplateRepository picksTemplateRepository;
     private final FollowerRepository followerRepository;
@@ -90,6 +93,19 @@ public class CommentServiceImpl implements CommentService {
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         Page<Comment> comments = commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(diaryEntryId, pageRequest);
+        return mapToResponseDtos(comments, viewerId);
+    }
+
+    @Override
+    public Page<CommentResponseDTO> getCommentsForDroppedEntry(UUID viewerId, UUID droppedEntryId,
+            Integer pageNumber, Integer pageSize) {
+        DroppedEntry droppedEntry = droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)
+                .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
+
+        assertDroppedEntryIsVisibleTo(viewerId, droppedEntry);
+
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        Page<Comment> comments = commentRepository.findByDroppedEntryIdOrderByCreatedAtAsc(droppedEntryId, pageRequest);
         return mapToResponseDtos(comments, viewerId);
     }
 
@@ -165,6 +181,24 @@ public class CommentServiceImpl implements CommentService {
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .diaryEntry(diaryEntry)
+                .build();
+
+        return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
+    }
+
+    @Override
+    @Transactional
+    public CommentResponseDTO createCommentOnDroppedEntry(UUID userId, UUID droppedEntryId,
+            CommentCreationDTO commentCreationDTO) {
+        DroppedEntry droppedEntry = droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)
+                .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
+
+        assertDroppedEntryIsVisibleTo(userId, droppedEntry);
+
+        Comment parentComment = resolveParentCommentOnDroppedEntry(commentCreationDTO.parentCommentId(), droppedEntryId);
+
+        Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
+                .droppedEntry(droppedEntry)
                 .build();
 
         return commentMapper.commentToResponseDto(commentRepository.save(comment), false);
@@ -264,6 +298,19 @@ public class CommentServiceImpl implements CommentService {
         return parent;
     }
 
+    private Comment resolveParentCommentOnDroppedEntry(UUID parentCommentId, UUID droppedEntryId) {
+        if (parentCommentId == null) {
+            return null;
+        }
+
+        Comment parent = findParentComment(parentCommentId);
+        if (parent.getDroppedEntry() == null || !parent.getDroppedEntry().getId().equals(droppedEntryId)) {
+            throw new BadRequestException("Parent comment must target the same dropped entry");
+        }
+
+        return parent;
+    }
+
     private Comment resolveParentCommentOnPick(UUID parentCommentId, UUID pickId) {
         if (parentCommentId == null) {
             return null;
@@ -324,6 +371,20 @@ public class CommentServiceImpl implements CommentService {
         }
 
         throw new ForbiddenException("This diary entry is private");
+    }
+
+    private void assertDroppedEntryIsVisibleTo(UUID viewerId, DroppedEntry droppedEntry) {
+        UUID ownerId = droppedEntry.getUser().getId();
+
+        if (viewerId.equals(ownerId) || Boolean.TRUE.equals(droppedEntry.getUser().getIsProfilePublic())) {
+            return;
+        }
+
+        if (followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, ownerId, FollowStatus.ACCEPTED)) {
+            return;
+        }
+
+        throw new ForbiddenException("This dropped entry is private");
     }
 
     private void assertPickIsVisibleTo(UUID viewerId, Pick pick) {

@@ -877,12 +877,23 @@ class DiaryEntryControllerIntegrationTest {
         DiaryEntry withReview = persistEntry(reviewerEntity, fightClub);
         withReview.setComment("Great movie");
         diaryEntryRepository.save(withReview);
+        droppedEntryRepository.save(DroppedEntry.builder()
+                .user(reviewerEntity)
+                .content(fightClub)
+                .type(ContentType.MOVIE)
+                .comment("Stopped halfway")
+                .createdAt(LocalDateTime.now().plusSeconds(1))
+                .updatedAt(LocalDateTime.now().plusSeconds(1))
+                .build());
         persistEntry(reviewerEntity, persistContent("680", ContentType.MOVIE));
 
         mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews").cookie(viewer.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content.length()").value(1))
-                .andExpect(jsonPath("$.content[0].comment").value("Great movie"));
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].source").value("DROPPED"))
+                .andExpect(jsonPath("$.content[0].comment").value("Stopped halfway"))
+                .andExpect(jsonPath("$.content[1].source").value("DIARY"))
+                .andExpect(jsonPath("$.content[1].comment").value("Great movie"));
     }
 
     @Test

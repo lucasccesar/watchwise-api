@@ -290,6 +290,8 @@ class FeedControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(3))
                 .andExpect(jsonPath("$.content[0].eventType").value("TOP5_UPDATE"))
                 .andExpect(jsonPath("$.content[1].eventType").value("DROPPED"))
+                .andExpect(jsonPath("$.content[1].likesCount").value(0))
+                .andExpect(jsonPath("$.content[1].likedByMe").value(false))
                 .andExpect(jsonPath("$.content[2].eventType").value("DIARY_ENTRY"))
                 .andExpect(jsonPath("$.hasNext").value(false));
     }

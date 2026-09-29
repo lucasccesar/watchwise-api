@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.dropped.service.DroppedEntryService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
@@ -43,6 +44,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
     private final ContentService contentService;
     private final FollowerRepository followerRepository;
     private final DroppedEntryMapper droppedEntryMapper;
+    private final LikeService likeService;
     private final NewTransactionExecutor newTransactionExecutor;
     private final WatchlistEntryService watchlistEntryService;
     private final PageRequestFactory pageRequestFactory;
@@ -58,8 +60,11 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
-        return droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, pageRequest)
-                .map(droppedEntryMapper::droppedEntryToResponseDto);
+        Page<DroppedEntry> entries = droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, pageRequest);
+        var entryIds = entries.getContent().stream().map(DroppedEntry::getId).toList();
+        var likedEntryIds = likeService.getLikedDroppedEntryIds(viewerId, entryIds);
+        return entries.map(entry -> droppedEntryMapper.droppedEntryToResponseDto(
+                entry, likedEntryIds.contains(entry.getId())));
     }
 
     private void assertCanViewDropped(UUID viewerId, UUID targetUserId, User target) {

@@ -11,6 +11,7 @@ public record CommentResponseDTO(
         UUID contentId,
         UUID listId,
         UUID diaryEntryId,
+        UUID droppedEntryId,
         UUID pickId,
         UUID picksTemplateId,
         UUID parentCommentId,
@@ -24,7 +25,7 @@ public record CommentResponseDTO(
     public CommentResponseDTO(UUID id, PublicUserDTO user, UUID contentId, UUID listId, UUID diaryEntryId,
             UUID parentCommentId, String text, Boolean containsSpoiler, LocalDateTime createdAt,
             LocalDateTime updatedAt, Integer likesCount, Boolean likedByMe) {
-        this(id, user, contentId, listId, diaryEntryId, null, null, parentCommentId, text, containsSpoiler,
+        this(id, user, contentId, listId, diaryEntryId, null, null, null, parentCommentId, text, containsSpoiler,
                 createdAt, updatedAt, likesCount, likedByMe);
     }
 }

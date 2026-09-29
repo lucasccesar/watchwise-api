@@ -15,6 +15,8 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -87,6 +89,9 @@ class LikeControllerIntegrationTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Autowired
+    private DroppedEntryRepository droppedEntryRepository;
+
+    @Autowired
     private CommentRepository commentRepository;
 
     @Autowired
@@ -105,6 +110,7 @@ class LikeControllerIntegrationTest {
     void setUp() {
         likeRepository.deleteAll();
         commentRepository.deleteAll();
+        droppedEntryRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         userListItemRepository.deleteAll();
         userListRepository.deleteAll();
@@ -191,6 +197,17 @@ class LikeControllerIntegrationTest {
                 .user(user)
                 .content(content)
                 .watchNumber(1)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private DroppedEntry persistDroppedEntry(User user, Content content) {
+        LocalDateTime now = LocalDateTime.now();
+        return droppedEntryRepository.save(DroppedEntry.builder()
+                .user(user)
+                .content(content)
+                .type(content.getType())
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -469,6 +486,36 @@ class LikeControllerIntegrationTest {
 
         mockMvc.perform(delete("/diary/" + UUID.randomUUID() + "/like").cookie(user.accessToken()))
                 .andExpect(status().isForbidden());
+    }
+
+    // ---------- POST/DELETE /dropped/{droppedEntryId}/like ----------
+
+    @Test
+    @DisplayName("[likeDroppedEntry] Should Return NoContent And Persist The Like")
+    void shouldReturnNoContentAndPersistTheLikeOnDroppedEntry() throws Exception {
+        RegisteredUser user = registerUser("likedroppedok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        DroppedEntry entry = persistDroppedEntry(entity, persistContent("550"));
+
+        mockMvc.perform(postRequest(user, "/dropped/" + entry.getId() + "/like"))
+                .andExpect(status().isNoContent());
+
+        assertThat(likeRepository.findAll()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[unlikeDroppedEntry] Should Return NoContent And Remove The Like")
+    void shouldReturnNoContentAndRemoveTheLikeFromDroppedEntry() throws Exception {
+        RegisteredUser user = registerUser("unlikedroppedok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        DroppedEntry entry = persistDroppedEntry(entity, persistContent("550"));
+
+        mockMvc.perform(postRequest(user, "/dropped/" + entry.getId() + "/like"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(deleteRequest(user, "/dropped/" + entry.getId() + "/like"))
+                .andExpect(status().isNoContent());
+
+        assertThat(likeRepository.findAll()).isEmpty();
     }
 
     // ---------- POST /lists/{listId}/like ----------

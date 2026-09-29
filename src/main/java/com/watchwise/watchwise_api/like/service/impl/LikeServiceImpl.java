@@ -8,6 +8,8 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
@@ -40,6 +42,7 @@ public class LikeServiceImpl implements LikeService {
     private final UserRepository userRepository;
     private final CommentRepository commentRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final DroppedEntryRepository droppedEntryRepository;
     private final UserListRepository userListRepository;
     private final UserListItemRepository userListItemRepository;
     private final FollowerRepository followerRepository;
@@ -118,6 +121,43 @@ public class LikeServiceImpl implements LikeService {
     public void unlikeDiaryEntry(UUID userId, UUID diaryEntryId) {
         if (likeRepository.deleteByUserIdAndDiaryEntryId(userId, diaryEntryId) > 0) {
             diaryEntryRepository.decrementLikesCount(diaryEntryId);
+        }
+    }
+
+    @Override
+    public void likeDroppedEntry(UUID userId, UUID droppedEntryId) {
+        if (likeRepository.existsByUserIdAndDroppedEntryId(userId, droppedEntryId)) {
+            return;
+        }
+
+        DroppedEntry droppedEntry = droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)
+                .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
+
+        assertDroppedEntryIsVisibleTo(userId, droppedEntry);
+
+        try {
+            newTransactionExecutor.runInNewTransaction(() -> {
+                Like like = Like.builder()
+                        .user(userRepository.getReferenceById(userId))
+                        .droppedEntry(droppedEntryRepository.getReferenceById(droppedEntryId))
+                        .createdAt(LocalDateTime.now())
+                        .build();
+                Like saved = likeRepository.saveAndFlush(like);
+                droppedEntryRepository.incrementLikesCount(droppedEntryId);
+                return saved;
+            });
+        } catch (DataIntegrityViolationException e) {
+            if (!likeRepository.existsByUserIdAndDroppedEntryId(userId, droppedEntryId)) {
+                throw e;
+            }
+        }
+    }
+
+    @Override
+    @Transactional
+    public void unlikeDroppedEntry(UUID userId, UUID droppedEntryId) {
+        if (likeRepository.deleteByUserIdAndDroppedEntryId(userId, droppedEntryId) > 0) {
+            droppedEntryRepository.decrementLikesCount(droppedEntryId);
         }
     }
 
@@ -255,6 +295,14 @@ public class LikeServiceImpl implements LikeService {
     }
 
     @Override
+    public Set<UUID> getLikedDroppedEntryIds(UUID userId, Collection<UUID> droppedEntryIds) {
+        if (droppedEntryIds.isEmpty()) {
+            return Set.of();
+        }
+        return likeRepository.findLikedDroppedEntryIds(userId, droppedEntryIds);
+    }
+
+    @Override
     public Set<UUID> getLikedListIds(UUID userId, Collection<UUID> listIds) {
         if (listIds.isEmpty()) {
             return Set.of();
@@ -303,6 +351,11 @@ public class LikeServiceImpl implements LikeService {
             return;
         }
 
+        if (comment.getDroppedEntry() != null) {
+            assertDroppedEntryIsVisibleTo(viewerId, comment.getDroppedEntry());
+            return;
+        }
+
         assertDiaryEntryIsVisibleTo(viewerId, comment.getDiaryEntry());
     }
 
@@ -345,5 +398,18 @@ public class LikeServiceImpl implements LikeService {
         }
 
         throw new ForbiddenException("This diary entry is private");
+    }
+
+    private void assertDroppedEntryIsVisibleTo(UUID viewerId, DroppedEntry droppedEntry) {
+        UUID ownerId = droppedEntry.getUser().getId();
+        if (viewerId.equals(ownerId) || Boolean.TRUE.equals(droppedEntry.getUser().getIsProfilePublic())) {
+            return;
+        }
+
+        if (followerRepository.existsByFollowerIdAndFollowedIdAndStatus(viewerId, ownerId, FollowStatus.ACCEPTED)) {
+            return;
+        }
+
+        throw new ForbiddenException("This dropped entry is private");
     }
 }

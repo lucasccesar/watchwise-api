@@ -15,6 +15,8 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -88,6 +90,9 @@ class CommentControllerIntegrationTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Autowired
+    private DroppedEntryRepository droppedEntryRepository;
+
+    @Autowired
     private CommentRepository commentRepository;
 
     @Autowired
@@ -102,6 +107,7 @@ class CommentControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         commentRepository.deleteAll();
+        droppedEntryRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         userListItemRepository.deleteAll();
         userListRepository.deleteAll();
@@ -222,6 +228,18 @@ class CommentControllerIntegrationTest {
                 .user(user)
                 .content(content)
                 .watchNumber(1)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private DroppedEntry persistDroppedEntry(User user, Content content) {
+        LocalDateTime now = LocalDateTime.now();
+        return droppedEntryRepository.save(DroppedEntry.builder()
+                .user(user)
+                .content(content)
+                .type(content.getType())
+                .comment("Stopped watching")
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -700,6 +718,38 @@ class CommentControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(commentBody("Agreed")))
                 .andExpect(status().isForbidden());
+    }
+
+    // ---------- GET/POST /dropped/{droppedEntryId}/comments ----------
+
+    @Test
+    @DisplayName("[createCommentOnDroppedEntry] Should Return Created And Persist The Comment")
+    void shouldReturnCreatedAndPersistTheCommentOnDroppedEntry() throws Exception {
+        RegisteredUser user = registerUser("createdroppedcommentok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        DroppedEntry entry = persistDroppedEntry(entity, persistContent("550"));
+
+        mockMvc.perform(postRequest(user, "/dropped/" + entry.getId() + "/comments", commentBody("Agreed")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.text").value("Agreed"))
+                .andExpect(jsonPath("$.droppedEntryId").value(entry.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("[getCommentsForDroppedEntry] Should Return Comments - When Owner Profile Is Public")
+    void shouldReturnCommentsForDroppedEntryWhenOwnerProfileIsPublic() throws Exception {
+        RegisteredUser owner = registerUser("getdroppedcommentsowner");
+        RegisteredUser viewer = registerUser("getdroppedcommentsviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        DroppedEntry entry = persistDroppedEntry(ownerEntity, persistContent("550"));
+
+        mockMvc.perform(postRequest(owner, "/dropped/" + entry.getId() + "/comments", commentBody("Agreed")))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(getRequest(viewer, "/dropped/" + entry.getId() + "/comments"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].droppedEntryId").value(entry.getId().toString()))
+                .andExpect(jsonPath("$.totalElements").value(1));
     }
 
     // ---------- DELETE /comments/{commentId} ----------
