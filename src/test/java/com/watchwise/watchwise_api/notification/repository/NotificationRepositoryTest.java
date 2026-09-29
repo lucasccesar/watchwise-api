@@ -21,6 +21,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -66,6 +67,7 @@ class NotificationRepositoryTest {
         notificationRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
+        entityManager.flush();
 
         lucas = userRepository.saveAndFlush(User.builder()
                 .username("lucas").email("lucas@email.com").password("hashed")
@@ -173,10 +175,14 @@ class NotificationRepositoryTest {
                         NotificationType.FOLLOWED_PERSON_NEW_CREDIT, cutoff.minusDays(1)))
         };
 
+        entityManager.flush();
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
         int deleted = notificationRepository.deleteExpiredSocialNotifications(false, cutoff, 2);
 
-        assertThat(deleted).isEqualTo(2);
+        TestTransaction.start();
         entityManager.clear();
+        assertThat(deleted).isEqualTo(2);
         assertThat(notificationRepository.findById(oldest.getId())).isEmpty();
         assertThat(notificationRepository.findById(secondOldest.getId())).isEmpty();
         assertThat(notificationRepository.findById(remainingExpired.getId())).isPresent();
@@ -210,12 +216,16 @@ class NotificationRepositoryTest {
                         NotificationType.FOLLOWED_PERSON_NEW_CREDIT, now.minusDays(60)))
         };
 
+        entityManager.flush();
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
         int deletedRead = notificationRepository.deleteExpiredSocialNotifications(true, readCutoff, 500);
         int deletedUnread = notificationRepository.deleteExpiredSocialNotifications(false, unreadCutoff, 500);
 
+        TestTransaction.start();
+        entityManager.clear();
         assertThat(deletedRead).isEqualTo(1);
         assertThat(deletedUnread).isEqualTo(1);
-        entityManager.clear();
         assertThat(notificationRepository.findById(expiredRead.getId())).isEmpty();
         assertThat(notificationRepository.findById(readAtCutoff.getId())).isPresent();
         assertThat(notificationRepository.findById(expiredUnread.getId())).isEmpty();
