@@ -76,7 +76,7 @@ class DailyGameRankingServiceImplTest {
                 .toList())
                 .containsExactly(
                         "challengeDate", "gameType", "targetKind", "maxAttempts", "status",
-                        "attemptsUsed", "score", "completedAt", "answer");
+                        "attemptsUsed", "score", "completedAt", "answer", "sharedToFeed");
     }
 
     @Test
