@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
+import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
@@ -52,6 +53,7 @@ public class DailyGameServiceImpl implements DailyGameService {
     private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
     private final DailyGameInfoComparisonService infoComparisonService;
     private final DailyGameFilmographyService filmographyService;
+    private final NewTransactionExecutor newTransactionExecutor;
     private final Clock clock;
 
     public DailyGameServiceImpl(
@@ -62,7 +64,8 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyChallengeResponseAssembler responseAssembler,
             Clock clock) {
         this(challengeRepository, hintRepository, resultRepository, candidateValidator,
-                responseAssembler, new DailyGameAttemptDetailsCodec(), null, clock);
+                responseAssembler, new DailyGameAttemptDetailsCodec(), null, null,
+                new NewTransactionExecutor(), clock);
     }
 
     public DailyGameServiceImpl(
@@ -74,7 +77,8 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyGameInfoComparisonService infoComparisonService,
             Clock clock) {
         this(challengeRepository, hintRepository, resultRepository, candidateValidator,
-                responseAssembler, new DailyGameAttemptDetailsCodec(), infoComparisonService, null, clock);
+                responseAssembler, new DailyGameAttemptDetailsCodec(), infoComparisonService, null,
+                new NewTransactionExecutor(), clock);
     }
 
     public DailyGameServiceImpl(
@@ -87,7 +91,7 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyGameInfoComparisonService infoComparisonService,
             Clock clock) {
         this(challengeRepository, hintRepository, resultRepository, candidateValidator, responseAssembler,
-                attemptDetailsCodec, infoComparisonService, null, clock);
+                attemptDetailsCodec, infoComparisonService, null, new NewTransactionExecutor(), clock);
     }
 
     public DailyGameServiceImpl(
@@ -100,7 +104,23 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyGameFilmographyService filmographyService,
             Clock clock) {
         this(challengeRepository, hintRepository, resultRepository, candidateValidator, responseAssembler,
-                new DailyGameAttemptDetailsCodec(), infoComparisonService, filmographyService, clock);
+                new DailyGameAttemptDetailsCodec(), infoComparisonService, filmographyService,
+                new NewTransactionExecutor(), clock);
+    }
+
+    public DailyGameServiceImpl(
+            DailyChallengeRepository challengeRepository,
+            DailyChallengeHintRepository hintRepository,
+            UserDailyGameResultRepository resultRepository,
+            DailyGameCandidateValidator candidateValidator,
+            DailyChallengeResponseAssembler responseAssembler,
+            DailyGameInfoComparisonService infoComparisonService,
+            DailyGameFilmographyService filmographyService,
+            NewTransactionExecutor newTransactionExecutor,
+            Clock clock) {
+        this(challengeRepository, hintRepository, resultRepository, candidateValidator, responseAssembler,
+                new DailyGameAttemptDetailsCodec(), infoComparisonService, filmographyService,
+                newTransactionExecutor, clock);
     }
 
     @Autowired
@@ -113,6 +133,7 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyGameAttemptDetailsCodec attemptDetailsCodec,
             DailyGameInfoComparisonService infoComparisonService,
             DailyGameFilmographyService filmographyService,
+            NewTransactionExecutor newTransactionExecutor,
             Clock clock) {
         this.challengeRepository = challengeRepository;
         this.hintRepository = hintRepository;
@@ -122,6 +143,7 @@ public class DailyGameServiceImpl implements DailyGameService {
         this.attemptDetailsCodec = attemptDetailsCodec;
         this.infoComparisonService = infoComparisonService;
         this.filmographyService = filmographyService;
+        this.newTransactionExecutor = newTransactionExecutor;
         this.clock = clock;
     }
 
@@ -172,28 +194,24 @@ public class DailyGameServiceImpl implements DailyGameService {
     }
 
     @Override
-    @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request) {
         return submitAttempt(userId, LocalDate.now(clock), gameType, request, true);
     }
 
     @Override
-    @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request, boolean majorRoles) {
         return submitAttempt(userId, LocalDate.now(clock), gameType, request, majorRoles);
     }
 
     @Override
-    @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request) {
         return submitAttempt(userId, challengeDate, gameType, request, true);
     }
 
     @Override
-    @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request,
             boolean majorRoles) {
@@ -203,17 +221,25 @@ public class DailyGameServiceImpl implements DailyGameService {
         DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
                 .orElseThrow(DailyGamesUnavailableException::new);
 
-        resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now);
-        UserDailyGameResult result = resultRepository
-                .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
+        newTransactionExecutor.runInNewTransaction(() ->
+                resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now));
+        UserDailyGameResult initialResult = resultRepository
+                .findByUserIdAndDailyChallengeIdIn(userId, List.of(challenge.getId()))
+                .stream()
+                .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
-        assertOpenAndHasAttempts(result, gameType);
+        assertOpenAndHasAttempts(initialResult, gameType);
 
         DailyGameCandidateIdentity candidate = candidateValidator.validate(gameType, request);
         DailyGameGuessFeedbackDTO episodeFeedback = guessFeedback(gameType, challenge, candidate);
         DailyGameInfoFeedbackDTO infoFeedback = infoFeedback(gameType, challenge, candidate);
         DailyGameFilmographyFeedbackDTO filmographyFeedback = filmographyFeedback(
                 gameType, challenge, candidate, majorRoles);
+        return newTransactionExecutor.runInNewTransaction(() -> {
+        UserDailyGameResult result = resultRepository
+                .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
+                .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
+        assertOpenAndHasAttempts(result, gameType);
         int attemptNumber = result.getAttemptsUsed() + 1;
         result.setAttemptsUsed(attemptNumber);
         result.setUpdatedAt(now);
@@ -232,9 +258,17 @@ public class DailyGameServiceImpl implements DailyGameService {
         }
         appendAttemptDetails(challenge, result, attemptNumber, candidate, episodeFeedback, infoFeedback,
                 filmographyFeedback);
+        resultRepository.save(result);
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
+        DailyGameCandidateDTO candidateDto = new DailyGameCandidateDTO(
+                candidate.targetKind(), candidate.tmdbId(), candidate.personTmdbId(), candidate.seriesTmdbId(),
+                candidate.seasonNumber(), candidate.episodeNumber(), candidate.title(), candidate.imageUrl(),
+                candidate.date());
         return responseAssembler.toAttemptResponse(challenge, result, hints,
-                episodeFeedback, challengeDate.equals(LocalDate.now(clock)), majorRoles);
+                episodeFeedback, challengeDate.equals(LocalDate.now(clock)), majorRoles,
+                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, infoFeedback,
+                        filmographyFeedback));
+        });
     }
 
     @Override

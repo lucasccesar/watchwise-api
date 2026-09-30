@@ -97,7 +97,8 @@ public class DailyChallengeResponseAssembler {
         return new DailyGameAttemptResponseDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, true), guessFeedback);
+                view.visibleImageUrls(), view.imageUrls(), attempts, null,
+                filmography(challenge, attempts, true), guessFeedback);
     }
 
     public DailyGameAttemptResponseDTO toAttemptResponse(
@@ -107,12 +108,25 @@ public class DailyChallengeResponseAssembler {
             DailyGameGuessFeedbackDTO guessFeedback,
             boolean includeAttempts,
             boolean majorRoles) {
+        return toAttemptResponse(
+                challenge, result, allHints, guessFeedback, includeAttempts, majorRoles, null);
+    }
+
+    public DailyGameAttemptResponseDTO toAttemptResponse(
+            DailyChallenge challenge,
+            UserDailyGameResult result,
+            List<DailyChallengeHint> allHints,
+            DailyGameGuessFeedbackDTO guessFeedback,
+            boolean includeAttempts,
+            boolean majorRoles,
+            DailyGameAttemptDTO currentAttempt) {
         DailyGameView view = view(challenge, result, allHints);
         List<DailyGameAttemptDTO> attempts = attempts(result, includeAttempts);
         return new DailyGameAttemptResponseDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, majorRoles), guessFeedback);
+                view.visibleImageUrls(), view.imageUrls(), attempts, currentAttempt,
+                filmography(challenge, attempts, majorRoles), guessFeedback);
     }
 
     public DailyGameHistoryDTO toHistoryResponse(

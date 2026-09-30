@@ -52,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.intThat;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -460,6 +461,36 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.answerKey()).isEqualTo("PERSON:17419");
         assertThat(candidate.sourceTmdbId()).isEqualTo("1396");
         assertThat((List<?>) candidate.answerSnapshot().get("filmography")).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("[generate] Should Reject The Actor - When The Default Major Role Projection Has Fewer Than Two Works")
+    void shouldRejectTheActorWhenTheDefaultMajorRoleProjectionHasFewerThanTwoWorks() {
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(seriesPage(new TmdbTvSearchResult(
+                        "1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
+                .thenReturn(found(seriesDetails("1396", "Breaking Bad", new TmdbAggregateCredits(
+                        List.of(new TmdbAggregateCastMember(
+                                17419, "Bryan Cranston", "/bryan.jpg",
+                                List.of(new TmdbAggregateRole("Walter")), 62)), List.of()))));
+        when(tmdbClient.getPersonAggregate("17419", LANGUAGE))
+                .thenReturn(found(personAggregate("17419", "Bryan Cranston",
+                        new TmdbPersonAggregateCredit("1400", "tv", null, "Guest One", "/one.jpg",
+                                null, "2000-01-09", "Guest", null, List.of(18), 1,
+                                List.of(new TmdbAggregateRole("Guest", 1))),
+                        new TmdbPersonAggregateCredit("1401", "tv", null, "Guest Two", "/two.jpg",
+                                null, "2001-01-09", "Guest", null, List.of(18), 1,
+                                List.of(new TmdbAggregateRole("Guest", 1))))));
+        when(tmdbClient.getTvFullDetails("1400", LANGUAGE))
+                .thenReturn(found(seriesDetails("1400", "Guest One", new TmdbAggregateCredits(
+                        List.of(), List.of()))));
+        DailyGameFilmographyServiceImpl boundedService = new DailyGameFilmographyServiceImpl(tmdbClient, 1);
+
+        assertThat(new ActorBySeriesFilmographyGenerator(tmdbClient, snapshotAssembler, boundedService)
+                .generate(CHALLENGE_DATE)).isEmpty();
+
+        verify(tmdbClient, never()).getTvFullDetails("1401", LANGUAGE);
     }
 
     private static <T> TmdbLookupResult<T> found(T value) {

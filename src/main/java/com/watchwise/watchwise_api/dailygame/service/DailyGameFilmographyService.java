@@ -21,6 +21,9 @@ public interface DailyGameFilmographyService {
     FilmographySnapshot snapshot(
             String personTmdbId, DailyGameType gameType, DailyGameFilmographyLookupBudget budget);
 
+    boolean hasAtLeastEntries(
+            FilmographySnapshot snapshot, DailyGameType gameType, boolean majorRoles, int minimumEntries);
+
     record FilmographySnapshot(List<Map<String, Object>> entries) {
 
         public FilmographySnapshot {

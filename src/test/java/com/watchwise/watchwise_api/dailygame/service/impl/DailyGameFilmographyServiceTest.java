@@ -237,6 +237,29 @@ class DailyGameFilmographyServiceTest {
                 .getTvFullDetails("20", LANGUAGE);
     }
 
+    @Test
+    @DisplayName("[compare] Should Bound Series Detail Lookups - When The Configured Budget Is Exhausted")
+    void shouldBoundSeriesDetailLookupsWhenTheConfiguredBudgetIsExhausted() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, List.of(
+                seriesWork("10", "First Series", 21, 1),
+                seriesWork("20", "Second Series", 21, 1)));
+        whenAggregate("2", new TmdbPersonAggregate("2", "Guessed Actor", null, null, null, null, null,
+                null, null, null, new TmdbPersonAggregateCredits(List.of(
+                        credit("10", "First Series", "tv", "2000-01-01", 1, 1),
+                        credit("20", "Second Series", "tv", "2001-01-01", 1, 1)), List.of())));
+        org.mockito.Mockito.when(tmdbClient.getTvFullDetails("10", LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(tvDetails("10", 21)));
+        DailyGameFilmographyServiceImpl boundedService = new DailyGameFilmographyServiceImpl(tmdbClient, 1);
+
+        DailyGameFilmographyFeedbackDTO feedback = boundedService.compare(challenge, "2", true);
+
+        assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("SERIES:10", "SERIES:20");
+        assertThat(feedback.sharedMajorRoleWorkKeys()).isEmpty();
+        verify(tmdbClient).getTvFullDetails("10", LANGUAGE);
+        org.mockito.Mockito.verify(tmdbClient, org.mockito.Mockito.never())
+                .getTvFullDetails("20", LANGUAGE);
+    }
+
     private void stubPerson(String id, String name, TmdbPersonAggregateCredit... credits) {
         whenAggregate(id, new TmdbPersonAggregate(id, name, null, null, null, null, null,
                 null, null, null, new TmdbPersonAggregateCredits(List.of(credits), List.of())));

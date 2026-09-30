@@ -67,7 +67,8 @@ public class ActorBySeriesFilmographyGenerator implements DailyChallengeGenerato
         List<ActorCandidate<TmdbAggregateCastMember>> eligible = cast.stream()
                 .map(actor -> new ActorCandidate<>(actor, filmographyService.snapshot(
                         String.valueOf(actor.id()), gameType(), budget)))
-                .filter(candidate -> candidate.snapshot().entries().size() >= 2)
+                .filter(candidate -> filmographyService.hasAtLeastEntries(
+                        candidate.snapshot(), gameType(), true, 2))
                 .toList();
         return DailyChallengeGenerationSupport.randomItem(eligible);
     }

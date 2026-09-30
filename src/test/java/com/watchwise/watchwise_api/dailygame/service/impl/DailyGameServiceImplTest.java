@@ -177,6 +177,8 @@ class DailyGameServiceImplTest {
         when(challengeRepository.findByChallengeDateAndGameType(historicalDate, DailyGameType.MOVIE_BY_POSTER))
                 .thenReturn(Optional.of(challenge));
         when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), any()))
+                .thenReturn(List.of(result));
         when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
                 .thenReturn(Optional.of(result));
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
@@ -187,6 +189,37 @@ class DailyGameServiceImplTest {
                 request("550", null, null, null, null));
 
         assertThat(response.status()).isEqualTo(DailyGameViewStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Return Only The Current Attempt - When The Challenge Is Historical")
+    void shouldReturnOnlyTheCurrentAttemptWhenTheChallengeIsHistorical() {
+        LocalDate historicalDate = TODAY.minusDays(1);
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", historicalDate);
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        when(challengeRepository.findByChallengeDateAndGameType(historicalDate, DailyGameType.MOVIE_BY_INFO))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+                .thenReturn(List.of(result));
+        org.mockito.Mockito.lenient()
+                .when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+                .thenReturn(Optional.of(result));
+        when(tmdbClient.getMovieFullDetails("680", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                        "680", "Pulp Fiction", null, null, "/pulp.jpg", null, "1994-09-10", 154,
+                        List.of(), List.of(), null, null, null, null, null, List.of(), null)));
+        when(infoComparisonService.compare(eq(challenge), any())).thenReturn(infoFeedback());
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(
+                USER_ID, historicalDate, DailyGameType.MOVIE_BY_INFO,
+                request("680", null, null, null, null));
+        assertThat(response.attempts()).isNull();
+        assertThat(result.getAttemptDetails()).isNull();
+        assertThat(response.currentAttempt().attemptNumber()).isOne();
+        assertThat(response.currentAttempt().candidate().tmdbId()).isEqualTo("680");
+        assertThat(response.currentAttempt().infoFeedback()).isNotNull();
+        assertThat(response.currentAttempt().filmographyFeedback()).isNull();
     }
 
     @Test
@@ -313,7 +346,8 @@ class DailyGameServiceImplTest {
         when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
                 .thenReturn(Optional.of(challenge));
         when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(0);
-        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+        org.mockito.Mockito.lenient()
+                .when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
                 .thenReturn(Optional.of(result));
 
         assertThatThrownBy(() -> service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO))
@@ -405,6 +439,8 @@ class DailyGameServiceImplTest {
         when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
         when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
                 .thenReturn(Optional.of(result));
+        org.mockito.Mockito.lenient().when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+                .thenReturn(List.of(result));
         when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
 
         DailyGameAttemptResponseDTO response = service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO);
@@ -413,6 +449,12 @@ class DailyGameServiceImplTest {
         assertThat(response.attemptsUsed()).isZero();
         assertThat(response.score()).isZero();
         assertThat(response.answer()).isNotNull();
+        assertThat(response.answer().targetKind()).isEqualTo(DailyGameTargetKind.MOVIE);
+        assertThat(response.answer().tmdbId()).isEqualTo("550");
+        assertThat(response.answer().personTmdbId()).isNull();
+        assertThat(response.answer().seriesTmdbId()).isNull();
+        assertThat(response.answer().title()).isEqualTo("Answer");
+        assertThat(response.answer().imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/image.jpg");
         assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.FAILED);
         assertThat(result.getCompletedAt()).isEqualTo(NOW);
     }
@@ -500,7 +542,7 @@ class DailyGameServiceImplTest {
         UserDailyGameResult result = result(challenge, 1, 6, DailyGameResultStatus.COMPLETED, NOW);
         when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.EPISODE_BY_FRAME))
                 .thenReturn(Optional.of(challenge));
-        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+        org.mockito.Mockito.lenient().when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
                 .thenReturn(List.of(result));
         when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
 
@@ -615,12 +657,14 @@ class DailyGameServiceImplTest {
     }
 
     @Test
-    @DisplayName("[submitAttempt] Should Serialize Insert And Locked Read - When Two First Submissions Race")
-    void shouldSerializeInsertAndLockedReadWhenTwoFirstSubmissionsRace() {
+    @DisplayName("[submitAttempt] Should Lock Only After TMDB Validation - When Two First Submissions Race")
+    void shouldLockOnlyAfterTmdbValidationWhenTwoFirstSubmissionsRace() {
         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
         when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_POSTER))
                 .thenReturn(Optional.of(challenge));
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), any()))
+                .thenReturn(List.of(result));
         when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
                 .thenReturn(Optional.of(result));
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
@@ -636,19 +680,19 @@ class DailyGameServiceImplTest {
         InOrder order = inOrder(challengeRepository, resultRepository, tmdbClient);
         order.verify(challengeRepository).findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_POSTER);
         order.verify(resultRepository).insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW));
-        order.verify(resultRepository).findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId());
+        order.verify(resultRepository).findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId()));
         order.verify(tmdbClient).getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        order.verify(resultRepository).findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId());
     }
 
     @Test
-    @DisplayName("[submitAttempt] Should Require A Transaction - When The Submission Method Is Inspected")
-    void shouldRequireATransactionWhenTheSubmissionMethodIsInspected() throws NoSuchMethodException {
+    @DisplayName("[submitAttempt] Should Not Hold A Method Transaction - When TMDB Work Must Precede Persistence")
+    void shouldNotHoldAMethodTransactionWhenTmdbWorkMustPrecedePersistence() throws NoSuchMethodException {
         Method method = DailyGameServiceImpl.class.getMethod("submitAttempt", UUID.class, DailyGameType.class,
                 com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest.class);
         Transactional transactional = AnnotatedElementUtils.findMergedAnnotation(method, Transactional.class);
 
-        assertThat(transactional).isNotNull();
-        assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRED);
+        assertThat(transactional).isNull();
     }
 
     @Test
@@ -683,7 +727,10 @@ class DailyGameServiceImplTest {
         when(challengeRepository.findByChallengeDateAndGameType(TODAY, challenge.getGameType()))
                 .thenReturn(Optional.of(challenge));
         when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
-        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+                .thenReturn(List.of(result));
+        org.mockito.Mockito.lenient()
+                .when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
                 .thenReturn(Optional.of(result));
     }
 
@@ -701,13 +748,17 @@ class DailyGameServiceImplTest {
     }
 
     private DailyChallenge challenge(DailyGameType type, String tmdbId) {
+        return challenge(type, tmdbId, TODAY);
+    }
+
+    private DailyChallenge challenge(DailyGameType type, String tmdbId, LocalDate challengeDate) {
         if (type.targetKind() == DailyGameTargetKind.EPISODE) {
             return challenge(type, tmdbId, 1, 1);
         }
         UUID id = UUID.randomUUID();
         return DailyChallenge.builder()
                 .id(id)
-                .challengeDate(TODAY)
+                .challengeDate(challengeDate)
                 .gameType(type)
                 .targetKind(type.targetKind())
                 .targetTmdbId(tmdbId)

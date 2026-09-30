@@ -21,6 +21,7 @@ public record DailyGameAttemptResponseDTO(
         List<String> visibleImageUrls,
         List<String> imageUrls,
         List<DailyGameAttemptDTO> attempts,
+        DailyGameAttemptDTO currentAttempt,
         DailyGameFilmographyStateDTO filmography,
         DailyGameGuessFeedbackDTO guessFeedback) {
 
@@ -37,7 +38,7 @@ public record DailyGameAttemptResponseDTO(
             LocalDateTime completedAt,
             DailyGameAnswerDTO answer) {
         this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
-                score, completedAt, answer, null, null, null, null, null);
+                score, completedAt, answer, null, null, null, null, null, null);
     }
 
     public DailyGameAttemptResponseDTO(
@@ -56,6 +57,6 @@ public record DailyGameAttemptResponseDTO(
             List<String> imageUrls,
             DailyGameGuessFeedbackDTO guessFeedback) {
         this(gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, imageUrl, hints,
-                score, completedAt, answer, visibleImageUrls, imageUrls, null, null, guessFeedback);
+                score, completedAt, answer, visibleImageUrls, imageUrls, null, null, null, guessFeedback);
     }
 }

@@ -63,8 +63,7 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         String expectedMediaType = mediaType(challenge.getGameType());
         List<Work> secret = readSnapshot(challenge, expectedMediaType);
         TmdbPersonAggregate guessedActor = requireAggregate(guessedPersonTmdbId);
-        List<Work> guessed = normalize(guessedActor, expectedMediaType,
-                new DailyGameFilmographyLookupBudget(Integer.MAX_VALUE));
+        List<Work> guessed = normalize(guessedActor, expectedMediaType, newGenerationBudget());
 
         Set<String> secretAllKeys = keys(secret);
         Set<String> guessedAllKeys = keys(guessed);
@@ -107,6 +106,24 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         return new FilmographySnapshot(normalize(found.value(), expectedMediaType, effectiveBudget).stream()
                 .map(Work::toSnapshot)
                 .toList());
+    }
+
+    @Override
+    public boolean hasAtLeastEntries(
+            FilmographySnapshot snapshot, DailyGameType gameType, boolean majorRoles, int minimumEntries) {
+        if (minimumEntries < 1) {
+            throw new IllegalArgumentException("minimumEntries must be positive");
+        }
+        String expectedMediaType = mediaType(gameType);
+        if (snapshot == null || expectedMediaType == null) {
+            return false;
+        }
+        List<Work> works = snapshot.entries().stream()
+                .map(entry -> snapshotWork(entry, expectedMediaType))
+                .filter(Objects::nonNull)
+                .toList();
+        List<Work> selected = isSeries(gameType) && majorRoles ? filterMajorRoles(works) : works;
+        return selected.size() >= minimumEntries;
     }
 
     private TmdbPersonAggregate requireAggregate(String personTmdbId) {
