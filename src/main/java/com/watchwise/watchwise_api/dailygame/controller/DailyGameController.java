@@ -32,7 +32,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -72,8 +71,7 @@ public class DailyGameController {
     public ResponseEntity<DailyGameStateDTO> getGameToday(
         @PathVariable("gameType") DailyGameType gameType,
             @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles) {
-        return ResponseEntity.ok(dailyGameService.getGame(
-                currentUserId(), LocalDate.now(ZoneOffset.UTC), gameType, majorRoles));
+        return ResponseEntity.ok(dailyGameService.getGameToday(currentUserId(), gameType, majorRoles));
     }
 
     @GetMapping("/games/{challengeDate}/{gameType}")
@@ -110,18 +108,18 @@ public class DailyGameController {
         return ResponseEntity.ok(PageResponseDTO.of(results));
     }
 
-    @GetMapping("/games/EPISODE_BY_FRAME/search/seasons")
+    @GetMapping("/games/EPISODE_BY_FRAME/series/{seriesTmdbId}/seasons")
     public ResponseEntity<List<DailyGameSeasonOptionDTO>> listEpisodeSeasons(
-            @RequestParam("seriesTmdbId") String seriesTmdbId) {
+            @PathVariable String seriesTmdbId) {
         UUID userId = currentUserId();
         throttleSearch(userId);
         return ResponseEntity.ok(dailyGameSearchService.listEpisodeSeasons(userId, seriesTmdbId));
     }
 
-    @GetMapping("/games/EPISODE_BY_FRAME/search/episodes")
+    @GetMapping("/games/EPISODE_BY_FRAME/series/{seriesTmdbId}/seasons/{seasonNumber}/episodes")
     public ResponseEntity<List<DailyGameEpisodeOptionDTO>> listEpisodeEpisodes(
-            @RequestParam("seriesTmdbId") String seriesTmdbId,
-            @RequestParam("seasonNumber") Integer seasonNumber) {
+            @PathVariable String seriesTmdbId,
+            @PathVariable Integer seasonNumber) {
         UUID userId = currentUserId();
         throttleSearch(userId);
         return ResponseEntity.ok(dailyGameSearchService.listEpisodeEpisodes(

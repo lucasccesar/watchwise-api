@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
@@ -296,9 +297,9 @@ class DailyGameSearchServiceImplTest {
         String seriesTmdbId = "123456789012345678901";
         when(tmdbClient.getTvFullDetails(seriesTmdbId, LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
 
-        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, seriesTmdbId);
-
-        assertThat(result).isEmpty();
+        assertThatThrownBy(() -> service().listEpisodeSeasons(USER_ID, seriesTmdbId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No series found on TMDB for the given id");
         verify(tmdbClient).getTvFullDetails(seriesTmdbId, LANGUAGE);
     }
 
@@ -370,23 +371,41 @@ class DailyGameSearchServiceImplTest {
     }
 
     @Test
-    @DisplayName("[listEpisodeSeasons] Should Return Empty List - When The Series Is Not Found")
-    void shouldReturnEmptyListWhenTheSeriesIsNotFound() {
+    @DisplayName("[listEpisodeSeasons] Should Throw NotFoundException - When The Series Is Not Found")
+    void shouldThrowNotFoundExceptionWhenTheSeriesIsNotFound() {
         when(tmdbClient.getTvFullDetails("1399", LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
 
-        List<DailyGameSeasonOptionDTO> result = service().listEpisodeSeasons(USER_ID, "1399");
-
-        assertThat(result).isEmpty();
+        assertThatThrownBy(() -> service().listEpisodeSeasons(USER_ID, "1399"))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No series found on TMDB for the given id");
     }
 
     @Test
-    @DisplayName("[listEpisodeEpisodes] Should Return Empty List - When The Season Is Not Found")
-    void shouldReturnEmptyListWhenTheSeasonIsNotFound() {
+    @DisplayName("[listEpisodeEpisodes] Should Throw NotFoundException - When The Season Is Not Found")
+    void shouldThrowNotFoundExceptionWhenTheSeasonIsNotFound() {
         when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
 
-        List<DailyGameEpisodeOptionDTO> result = service().listEpisodeEpisodes(USER_ID, "1399", 1);
+        assertThatThrownBy(() -> service().listEpisodeEpisodes(USER_ID, "1399", 1))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("No season found on TMDB for the given id");
+    }
 
-        assertThat(result).isEmpty();
+    @Test
+    @DisplayName("[listEpisodeSeasons] Should Return Empty List - When A Found Series Has No Regular Seasons")
+    void shouldReturnEmptyListWhenAFoundSeriesHasNoRegularSeasons() {
+        when(tmdbClient.getTvFullDetails("1399", LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesWithSeasons()));
+
+        assertThat(service().listEpisodeSeasons(USER_ID, "1399")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[listEpisodeEpisodes] Should Return Empty List - When A Found Season Has No Episodes")
+    void shouldReturnEmptyListWhenAFoundSeasonHasNoEpisodes() {
+        when(tmdbClient.getSeasonFullDetails("1399", 1, LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(season(1)));
+
+        assertThat(service().listEpisodeEpisodes(USER_ID, "1399", 1)).isEmpty();
     }
 
     @Test

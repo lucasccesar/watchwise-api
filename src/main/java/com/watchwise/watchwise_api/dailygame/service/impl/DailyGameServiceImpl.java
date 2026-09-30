@@ -167,6 +167,11 @@ public class DailyGameServiceImpl implements DailyGameService {
     }
 
     @Override
+    public DailyGameStateDTO getGameToday(UUID userId, DailyGameType gameType, boolean majorRoles) {
+        return getGame(userId, LocalDate.now(clock), gameType, majorRoles);
+    }
+
+    @Override
     @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request) {
@@ -273,7 +278,8 @@ public class DailyGameServiceImpl implements DailyGameService {
         }
         DailyGameCandidateDTO candidateDto = new DailyGameCandidateDTO(
                 candidate.targetKind(), candidate.tmdbId(), candidate.personTmdbId(), candidate.seriesTmdbId(),
-                candidate.seasonNumber(), candidate.episodeNumber(), null, null, null);
+                candidate.seasonNumber(), candidate.episodeNumber(), candidate.title(), candidate.imageUrl(),
+                candidate.date());
         result.setAttemptDetails(attemptDetailsCodec.append(
                 result.getAttemptDetails(),
                 new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, infoFeedback,

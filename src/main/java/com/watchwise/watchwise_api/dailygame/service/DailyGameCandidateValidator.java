@@ -3,11 +3,19 @@ package com.watchwise.watchwise_api.dailygame.service;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import org.springframework.stereotype.Component;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 
 @Component
 public class DailyGameCandidateValidator {
@@ -34,14 +42,18 @@ public class DailyGameCandidateValidator {
 
     private DailyGameCandidateIdentity validateMovie(DailyGameAttemptRequest request) {
         String tmdbId = onlyTmdbId(request);
-        ensureFound(tmdbClient.getMovieFullDetails(tmdbId, LANGUAGE), "movie");
-        return new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, tmdbId, null, null, null, null);
+        TmdbMovieFullDetails movie = ensureFound(
+                tmdbClient.getMovieFullDetails(tmdbId, LANGUAGE), "movie");
+        return new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, tmdbId, null, null, null, null,
+                movie.title(), TmdbImageUrlBuilder.posterUrl(movie.posterPath()), parseDate(movie.releaseDate()));
     }
 
     private DailyGameCandidateIdentity validateSeries(DailyGameAttemptRequest request) {
         String tmdbId = onlyTmdbId(request);
-        ensureFound(tmdbClient.getTvFullDetails(tmdbId, LANGUAGE), "series");
-        return new DailyGameCandidateIdentity(DailyGameTargetKind.SERIES, tmdbId, null, null, null, null);
+        TmdbTvFullDetails series = ensureFound(
+                tmdbClient.getTvFullDetails(tmdbId, LANGUAGE), "series");
+        return new DailyGameCandidateIdentity(DailyGameTargetKind.SERIES, tmdbId, null, null, null, null,
+                series.name(), TmdbImageUrlBuilder.posterUrl(series.posterPath()), parseDate(series.firstAirDate()));
     }
 
     private DailyGameCandidateIdentity validatePerson(DailyGameAttemptRequest request) {
@@ -50,8 +62,9 @@ public class DailyGameCandidateValidator {
             throw invalidCandidate();
         }
         String personTmdbId = positiveIdentifier(request.personTmdbId());
-        ensureFound(tmdbClient.getPersonDetails(personTmdbId), "person");
-        return new DailyGameCandidateIdentity(DailyGameTargetKind.PERSON, null, personTmdbId, null, null, null);
+        TmdbPersonDetails person = ensureFound(tmdbClient.getPersonDetails(personTmdbId), "person");
+        return new DailyGameCandidateIdentity(DailyGameTargetKind.PERSON, null, personTmdbId, null, null, null,
+                person.name(), TmdbImageUrlBuilder.profileUrl(person.profilePath()), parseDate(person.birthday()));
     }
 
     private DailyGameCandidateIdentity validateEpisode(DailyGameAttemptRequest request) {
@@ -61,9 +74,11 @@ public class DailyGameCandidateValidator {
         String seriesTmdbId = positiveIdentifier(request.seriesTmdbId());
         Integer seasonNumber = positiveCoordinate(request.seasonNumber());
         Integer episodeNumber = positiveCoordinate(request.episodeNumber());
-        ensureFound(tmdbClient.getEpisodeFullDetails(seriesTmdbId, seasonNumber, episodeNumber, LANGUAGE), "episode");
+        TmdbEpisodeFullDetails episode = ensureFound(
+                tmdbClient.getEpisodeFullDetails(seriesTmdbId, seasonNumber, episodeNumber, LANGUAGE), "episode");
         return new DailyGameCandidateIdentity(DailyGameTargetKind.EPISODE, null, null, seriesTmdbId,
-                seasonNumber, episodeNumber);
+                seasonNumber, episodeNumber, episode.name(), TmdbImageUrlBuilder.stillUrl(episode.stillPath()),
+                parseDate(episode.airDate()));
     }
 
     private String onlyTmdbId(DailyGameAttemptRequest request) {
@@ -88,19 +103,31 @@ public class DailyGameCandidateValidator {
         return value;
     }
 
-    private void ensureFound(TmdbLookupResult<?> result, String target) {
+    private <T> T ensureFound(TmdbLookupResult<T> result, String target) {
         if (result == null || result.isUnavailable()) {
             throw new TmdbUnavailableException("TMDB is temporarily unavailable");
         }
         if (result.isNotFound()) {
             throw new BadRequestException("The selected " + target + " does not exist");
         }
-        if (!(result instanceof TmdbLookupResult.Found<?>)) {
+        if (!(result instanceof TmdbLookupResult.Found<T> found) || found.value() == null) {
             throw new TmdbUnavailableException("TMDB is temporarily unavailable");
         }
+        return found.value();
     }
 
     private BadRequestException invalidCandidate() {
         return new BadRequestException("Candidate fields do not match the daily game target");
+    }
+
+    private LocalDate parseDate(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value);
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
     }
 }

@@ -196,7 +196,9 @@ class TmdbClientCachingTest {
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
-        assertThat(existence.toOptional()).isPresent();
+        TmdbPersonDetails details = existence.toOptional().orElseThrow();
+        assertThat(details.name()).isEqualTo("Leonardo DiCaprio");
+        assertThat(details.profilePath()).isNull();
         assertThat(tmdbPersonDetailsCache.getIfPresent("6193")).isNotNull();
         mockServer.verify();
     }

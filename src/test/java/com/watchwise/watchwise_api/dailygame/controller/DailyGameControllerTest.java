@@ -119,7 +119,7 @@ class DailyGameControllerTest {
     @Test
     @DisplayName("[getGame] Should Delegate The Specific Game - When A Game Type Is Requested For Today")
     void shouldDelegateTheSpecificGameWhenAGameTypeIsRequestedForToday() throws Exception {
-        when(dailyGameService.getGame(eq(CURRENT_USER_ID), any(LocalDate.class), eq(GAME_TYPE), eq(true)))
+        when(dailyGameService.getGameToday(CURRENT_USER_ID, GAME_TYPE, true))
                 .thenReturn(new DailyGameStateDTO(
                         GAME_TYPE, DailyGameTargetKind.MOVIE, 10, 0, 10, DailyGameViewStatus.NOT_PLAYED,
                         "/poster.jpg", List.of(), 0, null, null));
@@ -128,7 +128,7 @@ class DailyGameControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("NOT_PLAYED"));
 
-        verify(dailyGameService).getGame(eq(CURRENT_USER_ID), any(LocalDate.class), eq(GAME_TYPE), eq(true));
+        verify(dailyGameService).getGameToday(CURRENT_USER_ID, GAME_TYPE, true);
         verifyNoInteractions(dailyGameRankingService, dailyGameSearchService);
     }
 
@@ -246,14 +246,12 @@ class DailyGameControllerTest {
                         .param("q", "game").param("page", "1").param("size", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].tmdbId").value("1399"));
-        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/seasons")
-                        .param("seriesTmdbId", "1399"))
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/series/1399/seasons"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].seasonNumber").value(1))
                 .andExpect(jsonPath("$[0].episodeCount").value(10))
                 .andExpect(jsonPath("$[0].imageUrl").doesNotExist());
-        mockMvc.perform(get("/games/EPISODE_BY_FRAME/search/episodes")
-                        .param("seriesTmdbId", "1399").param("seasonNumber", "1"))
+        mockMvc.perform(get("/games/EPISODE_BY_FRAME/series/1399/seasons/1/episodes"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].seriesTmdbId").value("1399"))
                 .andExpect(jsonPath("$[0].episodeNumber").value(1))

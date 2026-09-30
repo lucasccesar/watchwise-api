@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyLookupBudget;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
 import org.springframework.stereotype.Component;
 
@@ -39,19 +40,22 @@ public class ActorByMovieFilmographyGenerator implements DailyChallengeGenerator
 
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
+        DailyGameFilmographyLookupBudget budget = filmographyService.newGenerationBudget();
         return DailyChallengeGenerationSupport.randomItem(
                         tmdbClient.getTopRatedMovies(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .filter(movie -> movie != null && DailyChallengeGenerationSupport.validId(movie.id()))
                 .flatMap(movie -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getMovieFullDetails(movie.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
-                .flatMap(movie -> eligibleActor(movie, excludedAnswerKeys)
+                .flatMap(movie -> eligibleActor(movie, excludedAnswerKeys, budget)
                         .map(candidate -> snapshotAssembler.actorFromMovie(movie.id(), candidate.actor(),
                                 TmdbImageUrlBuilder.profileUrl(candidate.actor().profilePath()), candidate.snapshot().entries())));
     }
 
     private Optional<ActorCandidate<TmdbCastMember>> eligibleActor(
-            TmdbMovieFullDetails movie, Set<String> excludedAnswerKeys) {
+            TmdbMovieFullDetails movie,
+            Set<String> excludedAnswerKeys,
+            DailyGameFilmographyLookupBudget budget) {
         if (movie.credits() == null || movie.credits().cast() == null) {
             return Optional.empty();
         }
@@ -62,7 +66,7 @@ public class ActorByMovieFilmographyGenerator implements DailyChallengeGenerator
                 .toList();
         List<ActorCandidate<TmdbCastMember>> eligible = cast.stream()
                 .map(actor -> new ActorCandidate<>(actor, filmographyService.snapshot(
-                        String.valueOf(actor.id()), gameType())))
+                        String.valueOf(actor.id()), gameType(), budget)))
                 .filter(candidate -> candidate.snapshot().entries().size() >= 2)
                 .toList();
         return DailyChallengeGenerationSupport.randomItem(eligible);

@@ -109,8 +109,8 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     @Test
-    @DisplayName("[images] Should Repeat Only The Last Image - When The Episode Has Fewer Than Six Stills")
-    void shouldRepeatOnlyTheLastImageWhenTheEpisodeHasFewerThanSixStills() {
+    @DisplayName("[images] Should Preserve Legacy Image Fallback - When A Stored Episode Has Fewer Than Six Stills")
+    void shouldPreserveLegacyImageFallbackWhenAStoredEpisodeHasFewerThanSixStills() {
         DailyChallenge challenge = DailyChallenge.builder()
                 .id(UUID.randomUUID())
                 .challengeDate(LocalDate.of(2026, 9, 27))

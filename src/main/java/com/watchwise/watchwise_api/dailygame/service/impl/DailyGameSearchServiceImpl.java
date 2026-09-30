@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
@@ -86,9 +87,9 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
     @Override
     public List<DailyGameSeasonOptionDTO> listEpisodeSeasons(UUID userId, String seriesTmdbId) {
         String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
-        TmdbTvFullDetails series = foundValueOrEmpty(
-                tmdbClient.getTvFullDetails(normalizedSeriesTmdbId, LANGUAGE));
-        if (series == null || series.seasons() == null) {
+        TmdbTvFullDetails series = requireFound(
+                tmdbClient.getTvFullDetails(normalizedSeriesTmdbId, LANGUAGE), "series");
+        if (series.seasons() == null) {
             return List.of();
         }
 
@@ -109,13 +110,13 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         if (lookup == null || lookup.isUnavailable()) {
             throw tmdbUnavailable();
         }
-        if (!(lookup instanceof TmdbLookupResult.Found<TmdbSeasonFullDetails> found)
-                || found.value() == null || found.value().episodes() == null) {
+        TmdbSeasonFullDetails season = requireFound(lookup, "season");
+        if (season.episodes() == null) {
             return List.of();
         }
 
         LocalDate today = LocalDate.now(clock);
-        return found.value().episodes().stream()
+        return season.episodes().stream()
                 .filter(episode -> isReleasedEpisode(episode, today))
                 .map(episode -> new DailyGameEpisodeOptionDTO(
                         normalizedSeriesTmdbId,
@@ -174,14 +175,17 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         null));
     }
 
-    private TmdbTvFullDetails foundValueOrEmpty(TmdbLookupResult<TmdbTvFullDetails> lookup) {
+    private <T> T requireFound(TmdbLookupResult<T> lookup, String subject) {
         if (lookup == null || lookup.isUnavailable()) {
             throw tmdbUnavailable();
         }
-        if (lookup instanceof TmdbLookupResult.Found<TmdbTvFullDetails> found) {
+        if (lookup instanceof TmdbLookupResult.NotFound<T>) {
+            throw new NotFoundException("No " + subject + " found on TMDB for the given id");
+        }
+        if (lookup instanceof TmdbLookupResult.Found<T> found && found.value() != null) {
             return found.value();
         }
-        return null;
+        throw tmdbUnavailable();
     }
 
     private boolean isRegularSeason(TmdbSeasonSummary season) {

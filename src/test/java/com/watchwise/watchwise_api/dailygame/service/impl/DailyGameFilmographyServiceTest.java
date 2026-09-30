@@ -11,6 +11,8 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyLookupBudget;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -210,6 +212,29 @@ class DailyGameFilmographyServiceTest {
         DailyGameFilmographyFeedbackDTO feedback = service.compare(challenge, "2", true);
 
         assertThat(feedback.sharedMajorRoleWorkKeys()).containsExactly("SERIES:10");
+    }
+
+    @Test
+    @DisplayName("[snapshot] Should Bound Series Detail Lookups And Preserve All Roles - When A Generation Budget Is Exhausted")
+    void shouldBoundSeriesDetailLookupsAndPreserveAllRolesWhenAGenerationBudgetIsExhausted() {
+        whenAggregate("1", new TmdbPersonAggregate("1", "First Actor", null, null, null, null, null,
+                null, null, null, new TmdbPersonAggregateCredits(List.of(
+                        credit("10", "First Series", "tv", "2000-01-01", 1, 1),
+                        credit("20", "Second Series", "tv", "2001-01-01", 1, 1)), List.of())));
+        org.mockito.Mockito.when(tmdbClient.getTvFullDetails("10", LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(tvDetails("10", 21)));
+
+        DailyGameFilmographyServiceImpl boundedService = new DailyGameFilmographyServiceImpl(tmdbClient, 1);
+        DailyGameFilmographyLookupBudget budget = boundedService.newGenerationBudget();
+        DailyGameFilmographyService.FilmographySnapshot snapshot = boundedService.snapshot(
+                "1", DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, budget);
+
+        assertThat(snapshot.entries()).hasSize(2);
+        assertThat(snapshot.entries()).extracting(entry -> entry.get("totalEpisodes"))
+                .containsExactly(21, null);
+        verify(tmdbClient).getTvFullDetails("10", LANGUAGE);
+        org.mockito.Mockito.verify(tmdbClient, org.mockito.Mockito.never())
+                .getTvFullDetails("20", LANGUAGE);
     }
 
     private void stubPerson(String id, String name, TmdbPersonAggregateCredit... credits) {

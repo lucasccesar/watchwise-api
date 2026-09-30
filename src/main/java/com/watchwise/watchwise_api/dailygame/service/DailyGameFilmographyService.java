@@ -14,7 +14,12 @@ public interface DailyGameFilmographyService {
     DailyGameFilmographyFeedbackDTO compare(
             DailyChallenge challenge, String guessedPersonTmdbId, boolean majorRoles);
 
+    DailyGameFilmographyLookupBudget newGenerationBudget();
+
     FilmographySnapshot snapshot(String personTmdbId, DailyGameType gameType);
+
+    FilmographySnapshot snapshot(
+            String personTmdbId, DailyGameType gameType, DailyGameFilmographyLookupBudget budget);
 
     record FilmographySnapshot(List<Map<String, Object>> entries) {
 

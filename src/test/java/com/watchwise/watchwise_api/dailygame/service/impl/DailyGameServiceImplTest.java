@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
@@ -432,6 +433,42 @@ class DailyGameServiceImplTest {
         assertThat(response.status()).isEqualTo(DailyGameViewStatus.NOT_PLAYED);
         assertThat(response.attemptsUsed()).isZero();
         assertThat(response.answer()).isNull();
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Persist Candidate Metadata - When The Validated Movie Has Metadata")
+    void shouldPersistCandidateMetadataWhenTheValidatedMovieHasMetadata() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getMovieFullDetails("680", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                        "680", "Pulp Fiction", null, null, "/pulp.jpg", null, "1994-09-10", 154,
+                        List.of(), List.of(), null, null, null, null, null, List.of(), null)));
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER,
+                request("680", null, null, null, null));
+
+        assertThat(response.attempts()).singleElement().satisfies(attempt -> {
+            assertThat(attempt.candidate().title()).isEqualTo("Pulp Fiction");
+            assertThat(attempt.candidate().imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w500/pulp.jpg");
+            assertThat(attempt.candidate().date()).isEqualTo(LocalDate.of(1994, 9, 10));
+        });
+    }
+
+    @Test
+    @DisplayName("[getGameToday] Should Resolve The Date With The Injected Clock - When The Current Game Is Requested")
+    void shouldResolveTheDateWithTheInjectedClockWhenTheCurrentGameIsRequested() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+                .thenReturn(List.of());
+        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+
+        service().getGameToday(USER_ID, DailyGameType.MOVIE_BY_INFO, true);
+
+        verify(challengeRepository).findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO);
     }
 
     @Test

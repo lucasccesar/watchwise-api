@@ -181,7 +181,8 @@ public class TmdbClient {
                 tmdbPersonAggregateCache, personTmdbId + "|" + language,
                 () -> loadPersonAggregate(personTmdbId, language));
         if (result instanceof TmdbLookupResult.Found<TmdbPersonAggregate> found) {
-            TmdbPersonDetails details = new TmdbPersonDetails(found.value().id());
+            TmdbPersonDetails details = new TmdbPersonDetails(
+                    found.value().id(), found.value().name(), found.value().profilePath(), found.value().birthday());
             tmdbPersonDetailsCache.put(personTmdbId,
                     new TmdbLookupResult.Found<>(details, found.origin()));
         }

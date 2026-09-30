@@ -13,7 +13,10 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyLookupBudget;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -32,11 +35,26 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
 
     private static final String LANGUAGE = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
     private static final String FILMOGRAPHY_KEY = "filmography";
+    private static final int DEFAULT_MAX_SERIES_DETAIL_LOOKUPS = 50;
 
     private final TmdbClient tmdbClient;
+    private final int maxSeriesDetailLookups;
 
     public DailyGameFilmographyServiceImpl(TmdbClient tmdbClient) {
+        this(tmdbClient, DEFAULT_MAX_SERIES_DETAIL_LOOKUPS);
+    }
+
+    @Autowired
+    public DailyGameFilmographyServiceImpl(
+            TmdbClient tmdbClient,
+            @Value("${app.daily-games.filmography-series-detail-max-lookups:50}") int maxSeriesDetailLookups) {
         this.tmdbClient = tmdbClient;
+        this.maxSeriesDetailLookups = maxSeriesDetailLookups;
+    }
+
+    @Override
+    public DailyGameFilmographyLookupBudget newGenerationBudget() {
+        return new DailyGameFilmographyLookupBudget(maxSeriesDetailLookups);
     }
 
     @Override
@@ -45,7 +63,8 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         String expectedMediaType = mediaType(challenge.getGameType());
         List<Work> secret = readSnapshot(challenge, expectedMediaType);
         TmdbPersonAggregate guessedActor = requireAggregate(guessedPersonTmdbId);
-        List<Work> guessed = normalize(guessedActor, expectedMediaType);
+        List<Work> guessed = normalize(guessedActor, expectedMediaType,
+                new DailyGameFilmographyLookupBudget(Integer.MAX_VALUE));
 
         Set<String> secretAllKeys = keys(secret);
         Set<String> guessedAllKeys = keys(guessed);
@@ -70,6 +89,12 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
 
     @Override
     public FilmographySnapshot snapshot(String personTmdbId, DailyGameType gameType) {
+        return snapshot(personTmdbId, gameType, newGenerationBudget());
+    }
+
+    @Override
+    public FilmographySnapshot snapshot(
+            String personTmdbId, DailyGameType gameType, DailyGameFilmographyLookupBudget budget) {
         String expectedMediaType = mediaType(gameType);
         if (expectedMediaType == null) {
             return new FilmographySnapshot(List.of());
@@ -78,7 +103,8 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         if (!(lookup instanceof TmdbLookupResult.Found<TmdbPersonAggregate> found) || found.value() == null) {
             return new FilmographySnapshot(List.of());
         }
-        return new FilmographySnapshot(normalize(found.value(), expectedMediaType).stream()
+        DailyGameFilmographyLookupBudget effectiveBudget = budget == null ? newGenerationBudget() : budget;
+        return new FilmographySnapshot(normalize(found.value(), expectedMediaType, effectiveBudget).stream()
                 .map(Work::toSnapshot)
                 .toList());
     }
@@ -91,13 +117,16 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         throw new TmdbUnavailableException("TMDB is temporarily unavailable");
     }
 
-    private List<Work> normalize(TmdbPersonAggregate aggregate, String expectedMediaType) {
+    private List<Work> normalize(
+            TmdbPersonAggregate aggregate,
+            String expectedMediaType,
+            DailyGameFilmographyLookupBudget budget) {
         if (aggregate == null || aggregate.combinedCredits() == null
                 || aggregate.combinedCredits().cast() == null) {
             return List.of();
         }
         List<TmdbPersonAggregateCredit> credits = aggregate.combinedCredits().cast();
-        Map<String, Integer> totalEpisodesByWork = totalEpisodesByWork(credits, expectedMediaType);
+        Map<String, Integer> totalEpisodesByWork = totalEpisodesByWork(credits, expectedMediaType, budget);
         Map<String, MutableWork> merged = new LinkedHashMap<>();
         for (TmdbPersonAggregateCredit credit : credits) {
             Work work = normalizeCredit(credit, expectedMediaType, totalEpisodesByWork);
@@ -152,7 +181,9 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
     }
 
     private Map<String, Integer> totalEpisodesByWork(
-            List<TmdbPersonAggregateCredit> credits, String expectedMediaType) {
+            List<TmdbPersonAggregateCredit> credits,
+            String expectedMediaType,
+            DailyGameFilmographyLookupBudget budget) {
         if (!"tv".equalsIgnoreCase(expectedMediaType)) {
             return Map.of();
         }
@@ -162,7 +193,8 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
                         && validId(credit.id()))
                 .map(TmdbPersonAggregateCredit::id)
                 .distinct()
-                .forEach(id -> tvTotalEpisodes(id).ifPresent(total -> totals.put(id, total)));
+                .forEach(id -> budget.getOrLoad(id, this::tvTotalEpisodes)
+                        .ifPresent(total -> totals.put(id, total)));
         return totals;
     }
 

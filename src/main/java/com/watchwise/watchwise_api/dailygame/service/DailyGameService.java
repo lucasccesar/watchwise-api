@@ -18,6 +18,8 @@ public interface DailyGameService {
     DailyGameStateDTO getGame(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, boolean majorRoles);
 
+    DailyGameStateDTO getGameToday(UUID userId, DailyGameType gameType, boolean majorRoles);
+
     DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request);
 
