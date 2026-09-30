@@ -225,7 +225,7 @@ class DailyGameControllerIntegrationTest {
                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
                 DailyGameViewStatus.COMPLETED, "/hint.jpg", List.of(), 10, LocalDateTime.now(),
                 answer(), true, true);
-        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true)))
                 .thenReturn(response);
 
         mockMvc.perform(attemptRequest(
@@ -238,7 +238,7 @@ class DailyGameControllerIntegrationTest {
 
         verify(dailyGameService).submitAttempt(
                 eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO),
-                argThat(request -> Boolean.TRUE.equals(request.shareOnCompletion())));
+                argThat(request -> Boolean.TRUE.equals(request.shareOnCompletion())), eq(true));
     }
 
     @Test
