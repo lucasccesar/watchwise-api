@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.comment.repository;
 
 import com.watchwise.watchwise_api.comment.entity.Comment;
-import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,8 +10,11 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public interface CommentRepository extends JpaRepository<Comment, UUID> {
 
@@ -68,9 +70,8 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
         long getCount();
     }
 
-    @EntityGraph(attributePaths = "user")
     @Query(value = """
-            SELECT ranked.*
+            SELECT ranked.id
             FROM (
                 SELECT c.*, ROW_NUMBER() OVER (
                     PARTITION BY c.diary_entry_id
@@ -82,11 +83,14 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             WHERE ranked.row_number <= 3
             ORDER BY ranked.diary_entry_id ASC, ranked.created_at DESC, ranked.id DESC
             """, nativeQuery = true)
-    List<Comment> findRecentByDiaryEntryIdIn(@Param("diaryEntryIds") Collection<UUID> diaryEntryIds);
+    List<UUID> findRecentIdsByDiaryEntryIdIn(@Param("diaryEntryIds") Collection<UUID> diaryEntryIds);
 
-    @EntityGraph(attributePaths = "user")
+    default List<Comment> findRecentByDiaryEntryIdIn(Collection<UUID> diaryEntryIds) {
+        return findRecentCommentsByIds(findRecentIdsByDiaryEntryIdIn(diaryEntryIds));
+    }
+
     @Query(value = """
-            SELECT ranked.*
+            SELECT ranked.id
             FROM (
                 SELECT c.*, ROW_NUMBER() OVER (
                     PARTITION BY c.dropped_entry_id
@@ -98,11 +102,14 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             WHERE ranked.row_number <= 3
             ORDER BY ranked.dropped_entry_id ASC, ranked.created_at DESC, ranked.id DESC
             """, nativeQuery = true)
-    List<Comment> findRecentByDroppedEntryIdIn(@Param("droppedEntryIds") Collection<UUID> droppedEntryIds);
+    List<UUID> findRecentIdsByDroppedEntryIdIn(@Param("droppedEntryIds") Collection<UUID> droppedEntryIds);
 
-    @EntityGraph(attributePaths = "user")
+    default List<Comment> findRecentByDroppedEntryIdIn(Collection<UUID> droppedEntryIds) {
+        return findRecentCommentsByIds(findRecentIdsByDroppedEntryIdIn(droppedEntryIds));
+    }
+
     @Query(value = """
-            SELECT ranked.*
+            SELECT ranked.id
             FROM (
                 SELECT c.*, ROW_NUMBER() OVER (
                     PARTITION BY c.pick_id
@@ -114,11 +121,14 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             WHERE ranked.row_number <= 3
             ORDER BY ranked.pick_id ASC, ranked.created_at DESC, ranked.id DESC
             """, nativeQuery = true)
-    List<Comment> findRecentByPickIdIn(@Param("pickIds") Collection<UUID> pickIds);
+    List<UUID> findRecentIdsByPickIdIn(@Param("pickIds") Collection<UUID> pickIds);
 
-    @EntityGraph(attributePaths = "user")
+    default List<Comment> findRecentByPickIdIn(Collection<UUID> pickIds) {
+        return findRecentCommentsByIds(findRecentIdsByPickIdIn(pickIds));
+    }
+
     @Query(value = """
-            SELECT ranked.*
+            SELECT ranked.id
             FROM (
                 SELECT c.*, ROW_NUMBER() OVER (
                     PARTITION BY c.picks_template_id
@@ -130,7 +140,25 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             WHERE ranked.row_number <= 3
             ORDER BY ranked.picks_template_id ASC, ranked.created_at DESC, ranked.id DESC
             """, nativeQuery = true)
-    List<Comment> findRecentByPicksTemplateIdIn(@Param("templateIds") Collection<UUID> templateIds);
+    List<UUID> findRecentIdsByPicksTemplateIdIn(@Param("templateIds") Collection<UUID> templateIds);
+
+    default List<Comment> findRecentByPicksTemplateIdIn(Collection<UUID> templateIds) {
+        return findRecentCommentsByIds(findRecentIdsByPicksTemplateIdIn(templateIds));
+    }
+
+    @Query("SELECT c FROM Comment c JOIN FETCH c.user WHERE c.id IN :commentIds")
+    List<Comment> findByIdInWithUser(@Param("commentIds") Collection<UUID> commentIds);
+
+    private List<Comment> findRecentCommentsByIds(List<UUID> commentIds) {
+        if (commentIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, Comment> commentsById = findByIdInWithUser(commentIds).stream()
+                .collect(Collectors.toMap(Comment::getId, Function.identity()));
+
+        return commentIds.stream().map(commentsById::get).toList();
+    }
 
     @Modifying
     @Query("UPDATE Comment c SET c.likesCount = c.likesCount + 1 WHERE c.id = :id")
