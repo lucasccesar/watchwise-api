@@ -58,6 +58,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -204,7 +205,8 @@ public class UserListServiceImpl implements UserListService {
                 : List.of(UserListVisibility.PUBLIC);
     }
 
-    private static final Set<String> ITEM_SORT_FIELDS = Set.of("position", "dateAdded", "duration", "episodeAvgRating");
+    private static final Set<String> ITEM_SORT_FIELDS = Set.of(
+            "position", "dateAdded", "duration", "episodeAvgRating", "globalEpisodeAvgRating", "contentAvgRating");
 
     @Override
     public UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
@@ -215,14 +217,20 @@ public class UserListServiceImpl implements UserListService {
         assertListIsVisibleTo(viewerId, userList);
 
         if (sortBy != null && !ITEM_SORT_FIELDS.contains(sortBy)) {
-            throw new BadRequestException("sortBy must be one of: position, dateAdded, duration, episodeAvgRating");
+            throw new BadRequestException(
+                    "sortBy must be one of: position, dateAdded, duration, episodeAvgRating, globalEpisodeAvgRating, contentAvgRating");
         }
         assertValidSortDirection(sortDirection);
+
+        boolean canViewOwnerRatings = canViewOwnerRatings(viewerId, userList.getUser());
+        if ("episodeAvgRating".equals(sortBy) && !canViewOwnerRatings) {
+            throw new ForbiddenException("The list owner's episode ratings are private");
+        }
 
         UserListItemsWithState itemsWithState = userListItemService.getItemsWithState(viewerId, listId);
         List<UserListItemResponseDTO> allItems = itemsWithState.items();
         List<UserListItemResponseDTO> items = filterAndSortItems(
-                allItems, type, genre, sortBy, sortDirection, userList.getUser().getId());
+                allItems, type, genre, sortBy, sortDirection, userList.getUser().getId(), canViewOwnerRatings);
         double watchedPercentage = itemsWithState.watchedPercentage();
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
@@ -376,7 +384,7 @@ public class UserListServiceImpl implements UserListService {
     }
 
     private List<UserListItemResponseDTO> filterAndSortItems(List<UserListItemResponseDTO> items, ContentType type,
-            String genre, String sortBy, String sortDirection, UUID ownerId) {
+            String genre, String sortBy, String sortDirection, UUID ownerId, boolean includeOwnerRatings) {
         Stream<UserListItemResponseDTO> stream = items.stream();
 
         if (type != null) {
@@ -387,30 +395,25 @@ public class UserListServiceImpl implements UserListService {
                     && item.content().genres() != null && item.content().genres().contains(genre));
         }
 
-        List<UserListItemResponseDTO> filtered = stream.toList();
+        List<UserListItemResponseDTO> filtered = enrichRatingAverages(stream.toList(), ownerId, includeOwnerRatings);
 
         if (sortBy == null) {
             return filtered;
         }
 
-        if ("episodeAvgRating".equals(sortBy)) {
-            Map<UUID, Double> ratingsByItemId = computeEpisodeAverageRatings(ownerId, filtered);
-            Comparator<Double> valueComparator = "desc".equals(sortDirection)
-                    ? Comparator.<Double>naturalOrder().reversed()
-                    : Comparator.naturalOrder();
-            Comparator<UserListItemResponseDTO> ratingComparator = Comparator.comparing(
-                    (UserListItemResponseDTO item) -> ratingsByItemId.get(item.id()),
-                    Comparator.nullsLast(valueComparator));
-            return filtered.stream().sorted(ratingComparator).toList();
-        }
-
         Comparator<UserListItemResponseDTO> comparator = switch (sortBy) {
+            case "episodeAvgRating" -> ratingComparator(
+                    UserListItemResponseDTO::episodeAverageRating, sortDirection);
+            case "globalEpisodeAvgRating" -> ratingComparator(
+                    UserListItemResponseDTO::globalEpisodeAverageRating, sortDirection);
+            case "contentAvgRating" -> ratingComparator(
+                    UserListItemResponseDTO::contentAverageRating, sortDirection);
             case "dateAdded" -> Comparator.comparing(UserListItemResponseDTO::createdAt);
             case "duration" -> Comparator.comparing(item -> durationMinutes(item.content()));
             default -> Comparator.comparing(UserListItemResponseDTO::position, Comparator.nullsLast(Comparator.naturalOrder()));
         };
 
-        if ("desc".equals(sortDirection)) {
+        if ("desc".equals(sortDirection) && !isRatingSort(sortBy)) {
             comparator = comparator.reversed();
         }
 
@@ -421,7 +424,8 @@ public class UserListServiceImpl implements UserListService {
         return content == null || content.runtimeMinutes() == null ? 0 : content.runtimeMinutes();
     }
 
-    private Map<UUID, Double> computeEpisodeAverageRatings(UUID ownerId, List<UserListItemResponseDTO> items) {
+    private List<UserListItemResponseDTO> enrichRatingAverages(
+            List<UserListItemResponseDTO> items, UUID ownerId, boolean includeOwnerRatings) {
         Set<String> seriesTmdbIds = items.stream()
                 .map(UserListItemResponseDTO::content)
                 .filter(content -> content != null
@@ -431,12 +435,46 @@ public class UserListServiceImpl implements UserListService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
-        if (seriesTmdbIds.isEmpty()) {
-            return Map.of();
+        Map<UUID, Double> ownerEpisodeAverages = Map.of();
+        Map<UUID, Double> publicEpisodeAverages = Map.of();
+        if (!seriesTmdbIds.isEmpty()) {
+            if (includeOwnerRatings) {
+                List<DiaryEntry> ownerEntries =
+                        diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(
+                                ownerId, seriesTmdbIds);
+                ownerEpisodeAverages = computeEpisodeAverageRatings(ownerEntries, items);
+            }
+            List<DiaryEntry> publicEntries =
+                    diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(seriesTmdbIds);
+            publicEpisodeAverages = computeEpisodeAverageRatings(publicEntries, items);
         }
 
-        List<DiaryEntry> scoredEpisodes =
-                diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(ownerId, seriesTmdbIds);
+        Set<UUID> contentIds = items.stream()
+                .map(UserListItemResponseDTO::content)
+                .filter(Objects::nonNull)
+                .map(ContentRefDTO::id)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<UUID, Double> contentAverages = new HashMap<>();
+        if (!contentIds.isEmpty()) {
+            for (DiaryEntryRepository.ContentStats stats
+                    : diaryEntryRepository.findContentStatsByContentIdIn(contentIds)) {
+                contentAverages.put(stats.getContentId(), stats.getAverageScore());
+            }
+        }
+
+        Map<UUID, Double> finalOwnerEpisodeAverages = ownerEpisodeAverages;
+        Map<UUID, Double> finalPublicEpisodeAverages = publicEpisodeAverages;
+        return items.stream()
+                .map(item -> item.withRatingAverages(
+                        finalOwnerEpisodeAverages.get(item.id()),
+                        finalPublicEpisodeAverages.get(item.id()),
+                        item.content() == null ? null : contentAverages.get(item.content().id())))
+                .toList();
+    }
+
+    private Map<UUID, Double> computeEpisodeAverageRatings(
+            List<DiaryEntry> scoredEpisodes, List<UserListItemResponseDTO> items) {
 
         Map<String, List<Integer>> scoresBySeries = new HashMap<>();
         Map<String, List<Integer>> scoresBySeason = new HashMap<>();
@@ -476,6 +514,26 @@ public class UserListServiceImpl implements UserListService {
         }
 
         return result;
+    }
+
+    private Comparator<UserListItemResponseDTO> ratingComparator(
+            Function<UserListItemResponseDTO, Double> ratingExtractor, String sortDirection) {
+        Comparator<Double> valueComparator = "desc".equals(sortDirection)
+                ? Comparator.<Double>naturalOrder().reversed()
+                : Comparator.naturalOrder();
+        return Comparator.comparing(ratingExtractor, Comparator.nullsLast(valueComparator));
+    }
+
+    private boolean isRatingSort(String sortBy) {
+        return "episodeAvgRating".equals(sortBy)
+                || "globalEpisodeAvgRating".equals(sortBy)
+                || "contentAvgRating".equals(sortBy);
+    }
+
+    private boolean canViewOwnerRatings(UUID viewerId, User owner) {
+        return viewerId.equals(owner.getId())
+                || Boolean.TRUE.equals(owner.getIsProfilePublic())
+                || viewerFollowsTarget(viewerId, owner.getId());
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {

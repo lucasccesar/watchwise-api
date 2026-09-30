@@ -30,6 +30,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListPreviewDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListProgressItemDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
@@ -825,7 +826,6 @@ class UserListServiceImplTest {
                 lucasId, list.getId(), null, null, "duration", "asc");
 
         assertThat(result.items()).containsExactly(seriesItem, movieItem);
-        verifyNoInteractions(diaryEntryRepository);
     }
 
     @Test
@@ -844,7 +844,6 @@ class UserListServiceImplTest {
                 lucasId, list.getId(), null, null, "duration", "asc");
 
         assertThat(result.items()).containsExactly(seriesWithoutAverage, shortMovie);
-        verifyNoInteractions(diaryEntryRepository);
     }
 
     @Test
@@ -855,7 +854,7 @@ class UserListServiceImplTest {
 
         assertThatThrownBy(() -> userListService.getUserListById(lucasId, list.getId(), null, null, "unknownField", null))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("sortBy must be one of: position, dateAdded, duration, episodeAvgRating");
+                .hasMessage("sortBy must be one of: position, dateAdded, duration, episodeAvgRating, globalEpisodeAvgRating, contentAvgRating");
 
         verifyNoInteractions(userListItemService);
     }
@@ -874,67 +873,191 @@ class UserListServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getUserListById] Should Sort Series Items By The Owner's Episode Average Rating")
-    void shouldSortSeriesItemsByTheOwnersEpisodeAverageRating() {
+    @DisplayName("[getUserListById] Should Return Owner, Public Episode, And Direct Content Averages")
+    void shouldReturnOwnerPublicEpisodeAndDirectContentAverages() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
-        UserListItemResponseDTO lowRatedSeries = buildItemResponseDto(buildContentRef("100", ContentType.SERIES));
-        UserListItemResponseDTO highRatedSeries = buildItemResponseDto(buildContentRef("200", ContentType.SERIES));
+        UserListItemResponseDTO series = buildRatingItem(ContentType.SERIES, "100", null, null, null, 1);
+        UserListItemResponseDTO season = buildRatingItem(ContentType.SEASON, null, "100", 1, null, 2);
+        UserListItemResponseDTO episode = buildRatingItem(ContentType.EPISODE, null, "100", 1, 2, 3);
+        UserListItemResponseDTO movie = buildRatingItem(ContentType.MOVIE, "500", null, null, null, 4);
+        UserListItemResponseDTO nested = buildNestedListItem(5);
+        List<UserListItemResponseDTO> items = List.of(series, season, episode, movie, nested);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
-                .thenReturn(new UserListItemsWithState(List.of(lowRatedSeries, highRatedSeries), 0.0));
-        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
+                .thenReturn(new UserListItemsWithState(items, 0.0));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(5L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
-        when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(eq(lucasId), eq(Set.of("100", "200"))))
+        when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(lucasId, Set.of("100")))
                 .thenReturn(List.of(
                         buildEpisodeEntry("100", 1, 1, 4),
-                        buildEpisodeEntry("100", 1, 2, 6),
-                        buildEpisodeEntry("200", 1, 1, 10),
-                        buildEpisodeEntry("200", 1, 2, 8)));
+                        buildEpisodeEntry("100", 1, 2, 6)));
+        when(diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(Set.of("100")))
+                .thenReturn(List.of(
+                        buildEpisodeEntry("100", 1, 1, 8),
+                        buildEpisodeEntry("100", 1, 2, 10)));
+        doReturn(List.of(
+                buildContentStats(series.content().id(), 7.0),
+                buildContentStats(season.content().id(), 6.5),
+                buildContentStats(episode.content().id(), 8.5),
+                buildContentStats(movie.content().id(), 9.0)))
+                .when(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(
+                        series.content().id(), season.content().id(), episode.content().id(), movie.content().id()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(
-                lucasId, list.getId(), null, null, "episodeAvgRating", "desc");
+                lucasId, list.getId(), null, null, null, null);
 
-        assertThat(result.items()).containsExactly(highRatedSeries, lowRatedSeries);
+        assertThat(result.items()).containsExactly(
+                series.withRatingAverages(5.0, 9.0, 7.0),
+                season.withRatingAverages(5.0, 9.0, 6.5),
+                episode.withRatingAverages(6.0, 10.0, 8.5),
+                movie.withRatingAverages(null, null, 9.0),
+                nested.withRatingAverages(null, null, null));
     }
 
     @Test
-    @DisplayName("[getUserListById] Should Sort Items With No Episode Ratings Last - Regardless Of Direction")
-    void shouldSortItemsWithNoEpisodeRatingsLastRegardlessOfDirection() {
+    @DisplayName("[getUserListById] Should Sort By Public Episode Average In Both Directions With Nulls Last")
+    void shouldSortByPublicEpisodeAverageInBothDirectionsWithNullsLast() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
-        UserListItemResponseDTO unratedMovie = buildItemResponseDto(buildContentRef("100", ContentType.MOVIE));
-        UserListItemResponseDTO ratedSeries = buildItemResponseDto(buildContentRef("200", ContentType.SERIES));
+        UserListItemResponseDTO lowPublic = buildRatingItem(ContentType.SERIES, "100", null, null, null, 1);
+        UserListItemResponseDTO highPublic = buildRatingItem(ContentType.SERIES, "200", null, null, null, 2);
+        UserListItemResponseDTO unratedMovie = buildRatingItem(ContentType.MOVIE, "300", null, null, null, 3);
+        List<UserListItemResponseDTO> items = List.of(unratedMovie, highPublic, lowPublic);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemService.getItemsWithState(lucasId, list.getId()))
-                .thenReturn(new UserListItemsWithState(List.of(unratedMovie, ratedSeries), 0.0));
-        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
+                .thenReturn(new UserListItemsWithState(items, 0.0));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(3L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
-        when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(eq(lucasId), eq(Set.of("200"))))
-                .thenReturn(List.of(buildEpisodeEntry("200", 1, 1, 9)));
+        when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(lucasId, Set.of("100", "200")))
+                .thenReturn(List.of(
+                        buildEpisodeEntry("100", 1, 1, 10),
+                        buildEpisodeEntry("200", 1, 1, 1)));
+        when(diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(Set.of("100", "200")))
+                .thenReturn(List.of(
+                        buildEpisodeEntry("100", 1, 1, 2),
+                        buildEpisodeEntry("200", 1, 1, 8)));
 
-        UserListDetailedResponseDTO ascResult = userListService.getUserListById(
-                lucasId, list.getId(), null, null, "episodeAvgRating", "asc");
-        UserListDetailedResponseDTO descResult = userListService.getUserListById(
-                lucasId, list.getId(), null, null, "episodeAvgRating", "desc");
+        UserListDetailedResponseDTO ascending = userListService.getUserListById(
+                lucasId, list.getId(), null, null, "globalEpisodeAvgRating", "asc");
+        UserListDetailedResponseDTO descending = userListService.getUserListById(
+                lucasId, list.getId(), null, null, "globalEpisodeAvgRating", "desc");
 
-        assertThat(ascResult.items()).containsExactly(ratedSeries, unratedMovie);
-        assertThat(descResult.items()).containsExactly(ratedSeries, unratedMovie);
+        assertThat(ascending.items()).extracting(UserListItemResponseDTO::id)
+                .containsExactly(lowPublic.id(), highPublic.id(), unratedMovie.id());
+        assertThat(descending.items()).extracting(UserListItemResponseDTO::id)
+                .containsExactly(highPublic.id(), lowPublic.id(), unratedMovie.id());
+        assertThat(ascending.items().getFirst().episodeAverageRating()).isEqualTo(10.0);
+        assertThat(ascending.items().getFirst().globalEpisodeAverageRating()).isEqualTo(2.0);
     }
 
     @Test
-    @DisplayName("[getUserListById] Should Use Only The Owner's Ratings - Not The Viewer's")
-    void shouldUseOnlyTheOwnersRatingsNotTheViewersForEpisodeAvgRating() {
-        UserList list = buildList(lucas, "Public list", null, UserListVisibility.PUBLIC);
-        UserListItemResponseDTO seriesItem = buildItemResponseDto(buildContentRef("100", ContentType.SERIES));
+    @DisplayName("[getUserListById] Should Sort By Direct Content Average In Both Directions With Nulls Last")
+    void shouldSortByDirectContentAverageInBothDirectionsWithNullsLast() {
+        UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
+        UserListItemResponseDTO lowRated = buildRatingItem(ContentType.MOVIE, "100", null, null, null, 1);
+        UserListItemResponseDTO highRated = buildRatingItem(ContentType.MOVIE, "200", null, null, null, 2);
+        UserListItemResponseDTO unrated = buildRatingItem(ContentType.MOVIE, "300", null, null, null, 3);
+        List<UserListItemResponseDTO> items = List.of(unrated, highRated, lowRated);
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(items, 0.0));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(3L), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+        doReturn(List.of(
+                buildContentStats(lowRated.content().id(), 3.0),
+                buildContentStats(highRated.content().id(), 9.0)))
+                .when(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(
+                        lowRated.content().id(), highRated.content().id(), unrated.content().id()));
+
+        UserListDetailedResponseDTO ascending = userListService.getUserListById(
+                lucasId, list.getId(), null, null, "contentAvgRating", "asc");
+        UserListDetailedResponseDTO descending = userListService.getUserListById(
+                lucasId, list.getId(), null, null, "contentAvgRating", "desc");
+
+        assertThat(ascending.items()).extracting(UserListItemResponseDTO::id)
+                .containsExactly(lowRated.id(), highRated.id(), unrated.id());
+        assertThat(descending.items()).extracting(UserListItemResponseDTO::id)
+                .containsExactly(highRated.id(), lowRated.id(), unrated.id());
+        verify(diaryEntryRepository, never()).findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(any(), any());
+        verify(diaryEntryRepository, never()).findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(any());
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Reject Private Owner Average Sort Before Loading Item State")
+    void shouldRejectPrivateOwnerAverageSortBeforeLoadingItemState() {
+        User privateOwner = buildUser(lucasId, "lucas", false);
+        UserList list = buildList(privateOwner, "Public list", null, UserListVisibility.PUBLIC);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> userListService.getUserListById(
+                marinaId, list.getId(), null, null, "episodeAvgRating", "desc"))
+                .isInstanceOf(ForbiddenException.class);
+
+        verifyNoInteractions(userListItemService, userListMapper, diaryEntryRepository);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Redact Private Owner Average And Keep Public Aggregates")
+    void shouldRedactPrivateOwnerAverageAndKeepPublicAggregates() {
+        User privateOwner = buildUser(lucasId, "lucas", false);
+        UserList list = buildList(privateOwner, "Public list", null, UserListVisibility.PUBLIC);
+        UserListItemResponseDTO series = buildRatingItem(ContentType.SERIES, "100", null, null, null, 1);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
         when(userListItemService.getItemsWithState(marinaId, list.getId()))
-                .thenReturn(new UserListItemsWithState(List.of(seriesItem), 0.0));
+                .thenReturn(new UserListItemsWithState(List.of(series), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(1L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+        when(diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(Set.of("100")))
+                .thenReturn(List.of(buildEpisodeEntry("100", 1, 1, 8)));
+        doReturn(List.of(buildContentStats(series.content().id(), 7.0)))
+                .when(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(series.content().id()));
 
-        userListService.getUserListById(marinaId, list.getId(), null, null, "episodeAvgRating", null);
+        UserListDetailedResponseDTO result = userListService.getUserListById(
+                marinaId, list.getId(), null, null, null, null);
 
-        verify(diaryEntryRepository).findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(eq(lucasId), eq(Set.of("100")));
-        verify(diaryEntryRepository, never()).findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(eq(marinaId), any());
+        assertThat(result.items()).containsExactly(series.withRatingAverages(null, 8.0, 7.0));
+        verify(diaryEntryRepository, never())
+                .findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(any(), any());
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Allow Owner And Accepted Follower To See And Sort By Owner Averages")
+    void shouldAllowOwnerAndAcceptedFollowerToSeeAndSortByOwnerAverages() {
+        User privateOwner = buildUser(lucasId, "lucas", false);
+        UserList list = buildList(privateOwner, "Public list", null, UserListVisibility.PUBLIC);
+        UserListItemResponseDTO lowRated = buildRatingItem(ContentType.SERIES, "100", null, null, null, 1);
+        UserListItemResponseDTO highRated = buildRatingItem(ContentType.SERIES, "200", null, null, null, 2);
+        List<UserListItemResponseDTO> items = List.of(lowRated, highRated);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(true);
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(items, 0.0));
+        when(userListItemService.getItemsWithState(marinaId, list.getId()))
+                .thenReturn(new UserListItemsWithState(items, 0.0));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+        when(diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(lucasId, Set.of("100", "200")))
+                .thenReturn(List.of(
+                        buildEpisodeEntry("100", 1, 1, 3),
+                        buildEpisodeEntry("200", 1, 1, 9)));
+
+        UserListDetailedResponseDTO ownerResult = userListService.getUserListById(
+                lucasId, list.getId(), null, null, "episodeAvgRating", "desc");
+        UserListDetailedResponseDTO followerResult = userListService.getUserListById(
+                marinaId, list.getId(), null, null, "episodeAvgRating", "desc");
+
+        assertThat(ownerResult.items()).extracting(UserListItemResponseDTO::id)
+                .containsExactly(highRated.id(), lowRated.id());
+        assertThat(followerResult.items()).extracting(UserListItemResponseDTO::id)
+                .containsExactly(highRated.id(), lowRated.id());
+        assertThat(ownerResult.items()).extracting(UserListItemResponseDTO::episodeAverageRating)
+                .containsExactly(9.0, 3.0);
+        assertThat(followerResult.items()).extracting(UserListItemResponseDTO::episodeAverageRating)
+                .containsExactly(9.0, 3.0);
     }
 
     private DiaryEntry buildEpisodeEntry(String seriesTmdbId, int seasonNumber, int episodeNumber, int score) {
@@ -1758,6 +1881,29 @@ class UserListServiceImplTest {
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+    }
+
+    private UserListItemResponseDTO buildRatingItem(ContentType type, String tmdbId, String seriesTmdbId,
+            Integer seasonNumber, Integer episodeNumber, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        ContentRefDTO content = new ContentRefDTO(
+                UUID.randomUUID(), tmdbId, type, seriesTmdbId, seasonNumber, episodeNumber,
+                null, null, now, now);
+        return new UserListItemResponseDTO(UUID.randomUUID(), content, null, position, null, now, now);
+    }
+
+    private UserListItemResponseDTO buildNestedListItem(int position) {
+        LocalDateTime now = LocalDateTime.now();
+        UserListPreviewDTO childList = new UserListPreviewDTO(
+                UUID.randomUUID(), null, "Nested", UserListVisibility.PUBLIC);
+        return new UserListItemResponseDTO(UUID.randomUUID(), null, childList, position, null, now, now);
+    }
+
+    private DiaryEntryRepository.ContentStats buildContentStats(UUID contentId, double averageScore) {
+        DiaryEntryRepository.ContentStats stats = mock(DiaryEntryRepository.ContentStats.class);
+        when(stats.getContentId()).thenReturn(contentId);
+        when(stats.getAverageScore()).thenReturn(averageScore);
+        return stats;
     }
 
     private UserListItem buildContentItem(UserList list, Content content, int position) {
