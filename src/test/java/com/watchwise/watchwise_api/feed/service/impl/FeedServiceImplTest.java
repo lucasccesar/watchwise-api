@@ -316,6 +316,8 @@ class FeedServiceImplTest {
 
     @Mock
     private UserContentPosterService userContentPosterService;
+
+    @Mock
     private UserDailyGameResultRepository dailyGameResultRepository;
 
     @Mock
