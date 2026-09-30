@@ -76,6 +76,31 @@ class FeedServiceImplTest {
     }
 
     @Test
+    @DisplayName("[PickPreviewDTO] Should Default RecentComments To Empty List - When Built Without Or With Null Comments")
+    void shouldDefaultRecentCommentsToEmptyListWhenPickPreviewIsBuiltWithoutOrWithNullComments() {
+        PickPreviewDTO withoutComments = new PickPreviewDTO(
+                UUID.randomUUID(), null, PickVisibility.PUBLIC, LocalDateTime.now(), 0, 0, false, List.of());
+        PickPreviewDTO withNullComments = new PickPreviewDTO(
+                UUID.randomUUID(), null, PickVisibility.PUBLIC, LocalDateTime.now(), 0, 0, false, List.of(), null);
+
+        assertThat(withoutComments.recentComments()).isNotNull().isEmpty();
+        assertThat(withNullComments.recentComments()).isNotNull().isEmpty();
+    }
+
+    @Test
+    @DisplayName("[PicksTemplatePreviewDTO] Should Default RecentComments To Empty List - When Built Without Or With Null Comments")
+    void shouldDefaultRecentCommentsToEmptyListWhenTemplatePreviewIsBuiltWithoutOrWithNullComments() {
+        PicksTemplatePreviewDTO shortForm = new PicksTemplatePreviewDTO(
+                UUID.randomUUID(), PickOrigin.COMMUNITY, "Weekend Picks", null, null);
+        PicksTemplatePreviewDTO withNullComments = new PicksTemplatePreviewDTO(
+                UUID.randomUUID(), null, PickOrigin.COMMUNITY, "Weekend Picks", null, null, null, 0, 0, List.of(), 0,
+                0, false, 0, null, null);
+
+        assertThat(shortForm.recentComments()).isNotNull().isEmpty();
+        assertThat(withNullComments.recentComments()).isNotNull().isEmpty();
+    }
+
+    @Test
     @DisplayName("[FeedItemDTO] Should Expose Current Top 5 Preview - When Feed Item Is Built")
     void shouldExposeCurrentTop5PreviewWhenFeedItemIsBuilt() {
         assertThat(Arrays.stream(FeedItemDTO.class.getRecordComponents())

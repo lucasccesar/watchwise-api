@@ -18,6 +18,8 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.like.entity.Like;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
@@ -102,6 +104,9 @@ class FeedControllerIntegrationTest {
     private CommentRepository commentRepository;
 
     @Autowired
+    private LikeRepository likeRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -112,6 +117,7 @@ class FeedControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        likeRepository.deleteAll();
         commentRepository.deleteAll();
         pickRepository.deleteAll();
         picksTemplateRepository.deleteAll();
@@ -261,6 +267,28 @@ class FeedControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[2].eventType").value("DIARY_ENTRY"))
                 .andExpect(jsonPath("$.content[2].commentsCount").value(1))
                 .andExpect(jsonPath("$.content[2].recentComments[0].text").value("other diary"));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Mark LikedByMe Only On Comments The Viewer Liked - When Preview Has Several Comments")
+    void shouldMarkLikedByMeOnlyOnCommentsTheViewerLikedWhenPreviewHasSeveralComments() throws Exception {
+        RegisteredUser viewer = registerUser("feedlikedviewer");
+        RegisteredUser followed = registerUser("feedlikedfollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        User viewerEntity = userRepository.findById(viewer.id()).orElseThrow();
+        LocalDateTime now = LocalDateTime.now();
+        DiaryEntry diary = persistDiaryEntry(followedEntity, persistContent("550", ContentType.MOVIE), now);
+        persistComment(followedEntity, Comment.builder().diaryEntry(diary), "not liked", now.plusSeconds(1));
+        Comment liked = persistComment(followedEntity, Comment.builder().diaryEntry(diary), "liked", now.plusSeconds(2));
+        likeRepository.save(Like.builder().user(viewerEntity).comment(liked).createdAt(now).build());
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].recentComments[0].text").value("liked"))
+                .andExpect(jsonPath("$.content[0].recentComments[0].likedByMe").value(true))
+                .andExpect(jsonPath("$.content[0].recentComments[1].text").value("not liked"))
+                .andExpect(jsonPath("$.content[0].recentComments[1].likedByMe").value(false));
     }
 
     @Test
