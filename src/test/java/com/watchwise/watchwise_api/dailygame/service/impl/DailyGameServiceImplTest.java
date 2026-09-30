@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
@@ -25,6 +26,7 @@ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository
 import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -81,6 +83,9 @@ class DailyGameServiceImplTest {
 
     @Mock
     private DailyGameInfoComparisonService infoComparisonService;
+
+    @Mock
+    private DailyGameFilmographyService filmographyService;
 
     @Test
     @DisplayName("[getToday] Should Return Eight NotPlayed States Without Creating Results - When The User Has No Results")
@@ -430,6 +435,28 @@ class DailyGameServiceImplTest {
     }
 
     @Test
+    @DisplayName("[submitAttempt] Should Persist Filmography Feedback - When A Person Guess Is Submitted")
+    void shouldPersistFilmographyFeedbackWhenAPersonGuessIsSubmitted() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, "1");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getPersonDetails("2"))
+                .thenReturn(new TmdbLookupResult.Found<>(mock()));
+        DailyGameFilmographyFeedbackDTO feedback = new DailyGameFilmographyFeedbackDTO(
+                new com.watchwise.watchwise_api.dailygame.dto.DailyGameActorGuessDTO("2", "Guessed Actor"),
+                List.of("SERIES:10"), List.of("SERIES:10", "SERIES:20"), List.of());
+        when(filmographyService.compare(challenge, "2", true)).thenReturn(feedback);
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(
+                USER_ID, DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY,
+                request(null, "2", null, null, null));
+
+        assertThat(response.attempts()).singleElement().satisfies(attempt ->
+                assertThat(attempt.filmographyFeedback()).isEqualTo(feedback));
+        verify(filmographyService).compare(challenge, "2", true);
+    }
+
+    @Test
     @DisplayName("[getGame] Should Assemble A Terminal Episode Answer From The Snapshot - Without Calling TMDB")
     void shouldAssembleATerminalEpisodeAnswerFromTheSnapshotWithoutCallingTmdb() {
         DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME, "1396", 1, 1);
@@ -605,6 +632,7 @@ class DailyGameServiceImplTest {
                 new com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator(tmdbClient),
                 new DailyChallengeResponseAssembler(),
                 infoComparisonService,
+                filmographyService,
                 CLOCK);
     }
 

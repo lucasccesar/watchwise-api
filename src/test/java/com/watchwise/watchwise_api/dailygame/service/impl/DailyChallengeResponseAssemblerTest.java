@@ -7,6 +7,9 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameActorGuessDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
@@ -187,6 +190,45 @@ class DailyChallengeResponseAssemblerTest {
         assertThat(state.attempts()).hasSize(1);
         assertThat(state.attempts().getFirst().infoFeedback()).isEqualTo(infoFeedback());
         assertThat(state.answer()).isNull();
+    }
+
+    @Test
+    @DisplayName("[state] Should Reproject Series Filmography Without Remote Data - When Major Roles Change")
+    void shouldReprojectSeriesFilmographyWithoutRemoteDataWhenMajorRolesChange() {
+        DailyChallenge challenge = DailyChallenge.builder()
+                .id(UUID.randomUUID())
+                .challengeDate(LocalDate.of(2026, 9, 27))
+                .gameType(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY)
+                .targetKind(DailyGameTargetKind.PERSON)
+                .targetTmdbId("1")
+                .answerKey("PERSON:1")
+                .imagePath("/actor.jpg")
+                .answerSnapshot(Map.of("title", "Secret Actor", "filmography", List.of(
+                        Map.of("workId", "10", "title", "Major", "mediaType", "tv", "year", 2000,
+                                "genres", List.of("18"), "episodeCount", 2, "totalEpisodes", 6,
+                                "period", "2000-01-01"),
+                        Map.of("workId", "20", "title", "Guest", "mediaType", "tv", "year", 2001,
+                                "genres", List.of("18"), "episodeCount", 2, "totalEpisodes", 7,
+                                "period", "2001-01-01"))))
+                .displaySnapshot(Map.of("imageUrl", "/actor.jpg"))
+                .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+                .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+                .build();
+        UserDailyGameResult result = result();
+        DailyGameFilmographyFeedbackDTO feedback = new DailyGameFilmographyFeedbackDTO(
+                new DailyGameActorGuessDTO("2", "Guessed Actor"),
+                List.of("SERIES:10"), List.of("SERIES:10", "SERIES:20"), List.of());
+        result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null,
+                new DailyGameAttemptDTO(1, null, null, null, feedback)));
+
+        DailyGameStateDTO major = assembler.toState(challenge, result, List.of(), true, true);
+        DailyGameStateDTO all = assembler.toState(challenge, result, List.of(), true, false);
+
+        assertThat(major.filmography().guessedActors()).containsExactly(new DailyGameActorGuessDTO("2", "Guessed Actor"));
+        assertThat(major.filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
+                .containsExactly("10:Major");
+        assertThat(all.filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
+                .containsExactly("10:Major", "20:Guest");
     }
 
     private DailyGameInfoFeedbackDTO infoFeedback() {

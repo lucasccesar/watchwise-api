@@ -5,6 +5,9 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
+import com.watchwise.watchwise_api.dailygame.service.impl.DailyGameFilmographyServiceImpl;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -17,10 +20,18 @@ public class ActorBySeriesFilmographyGenerator implements DailyChallengeGenerato
 
     private final TmdbClient tmdbClient;
     private final DailyChallengeSnapshotAssembler snapshotAssembler;
+    private final DailyGameFilmographyService filmographyService;
 
     public ActorBySeriesFilmographyGenerator(TmdbClient tmdbClient, DailyChallengeSnapshotAssembler snapshotAssembler) {
+        this(tmdbClient, snapshotAssembler, new DailyGameFilmographyServiceImpl(tmdbClient));
+    }
+
+    @Autowired
+    public ActorBySeriesFilmographyGenerator(TmdbClient tmdbClient, DailyChallengeSnapshotAssembler snapshotAssembler,
+                                             DailyGameFilmographyService filmographyService) {
         this.tmdbClient = tmdbClient;
         this.snapshotAssembler = snapshotAssembler;
+        this.filmographyService = filmographyService;
     }
 
     @Override
@@ -41,11 +52,13 @@ public class ActorBySeriesFilmographyGenerator implements DailyChallengeGenerato
                 .filter(series -> series != null && DailyChallengeGenerationSupport.validId(series.id()))
                 .flatMap(series -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getTvFullDetails(series.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
-                .flatMap(series -> eligibleActor(series, excludedAnswerKeys).map(actor -> snapshotAssembler.actorFromSeries(series.id(), actor,
-                        TmdbImageUrlBuilder.profileUrl(actor.profilePath()))));
+                .flatMap(series -> eligibleActor(series, excludedAnswerKeys)
+                        .map(candidate -> snapshotAssembler.actorFromSeries(series.id(), candidate.actor(),
+                                TmdbImageUrlBuilder.profileUrl(candidate.actor().profilePath()), candidate.snapshot().entries())));
     }
 
-    private Optional<TmdbAggregateCastMember> eligibleActor(TmdbTvFullDetails series, Set<String> excludedAnswerKeys) {
+    private Optional<ActorCandidate<TmdbAggregateCastMember>> eligibleActor(
+            TmdbTvFullDetails series, Set<String> excludedAnswerKeys) {
         if (series.aggregateCredits() == null || series.aggregateCredits().cast() == null) {
             return Optional.empty();
         }
@@ -54,6 +67,14 @@ public class ActorBySeriesFilmographyGenerator implements DailyChallengeGenerato
                         && DailyChallengeGenerationSupport.validImage(actor.profilePath())
                         && !excludedAnswerKeys.contains("PERSON:" + actor.id()))
                 .toList();
-        return DailyChallengeGenerationSupport.randomItem(cast);
+        List<ActorCandidate<TmdbAggregateCastMember>> eligible = cast.stream()
+                .map(actor -> new ActorCandidate<>(actor, filmographyService.snapshot(
+                        String.valueOf(actor.id()), gameType())))
+                .filter(candidate -> candidate.snapshot().entries().size() >= 2)
+                .toList();
+        return DailyChallengeGenerationSupport.randomItem(eligible);
+    }
+
+    private record ActorCandidate<T>(T actor, DailyGameFilmographyService.FilmographySnapshot snapshot) {
     }
 }

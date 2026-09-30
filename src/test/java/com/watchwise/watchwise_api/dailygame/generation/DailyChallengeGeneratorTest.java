@@ -14,6 +14,9 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbNetwork;
 import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCompany;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregate;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregateCredit;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregateCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionProviders;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
@@ -166,7 +169,7 @@ class DailyChallengeGeneratorTest {
                 new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 4, null)));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(series));
         when(tmdbClient.getSeasonFullDetails("1396", 1, LANGUAGE)).thenReturn(found(season));
-        when(tmdbClient.getEpisodeImages("1396", 1, 3)).thenReturn(found(new TmdbEpisodeImages(List.of(
+        org.mockito.Mockito.lenient().when(tmdbClient.getEpisodeImages("1396", 1, 3)).thenReturn(found(new TmdbEpisodeImages(List.of(
                 new TmdbStill("/first.jpg"),
                 new TmdbStill("/second.jpg"),
                 new TmdbStill("/third.jpg"),
@@ -394,12 +397,37 @@ class DailyChallengeGeneratorTest {
                 .thenReturn(found(movieDetails("680", "Pulp Fiction", new TmdbCredits(
                         List.of(new TmdbCastMember(103, "Uma Thurman", "Mia", "/uma.jpg")), List.of()))));
 
+        when(tmdbClient.getPersonAggregate("103", LANGUAGE))
+                .thenReturn(found(personAggregate("103", "Uma Thurman",
+                        new TmdbPersonAggregateCredit("680", "movie", "Pulp Fiction", null, "/pulp.jpg",
+                                "1994-09-10", null, "Mia", null),
+                        new TmdbPersonAggregateCredit("550", "movie", "Kill Bill", null, "/kill-bill.jpg",
+                                "2003-10-10", null, "The Bride", null))));
+
         DailyChallengeCandidate candidate = new ActorByMovieFilmographyGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE)
                 .orElseThrow();
 
         assertThat(candidate.answerKey()).isEqualTo("PERSON:103");
         assertThat(candidate.sourceTmdbId()).isEqualTo("680");
+        assertThat((List<?>) candidate.answerSnapshot().get("filmography")).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("[generate] Should Reject The Actor - When The Movie Filmography Has Fewer Than Two Eligible Works")
+    void shouldRejectTheActorWhenTheMovieFilmographyHasFewerThanTwoEligibleWorks() {
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10"))));
+        when(tmdbClient.getMovieFullDetails("680", LANGUAGE))
+                .thenReturn(found(movieDetails("680", "Pulp Fiction", new TmdbCredits(
+                        List.of(new TmdbCastMember(103, "Uma Thurman", "Mia", "/uma.jpg")), List.of()))));
+        when(tmdbClient.getPersonAggregate("103", LANGUAGE))
+                .thenReturn(found(personAggregate("103", "Uma Thurman",
+                        new TmdbPersonAggregateCredit("680", "movie", "Pulp Fiction", null, "/pulp.jpg",
+                                "1994-09-10", null, "Mia", null))));
+
+        assertThat(new ActorByMovieFilmographyGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE)).isEmpty();
     }
 
     @Test
@@ -410,6 +438,16 @@ class DailyChallengeGeneratorTest {
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
                 .thenReturn(found(seriesDetails("1396", "Breaking Bad", new TmdbAggregateCredits(
                         List.of(new TmdbAggregateCastMember(17419, "Bryan Cranston", "/bryan.jpg", List.of(new TmdbAggregateRole("Walter")), 62)), List.of()))));
+        when(tmdbClient.getTvFullDetails("1400", LANGUAGE))
+                .thenReturn(found(seriesDetails("1400", "Malcolm", new TmdbAggregateCredits(List.of(), List.of()))));
+        when(tmdbClient.getPersonAggregate("17419", LANGUAGE))
+                .thenReturn(found(personAggregate("17419", "Bryan Cranston",
+                        new TmdbPersonAggregateCredit("1396", "tv", null, "Breaking Bad", "/breaking-bad.jpg",
+                                null, "2008-01-20", "Walter", null, List.of(18), 62,
+                                List.of(new TmdbAggregateRole("Walter", 62))),
+                        new TmdbPersonAggregateCredit("1400", "tv", null, "Malcolm", "/malcolm.jpg",
+                                null, "2000-01-09", "Hal", null, List.of(35), 151,
+                                List.of(new TmdbAggregateRole("Hal", 151))))));
 
         DailyChallengeCandidate candidate = new ActorBySeriesFilmographyGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE)
@@ -417,6 +455,7 @@ class DailyChallengeGeneratorTest {
 
         assertThat(candidate.answerKey()).isEqualTo("PERSON:17419");
         assertThat(candidate.sourceTmdbId()).isEqualTo("1396");
+        assertThat((List<?>) candidate.answerSnapshot().get("filmography")).hasSize(2);
     }
 
     private static <T> TmdbLookupResult<T> found(T value) {
@@ -473,6 +512,12 @@ class DailyChallengeGeneratorTest {
     private static TmdbTvFullDetails seriesDetails(String id, String name, TmdbAggregateCredits credits) {
         return new TmdbTvFullDetails(id, name, name, null, "/poster.jpg", null, "2008-01-20", List.of(),
                 List.of(), List.of(), List.of(), List.of(), null, credits, null, null, 5, 62, List.of(), null, "Ended");
+    }
+
+    private static TmdbPersonAggregate personAggregate(String id, String name,
+                                                        TmdbPersonAggregateCredit... credits) {
+        return new TmdbPersonAggregate(id, name, null, null, null, null, null, null, null, null,
+                new TmdbPersonAggregateCredits(List.of(credits), List.of()));
     }
 
     private static TmdbTvFullDetails seriesDetails(String id, String name, TmdbAggregateCredits credits,

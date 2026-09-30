@@ -125,11 +125,44 @@ public class DailyChallengeSnapshotAssembler {
     }
 
     public DailyChallengeCandidate actorFromMovie(String movieTmdbId, TmdbCastMember actor, String imagePath) {
+        return actorFromMovie(movieTmdbId, actor, imagePath, List.of());
+    }
+
+    public DailyChallengeCandidate actorFromMovie(String movieTmdbId, TmdbCastMember actor, String imagePath,
+                                                  List<Map<String, Object>> filmography) {
+        Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.PERSON, null,
+                String.valueOf(actor.id()), null, null, null, actor.name(), imagePath, movieTmdbId);
+        put(answerSnapshot, "filmography", filmography);
+        return candidate(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, DailyGameTargetKind.PERSON,
+                String.valueOf(actor.id()), null, null, null, movieTmdbId,
+                "PERSON:" + actor.id(), imagePath, answerSnapshot, displaySnapshot(imagePath), List.of());
+    }
+
+    public DailyChallengeCandidate actorFromMovie(String movieTmdbId, TmdbCastMember actor, String imagePath,
+                                                  java.util.Collection<Map<String, Object>> filmography) {
+        return actorFromMovie(movieTmdbId, actor, imagePath, List.copyOf(filmography));
+    }
+
+    public DailyChallengeCandidate actorFromMovieLegacy(String movieTmdbId, TmdbCastMember actor, String imagePath) {
         return person(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, String.valueOf(actor.id()), actor.name(), imagePath,
                 movieTmdbId, List.of());
     }
 
     public DailyChallengeCandidate actorFromSeries(String seriesTmdbId, TmdbAggregateCastMember actor, String imagePath) {
+        return actorFromSeries(seriesTmdbId, actor, imagePath, List.of());
+    }
+
+    public DailyChallengeCandidate actorFromSeries(String seriesTmdbId, TmdbAggregateCastMember actor, String imagePath,
+                                                   List<Map<String, Object>> filmography) {
+        Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.PERSON, null,
+                String.valueOf(actor.id()), null, null, null, actor.name(), imagePath, seriesTmdbId);
+        put(answerSnapshot, "filmography", filmography);
+        return candidate(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, DailyGameTargetKind.PERSON,
+                String.valueOf(actor.id()), null, null, null, seriesTmdbId,
+                "PERSON:" + actor.id(), imagePath, answerSnapshot, displaySnapshot(imagePath), List.of());
+    }
+
+    public DailyChallengeCandidate actorFromSeriesLegacy(String seriesTmdbId, TmdbAggregateCastMember actor, String imagePath) {
         return person(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, String.valueOf(actor.id()), actor.name(), imagePath,
                 seriesTmdbId, List.of());
     }

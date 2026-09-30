@@ -80,6 +80,25 @@ class TmdbSearchModelsTest {
         assertThat(paddedQuery).isEqualTo(normalizedQuery);
     }
 
+    @Test
+    @DisplayName("[TmdbPersonAggregateCredit] Should Parse Filmography Fields - When TMDB Returns Mixed Credits")
+    void shouldParseFilmographyFieldsWhenTmdbReturnsMixedCredits() throws Exception {
+        TmdbPersonAggregateCredit credit = objectMapper.readValue("""
+                {"id":1396,"media_type":"tv","name":"Breaking Bad","poster_path":"/breaking-bad.jpg",
+                "first_air_date":"2008-01-20","genre_ids":[18,80],"episode_count":62,
+                "roles":[{"character":"Walter White","episode_count":62,"credit_id":"abc"}]}
+                """, TmdbPersonAggregateCredit.class);
+
+        assertThat(credit.id()).isEqualTo("1396");
+        assertThat(credit.genreIds()).containsExactly(18, 80);
+        assertThat(credit.episodeCount()).isEqualTo(62);
+        assertThat(credit.roles()).singleElement().satisfies(role -> {
+            assertThat(role.character()).isEqualTo("Walter White");
+            assertThat(role.episodeCount()).isEqualTo(62);
+            assertThat(role.creditId()).isEqualTo("abc");
+        });
+    }
+
     private <T> TmdbSearchPage<T> readPage(String json, Class<T> resultType) throws Exception {
         return objectMapper.readValue(json,
                 objectMapper.getTypeFactory().constructParametricType(TmdbSearchPage.class, resultType));
