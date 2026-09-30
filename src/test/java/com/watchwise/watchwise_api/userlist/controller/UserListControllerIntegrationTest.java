@@ -49,6 +49,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
@@ -345,6 +346,20 @@ class UserListControllerIntegrationTest {
                                     "score": %d
                                 }
                                 """.formatted(seriesTmdbId, seasonNumber, episodeNumber, score)))
+                .andExpect(status().isCreated());
+    }
+
+    private void logContent(RegisteredUser actor, String tmdbId, ContentType type, int score) throws Exception {
+        mockMvc.perform(post("/diary")
+                        .cookie(actor.accessToken(), actor.csrfToken())
+                        .header("X-XSRF-TOKEN", actor.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "content": { "tmdbId": "%s", "type": "%s" },
+                                    "score": %d
+                                }
+                                """.formatted(tmdbId, type.name(), score)))
                 .andExpect(status().isCreated());
     }
 
@@ -777,6 +792,106 @@ class UserListControllerIntegrationTest {
                 .andExpect(jsonPath("$.items[0].content.tmdbId").value("100"))
                 .andExpect(jsonPath("$.items[1].content.tmdbId").value("200"))
                 .andExpect(jsonPath("$.items[2].content.tmdbId").value("300"));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return Rating Averages And Sort By Global Episode Average - Using Public Profiles")
+    void shouldReturnRatingAveragesAndSortByGlobalEpisodeAverageUsingPublicProfiles() throws Exception {
+        RegisteredUser owner = registerUser("getbyidglobalepisodeowner");
+        RegisteredUser publicRater = registerUser("getbyidglobalepisodepublic");
+        RegisteredUser privateRater = registerUser("getbyidglobalepisodeprivate");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+        persistContentItem(list, "100", ContentType.SERIES, 1);
+        persistContentItem(list, "200", ContentType.SERIES, 2);
+        persistContentItem(list, "300", ContentType.MOVIE, 3);
+        makeProfilePrivate(privateRater);
+
+        logEpisode(owner, "100", 1, 1, 4);
+        logEpisode(owner, "100", 1, 2, 6);
+        logEpisode(owner, "200", 1, 1, 10);
+        logEpisode(publicRater, "100", 1, 1, 8);
+        logEpisode(publicRater, "200", 1, 1, 6);
+        logEpisode(privateRater, "100", 1, 1, 10);
+        logEpisode(privateRater, "200", 1, 1, 2);
+        logContent(owner, "100", ContentType.SERIES, 4);
+        logContent(owner, "200", ContentType.SERIES, 6);
+        logContent(publicRater, "100", ContentType.SERIES, 8);
+        logContent(publicRater, "200", ContentType.SERIES, 10);
+        logContent(privateRater, "100", ContentType.SERIES, 10);
+        logContent(privateRater, "200", ContentType.SERIES, 1);
+
+        mockMvc.perform(getUserListByIdRequest(owner, list.getId(), "globalEpisodeAvgRating", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].content.tmdbId").value("100"))
+                .andExpect(jsonPath("$.items[0].episodeAverageRating").value(5.0))
+                .andExpect(jsonPath("$.items[0].globalEpisodeAverageRating").value(6.0))
+                .andExpect(jsonPath("$.items[0].contentAverageRating").value(6.0))
+                .andExpect(jsonPath("$.items[1].content.tmdbId").value("200"))
+                .andExpect(jsonPath("$.items[1].episodeAverageRating").value(10.0))
+                .andExpect(jsonPath("$.items[1].globalEpisodeAverageRating").value(8.0))
+                .andExpect(jsonPath("$.items[1].contentAverageRating").value(8.0))
+                .andExpect(jsonPath("$.items[2].content.tmdbId").value("300"))
+                .andExpect(jsonPath("$.items[2].episodeAverageRating").value(nullValue()))
+                .andExpect(jsonPath("$.items[2].globalEpisodeAverageRating").value(nullValue()))
+                .andExpect(jsonPath("$.items[2].contentAverageRating").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Sort By Direct Content Average - Using Public Profiles And Nulls Last")
+    void shouldSortByDirectContentAverageUsingPublicProfilesAndNullsLast() throws Exception {
+        RegisteredUser owner = registerUser("getbyidcontentavgowner");
+        RegisteredUser publicRater = registerUser("getbyidcontentavgpublic");
+        RegisteredUser privateRater = registerUser("getbyidcontentavgprivate");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+        persistContentItem(list, "400", ContentType.MOVIE, 1);
+        persistContentItem(list, "500", ContentType.MOVIE, 2);
+        persistContentItem(list, "600", ContentType.MOVIE, 3);
+        makeProfilePrivate(privateRater);
+
+        logContent(owner, "400", ContentType.MOVIE, 4);
+        logContent(publicRater, "400", ContentType.MOVIE, 6);
+        logContent(owner, "500", ContentType.MOVIE, 8);
+        logContent(publicRater, "500", ContentType.MOVIE, 10);
+        logContent(privateRater, "400", ContentType.MOVIE, 1);
+        logContent(privateRater, "500", ContentType.MOVIE, 1);
+
+        mockMvc.perform(getUserListByIdRequest(owner, list.getId(), "contentAvgRating", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].content.tmdbId").value("400"))
+                .andExpect(jsonPath("$.items[0].episodeAverageRating").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].globalEpisodeAverageRating").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].contentAverageRating").value(5.0))
+                .andExpect(jsonPath("$.items[1].content.tmdbId").value("500"))
+                .andExpect(jsonPath("$.items[1].contentAverageRating").value(9.0))
+                .andExpect(jsonPath("$.items[2].content.tmdbId").value("600"))
+                .andExpect(jsonPath("$.items[2].contentAverageRating").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Hide Owner Episode Ratings - When Private Owner's Public List Is Read By Another User")
+    void shouldHideOwnerEpisodeRatingsWhenPrivateOwnersPublicListIsReadByAnotherUser() throws Exception {
+        RegisteredUser owner = registerUser("getbyidprivateepisodeowner");
+        RegisteredUser viewer = registerUser("getbyidprivateepisodeviewer");
+        RegisteredUser publicRater = registerUser("getbyidprivateepisodepublic");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+        persistContentItem(list, "700", ContentType.SERIES, 1);
+        makeProfilePrivate(owner);
+        logEpisode(owner, "700", 1, 1, 10);
+        logEpisode(publicRater, "700", 1, 1, 7);
+        logContent(owner, "700", ContentType.SERIES, 10);
+        logContent(publicRater, "700", ContentType.SERIES, 6);
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId(), "episodeAvgRating", "desc"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(getUserListByIdRequest(viewer, list.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].episodeAverageRating").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].globalEpisodeAverageRating").value(7.0))
+                .andExpect(jsonPath("$.items[0].contentAverageRating").value(6.0));
     }
 
     @Test
