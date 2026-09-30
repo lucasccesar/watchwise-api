@@ -52,5 +52,6 @@ public interface PicksTemplateMapper {
     @Mapping(target = "isLikedByViewer", ignore = true)
     @Mapping(target = "myPicksCount", ignore = true)
     @Mapping(target = "latestMyPickId", ignore = true)
+    @Mapping(target = "recentComments", ignore = true)
     PicksTemplatePreviewDTO picksTemplateToPreviewDto(PicksTemplate picksTemplate);
 }
