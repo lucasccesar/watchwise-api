@@ -522,6 +522,44 @@ class DailyGameServiceImplTest {
     }
 
     @Test
+    @DisplayName("[giveUp] Should Share The Failed Result - When Sharing Was Enabled Before Giving Up")
+    void shouldShareTheFailedResultWhenSharingWasEnabledBeforeGivingUp() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 2, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        result.setShareOnCompletion(true);
+        stubGiveUp(challenge, result);
+
+        DailyGameAttemptResponseDTO response = service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO);
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.FAILED);
+        assertThat(response.sharedToFeed()).isTrue();
+        assertThat(result.getSharedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    @DisplayName("[giveUp] Should Not Share The Failed Result - When Sharing Was Not Enabled")
+    void shouldNotShareTheFailedResultWhenSharingWasNotEnabled() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 2, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubGiveUp(challenge, result);
+
+        DailyGameAttemptResponseDTO response = service().giveUp(USER_ID, DailyGameType.MOVIE_BY_INFO);
+
+        assertThat(response.status()).isEqualTo(DailyGameViewStatus.FAILED);
+        assertThat(response.sharedToFeed()).isFalse();
+        assertThat(result.getSharedAt()).isNull();
+    }
+
+    private void stubGiveUp(DailyChallenge challenge, UserDailyGameResult result) {
+        when(challengeRepository.findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_INFO))
+                .thenReturn(Optional.of(challenge));
+        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
+        when(resultRepository.findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId()))
+                .thenReturn(Optional.of(result));
+        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+    }
+
+    @Test
     @DisplayName("[giveUp] Should Fail Without Consuming An Attempt - When The User Gives Up Before Playing")
     void shouldFailWithoutConsumingAnAttemptWhenTheUserGivesUp() {
         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550");
