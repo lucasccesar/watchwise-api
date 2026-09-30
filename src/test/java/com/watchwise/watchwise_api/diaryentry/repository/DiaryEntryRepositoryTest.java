@@ -1058,6 +1058,32 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findScoredPublicEpisodeEntriesBySeriesTmdbIdIn] Should Return Only Public Scored Episodes - When Private And Unscored Entries Exist")
+    void shouldReturnOnlyPublicScoredEpisodeEntriesForRequestedSeries() {
+        contentRepository.deleteAll();
+        marina.setIsProfilePublic(false);
+        Content publicScoredEpisode = contentRepository.save(buildEpisode("100", 1, 1));
+        Content privateScoredEpisode = contentRepository.save(buildEpisode("100", 1, 2));
+        Content publicUnscoredEpisode = contentRepository.save(buildEpisode("100", 1, 3));
+
+        DiaryEntry publicScoredEntry = buildEntry(lucas, publicScoredEpisode);
+        publicScoredEntry.setScore(8);
+        DiaryEntry privateScoredEntry = buildEntry(marina, privateScoredEpisode);
+        privateScoredEntry.setScore(9);
+        DiaryEntry publicUnscoredEntry = buildEntry(lucas, publicUnscoredEpisode);
+        DiaryEntry savedPublicScoredEntry = diaryEntryRepository.save(publicScoredEntry);
+        diaryEntryRepository.save(privateScoredEntry);
+        diaryEntryRepository.save(publicUnscoredEntry);
+        diaryEntryRepository.flush();
+        entityManager.clear();
+
+        List<DiaryEntry> result = diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(List.of("100"));
+
+        assertThat(result).extracting(DiaryEntry::getId)
+                .containsExactly(savedPublicScoredEntry.getId());
+    }
+
+    @Test
     @DisplayName("[findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber] Should Return Every Pass For Episodes In The Requested Season")
     void shouldFindAllEpisodeEntriesForUserAndSeason() {
         contentRepository.deleteAll();
