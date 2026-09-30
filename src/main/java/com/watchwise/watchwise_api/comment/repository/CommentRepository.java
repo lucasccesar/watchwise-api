@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -157,7 +158,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
         Map<UUID, Comment> commentsById = findByIdInWithUser(commentIds).stream()
                 .collect(Collectors.toMap(Comment::getId, Function.identity()));
 
-        return commentIds.stream().map(commentsById::get).toList();
+        return commentIds.stream().map(commentsById::get).filter(Objects::nonNull).toList();
     }
 
     @Modifying
