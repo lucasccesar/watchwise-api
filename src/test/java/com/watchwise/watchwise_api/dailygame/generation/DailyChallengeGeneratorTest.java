@@ -33,6 +33,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbStill;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.dailygame.service.impl.DailyGameFilmographyServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -404,7 +405,8 @@ class DailyChallengeGeneratorTest {
                         new TmdbPersonAggregateCredit("550", "movie", "Kill Bill", null, "/kill-bill.jpg",
                                 "2003-10-10", null, "The Bride", null))));
 
-        DailyChallengeCandidate candidate = new ActorByMovieFilmographyGenerator(tmdbClient, snapshotAssembler)
+        DailyChallengeCandidate candidate = new ActorByMovieFilmographyGenerator(tmdbClient, snapshotAssembler,
+                new DailyGameFilmographyServiceImpl(tmdbClient))
                 .generate(CHALLENGE_DATE)
                 .orElseThrow();
 
@@ -426,7 +428,8 @@ class DailyChallengeGeneratorTest {
                         new TmdbPersonAggregateCredit("680", "movie", "Pulp Fiction", null, "/pulp.jpg",
                                 "1994-09-10", null, "Mia", null))));
 
-        assertThat(new ActorByMovieFilmographyGenerator(tmdbClient, snapshotAssembler)
+        assertThat(new ActorByMovieFilmographyGenerator(tmdbClient, snapshotAssembler,
+                new DailyGameFilmographyServiceImpl(tmdbClient))
                 .generate(CHALLENGE_DATE)).isEmpty();
     }
 
@@ -449,7 +452,8 @@ class DailyChallengeGeneratorTest {
                                 null, "2000-01-09", "Hal", null, List.of(35), 151,
                                 List.of(new TmdbAggregateRole("Hal", 151))))));
 
-        DailyChallengeCandidate candidate = new ActorBySeriesFilmographyGenerator(tmdbClient, snapshotAssembler)
+        DailyChallengeCandidate candidate = new ActorBySeriesFilmographyGenerator(tmdbClient, snapshotAssembler,
+                new DailyGameFilmographyServiceImpl(tmdbClient))
                 .generate(CHALLENGE_DATE)
                 .orElseThrow();
 

@@ -22,7 +22,14 @@ public interface DailyGameService {
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request);
 
     DailyGameAttemptResponseDTO submitAttempt(
+            UUID userId, DailyGameType gameType, DailyGameAttemptRequest request, boolean majorRoles);
+
+    DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request);
+
+    DailyGameAttemptResponseDTO submitAttempt(
+            UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request,
+            boolean majorRoles);
 
     DailyGameAttemptResponseDTO giveUp(UUID userId, DailyGameType gameType);
 

@@ -121,7 +121,7 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
                 ? usable(credit.releaseDate()) ? credit.releaseDate().trim() : null
                 : usable(credit.firstAirDate()) ? credit.firstAirDate().trim() : null;
         Integer year = year(period);
-        if (title == null || period == null || year == null) {
+        if (title == null) {
             return null;
         }
 
@@ -216,8 +216,7 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         String title = string(raw.get("title"));
         Integer year = integer(raw.get("year"));
         String period = string(raw.get("period"));
-        if (!validId(workId) || !expectedMediaType.equalsIgnoreCase(mediaType)
-                || !usable(title) || year == null) {
+        if (!validId(workId) || !expectedMediaType.equalsIgnoreCase(mediaType) || !usable(title)) {
             return null;
         }
         Integer episodeCount = integer(raw.get("episodeCount"));
@@ -228,7 +227,7 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         }
         return new Work(mediaType.toLowerCase(Locale.ROOT), workId, title, year,
                 strings(raw.get("genres")), string(raw.get("posterUrl")), episodeCount,
-                totalEpisodes == null ? episodeCount : totalEpisodes, period,
+                totalEpisodes, period,
                 string(raw.get("character")));
     }
 

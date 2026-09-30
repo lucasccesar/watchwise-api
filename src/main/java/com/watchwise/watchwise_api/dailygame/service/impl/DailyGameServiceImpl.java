@@ -170,13 +170,28 @@ public class DailyGameServiceImpl implements DailyGameService {
     @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request) {
-        return submitAttempt(userId, LocalDate.now(clock), gameType, request);
+        return submitAttempt(userId, LocalDate.now(clock), gameType, request, true);
+    }
+
+    @Override
+    @Transactional
+    public DailyGameAttemptResponseDTO submitAttempt(
+            UUID userId, DailyGameType gameType, DailyGameAttemptRequest request, boolean majorRoles) {
+        return submitAttempt(userId, LocalDate.now(clock), gameType, request, majorRoles);
     }
 
     @Override
     @Transactional
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request) {
+        return submitAttempt(userId, challengeDate, gameType, request, true);
+    }
+
+    @Override
+    @Transactional
+    public DailyGameAttemptResponseDTO submitAttempt(
+            UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request,
+            boolean majorRoles) {
         requireGameType(gameType);
         assertAvailableDate(challengeDate);
         LocalDateTime now = LocalDateTime.now(clock);
@@ -213,7 +228,7 @@ public class DailyGameServiceImpl implements DailyGameService {
                 filmographyFeedback);
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
         return responseAssembler.toAttemptResponse(challenge, result, hints,
-                episodeFeedback, challengeDate.equals(LocalDate.now(clock)));
+                episodeFeedback, challengeDate.equals(LocalDate.now(clock)), majorRoles);
     }
 
     @Override

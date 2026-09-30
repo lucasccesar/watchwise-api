@@ -207,7 +207,7 @@ class DailyGameControllerIntegrationTest {
         DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
                 DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null);
-        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true)))
                 .thenReturn(response);
 
         mockMvc.perform(attemptRequest(user, DailyGameType.MOVIE_BY_INFO, "{\"tmdbId\":\"550\"}"))
@@ -215,7 +215,7 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.attemptsUsed").value(1))
                 .andExpect(jsonPath("$.answer").doesNotExist());
 
-        verify(dailyGameService).submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any());
+        verify(dailyGameService).submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true));
     }
 
     @Test
@@ -309,7 +309,7 @@ class DailyGameControllerIntegrationTest {
     @DisplayName("[submitAttempt] Should Return Conflict - When The Game Is Already Completed")
     void shouldReturnConflictWhenTheGameIsAlreadyCompleted() throws Exception {
         RegisteredUser user = registerUser("dailycontrollerconflict");
-        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true)))
                 .thenThrow(new ConflictException("Daily game attempt is already finished"));
 
         mockMvc.perform(attemptRequest(user, DailyGameType.MOVIE_BY_INFO, "{\"tmdbId\":\"550\"}"))
@@ -443,7 +443,7 @@ class DailyGameControllerIntegrationTest {
         DailyGameAttemptResponseDTO response = new DailyGameAttemptResponseDTO(
                 DailyGameType.MOVIE_BY_INFO, DailyGameTargetKind.MOVIE, 10, 1, 9,
                 DailyGameViewStatus.IN_PROGRESS, "/hint.jpg", List.of(), 0, null, null);
-        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any()))
+        when(dailyGameService.submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true)))
                 .thenReturn(response);
 
         for (int attempt = 0; attempt < 20; attempt++) {
@@ -456,7 +456,7 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(429));
 
         verify(dailyGameService, times(20))
-                .submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any());
+                .submitAttempt(eq(user.id()), eq(DailyGameType.MOVIE_BY_INFO), any(), eq(true));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {

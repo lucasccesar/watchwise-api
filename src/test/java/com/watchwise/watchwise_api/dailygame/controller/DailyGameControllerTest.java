@@ -153,10 +153,11 @@ class DailyGameControllerTest {
     @DisplayName("[submitAttempt] Should Delegate And Return Response - When Attempt Is Valid")
     void shouldSubmitAttemptWithCurrentUserAndRateLimit() throws Exception {
         DailyGameAttemptResponseDTO response = attemptResponse();
-        when(dailyGameService.submitAttempt(eq(CURRENT_USER_ID), eq(GAME_TYPE), any(DailyGameAttemptRequest.class)))
+        when(dailyGameService.submitAttempt(eq(CURRENT_USER_ID), eq(GAME_TYPE), any(DailyGameAttemptRequest.class), eq(false)))
                 .thenReturn(response);
 
         mockMvc.perform(post("/games/{gameType}/attempt", GAME_TYPE)
+                        .param("majorRoles", "false")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tmdbId\":\"550\"}"))
                 .andExpect(status().isOk())
@@ -166,7 +167,7 @@ class DailyGameControllerTest {
 
         verify(requestThrottler).checkAllowed(
                 "daily-game-attempt|" + CURRENT_USER_ID, 20, Duration.ofMinutes(5));
-        verify(dailyGameService).submitAttempt(eq(CURRENT_USER_ID), eq(GAME_TYPE), any(DailyGameAttemptRequest.class));
+        verify(dailyGameService).submitAttempt(eq(CURRENT_USER_ID), eq(GAME_TYPE), any(DailyGameAttemptRequest.class), eq(false));
     }
 
     @Test
@@ -175,17 +176,18 @@ class DailyGameControllerTest {
         LocalDate historicalDate = LocalDate.of(2026, 9, 27);
         DailyGameAttemptResponseDTO response = attemptResponse();
         when(dailyGameService.submitAttempt(
-                eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class)))
+                eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class), eq(false)))
                 .thenReturn(response);
 
         mockMvc.perform(post("/games/{challengeDate}/{gameType}/attempt", historicalDate, GAME_TYPE)
+                        .param("majorRoles", "false")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tmdbId\":\"550\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.gameType").value(GAME_TYPE.name()));
 
         verify(dailyGameService).submitAttempt(
-                eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class));
+                eq(CURRENT_USER_ID), eq(historicalDate), eq(GAME_TYPE), any(DailyGameAttemptRequest.class), eq(false));
     }
 
     @Test

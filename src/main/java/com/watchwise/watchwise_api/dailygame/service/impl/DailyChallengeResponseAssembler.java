@@ -100,6 +100,21 @@ public class DailyChallengeResponseAssembler {
                 view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, true), guessFeedback);
     }
 
+    public DailyGameAttemptResponseDTO toAttemptResponse(
+            DailyChallenge challenge,
+            UserDailyGameResult result,
+            List<DailyChallengeHint> allHints,
+            DailyGameGuessFeedbackDTO guessFeedback,
+            boolean includeAttempts,
+            boolean majorRoles) {
+        DailyGameView view = view(challenge, result, allHints);
+        List<DailyGameAttemptDTO> attempts = attempts(result, includeAttempts);
+        return new DailyGameAttemptResponseDTO(
+                view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
+                view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
+                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, majorRoles), guessFeedback);
+    }
+
     public DailyGameHistoryDTO toHistoryResponse(
             LocalDate challengeDate, DailyChallenge challenge, UserDailyGameResult result) {
         DailyGameView view = view(challenge, result, List.of());

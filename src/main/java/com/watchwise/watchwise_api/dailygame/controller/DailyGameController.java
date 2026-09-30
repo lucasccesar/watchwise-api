@@ -131,20 +131,22 @@ public class DailyGameController {
     @PostMapping("/games/{gameType}/attempt")
     public ResponseEntity<DailyGameAttemptResponseDTO> submitAttempt(
             @PathVariable("gameType") DailyGameType gameType,
+            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles,
             @Valid @RequestBody DailyGameAttemptRequest request) {
         UUID userId = currentUserId();
         throttleAttempt(userId);
-        return ResponseEntity.ok(dailyGameService.submitAttempt(userId, gameType, request));
+        return ResponseEntity.ok(dailyGameService.submitAttempt(userId, gameType, request, majorRoles));
     }
 
     @PostMapping("/games/{challengeDate}/{gameType}/attempt")
     public ResponseEntity<DailyGameAttemptResponseDTO> submitHistoricalAttempt(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate challengeDate,
             @PathVariable("gameType") DailyGameType gameType,
+            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles,
             @Valid @RequestBody DailyGameAttemptRequest request) {
         UUID userId = currentUserId();
         throttleAttempt(userId);
-        return ResponseEntity.ok(dailyGameService.submitAttempt(userId, challengeDate, gameType, request));
+        return ResponseEntity.ok(dailyGameService.submitAttempt(userId, challengeDate, gameType, request, majorRoles));
     }
 
     @PostMapping("/games/{gameType}/give-up")

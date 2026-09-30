@@ -6,8 +6,6 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
-import com.watchwise.watchwise_api.dailygame.service.impl.DailyGameFilmographyServiceImpl;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -22,11 +20,6 @@ public class ActorByMovieFilmographyGenerator implements DailyChallengeGenerator
     private final DailyChallengeSnapshotAssembler snapshotAssembler;
     private final DailyGameFilmographyService filmographyService;
 
-    public ActorByMovieFilmographyGenerator(TmdbClient tmdbClient, DailyChallengeSnapshotAssembler snapshotAssembler) {
-        this(tmdbClient, snapshotAssembler, new DailyGameFilmographyServiceImpl(tmdbClient));
-    }
-
-    @Autowired
     public ActorByMovieFilmographyGenerator(TmdbClient tmdbClient, DailyChallengeSnapshotAssembler snapshotAssembler,
                                             DailyGameFilmographyService filmographyService) {
         this.tmdbClient = tmdbClient;

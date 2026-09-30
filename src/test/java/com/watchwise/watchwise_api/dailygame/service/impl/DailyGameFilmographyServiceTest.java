@@ -170,6 +170,34 @@ class DailyGameFilmographyServiceTest {
         assertThat(feedback.sharedMajorRoleWorkKeys()).isEmpty();
     }
 
+    @Test
+    @DisplayName("[compare] Should Exclude Unknown TV Totals From Major Roles - When Details Are Unavailable")
+    void shouldExcludeUnknownTvTotalsFromMajorRolesWhenDetailsAreUnavailable() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY,
+                List.of(seriesWork("10", "Unknown Total", 1, 1)));
+        stubPerson("2", "Guessed Actor", credit("10", "Unknown Total", "tv", "2000-01-01", 1, 1));
+        org.mockito.Mockito.when(tmdbClient.getTvFullDetails("10", LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        DailyGameFilmographyFeedbackDTO feedback = service.compare(challenge, "2", true);
+
+        assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("SERIES:10");
+        assertThat(feedback.sharedMajorRoleWorkKeys()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[snapshot] Should Preserve A Credit With No Period - When Aggregate Metadata Omits Dates")
+    void shouldPreserveACreditWithNoPeriodWhenAggregateMetadataOmitsDates() {
+        stubPerson("2", "Guessed Actor", credit("100", "Undated Movie", "movie", null, null, null));
+
+        assertThat(service.snapshot("2", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY).entries())
+                .singleElement().satisfies(entry -> {
+                    assertThat(entry.get("workId")).isEqualTo("100");
+                    assertThat(entry.get("year")).isNull();
+                    assertThat(entry.get("period")).isNull();
+                });
+    }
+
     @ParameterizedTest(name = "{0} total episodes requires {1} role episodes")
     @CsvSource({"6, 2", "7, 3", "20, 8", "21, 11"})
     @DisplayName("[compare] Should Apply The Proportional Major Role Threshold - At Each Boundary")
