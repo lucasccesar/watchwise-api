@@ -445,15 +445,15 @@ class DailyGameServiceImplTest {
         DailyGameFilmographyFeedbackDTO feedback = new DailyGameFilmographyFeedbackDTO(
                 new com.watchwise.watchwise_api.dailygame.dto.DailyGameActorGuessDTO("2", "Guessed Actor"),
                 List.of("SERIES:10"), List.of("SERIES:10", "SERIES:20"), List.of());
-        when(filmographyService.compare(challenge, "2", true)).thenReturn(feedback);
+        when(filmographyService.compare(challenge, "2", false)).thenReturn(feedback);
 
         DailyGameAttemptResponseDTO response = service().submitAttempt(
                 USER_ID, DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY,
-                request(null, "2", null, null, null));
+                request(null, "2", null, null, null), false);
 
         assertThat(response.attempts()).singleElement().satisfies(attempt ->
                 assertThat(attempt.filmographyFeedback()).isEqualTo(feedback));
-        verify(filmographyService).compare(challenge, "2", true);
+        verify(filmographyService).compare(challenge, "2", false);
     }
 
     @Test

@@ -207,7 +207,8 @@ public class DailyGameServiceImpl implements DailyGameService {
         DailyGameCandidateIdentity candidate = candidateValidator.validate(gameType, request);
         DailyGameGuessFeedbackDTO episodeFeedback = guessFeedback(gameType, challenge, candidate);
         DailyGameInfoFeedbackDTO infoFeedback = infoFeedback(gameType, challenge, candidate);
-        DailyGameFilmographyFeedbackDTO filmographyFeedback = filmographyFeedback(gameType, challenge, candidate);
+        DailyGameFilmographyFeedbackDTO filmographyFeedback = filmographyFeedback(
+                gameType, challenge, candidate, majorRoles);
         int attemptNumber = result.getAttemptsUsed() + 1;
         result.setAttemptsUsed(attemptNumber);
         result.setUpdatedAt(now);
@@ -308,13 +309,13 @@ public class DailyGameServiceImpl implements DailyGameService {
     }
 
     private DailyGameFilmographyFeedbackDTO filmographyFeedback(
-            DailyGameType gameType, DailyChallenge challenge, DailyGameCandidateIdentity candidate) {
+            DailyGameType gameType, DailyChallenge challenge, DailyGameCandidateIdentity candidate, boolean majorRoles) {
         if (filmographyService == null
                 || (gameType != DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
                 && gameType != DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY)) {
             return null;
         }
-        return filmographyService.compare(challenge, candidate.personTmdbId(), true);
+        return filmographyService.compare(challenge, candidate.personTmdbId(), majorRoles);
     }
 
     private void assertAvailableDate(LocalDate challengeDate) {
