@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.comment.repository;
 
 import com.watchwise.watchwise_api.comment.entity.Comment;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -35,6 +36,22 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
         long getCount();
     }
 
+    @Query("SELECT c.diaryEntry.id AS diaryEntryId, COUNT(c) AS count FROM Comment c WHERE c.diaryEntry.id IN :diaryEntryIds GROUP BY c.diaryEntry.id")
+    List<DiaryCommentCount> countByDiaryEntryIdIn(@Param("diaryEntryIds") Collection<UUID> diaryEntryIds);
+
+    interface DiaryCommentCount {
+        UUID getDiaryEntryId();
+        long getCount();
+    }
+
+    @Query("SELECT c.droppedEntry.id AS droppedEntryId, COUNT(c) AS count FROM Comment c WHERE c.droppedEntry.id IN :droppedEntryIds GROUP BY c.droppedEntry.id")
+    List<DroppedCommentCount> countByDroppedEntryIdIn(@Param("droppedEntryIds") Collection<UUID> droppedEntryIds);
+
+    interface DroppedCommentCount {
+        UUID getDroppedEntryId();
+        long getCount();
+    }
+
     @Query("SELECT c.pick.id AS pickId, COUNT(c) AS count FROM Comment c WHERE c.pick.id IN :pickIds GROUP BY c.pick.id")
     List<PickCommentCount> countByPickIdIn(@Param("pickIds") Collection<UUID> pickIds);
 
@@ -50,6 +67,70 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
         UUID getTemplateId();
         long getCount();
     }
+
+    @EntityGraph(attributePaths = "user")
+    @Query(value = """
+            SELECT ranked.*
+            FROM (
+                SELECT c.*, ROW_NUMBER() OVER (
+                    PARTITION BY c.diary_entry_id
+                    ORDER BY c.created_at DESC, c.id DESC
+                ) AS row_number
+                FROM comments c
+                WHERE c.diary_entry_id IN (:diaryEntryIds)
+            ) ranked
+            WHERE ranked.row_number <= 3
+            ORDER BY ranked.diary_entry_id ASC, ranked.created_at DESC, ranked.id DESC
+            """, nativeQuery = true)
+    List<Comment> findRecentByDiaryEntryIdIn(@Param("diaryEntryIds") Collection<UUID> diaryEntryIds);
+
+    @EntityGraph(attributePaths = "user")
+    @Query(value = """
+            SELECT ranked.*
+            FROM (
+                SELECT c.*, ROW_NUMBER() OVER (
+                    PARTITION BY c.dropped_entry_id
+                    ORDER BY c.created_at DESC, c.id DESC
+                ) AS row_number
+                FROM comments c
+                WHERE c.dropped_entry_id IN (:droppedEntryIds)
+            ) ranked
+            WHERE ranked.row_number <= 3
+            ORDER BY ranked.dropped_entry_id ASC, ranked.created_at DESC, ranked.id DESC
+            """, nativeQuery = true)
+    List<Comment> findRecentByDroppedEntryIdIn(@Param("droppedEntryIds") Collection<UUID> droppedEntryIds);
+
+    @EntityGraph(attributePaths = "user")
+    @Query(value = """
+            SELECT ranked.*
+            FROM (
+                SELECT c.*, ROW_NUMBER() OVER (
+                    PARTITION BY c.pick_id
+                    ORDER BY c.created_at DESC, c.id DESC
+                ) AS row_number
+                FROM comments c
+                WHERE c.pick_id IN (:pickIds)
+            ) ranked
+            WHERE ranked.row_number <= 3
+            ORDER BY ranked.pick_id ASC, ranked.created_at DESC, ranked.id DESC
+            """, nativeQuery = true)
+    List<Comment> findRecentByPickIdIn(@Param("pickIds") Collection<UUID> pickIds);
+
+    @EntityGraph(attributePaths = "user")
+    @Query(value = """
+            SELECT ranked.*
+            FROM (
+                SELECT c.*, ROW_NUMBER() OVER (
+                    PARTITION BY c.picks_template_id
+                    ORDER BY c.created_at DESC, c.id DESC
+                ) AS row_number
+                FROM comments c
+                WHERE c.picks_template_id IN (:templateIds)
+            ) ranked
+            WHERE ranked.row_number <= 3
+            ORDER BY ranked.picks_template_id ASC, ranked.created_at DESC, ranked.id DESC
+            """, nativeQuery = true)
+    List<Comment> findRecentByPicksTemplateIdIn(@Param("templateIds") Collection<UUID> templateIds);
 
     @Modifying
     @Query("UPDATE Comment c SET c.likesCount = c.likesCount + 1 WHERE c.id = :id")

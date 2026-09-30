@@ -6,6 +6,14 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -32,9 +40,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -66,6 +76,15 @@ class CommentRepositoryTest {
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
 
+    @Autowired
+    private DroppedEntryRepository droppedEntryRepository;
+
+    @Autowired
+    private PickRepository pickRepository;
+
+    @Autowired
+    private PicksTemplateRepository picksTemplateRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -78,7 +97,10 @@ class CommentRepositoryTest {
     @BeforeEach
     void setUp() {
         commentRepository.deleteAll();
+        pickRepository.deleteAll();
+        droppedEntryRepository.deleteAll();
         diaryEntryRepository.deleteAll();
+        picksTemplateRepository.deleteAll();
         userListRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
@@ -395,6 +417,150 @@ class CommentRepositoryTest {
     }
 
     @Test
+    @DisplayName("[countByTargetIdIn] Should Count Comments Per Diary Entry, Dropped Entry, Pick And Picks Template")
+    void shouldCountCommentsForEachSocialTargetInBatches() {
+        DiaryEntry secondDiaryEntry = diaryEntryRepository.save(buildDiaryEntry(marina, fightClub));
+        DroppedEntry droppedEntry = droppedEntryRepository.saveAndFlush(buildDroppedEntry(lucas, fightClub));
+        DroppedEntry secondDroppedEntry = droppedEntryRepository.saveAndFlush(buildDroppedEntry(marina, fightClub));
+        PicksTemplate template = savePicksTemplate(lucas, "First template");
+        PicksTemplate secondTemplate = savePicksTemplate(marina, "Second template");
+        Pick pick = savePick(template, lucas);
+        Pick secondPick = savePick(template, marina);
+
+        commentRepository.save(buildDiaryEntryComment(lucas, diaryEntry, "Diary one"));
+        commentRepository.save(buildDiaryEntryComment(marina, diaryEntry, "Diary two"));
+        commentRepository.save(buildDiaryEntryComment(lucas, secondDiaryEntry, "Other diary"));
+        commentRepository.save(buildDroppedEntryComment(lucas, droppedEntry, "Dropped one"));
+        commentRepository.save(buildDroppedEntryComment(marina, droppedEntry, "Dropped two"));
+        commentRepository.save(buildDroppedEntryComment(lucas, secondDroppedEntry, "Other dropped"));
+        commentRepository.save(buildPickComment(lucas, pick, "Pick one"));
+        commentRepository.save(buildPickComment(marina, pick, "Pick two"));
+        commentRepository.save(buildPickComment(lucas, secondPick, "Other pick"));
+        commentRepository.save(buildPicksTemplateComment(lucas, template, "Template one"));
+        commentRepository.save(buildPicksTemplateComment(marina, template, "Template two"));
+        commentRepository.saveAndFlush(buildPicksTemplateComment(lucas, secondTemplate, "Other template"));
+        entityManager.clear();
+
+        List<CommentRepository.DiaryCommentCount> diaryCounts = commentRepository
+                .countByDiaryEntryIdIn(List.of(diaryEntry.getId(), secondDiaryEntry.getId()));
+        List<CommentRepository.DroppedCommentCount> droppedCounts = commentRepository
+                .countByDroppedEntryIdIn(List.of(droppedEntry.getId(), secondDroppedEntry.getId()));
+        List<CommentRepository.PickCommentCount> pickCounts = commentRepository
+                .countByPickIdIn(List.of(pick.getId(), secondPick.getId()));
+        List<CommentRepository.TemplateCommentCount> templateCounts = commentRepository
+                .countByPicksTemplateIdIn(List.of(template.getId(), secondTemplate.getId()));
+
+        assertThat(diaryCounts).extracting(count -> tuple(count.getDiaryEntryId(), count.getCount()))
+                .containsExactlyInAnyOrder(
+                        tuple(diaryEntry.getId(), 2L),
+                        tuple(secondDiaryEntry.getId(), 1L));
+        assertThat(droppedCounts).extracting(count -> tuple(count.getDroppedEntryId(), count.getCount()))
+                .containsExactlyInAnyOrder(
+                        tuple(droppedEntry.getId(), 2L),
+                        tuple(secondDroppedEntry.getId(), 1L));
+        assertThat(pickCounts).extracting(count -> tuple(count.getPickId(), count.getCount()))
+                .containsExactlyInAnyOrder(
+                        tuple(pick.getId(), 2L),
+                        tuple(secondPick.getId(), 1L));
+        assertThat(templateCounts).extracting(count -> tuple(count.getTemplateId(), count.getCount()))
+                .containsExactlyInAnyOrder(
+                        tuple(template.getId(), 2L),
+                        tuple(secondTemplate.getId(), 1L));
+    }
+
+    @Test
+    @DisplayName("[findRecentByDiaryEntryIdIn] Should Return At Most Three Newest Comments Per Diary Entry")
+    void shouldReturnThreeRecentCommentsPerDiaryEntryInNewestFirstOrder() {
+        DiaryEntry secondDiaryEntry = diaryEntryRepository.saveAndFlush(buildDiaryEntry(marina, fightClub));
+        LocalDateTime olderAt = LocalDateTime.of(2026, 1, 1, 10, 0);
+        LocalDateTime tieAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        LocalDateTime newestAt = LocalDateTime.of(2026, 1, 1, 14, 0);
+        savePreviewComment(buildDiaryEntryComment(lucas, diaryEntry, "Older", olderAt, commentId(1)));
+        Comment tiedLowId = savePreviewComment(buildDiaryEntryComment(lucas, diaryEntry, "Tie low", tieAt, commentId(2)));
+        Comment tiedHighId = savePreviewComment(buildDiaryEntryComment(marina, diaryEntry, "Tie high", tieAt, commentId(3)));
+        Comment newest = savePreviewComment(buildDiaryEntryComment(marina, diaryEntry, "Newest", newestAt, commentId(4)));
+        Comment otherTarget = savePreviewComment(buildDiaryEntryComment(marina, secondDiaryEntry, "Other diary", newestAt, commentId(5)));
+        entityManager.clear();
+
+        List<Comment> result = commentRepository.findRecentByDiaryEntryIdIn(List.of(diaryEntry.getId(), secondDiaryEntry.getId()));
+
+        assertThat(result).hasSize(4);
+        assertPreviewTarget(result, diaryEntry.getId(), comment -> comment.getDiaryEntry().getId(), newest, tiedHighId, tiedLowId);
+        assertPreviewTarget(result, secondDiaryEntry.getId(), comment -> comment.getDiaryEntry().getId(), otherTarget);
+        assertPreviewUserInitialized(result);
+    }
+
+    @Test
+    @DisplayName("[findRecentByDroppedEntryIdIn] Should Return At Most Three Newest Comments Per Dropped Entry")
+    void shouldReturnThreeRecentCommentsPerDroppedEntryInNewestFirstOrder() {
+        DroppedEntry droppedEntry = droppedEntryRepository.saveAndFlush(buildDroppedEntry(lucas, fightClub));
+        DroppedEntry secondDroppedEntry = droppedEntryRepository.saveAndFlush(buildDroppedEntry(marina, fightClub));
+        LocalDateTime olderAt = LocalDateTime.of(2026, 1, 1, 10, 0);
+        LocalDateTime tieAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        LocalDateTime newestAt = LocalDateTime.of(2026, 1, 1, 14, 0);
+        savePreviewComment(buildDroppedEntryComment(lucas, droppedEntry, "Older", olderAt, commentId(1)));
+        Comment tiedLowId = savePreviewComment(buildDroppedEntryComment(lucas, droppedEntry, "Tie low", tieAt, commentId(2)));
+        Comment tiedHighId = savePreviewComment(buildDroppedEntryComment(marina, droppedEntry, "Tie high", tieAt, commentId(3)));
+        Comment newest = savePreviewComment(buildDroppedEntryComment(marina, droppedEntry, "Newest", newestAt, commentId(4)));
+        Comment otherTarget = savePreviewComment(buildDroppedEntryComment(marina, secondDroppedEntry, "Other dropped", newestAt, commentId(5)));
+        entityManager.clear();
+
+        List<Comment> result = commentRepository.findRecentByDroppedEntryIdIn(List.of(droppedEntry.getId(), secondDroppedEntry.getId()));
+
+        assertThat(result).hasSize(4);
+        assertPreviewTarget(result, droppedEntry.getId(), comment -> comment.getDroppedEntry().getId(), newest, tiedHighId, tiedLowId);
+        assertPreviewTarget(result, secondDroppedEntry.getId(), comment -> comment.getDroppedEntry().getId(), otherTarget);
+        assertPreviewUserInitialized(result);
+    }
+
+    @Test
+    @DisplayName("[findRecentByPickIdIn] Should Return At Most Three Newest Comments Per Pick")
+    void shouldReturnThreeRecentCommentsPerPickInNewestFirstOrder() {
+        PicksTemplate template = savePicksTemplate(lucas, "Pick template");
+        Pick pick = savePick(template, lucas);
+        Pick secondPick = savePick(template, marina);
+        LocalDateTime olderAt = LocalDateTime.of(2026, 1, 1, 10, 0);
+        LocalDateTime tieAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        LocalDateTime newestAt = LocalDateTime.of(2026, 1, 1, 14, 0);
+        savePreviewComment(buildPickComment(lucas, pick, "Older", olderAt, commentId(1)));
+        Comment tiedLowId = savePreviewComment(buildPickComment(lucas, pick, "Tie low", tieAt, commentId(2)));
+        Comment tiedHighId = savePreviewComment(buildPickComment(marina, pick, "Tie high", tieAt, commentId(3)));
+        Comment newest = savePreviewComment(buildPickComment(marina, pick, "Newest", newestAt, commentId(4)));
+        Comment otherTarget = savePreviewComment(buildPickComment(marina, secondPick, "Other pick", newestAt, commentId(5)));
+        entityManager.clear();
+
+        List<Comment> result = commentRepository.findRecentByPickIdIn(List.of(pick.getId(), secondPick.getId()));
+
+        assertThat(result).hasSize(4);
+        assertPreviewTarget(result, pick.getId(), comment -> comment.getPick().getId(), newest, tiedHighId, tiedLowId);
+        assertPreviewTarget(result, secondPick.getId(), comment -> comment.getPick().getId(), otherTarget);
+        assertPreviewUserInitialized(result);
+    }
+
+    @Test
+    @DisplayName("[findRecentByPicksTemplateIdIn] Should Return At Most Three Newest Comments Per Picks Template")
+    void shouldReturnThreeRecentCommentsPerPicksTemplateInNewestFirstOrder() {
+        PicksTemplate template = savePicksTemplate(lucas, "First template");
+        PicksTemplate secondTemplate = savePicksTemplate(marina, "Second template");
+        LocalDateTime olderAt = LocalDateTime.of(2026, 1, 1, 10, 0);
+        LocalDateTime tieAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        LocalDateTime newestAt = LocalDateTime.of(2026, 1, 1, 14, 0);
+        savePreviewComment(buildPicksTemplateComment(lucas, template, "Older", olderAt, commentId(1)));
+        Comment tiedLowId = savePreviewComment(buildPicksTemplateComment(lucas, template, "Tie low", tieAt, commentId(2)));
+        Comment tiedHighId = savePreviewComment(buildPicksTemplateComment(marina, template, "Tie high", tieAt, commentId(3)));
+        Comment newest = savePreviewComment(buildPicksTemplateComment(marina, template, "Newest", newestAt, commentId(4)));
+        Comment otherTarget = savePreviewComment(buildPicksTemplateComment(marina, secondTemplate, "Other template", newestAt, commentId(5)));
+        entityManager.clear();
+
+        List<Comment> result = commentRepository.findRecentByPicksTemplateIdIn(List.of(template.getId(), secondTemplate.getId()));
+
+        assertThat(result).hasSize(4);
+        assertPreviewTarget(result, template.getId(), comment -> comment.getPicksTemplate().getId(), newest, tiedHighId, tiedLowId);
+        assertPreviewTarget(result, secondTemplate.getId(), comment -> comment.getPicksTemplate().getId(), otherTarget);
+        assertPreviewUserInitialized(result);
+    }
+
+    @Test
     @DisplayName("[incrementLikesCount] Should Increase LikesCount By One - When Called")
     void shouldIncreaseLikesCountByOneWhenIncrementLikesCountIsCalled() {
         Comment saved = commentRepository.saveAndFlush(buildContentComment(lucas, fightClub, "Great movie!"));
@@ -431,6 +597,91 @@ class CommentRepositoryTest {
         assertThat(commentRepository.findById(saved.getId()).orElseThrow().getLikesCount()).isEqualTo(0);
     }
 
+    private void assertPreviewTarget(List<Comment> comments, UUID targetId, Function<Comment, UUID> targetIdExtractor,
+                                     Comment... expectedComments) {
+        List<Comment> targetComments = comments.stream()
+                .filter(comment -> targetId.equals(targetIdExtractor.apply(comment)))
+                .toList();
+
+        assertThat(targetComments).extracting(Comment::getId)
+                .containsExactly(java.util.Arrays.stream(expectedComments).map(Comment::getId).toArray(UUID[]::new));
+    }
+
+    private void assertPreviewUserInitialized(List<Comment> comments) {
+        assertThat(comments).allSatisfy(comment -> assertThat(Hibernate.isInitialized(comment.getUser())).isTrue());
+    }
+
+    private Comment savePreviewComment(Comment comment) {
+        String targetColumn;
+        UUID targetId;
+
+        if (comment.getDiaryEntry() != null) {
+            targetColumn = "diary_entry_id";
+            targetId = comment.getDiaryEntry().getId();
+        } else if (comment.getDroppedEntry() != null) {
+            targetColumn = "dropped_entry_id";
+            targetId = comment.getDroppedEntry().getId();
+        } else if (comment.getPick() != null) {
+            targetColumn = "pick_id";
+            targetId = comment.getPick().getId();
+        } else {
+            targetColumn = "picks_template_id";
+            targetId = comment.getPicksTemplate().getId();
+        }
+
+        entityManager.createNativeQuery("""
+                INSERT INTO comments (id, user_id, %s, text, contains_spoiler, created_at, updated_at, likes_count)
+                VALUES (:id, :userId, :targetId, :text, :containsSpoiler, :createdAt, :updatedAt, :likesCount)
+                """.formatted(targetColumn))
+                .setParameter("id", comment.getId())
+                .setParameter("userId", comment.getUser().getId())
+                .setParameter("targetId", targetId)
+                .setParameter("text", comment.getText())
+                .setParameter("containsSpoiler", comment.getContainsSpoiler())
+                .setParameter("createdAt", comment.getCreatedAt())
+                .setParameter("updatedAt", comment.getUpdatedAt())
+                .setParameter("likesCount", comment.getLikesCount())
+                .executeUpdate();
+        return comment;
+    }
+
+    private UUID commentId(long value) {
+        return new UUID(0L, value);
+    }
+
+    private DroppedEntry buildDroppedEntry(User user, Content content) {
+        LocalDateTime now = LocalDateTime.now();
+        return DroppedEntry.builder()
+                .user(user)
+                .content(content)
+                .type(ContentType.MOVIE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private PicksTemplate savePicksTemplate(User creator, String name) {
+        LocalDateTime now = LocalDateTime.now();
+        return picksTemplateRepository.saveAndFlush(PicksTemplate.builder()
+                .creator(creator)
+                .origin(PickOrigin.COMMUNITY)
+                .name(name)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private Pick savePick(PicksTemplate template, User user) {
+        LocalDateTime now = LocalDateTime.now();
+        return pickRepository.saveAndFlush(Pick.builder()
+                .picksTemplate(template)
+                .user(user)
+                .visibility(PickVisibility.PUBLIC)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
     private Comment buildContentComment(User user, Content content, String text) {
         LocalDateTime now = LocalDateTime.now();
         return Comment.builder()
@@ -457,13 +708,72 @@ class CommentRepositoryTest {
 
     private Comment buildDiaryEntryComment(User user, DiaryEntry diaryEntry, String text) {
         LocalDateTime now = LocalDateTime.now();
+        return buildDiaryEntryComment(user, diaryEntry, text, now, null);
+    }
+
+    private Comment buildDiaryEntryComment(User user, DiaryEntry diaryEntry, String text,
+                                           LocalDateTime createdAt, UUID id) {
         return Comment.builder()
+                .id(id)
                 .user(user)
                 .diaryEntry(diaryEntry)
                 .text(text)
                 .containsSpoiler(false)
-                .createdAt(now)
-                .updatedAt(now)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .build();
+    }
+
+    private Comment buildDroppedEntryComment(User user, DroppedEntry droppedEntry, String text) {
+        LocalDateTime now = LocalDateTime.now();
+        return buildDroppedEntryComment(user, droppedEntry, text, now, null);
+    }
+
+    private Comment buildDroppedEntryComment(User user, DroppedEntry droppedEntry, String text,
+                                             LocalDateTime createdAt, UUID id) {
+        return Comment.builder()
+                .id(id)
+                .user(user)
+                .droppedEntry(droppedEntry)
+                .text(text)
+                .containsSpoiler(false)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .build();
+    }
+
+    private Comment buildPickComment(User user, Pick pick, String text) {
+        LocalDateTime now = LocalDateTime.now();
+        return buildPickComment(user, pick, text, now, null);
+    }
+
+    private Comment buildPickComment(User user, Pick pick, String text, LocalDateTime createdAt, UUID id) {
+        return Comment.builder()
+                .id(id)
+                .user(user)
+                .pick(pick)
+                .text(text)
+                .containsSpoiler(false)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .build();
+    }
+
+    private Comment buildPicksTemplateComment(User user, PicksTemplate template, String text) {
+        LocalDateTime now = LocalDateTime.now();
+        return buildPicksTemplateComment(user, template, text, now, null);
+    }
+
+    private Comment buildPicksTemplateComment(User user, PicksTemplate template, String text,
+                                              LocalDateTime createdAt, UUID id) {
+        return Comment.builder()
+                .id(id)
+                .user(user)
+                .picksTemplate(template)
+                .text(text)
+                .containsSpoiler(false)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
                 .build();
     }
 
