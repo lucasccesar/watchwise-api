@@ -15,20 +15,41 @@ public record UserListItemResponseDTO(
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         String customPosterUrl,
-        ContentStateDTO contentState
+        ContentStateDTO contentState,
+        Double episodeAverageRating,
+        Double globalEpisodeAverageRating,
+        Double contentAverageRating
 ) {
     public UserListItemResponseDTO withCustomPosterUrl(String customPosterUrl) {
         return new UserListItemResponseDTO(
-                id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState);
+                id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
+                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating);
+    }
+
+    public UserListItemResponseDTO withRatingAverages(
+            Double episodeAverageRating,
+            Double globalEpisodeAverageRating,
+            Double contentAverageRating) {
+        return new UserListItemResponseDTO(
+                id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
+                episodeAverageRating, globalEpisodeAverageRating, contentAverageRating);
     }
 
     public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
             String description, LocalDateTime createdAt, LocalDateTime updatedAt) {
-        this(id, content, childList, position, description, createdAt, updatedAt, null, null);
+        this(id, content, childList, position, description, createdAt, updatedAt, null, null, null, null, null);
     }
 
     public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
             String description, LocalDateTime createdAt, LocalDateTime updatedAt, String customPosterUrl) {
-        this(id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, null);
+        this(id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, null,
+                null, null, null);
+    }
+
+    public UserListItemResponseDTO(UUID id, ContentRefDTO content, UserListPreviewDTO childList, Integer position,
+            String description, LocalDateTime createdAt, LocalDateTime updatedAt, String customPosterUrl,
+            ContentStateDTO contentState) {
+        this(id, content, childList, position, description, createdAt, updatedAt, customPosterUrl, contentState,
+                null, null, null);
     }
 }

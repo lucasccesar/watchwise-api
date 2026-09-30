@@ -16,6 +16,9 @@ public interface UserListItemMapper {
     @Mapping(target = "contentState", ignore = true)
     @Mapping(target = "customPosterUrl", ignore = true)
     @Mapping(target = "withCustomPosterUrl", ignore = true)
+    @Mapping(target = "episodeAverageRating", ignore = true)
+    @Mapping(target = "globalEpisodeAverageRating", ignore = true)
+    @Mapping(target = "contentAverageRating", ignore = true)
     UserListItemResponseDTO userListItemToResponseDto(UserListItem userListItem);
 
     UserListPreviewDTO userListToPreviewDto(UserList userList);

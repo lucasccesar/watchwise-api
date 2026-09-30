@@ -68,6 +68,9 @@ class UserListItemMapperTest {
         assertThat(result.position()).isEqualTo(1);
         assertThat(result.description()).isEqualTo("Best plot twist");
         assertThat(result.customPosterUrl()).isNull();
+        assertThat(result.episodeAverageRating()).isNull();
+        assertThat(result.globalEpisodeAverageRating()).isNull();
+        assertThat(result.contentAverageRating()).isNull();
         assertThat(result.createdAt()).isEqualTo(now);
         assertThat(result.updatedAt()).isEqualTo(now);
     }
@@ -86,6 +89,51 @@ class UserListItemMapperTest {
                 UUID.randomUUID(), null, null, 1, null, null, null, null, contentState);
 
         assertThat(result.contentState()).isEqualTo(contentState);
+    }
+
+    @Test
+    @DisplayName("[withRatingAverages] Should Preserve Existing Fields - When Adding Ratings")
+    void shouldPreserveExistingFieldsWhenAddingRatingAverages() {
+        UUID id = UUID.randomUUID();
+        ContentStateDTO contentState = new ContentStateDTO(
+                WatchStatus.PARTIALLY_WATCHED,
+                ReleaseStatus.RELEASED,
+                ContentProductionStatus.IN_PROGRESS,
+                3,
+                5);
+        UserListItemResponseDTO item = new UserListItemResponseDTO(
+                id,
+                null,
+                null,
+                2,
+                "A favorite",
+                LocalDateTime.parse("2026-09-30T12:30:00"),
+                LocalDateTime.parse("2026-09-30T13:30:00"),
+                "https://example.com/poster.jpg",
+                contentState);
+
+        UserListItemResponseDTO result = item.withRatingAverages(7.5, 8.0, 7.0);
+
+        assertThat(result.id()).isEqualTo(id);
+        assertThat(result.content()).isNull();
+        assertThat(result.childList()).isNull();
+        assertThat(result.position()).isEqualTo(2);
+        assertThat(result.description()).isEqualTo("A favorite");
+        assertThat(result.createdAt()).isEqualTo(LocalDateTime.parse("2026-09-30T12:30:00"));
+        assertThat(result.updatedAt()).isEqualTo(LocalDateTime.parse("2026-09-30T13:30:00"));
+        assertThat(result.customPosterUrl()).isEqualTo("https://example.com/poster.jpg");
+        assertThat(result.contentState()).isEqualTo(contentState);
+        assertThat(result.episodeAverageRating()).isEqualTo(7.5);
+        assertThat(result.globalEpisodeAverageRating()).isEqualTo(8.0);
+        assertThat(result.contentAverageRating()).isEqualTo(7.0);
+
+        UserListItemResponseDTO updatedPoster = result.withCustomPosterUrl("https://example.com/updated-poster.jpg");
+
+        assertThat(updatedPoster.customPosterUrl()).isEqualTo("https://example.com/updated-poster.jpg");
+        assertThat(updatedPoster.contentState()).isEqualTo(contentState);
+        assertThat(updatedPoster.episodeAverageRating()).isEqualTo(7.5);
+        assertThat(updatedPoster.globalEpisodeAverageRating()).isEqualTo(8.0);
+        assertThat(updatedPoster.contentAverageRating()).isEqualTo(7.0);
     }
 
     @Test
