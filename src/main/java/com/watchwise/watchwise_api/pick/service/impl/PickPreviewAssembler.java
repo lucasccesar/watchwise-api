@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.pick.service.impl;
 
+import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
+import com.watchwise.watchwise_api.comment.service.CommentPreviewData;
+import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.pick.dto.PickAnsweredCategoryPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
@@ -35,6 +38,7 @@ public class PickPreviewAssembler {
     private final PicksTemplateCategoryRepository categoryRepository;
     private final PicksTemplateOptionRepository optionRepository;
     private final CommentRepository commentRepository;
+    private final CommentPreviewAssembler commentPreviewAssembler;
     private final LikeService likeService;
     private final PickMapper pickMapper;
     private final PickTargetService targetService;
@@ -49,6 +53,19 @@ public class PickPreviewAssembler {
     }
 
     public Map<UUID, PickPreviewDTO> assemble(Collection<Pick> picks, UUID viewerId) {
+        return assemble(picks, viewerId, null);
+    }
+
+    public Map<UUID, PickPreviewDTO> assembleForFeed(Collection<Pick> picks, UUID viewerId) {
+        if (picks.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> pickIds = picks.stream().map(Pick::getId).toList();
+        return assemble(picks, viewerId, commentPreviewAssembler.assemblePickPreviews(pickIds, viewerId));
+    }
+
+    private Map<UUID, PickPreviewDTO> assemble(Collection<Pick> picks, UUID viewerId,
+            Map<UUID, CommentPreviewData> commentPreviews) {
         if (picks.isEmpty()) {
             return Map.of();
         }
@@ -63,7 +80,8 @@ public class PickPreviewAssembler {
         Map<UUID, List<PicksTemplateOption>> optionsByCategory = fixedCategoryIds.isEmpty() ? Map.of()
                 : optionRepository.findByCategoryIdIn(fixedCategoryIds).stream()
                 .collect(Collectors.groupingBy(option -> option.getCategory().getId()));
-        Map<UUID, Long> commentsByPickId = commentRepository.countByPickIdIn(pickIds).stream()
+        Map<UUID, Long> commentsByPickId = commentPreviews != null ? Map.of()
+                : commentRepository.countByPickIdIn(pickIds).stream()
                 .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId,
                         CommentRepository.PickCommentCount::getCount));
         Set<UUID> likedPickIds = likeService.getLikedPickIds(viewerId, pickIds);
@@ -84,9 +102,14 @@ public class PickPreviewAssembler {
                         return new PickAnsweredCategoryPreviewDTO(category.getId(), category.getName(), category.getGroup(),
                                 category.getDisplayOrder(), pickMapper.pickSelectionToSearchDto(selection), valid);
                     }).toList();
+            CommentPreviewData commentPreview = commentPreviews == null ? null : commentPreviews.get(pick.getId());
+            long commentsCount = commentPreview != null ? commentPreview.commentsCount()
+                    : commentsByPickId.getOrDefault(pick.getId(), 0L);
+            List<CommentResponseDTO> recentComments = commentPreview != null ? commentPreview.recentComments()
+                    : List.of();
             return new PickPreviewDTO(pick.getId(), userMapper.userToUserPreviewDto(pick.getUser()), pick.getVisibility(),
                     pick.getCreatedAt(), pick.getLikesCount() == null ? 0 : pick.getLikesCount(),
-                    commentsByPickId.getOrDefault(pick.getId(), 0L), likedPickIds.contains(pick.getId()), answered);
+                    commentsCount, likedPickIds.contains(pick.getId()), answered, recentComments);
         }, (first, ignored) -> first));
     }
 

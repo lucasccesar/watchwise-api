@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.pick.service.impl;
 
+import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
+import com.watchwise.watchwise_api.comment.service.CommentPreviewData;
+import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
@@ -36,6 +39,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -45,6 +50,7 @@ class PickPreviewAssemblerTest {
     @Mock PicksTemplateCategoryRepository categoryRepository;
     @Mock PicksTemplateOptionRepository optionRepository;
     @Mock CommentRepository commentRepository;
+    @Mock CommentPreviewAssembler commentPreviewAssembler;
     @Mock LikeService likeService;
     @Mock PickMapper pickMapper;
     @Mock PickTargetService targetService;
@@ -85,5 +91,51 @@ class PickPreviewAssemblerTest {
         assertThat(preview.isLikedByViewer()).isTrue();
         assertThat(preview.answeredCategories()).hasSize(1);
         assertThat(preview.answeredCategories().getFirst().target()).isEqualTo(selectionDto);
+    }
+
+    @Test
+    void assemblesFeedPickPreviewWithOwnRecentCommentsAndCountFromSharedAssembler() {
+        UUID viewerId = UUID.randomUUID();
+        User user = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        Pick pick = Pick.builder().id(UUID.randomUUID()).user(user).picksTemplate(template)
+                .visibility(PickVisibility.PUBLIC).createdAt(LocalDateTime.now()).likesCount(4).build();
+        CommentResponseDTO comment = new CommentResponseDTO(UUID.randomUUID(), null, null, null, null, null,
+                pick.getId(), null, null, "nice", false, LocalDateTime.now(), LocalDateTime.now(), 0, false);
+
+        when(selectionRepository.findByPickIdIn(List.of(pick.getId()))).thenReturn(List.of());
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, List.of(pick.getId()))).thenReturn(Set.of());
+        when(commentPreviewAssembler.assemblePickPreviews(List.of(pick.getId()), viewerId))
+                .thenReturn(Map.of(pick.getId(), new CommentPreviewData(7, List.of(comment))));
+        when(userMapper.userToUserPreviewDto(user)).thenReturn(new UserPreviewDTO(user.getId(), "marina", null, true));
+
+        PickPreviewDTO preview = assembler.assembleForFeed(List.of(pick), viewerId).get(pick.getId());
+
+        assertThat(preview.commentsCount()).isEqualTo(7);
+        assertThat(preview.recentComments()).containsExactly(comment);
+        verify(commentRepository, never()).countByPickIdIn(any());
+    }
+
+    @Test
+    void returnsEmptyRecentCommentsWithoutLoadingThemWhenAssemblingOutsideTheFeed() {
+        UUID viewerId = UUID.randomUUID();
+        User user = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        Pick pick = Pick.builder().id(UUID.randomUUID()).user(user).picksTemplate(template)
+                .visibility(PickVisibility.PUBLIC).createdAt(LocalDateTime.now()).likesCount(0).build();
+
+        when(selectionRepository.findByPickIdIn(List.of(pick.getId()))).thenReturn(List.of());
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of());
+        when(commentRepository.countByPickIdIn(List.of(pick.getId()))).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, List.of(pick.getId()))).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(user)).thenReturn(new UserPreviewDTO(user.getId(), "marina", null, true));
+
+        PickPreviewDTO preview = assembler.assemble(List.of(pick), viewerId).get(pick.getId());
+
+        assertThat(preview.recentComments()).isEmpty();
+        verify(commentPreviewAssembler, never()).assemblePickPreviews(any(), any());
     }
 }

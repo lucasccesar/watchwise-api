@@ -1,5 +1,8 @@
 package com.watchwise.watchwise_api.feed.service.impl;
 
+import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
+import com.watchwise.watchwise_api.comment.service.CommentPreviewData;
+import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -63,6 +66,14 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FeedServiceImplTest {
+
+    @Test
+    @DisplayName("[FeedItemDTO] Should Expose Social Comment Fields - When Feed Item Is Built")
+    void shouldExposeSocialCommentFieldsWhenFeedItemIsBuilt() {
+        assertThat(Arrays.stream(FeedItemDTO.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName))
+                .contains("commentsCount", "recentComments");
+    }
 
     @Test
     @DisplayName("[FeedItemDTO] Should Expose Current Top 5 Preview - When Feed Item Is Built")
@@ -132,9 +143,9 @@ class FeedServiceImplTest {
                 .thenReturn(List.of(pick));
         when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of(template));
-        when(pickPreviewAssembler.assemble(eq(List.of(pick)), eq(viewerId)))
+        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId)))
                 .thenReturn(Map.of(pick.getId(), pickPreview));
-        when(picksTemplatePreviewAssembler.assemble(any(), eq(viewerId)))
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId)))
                 .thenReturn(Map.of(template.getId(), templatePreview));
         when(likeService.getLikedDiaryEntryIds(eq(viewerId), any())).thenReturn(Set.of());
 
@@ -172,10 +183,10 @@ class FeedServiceImplTest {
                 .thenReturn(List.of(first, beyondLimit));
         when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 2))))
                 .thenReturn(List.of());
-        when(pickPreviewAssembler.assemble(eq(List.of(first)), eq(viewerId)))
+        when(pickPreviewAssembler.assembleForFeed(eq(List.of(first)), eq(viewerId)))
                 .thenReturn(Map.of(first.getId(), new PickPreviewDTO(first.getId(), null, PickVisibility.PUBLIC,
                         first.getCreatedAt(), 0, 0, false, List.of())));
-        when(picksTemplatePreviewAssembler.assemble(any(), eq(viewerId))).thenReturn(Map.of());
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId))).thenReturn(Map.of());
 
         CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, 1);
 
@@ -225,6 +236,9 @@ class FeedServiceImplTest {
 
     @Mock
     private PicksTemplatePreviewAssembler picksTemplatePreviewAssembler;
+
+    @Mock
+    private CommentPreviewAssembler commentPreviewAssembler;
 
     @InjectMocks
     private FeedServiceImpl feedService;
@@ -519,6 +533,150 @@ class FeedServiceImplTest {
         assertThat(result.content()).isEmpty();
         verify(diaryEntryRepository).findFeedCandidates(
                 eq(List.of(followedId)), eq(cursorCreatedAt), eq(cursorId), eq(PageRequest.of(0, 21)));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Attach Own Comment Preview To DiaryEntry And DroppedEntry - When Both Have Comments")
+    void shouldAttachOwnCommentPreviewToDiaryEntryAndDroppedEntryWhenBothHaveComments() {
+        stubFollowedIds();
+        LocalDateTime now = LocalDateTime.now();
+        DiaryEntry diaryEntry = buildDiaryEntry(now);
+        DroppedEntry droppedEntry = buildDroppedEntry(now.minusMinutes(1));
+        CommentResponseDTO diaryComment = commentDto("diary comment");
+        CommentResponseDTO droppedComment = commentDto("dropped comment");
+        stubEmptyTop5PickAndTemplate(21);
+        when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(diaryEntry));
+        when(droppedEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(droppedEntry));
+        when(likeService.getLikedDiaryEntryIds(eq(viewerId), any())).thenReturn(Set.of());
+        when(commentPreviewAssembler.assembleDiaryEntryPreviews(List.of(diaryEntry.getId()), viewerId))
+                .thenReturn(Map.of(diaryEntry.getId(), new CommentPreviewData(5, List.of(diaryComment))));
+        when(commentPreviewAssembler.assembleDroppedEntryPreviews(List.of(droppedEntry.getId()), viewerId))
+                .thenReturn(Map.of(droppedEntry.getId(), new CommentPreviewData(2, List.of(droppedComment))));
+
+        CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, null);
+
+        FeedItemDTO diaryItem = result.content().get(0);
+        assertThat(diaryItem.eventType()).isEqualTo(FeedEventType.DIARY_ENTRY);
+        assertThat(diaryItem.commentsCount()).isEqualTo(5);
+        assertThat(diaryItem.recentComments()).containsExactly(diaryComment);
+        FeedItemDTO droppedItem = result.content().get(1);
+        assertThat(droppedItem.eventType()).isEqualTo(FeedEventType.DROPPED);
+        assertThat(droppedItem.commentsCount()).isEqualTo(2);
+        assertThat(droppedItem.recentComments()).containsExactly(droppedComment);
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Serialize Zero Count And Empty List - When DiaryEntry Has No Comments")
+    void shouldSerializeZeroCountAndEmptyListWhenDiaryEntryHasNoComments() {
+        stubFollowedIds();
+        DiaryEntry diaryEntry = buildDiaryEntry(LocalDateTime.now());
+        stubEmptyDroppedAndTop5(21);
+        stubEmptyPickAndTemplate(21);
+        when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(diaryEntry));
+        when(likeService.getLikedDiaryEntryIds(eq(viewerId), any())).thenReturn(Set.of());
+
+        FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().get(0);
+
+        assertThat(item.commentsCount()).isZero();
+        assertThat(item.recentComments()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Keep Social Comment Fields Null - When Event Is Top5Update")
+    void shouldKeepSocialCommentFieldsNullWhenEventIsTop5Update() {
+        stubFollowedIds();
+        Top5Entry top5Entry = buildTop5Entry(LocalDateTime.now());
+        stubEmptyDiaryAndDropped(21);
+        stubEmptyPickAndTemplate(21);
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(top5Entry));
+
+        FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().get(0);
+
+        assertThat(item.eventType()).isEqualTo(FeedEventType.TOP5_UPDATE);
+        assertThat(item.commentsCount()).isNull();
+        assertThat(item.recentComments()).isNull();
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Request Comment Previews For Both Targets Of Pick Event - When Pick Event Is Built")
+    void shouldRequestCommentPreviewsForBothTargetsOfPickEventWhenPickEventIsBuilt() {
+        stubFollowedIds();
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplate template = buildTemplate(now.minusMinutes(1));
+        Pick pick = buildPick(template, now);
+        stubEmptyDiaryAndDropped(21);
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of());
+        when(pickRepository.findFeedCandidates(eq(List.of(followedId)), eq(viewerId), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(pick));
+        when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of());
+        CommentResponseDTO pickComment = commentDto("pick comment");
+        CommentResponseDTO templateComment = commentDto("template comment");
+        PickPreviewDTO pickPreview = new PickPreviewDTO(pick.getId(), null, PickVisibility.PUBLIC, pick.getCreatedAt(),
+                0, 1, false, List.of(), List.of(pickComment));
+        PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(template.getId(), null,
+                PickOrigin.COMMUNITY, template.getName(), null, null, null, 0, 0, List.of(), 0, 1, false, 0, null,
+                List.of(templateComment));
+        when(pickPreviewAssembler.assembleForFeed(eq(List.of(pick)), eq(viewerId)))
+                .thenReturn(Map.of(pick.getId(), pickPreview));
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), templatePreview));
+
+        FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().get(0);
+
+        assertThat(item.pick().recentComments()).containsExactly(pickComment);
+        assertThat(item.picksTemplate().recentComments()).containsExactly(templateComment);
+        assertThat(item.commentsCount()).isNull();
+        assertThat(item.recentComments()).isNull();
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Attach Template Preview With Own Comments - When Event Is PicksTemplateCreated")
+    void shouldAttachTemplatePreviewWithOwnCommentsWhenEventIsPicksTemplateCreated() {
+        stubFollowedIds();
+        PicksTemplate template = buildTemplate(LocalDateTime.now());
+        stubEmptyDiaryAndDropped(21);
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of());
+        when(pickRepository.findFeedCandidates(eq(List.of(followedId)), eq(viewerId), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of());
+        when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(template));
+        CommentResponseDTO templateComment = commentDto("template comment");
+        PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(template.getId(), null,
+                PickOrigin.COMMUNITY, template.getName(), null, null, null, 0, 0, List.of(), 0, 1, false, 0, null,
+                List.of(templateComment));
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), templatePreview));
+
+        FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().get(0);
+
+        assertThat(item.eventType()).isEqualTo(FeedEventType.PICKS_TEMPLATE_CREATED);
+        assertThat(item.picksTemplate().recentComments()).containsExactly(templateComment);
+        assertThat(item.pick()).isNull();
+    }
+
+    private void stubEmptyTop5PickAndTemplate(int expectedFetchLimit) {
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+                .thenReturn(List.of());
+        stubEmptyPickAndTemplate(expectedFetchLimit);
+    }
+
+    private void stubEmptyPickAndTemplate(int expectedFetchLimit) {
+        when(pickRepository.findFeedCandidates(eq(List.of(followedId)), eq(viewerId), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+                .thenReturn(List.of());
+        when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, expectedFetchLimit))))
+                .thenReturn(List.of());
+    }
+
+    private CommentResponseDTO commentDto(String text) {
+        return new CommentResponseDTO(UUID.randomUUID(), null, null, null, null, null, null, null, null, text,
+                false, LocalDateTime.now(), LocalDateTime.now(), 0, false);
     }
 
     private void stubFollowedIds() {

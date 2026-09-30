@@ -1,5 +1,8 @@
 package com.watchwise.watchwise_api.feed.service.impl;
 
+import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
+import com.watchwise.watchwise_api.comment.service.CommentPreviewData;
+import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
@@ -71,6 +74,7 @@ public class FeedServiceImpl implements FeedService {
     private final UserMapper userMapper;
     private final PickPreviewAssembler pickPreviewAssembler;
     private final PicksTemplatePreviewAssembler picksTemplatePreviewAssembler;
+    private final CommentPreviewAssembler commentPreviewAssembler;
 
     @Override
     @Transactional(readOnly = true)
@@ -115,22 +119,28 @@ public class FeedServiceImpl implements FeedService {
                 .findByDiaryEntryIdIn(diaryEntries.stream().map(DiaryEntry::getId).toList()).stream()
                 .collect(Collectors.groupingBy(wc -> wc.getDiaryEntry().getId(),
                         Collectors.mapping(wc -> userMapper.userToUserPreviewDto(wc.getUser()), Collectors.toList())));
-        Map<UUID, PickPreviewDTO> pickPreviews = pickPreviewAssembler.assemble(pickEntries, userId);
+        Map<UUID, CommentPreviewData> diaryCommentPreviews = commentPreviewAssembler.assembleDiaryEntryPreviews(
+                diaryEntries.stream().map(DiaryEntry::getId).toList(), userId);
+        Map<UUID, CommentPreviewData> droppedCommentPreviews = commentPreviewAssembler.assembleDroppedEntryPreviews(
+                droppedEntries.stream().map(DroppedEntry::getId).toList(), userId);
+        Map<UUID, PickPreviewDTO> pickPreviews = pickPreviewAssembler.assembleForFeed(pickEntries, userId);
         Map<UUID, PicksTemplate> templatesById = new LinkedHashMap<>();
         pickEntries.forEach(pick -> templatesById.put(pick.getPicksTemplate().getId(), pick.getPicksTemplate()));
         picksTemplateEntries.forEach(template -> templatesById.put(template.getId(), template));
         Map<UUID, PicksTemplatePreviewDTO> picksTemplatePreviews = picksTemplatePreviewAssembler
-                .assemble(templatesById.values(), userId);
+                .assembleForFeed(templatesById.values(), userId);
 
         List<FeedCandidate> candidates = new ArrayList<>();
         for (DiaryEntry entry : diaryEntries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
                     toDiaryFeedItem(entry, likedDiaryEntryIds.contains(entry.getId()),
-                            watchedWithByEntryId.getOrDefault(entry.getId(), List.of()))));
+                            watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
+                            diaryCommentPreviews.get(entry.getId()))));
         }
         for (DroppedEntry entry : droppedEntries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
-                    toDroppedFeedItem(entry, likedDroppedEntryIds.contains(entry.getId()))));
+                    toDroppedFeedItem(entry, likedDroppedEntryIds.contains(entry.getId()),
+                            droppedCommentPreviews.get(entry.getId()))));
         }
         for (Top5Entry entry : top5Entries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
@@ -174,7 +184,8 @@ public class FeedServiceImpl implements FeedService {
         return list.size() > size ? list.subList(0, size) : list;
     }
 
-    private FeedItemDTO toDiaryFeedItem(DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith) {
+    private FeedItemDTO toDiaryFeedItem(DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith,
+            CommentPreviewData commentPreview) {
         return new FeedItemDTO(
                 FeedEventType.DIARY_ENTRY,
                 entry.getId(),
@@ -185,13 +196,16 @@ public class FeedServiceImpl implements FeedService {
                 entry.getComment(),
                 entry.getLikesCount(),
                 likedByMe,
+                commentsCount(commentPreview),
+                recentComments(commentPreview),
                 watchedWith,
                 null,
                 null,
-                entry.getCreatedAt());
+                entry.getCreatedAt(),
+                null);
     }
 
-    private FeedItemDTO toDroppedFeedItem(DroppedEntry entry, boolean likedByMe) {
+    private FeedItemDTO toDroppedFeedItem(DroppedEntry entry, boolean likedByMe, CommentPreviewData commentPreview) {
         return new FeedItemDTO(
                 FeedEventType.DROPPED,
                 entry.getId(),
@@ -202,10 +216,21 @@ public class FeedServiceImpl implements FeedService {
                 entry.getComment(),
                 entry.getLikesCount(),
                 likedByMe,
+                commentsCount(commentPreview),
+                recentComments(commentPreview),
                 null,
                 null,
                 null,
-                entry.getCreatedAt());
+                entry.getCreatedAt(),
+                null);
+    }
+
+    private static Integer commentsCount(CommentPreviewData commentPreview) {
+        return commentPreview == null ? 0 : Math.toIntExact(commentPreview.commentsCount());
+    }
+
+    private static List<CommentResponseDTO> recentComments(CommentPreviewData commentPreview) {
+        return commentPreview == null ? List.of() : commentPreview.recentComments();
     }
 
     private Map<Top5Key, List<Top5EntryResponseDTO>> loadCurrentTop5Previews(List<Top5Entry> top5Entries) {

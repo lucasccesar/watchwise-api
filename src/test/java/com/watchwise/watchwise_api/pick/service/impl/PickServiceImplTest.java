@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
+import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -73,7 +74,8 @@ class PickServiceImplTest {
     void setUp() {
         pageRequestFactory = new PageRequestFactory();
         PickPreviewAssembler pickPreviewAssembler = new PickPreviewAssembler(selectionRepository, categoryRepository,
-                optionRepository, commentRepository, likeService, pickMapper, targetService, userMapper);
+                optionRepository, commentRepository, mock(CommentPreviewAssembler.class), likeService, pickMapper,
+                targetService, userMapper);
         service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
                 userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
                 pickPreviewAssembler);

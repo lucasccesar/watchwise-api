@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.feed.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.comment.entity.Comment;
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
@@ -97,6 +99,9 @@ class FeedControllerIntegrationTest {
     private PicksTemplateRepository picksTemplateRepository;
 
     @Autowired
+    private CommentRepository commentRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -107,6 +112,7 @@ class FeedControllerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        commentRepository.deleteAll();
         pickRepository.deleteAll();
         picksTemplateRepository.deleteAll();
         top5EntryRepository.deleteAll();
@@ -211,6 +217,98 @@ class FeedControllerIntegrationTest {
                 .createdAt(createdAt)
                 .updatedAt(createdAt)
                 .build());
+    }
+
+    private Comment persistComment(User author, Comment.CommentBuilder target, String text, LocalDateTime createdAt) {
+        return commentRepository.save(target
+                .user(author)
+                .text(text)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
+                .build());
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Return Count And Three Newest Comments Per Target - When Entries Have Comments")
+    void shouldReturnCountAndThreeNewestCommentsPerTargetWhenEntriesHaveComments() throws Exception {
+        RegisteredUser viewer = registerUser("feedcommentviewer");
+        RegisteredUser followed = registerUser("feedcommentfollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        User viewerEntity = userRepository.findById(viewer.id()).orElseThrow();
+        LocalDateTime now = LocalDateTime.now();
+        Content movie = persistContent("550", ContentType.MOVIE);
+        Content series = persistContent("1399", ContentType.SERIES);
+        DiaryEntry diary = persistDiaryEntry(followedEntity, movie, now);
+        DiaryEntry otherDiary = persistDiaryEntry(followedEntity, persistContent("680", ContentType.MOVIE), now.minusMinutes(5));
+        persistDroppedEntry(followedEntity, series, now.minusMinutes(1));
+        for (int i = 1; i <= 4; i++) {
+            persistComment(viewerEntity, Comment.builder().diaryEntry(diary), "diary " + i, now.plusSeconds(i));
+        }
+        persistComment(viewerEntity, Comment.builder().diaryEntry(otherDiary), "other diary", now.plusSeconds(9));
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].eventType").value("DIARY_ENTRY"))
+                .andExpect(jsonPath("$.content[0].commentsCount").value(4))
+                .andExpect(jsonPath("$.content[0].recentComments.length()").value(3))
+                .andExpect(jsonPath("$.content[0].recentComments[0].text").value("diary 4"))
+                .andExpect(jsonPath("$.content[0].recentComments[1].text").value("diary 3"))
+                .andExpect(jsonPath("$.content[0].recentComments[2].text").value("diary 2"))
+                .andExpect(jsonPath("$.content[1].eventType").value("DROPPED"))
+                .andExpect(jsonPath("$.content[1].commentsCount").value(0))
+                .andExpect(jsonPath("$.content[1].recentComments.length()").value(0))
+                .andExpect(jsonPath("$.content[2].eventType").value("DIARY_ENTRY"))
+                .andExpect(jsonPath("$.content[2].commentsCount").value(1))
+                .andExpect(jsonPath("$.content[2].recentComments[0].text").value("other diary"));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Keep Social Fields Null - When Event Is Top5Update")
+    void shouldKeepSocialFieldsNullWhenEventIsTop5Update() throws Exception {
+        RegisteredUser viewer = registerUser("feedtop5socialviewer");
+        RegisteredUser followed = registerUser("feedtop5socialfollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        persistTop5Entry(followedEntity, persistContent("550", ContentType.MOVIE), LocalDateTime.now());
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].eventType").value("TOP5_UPDATE"))
+                .andExpect(jsonPath("$.content[0].commentsCount").value(nullValue()))
+                .andExpect(jsonPath("$.content[0].recentComments").value(nullValue()));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Isolate Pick And Template Recent Comments - When Both Have Comments")
+    void shouldIsolatePickAndTemplateRecentCommentsWhenBothHaveComments() throws Exception {
+        RegisteredUser viewer = registerUser("feedpicksocialviewer");
+        RegisteredUser followed = registerUser("feedpicksocialfollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        User viewerEntity = userRepository.findById(viewer.id()).orElseThrow();
+        LocalDateTime now = LocalDateTime.now();
+        PicksTemplate template = picksTemplateRepository.saveAndFlush(PicksTemplate.builder()
+                .creator(followedEntity).origin(PickOrigin.COMMUNITY).name("Weekend Picks")
+                .createdAt(now.minusMinutes(1)).updatedAt(now.minusMinutes(1)).build());
+        Pick pick = pickRepository.saveAndFlush(Pick.builder()
+                .picksTemplate(template).user(followedEntity).visibility(PickVisibility.PUBLIC)
+                .createdAt(now).updatedAt(now).build());
+        persistComment(viewerEntity, Comment.builder().pick(pick), "pick comment", now.plusSeconds(1));
+        persistComment(viewerEntity, Comment.builder().picksTemplate(template), "template comment one", now.plusSeconds(2));
+        persistComment(viewerEntity, Comment.builder().picksTemplate(template), "template comment two", now.plusSeconds(3));
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].eventType").value("PICK_CREATED"))
+                .andExpect(jsonPath("$.content[0].pick.commentsCount").value(1))
+                .andExpect(jsonPath("$.content[0].pick.recentComments.length()").value(1))
+                .andExpect(jsonPath("$.content[0].pick.recentComments[0].text").value("pick comment"))
+                .andExpect(jsonPath("$.content[0].picksTemplate.commentsCount").value(2))
+                .andExpect(jsonPath("$.content[0].picksTemplate.recentComments.length()").value(2))
+                .andExpect(jsonPath("$.content[0].picksTemplate.recentComments[0].text").value("template comment two"))
+                .andExpect(jsonPath("$.content[1].eventType").value("PICKS_TEMPLATE_CREATED"))
+                .andExpect(jsonPath("$.content[1].picksTemplate.recentComments.length()").value(2));
     }
 
     @Test
