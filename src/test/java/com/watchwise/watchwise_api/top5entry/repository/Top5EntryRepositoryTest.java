@@ -24,6 +24,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -141,6 +143,26 @@ class Top5EntryRepositoryTest {
         List<Top5Entry> result = top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucas.getId(), ContentType.MOVIE);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findCurrentPreviewsByUserIdsAndType] Should Filter Users And Type And Order Each User - When Multiple Current Top 5 Lists Exist")
+    void shouldFilterUsersAndTypeAndOrderEachUserWhenMultipleCurrentTop5ListsExist() {
+        top5EntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 2));
+        top5EntryRepository.save(buildEntry(lucas, pulpFiction, ContentType.MOVIE, 1));
+        top5EntryRepository.save(buildEntry(marina, breakingBad, ContentType.SERIES, 1));
+        top5EntryRepository.saveAndFlush(buildEntry(marina, fightClub, ContentType.MOVIE, 1));
+        entityManager.clear();
+
+        List<Top5Entry> result = top5EntryRepository.findCurrentPreviewsByUserIdsAndType(
+                List.of(lucas.getId(), marina.getId()), ContentType.MOVIE);
+        Map<java.util.UUID, List<Top5Entry>> byUser = result.stream()
+                .collect(Collectors.groupingBy(entry -> entry.getUser().getId()));
+
+        assertThat(byUser.get(lucas.getId())).extracting(Top5Entry::getPosition).containsExactly(1, 2);
+        assertThat(byUser.get(lucas.getId())).allMatch(entry -> Hibernate.isInitialized(entry.getContent()));
+        assertThat(byUser.get(marina.getId())).extracting(entry -> entry.getContent().getId())
+                .containsExactly(fightClub.getId());
     }
 
     @Test

@@ -3,6 +3,8 @@ package com.watchwise.watchwise_api.feed.service.impl;
 import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -24,6 +26,8 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
+import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -62,6 +66,8 @@ public class FeedServiceImpl implements FeedService {
     private final WatchCompanionRepository watchCompanionRepository;
     private final LikeService likeService;
     private final ContentMapper contentMapper;
+    private final Top5EntryMapper top5EntryMapper;
+    private final UserContentPosterService userContentPosterService;
     private final UserMapper userMapper;
     private final PickPreviewAssembler pickPreviewAssembler;
     private final PicksTemplatePreviewAssembler picksTemplatePreviewAssembler;
@@ -99,6 +105,7 @@ public class FeedServiceImpl implements FeedService {
         List<Top5Entry> top5Entries = trim(top5Raw, effectiveSize);
         List<Pick> pickEntries = trim(pickRaw, effectiveSize);
         List<PicksTemplate> picksTemplateEntries = trim(picksTemplateRaw, effectiveSize);
+        Map<Top5Key, List<Top5EntryResponseDTO>> currentTop5ByKey = loadCurrentTop5Previews(top5Entries);
 
         Set<UUID> likedDiaryEntryIds = likeService.getLikedDiaryEntryIds(
                 userId, diaryEntries.stream().map(DiaryEntry::getId).toList());
@@ -126,7 +133,8 @@ public class FeedServiceImpl implements FeedService {
                     toDroppedFeedItem(entry, likedDroppedEntryIds.contains(entry.getId()))));
         }
         for (Top5Entry entry : top5Entries) {
-            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(), toTop5FeedItem(entry)));
+            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
+                    toTop5FeedItem(entry, currentTop5ByKey.getOrDefault(top5Key(entry), List.of()))));
         }
         for (Pick entry : pickEntries) {
             candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
@@ -200,7 +208,51 @@ public class FeedServiceImpl implements FeedService {
                 entry.getCreatedAt());
     }
 
-    private FeedItemDTO toTop5FeedItem(Top5Entry entry) {
+    private Map<Top5Key, List<Top5EntryResponseDTO>> loadCurrentTop5Previews(List<Top5Entry> top5Entries) {
+        if (top5Entries.isEmpty()) {
+            return Map.of();
+        }
+
+        List<UUID> userIds = top5Entries.stream()
+                .map(entry -> entry.getUser().getId())
+                .distinct()
+                .toList();
+        Map<ContentType, List<UUID>> userIdsByType = new LinkedHashMap<>();
+        for (Top5Entry entry : top5Entries) {
+            List<UUID> typeUserIds = userIdsByType.computeIfAbsent(entry.getType(), ignored -> new ArrayList<>());
+            UUID userId = entry.getUser().getId();
+            if (!typeUserIds.contains(userId)) {
+                typeUserIds.add(userId);
+            }
+        }
+        List<Top5Entry> currentEntries = new ArrayList<>();
+        userIdsByType.forEach((type, typeUserIds) -> currentEntries.addAll(
+                top5EntryRepository.findCurrentPreviewsByUserIdsAndType(typeUserIds, type)));
+        List<UserContentPosterService.UserContentPosterKey> posterKeys = currentEntries.stream()
+                .map(entry -> new UserContentPosterService.UserContentPosterKey(
+                        entry.getUser().getId(), entry.getContent().getId()))
+                .distinct()
+                .toList();
+        Map<UserContentPosterService.UserContentPosterKey, String> customPosters =
+                userContentPosterService.findByUserAndContentPairs(posterKeys);
+
+        Map<Top5Key, List<Top5EntryResponseDTO>> previewsByKey = new LinkedHashMap<>();
+        for (Top5Entry entry : currentEntries) {
+            Top5Key key = top5Key(entry);
+            UserContentPosterService.UserContentPosterKey posterKey =
+                    new UserContentPosterService.UserContentPosterKey(key.userId(), entry.getContent().getId());
+            Top5EntryResponseDTO preview = top5EntryMapper.top5EntryToResponseDto(entry)
+                    .withCustomPosterUrl(customPosters.get(posterKey));
+            previewsByKey.computeIfAbsent(key, ignored -> new ArrayList<>()).add(preview);
+        }
+        return previewsByKey;
+    }
+
+    private Top5Key top5Key(Top5Entry entry) {
+        return new Top5Key(entry.getUser().getId(), entry.getType());
+    }
+
+    private FeedItemDTO toTop5FeedItem(Top5Entry entry, List<Top5EntryResponseDTO> top5) {
         return new FeedItemDTO(
                 FeedEventType.TOP5_UPDATE,
                 entry.getId(),
@@ -214,7 +266,8 @@ public class FeedServiceImpl implements FeedService {
                 null,
                 null,
                 null,
-                entry.getCreatedAt());
+                entry.getCreatedAt(),
+                top5);
     }
 
     private FeedItemDTO toPickFeedItem(Pick entry, PickPreviewDTO pick, PicksTemplatePreviewDTO picksTemplate) {
@@ -272,6 +325,9 @@ public class FeedServiceImpl implements FeedService {
     }
 
     private record FeedCursor(LocalDateTime createdAt, UUID id) {
+    }
+
+    private record Top5Key(UUID userId, ContentType type) {
     }
 
     private record FeedCandidate(LocalDateTime createdAt, UUID id, FeedItemDTO item) {

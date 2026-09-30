@@ -32,6 +32,15 @@ public interface Top5EntryRepository extends JpaRepository<Top5Entry, UUID> {
             @Param("cursorId") UUID cursorId,
             Pageable pageable);
 
+    @Query("""
+            SELECT t FROM Top5Entry t JOIN FETCH t.content
+            WHERE t.user.id IN :userIds AND t.type = :type
+            ORDER BY t.user.id ASC, t.position ASC
+            """)
+    List<Top5Entry> findCurrentPreviewsByUserIdsAndType(
+            @Param("userIds") Collection<UUID> userIds,
+            @Param("type") ContentType type);
+
     List<Top5Entry> findByUserIdAndTypeOrderByPositionAsc(UUID userId, ContentType type);
 
     @Query("""

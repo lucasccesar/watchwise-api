@@ -27,7 +27,10 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
+import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
+import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -42,6 +45,7 @@ import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.List;
 import java.util.Set;
@@ -53,11 +57,20 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FeedServiceImplTest {
+
+    @Test
+    @DisplayName("[FeedItemDTO] Should Expose Current Top 5 Preview - When Feed Item Is Built")
+    void shouldExposeCurrentTop5PreviewWhenFeedItemIsBuilt() {
+        assertThat(Arrays.stream(FeedItemDTO.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName))
+                .contains("top5");
+    }
 
     @Test
     @DisplayName("[FeedItemDTO] Should Carry Pick And Template Previews - When A Pick Event Is Created")
@@ -184,6 +197,12 @@ class FeedServiceImplTest {
     private Top5EntryRepository top5EntryRepository;
 
     @Mock
+    private Top5EntryMapper top5EntryMapper;
+
+    @Mock
+    private UserContentPosterService userContentPosterService;
+
+    @Mock
     private PickRepository pickRepository;
 
     @Mock
@@ -305,6 +324,7 @@ class FeedServiceImplTest {
         assertThat(item.likesCount()).isEqualTo(3);
         assertThat(item.likedByMe()).isTrue();
         assertThat(item.top5Type()).isNull();
+        assertThat(item.top5()).isNull();
     }
 
     @Test
@@ -348,6 +368,40 @@ class FeedServiceImplTest {
         assertThat(item.content()).isNull();
         assertThat(item.comment()).isNull();
         assertThat(item.score()).isNull();
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Carry Current Top 5 Preview And Reuse It - When Multiple Events Share Author And Type")
+    void shouldCarryCurrentTop5PreviewAndReuseItWhenMultipleEventsShareAuthorAndType() {
+        stubFollowedIds();
+        stubEmptyDiaryAndDropped(21);
+
+        LocalDateTime now = LocalDateTime.now();
+        Top5Entry newestEntry = buildTop5Entry(now);
+        Top5Entry olderEntry = buildTop5Entry(now.minusMinutes(1));
+        Top5EntryResponseDTO currentEntry = new Top5EntryResponseDTO(
+                UUID.randomUUID(), ContentType.MOVIE, null, 1, now, now);
+        UserContentPosterService.UserContentPosterKey posterKey =
+                new UserContentPosterService.UserContentPosterKey(followedId, newestEntry.getContent().getId());
+        String customPosterUrl = "https://image.tmdb.org/t/p/w342/current.png";
+
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(newestEntry, olderEntry));
+        when(top5EntryRepository.findCurrentPreviewsByUserIdsAndType(
+                eq(List.of(followedId)), eq(ContentType.MOVIE)))
+                .thenReturn(List.of(newestEntry));
+        when(top5EntryMapper.top5EntryToResponseDto(newestEntry)).thenReturn(currentEntry);
+        when(userContentPosterService.findByUserAndContentPairs(List.of(posterKey)))
+                .thenReturn(Map.of(posterKey, customPosterUrl));
+        List<Top5EntryResponseDTO> expectedTop5 = List.of(currentEntry.withCustomPosterUrl(customPosterUrl));
+
+        CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, null);
+
+        assertThat(result.content())
+                .extracting(FeedItemDTO::top5)
+                .containsExactly(expectedTop5, expectedTop5);
+        verify(top5EntryRepository, times(1)).findCurrentPreviewsByUserIdsAndType(
+                eq(List.of(followedId)), eq(ContentType.MOVIE));
     }
 
     @Test
