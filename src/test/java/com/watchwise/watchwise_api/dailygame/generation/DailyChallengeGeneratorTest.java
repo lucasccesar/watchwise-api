@@ -79,6 +79,14 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
+    @DisplayName("[hasComparableInfo] Should Ignore Arbitrary Map Values - When Checking Comparable Fields")
+    void shouldIgnoreArbitraryMapValuesWhenCheckingComparableFields() {
+        assertThat(DailyChallengeInfoSupport.hasComparableInfo(
+                Map.of("year", 2000, "genres", Map.of("unexpected", "shape")),
+                DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isFalse();
+    }
+
+    @Test
     @DisplayName("[generate] Should Choose A Supported Discovery Page - When Generating A Movie Poster Challenge")
     void shouldChooseASupportedDiscoveryPageWhenGeneratingAMoviePosterChallenge() {
         when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))

@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvContentRating;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvContentRatings;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeCandidate;
 import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeInfoSupport;
@@ -49,6 +50,9 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
     @Override
     public boolean repairIfIncomplete(DailyChallenge challenge) {
         if (challenge == null || challenge.getGameType() == null) {
+            return false;
+        }
+        if (!hasConsistentSnapshotIdentity(challenge)) {
             return false;
         }
         return switch (challenge.getGameType()) {
@@ -115,7 +119,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
 
     private boolean repairFilmography(DailyChallenge challenge) {
         Map<String, Object> existingSnapshot = challenge.getAnswerSnapshot();
-        if (hasCompleteFilmography(existingSnapshot)) {
+        if (hasCompleteFilmography(existingSnapshot, challenge.getGameType())) {
             return false;
         }
         if (!usable(challenge.getTargetTmdbId())) {
@@ -124,6 +128,9 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
         DailyGameFilmographyService.FilmographySnapshot snapshot = filmographyService.snapshot(
                 challenge.getTargetTmdbId(), challenge.getGameType());
         if (snapshot == null || snapshot.entries().isEmpty()) {
+            return false;
+        }
+        if (!hasCompleteFilmography(Map.of("filmography", snapshot.entries()), challenge.getGameType())) {
             return false;
         }
         return mergeAndSave(challenge, Map.of("filmography", snapshot.entries()));
@@ -136,7 +143,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
         }
         boolean changed = false;
         for (Map.Entry<String, Object> entry : candidateSnapshot.entrySet()) {
-            if (isMissingOrInvalid(repairedSnapshot.get(entry.getKey()), entry.getKey())) {
+            if (isMissingOrInvalid(repairedSnapshot.get(entry.getKey()), entry.getKey(), challenge.getGameType())) {
                 repairedSnapshot.put(entry.getKey(), entry.getValue());
                 changed = true;
             }
@@ -218,11 +225,77 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
         return true;
     }
 
-    private boolean hasCompleteFilmography(Map<String, Object> snapshot) {
-        return snapshot != null && snapshot.get("filmography") instanceof List<?> entries && !entries.isEmpty();
+    private boolean hasCompleteFilmography(Map<String, Object> snapshot, DailyGameType gameType) {
+        return snapshot != null && validFilmographyEntries(snapshot.get("filmography"), gameType);
     }
 
-    private boolean isMissingOrInvalid(Object value, String key) {
-        return "filmography".equals(key) ? !(value instanceof List<?> entries && !entries.isEmpty()) : !usable(value);
+    private boolean validFilmographyEntries(Object value, DailyGameType gameType) {
+        String expectedMediaType = expectedFilmographyMediaType(gameType);
+        if (expectedMediaType == null || !(value instanceof List<?> entries) || entries.isEmpty()) {
+            return false;
+        }
+        return entries.stream().allMatch(entry -> validFilmographyEntry(entry, expectedMediaType));
+    }
+
+    private boolean validFilmographyEntry(Object value, String expectedMediaType) {
+        if (!(value instanceof Map<?, ?> entry)) {
+            return false;
+        }
+        Object workId = entry.get("workId");
+        Object title = entry.get("title");
+        Object mediaType = entry.get("mediaType");
+        if (!(workId instanceof String workIdValue) || !validId(workIdValue)
+                || !(title instanceof String titleValue) || !nonBlank(titleValue)
+                || !(mediaType instanceof String mediaTypeValue)
+                || !expectedMediaType.equalsIgnoreCase(mediaTypeValue)) {
+            return false;
+        }
+        return !"tv".equalsIgnoreCase(expectedMediaType)
+                || positiveEpisodeCount(entry.get("episodeCount"));
+    }
+
+    private boolean positiveEpisodeCount(Object value) {
+        if (!(value instanceof Number number)) {
+            return false;
+        }
+        double count = number.doubleValue();
+        return count > 0 && count == Math.rint(count);
+    }
+
+    private String expectedFilmographyMediaType(DailyGameType gameType) {
+        return gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY ? "movie"
+                : gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY ? "tv" : null;
+    }
+
+    private boolean hasConsistentSnapshotIdentity(DailyChallenge challenge) {
+        Map<String, Object> snapshot = challenge.getAnswerSnapshot();
+        if (snapshot == null || snapshot.isEmpty()) {
+            return true;
+        }
+        DailyGameTargetKind targetKind = challenge.getTargetKind();
+        String targetTmdbId = targetKind == DailyGameTargetKind.MOVIE
+                || targetKind == DailyGameTargetKind.SERIES ? challenge.getTargetTmdbId() : null;
+        String personTmdbId = targetKind == DailyGameTargetKind.PERSON
+                ? challenge.getTargetTmdbId() : null;
+        return matchesIdentity(snapshot, "targetKind",
+                targetKind == null ? null : targetKind.name())
+                && matchesIdentity(snapshot, "tmdbId", targetTmdbId)
+                && matchesIdentity(snapshot, "personTmdbId", personTmdbId)
+                && matchesIdentity(snapshot, "sourceTmdbId", challenge.getSourceTmdbId());
+    }
+
+    private boolean matchesIdentity(Map<String, Object> snapshot, String field, String expected) {
+        if (!snapshot.containsKey(field)) {
+            return true;
+        }
+        Object actual = snapshot.get(field);
+        if (actual == null) {
+            return expected == null;
+        }
+        return expected != null && actual instanceof String string && expected.equals(string);
+    }
+
+    private boolean isMissingOrInvalid(Object value, String key, DailyGameType gameType) {
+        return "filmography".equals(key) ? !validFilmographyEntries(value, gameType) : !usable(value);
     }
 }

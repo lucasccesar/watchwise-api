@@ -41,7 +41,10 @@ public final class DailyChallengeInfoSupport {
         if (value instanceof Collection<?> collection) {
             return !collection.isEmpty();
         }
-        return true;
+        if (value instanceof Number number) {
+            return number.doubleValue() > 0;
+        }
+        return false;
     }
 
     static String providers(TmdbWatchProviders providers, String region) {

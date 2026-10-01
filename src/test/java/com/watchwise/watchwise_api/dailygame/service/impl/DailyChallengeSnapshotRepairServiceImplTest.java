@@ -138,11 +138,31 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     }
 
     @Test
+    @DisplayName("[repairIfIncomplete] Should Preserve Existing Title - When TMDB Title Changes")
+    void shouldPreserveExistingTitleWhenTmdbTitleChanges() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "550", "title", "Frozen legacy title",
+                "imageUrl", IMAGE_PATH, "sourceTmdbId", "550"));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550");
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                .thenReturn(found(movieDetails("550", "/poster.jpg", "Current TMDB title")));
+        when(tmdbClient.getMovieReleaseDates("550", LANGUAGE)).thenReturn(found(movieReleaseDates("550")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+
+        assertThat(challenge.getAnswerSnapshot())
+                .containsEntry("title", "Frozen legacy title")
+                .containsEntry("sourceTmdbId", "550");
+    }
+
+    @Test
     @DisplayName("[repairIfIncomplete] Should Add Movie Filmography And Be Idempotent - When The Legacy Snapshot Omits It")
     void shouldAddMovieFilmographyAndBeIdempotentWhenTheLegacySnapshotOmitsIt() {
         DailyChallenge challenge = actorChallenge(
                 DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550", "PERSON:287");
-        List<Map<String, Object>> entries = List.of(Map.of("tmdbId", "680", "title", "Pulp Fiction"));
+        List<Map<String, Object>> entries = List.of(Map.of(
+                "workId", "680", "title", "Pulp Fiction", "mediaType", "movie"));
         when(filmographyService.snapshot("287", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
                 .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(entries));
 
@@ -160,7 +180,8 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     void shouldAddSeriesFilmographyAndBeIdempotentWhenTheLegacySnapshotOmitsIt() {
         DailyChallenge challenge = actorChallenge(
                 DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, "17419", "1396", "PERSON:17419");
-        List<Map<String, Object>> entries = List.of(Map.of("tmdbId", "1396", "title", "Breaking Bad"));
+        List<Map<String, Object>> entries = List.of(Map.of(
+                "workId", "1396", "title", "Breaking Bad", "mediaType", "tv", "episodeCount", 5));
         when(filmographyService.snapshot("17419", DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY))
                 .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(entries));
 
@@ -330,6 +351,67 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     }
 
     @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Mismatched Target Kind - Without Saving")
+    void shouldRejectMismatchedTargetKindWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "SERIES", "tmdbId", "550", "title", "Fight Club"));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550");
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verifyNoInteractions(tmdbClient, filmographyService);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Mismatched Movie ID - Without Saving")
+    void shouldRejectMismatchedMovieIdWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "999", "title", "Fight Club"));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550");
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verifyNoInteractions(tmdbClient, filmographyService);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Mismatched Person ID - Without Saving")
+    void shouldRejectMismatchedPersonIdWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "999", "title", "Brad Pitt"));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
+                originalSnapshot, "PERSON:287");
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verifyNoInteractions(tmdbClient, filmographyService);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Mismatched Source ID - Without Saving")
+    void shouldRejectMismatchedSourceIdWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "287", "sourceTmdbId", "999",
+                "title", "Brad Pitt"));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
+                originalSnapshot, "PERSON:287");
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verifyNoInteractions(tmdbClient, filmographyService);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
     @DisplayName("[repairIfIncomplete] Should Reject Blank Movie Title - Without Saving")
     void shouldRejectBlankMovieTitleWithoutSaving() {
         Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
@@ -386,13 +468,54 @@ class DailyChallengeSnapshotRepairServiceImplTest {
                 "filmography", Map.of("unexpected", "shape")));
         DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
                 originalSnapshot, "PERSON:287");
-        List<Map<String, Object>> entries = List.of(Map.of("workId", "680", "title", "Pulp Fiction"));
+        List<Map<String, Object>> entries = List.of(Map.of(
+                "workId", "680", "title", "Pulp Fiction", "mediaType", "movie"));
         when(filmographyService.snapshot("287", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
                 .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(entries));
 
         assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
 
         assertThat(challenge.getAnswerSnapshot()).containsEntry("filmography", entries);
+        verify(challengeRepository).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Replace Malformed Filmography Entry")
+    void shouldReplaceMalformedFilmographyEntry() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "287", "title", "Brad Pitt",
+                "filmography", List.of(Map.of(
+                        "workId", "680", "title", "Pulp Fiction", "mediaType", "tv"))));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
+                originalSnapshot, "PERSON:287");
+        List<Map<String, Object>> canonicalEntries = List.of(Map.of(
+                "workId", "680", "title", "Pulp Fiction", "mediaType", "movie"));
+        when(filmographyService.snapshot("287", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
+                .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(canonicalEntries));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("filmography", canonicalEntries);
+        verify(challengeRepository).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Replace Series Filmography Entry Without Positive Episode Count")
+    void shouldReplaceSeriesFilmographyEntryWithoutPositiveEpisodeCount() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "17419", "title", "Actor",
+                "filmography", List.of(Map.of(
+                        "workId", "1396", "title", "Breaking Bad", "mediaType", "tv", "episodeCount", 0))));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, "17419", "1396",
+                originalSnapshot, "PERSON:17419");
+        List<Map<String, Object>> canonicalEntries = List.of(Map.of(
+                "workId", "1396", "title", "Breaking Bad", "mediaType", "tv", "episodeCount", 5));
+        when(filmographyService.snapshot("17419", DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY))
+                .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(canonicalEntries));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("filmography", canonicalEntries);
         verify(challengeRepository).saveAndFlush(challenge);
     }
 
@@ -404,7 +527,8 @@ class DailyChallengeSnapshotRepairServiceImplTest {
                 "filmography", "unexpected shape"));
         DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
                 originalSnapshot, "PERSON:287");
-        List<Map<String, Object>> entries = List.of(Map.of("workId", "680", "title", "Pulp Fiction"));
+        List<Map<String, Object>> entries = List.of(Map.of(
+                "workId", "680", "title", "Pulp Fiction", "mediaType", "movie"));
         when(filmographyService.snapshot("287", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
                 .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(entries));
 
