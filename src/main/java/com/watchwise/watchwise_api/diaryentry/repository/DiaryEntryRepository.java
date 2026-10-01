@@ -60,6 +60,15 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             AND (:hasReview IS NULL
                  OR (:hasReview = TRUE AND d.comment IS NOT NULL)
                  OR (:hasReview = FALSE AND d.comment IS NULL))
+            AND (:seriesTmdbId IS NULL OR (
+                (d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                    AND d.content.tmdbId = :seriesTmdbId)
+                OR (d.content.type IN (
+                    com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
+                    com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
+                    AND d.content.seriesTmdbId = :seriesTmdbId)
+            ))
+            AND (:score IS NULL OR d.score = :score)
             ORDER BY d.createdAt DESC, d.id DESC
             """)
     Page<DiaryEntry> findByUserIdWithFilters(
@@ -68,7 +77,37 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("watchedDateStart") LocalDate watchedDateStart,
             @Param("watchedDateEnd") LocalDate watchedDateEnd,
             @Param("hasReview") Boolean hasReview,
+            @Param("seriesTmdbId") String seriesTmdbId,
+            @Param("score") Integer score,
             Pageable pageable);
+
+    default Page<DiaryEntry> findByUserIdWithFilters(
+            UUID userId,
+            ContentType type,
+            LocalDate watchedDateStart,
+            LocalDate watchedDateEnd,
+            Boolean hasReview,
+            Pageable pageable) {
+        return findByUserIdWithFilters(userId, type, watchedDateStart, watchedDateEnd, hasReview, null, null, pageable);
+    }
+
+    interface DiarySeriesCount {
+        String getSeriesTmdbId();
+        Long getEntriesCount();
+    }
+
+    @Query(value = """
+            SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS seriesTmdbId,
+                   COUNT(d.id) AS entriesCount
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            AND c.type IN ('SERIES', 'SEASON', 'EPISODE')
+            GROUP BY CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END
+            ORDER BY COUNT(d.id) DESC,
+                     CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END ASC
+            """, nativeQuery = true)
+    List<DiarySeriesCount> findSeriesEntryCountsByUserId(@Param("userId") UUID userId);
 
     List<DiaryEntry> findByUserIdAndContentIdAndWatchNumberGreaterThan(UUID userId, UUID contentId, Integer watchNumber);
 

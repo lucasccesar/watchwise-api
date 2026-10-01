@@ -166,12 +166,60 @@ class DiaryEntryRepositoryTest {
         entityManager.clear();
 
         Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
-                lucas.getId(), null, LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), null, PageRequest.of(0, 10));
+                lucas.getId(), null, LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), null, null, null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
                 .containsExactly(fightClub.getId());
         assertThat(Hibernate.isInitialized(result.getContent().get(0).getContent())).isTrue();
         assertThat(result.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[findSeriesEntryCountsByUserId] Should Count Every Related Entry And Rewatch")
+    void shouldCountEveryRelatedEntryAndRewatch() {
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        Content season = contentRepository.save(buildSeason("1399", 1));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content otherEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+
+        diaryEntryRepository.save(buildEntry(lucas, series));
+        diaryEntryRepository.save(buildEntry(lucas, season));
+        diaryEntryRepository.save(buildEntry(lucas, episode, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode, 2));
+        diaryEntryRepository.save(buildEntry(lucas, otherEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
+
+        List<DiaryEntryRepository.DiarySeriesCount> result =
+                diaryEntryRepository.findSeriesEntryCountsByUserId(lucas.getId());
+
+        assertThat(result)
+                .extracting(DiaryEntryRepository.DiarySeriesCount::getSeriesTmdbId,
+                        DiaryEntryRepository.DiarySeriesCount::getEntriesCount)
+                .containsExactly(tuple("1399", 4L), tuple("1396", 1L));
+    }
+
+    @Test
+    @DisplayName("[findByUserIdWithFilters] Should Filter By Series And Exact Score")
+    void shouldFilterBySeriesAndExactScore() {
+        Content targetEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        DiaryEntry scoreTenEntry = buildEntry(lucas, targetEpisode);
+        scoreTenEntry.setScore(10);
+        DiaryEntry scoreNineEntry = buildEntry(lucas, targetEpisode, 2);
+        scoreNineEntry.setScore(9);
+        DiaryEntry otherSeriesScoreTenEntry = buildEntry(lucas, otherSeriesEpisode);
+        otherSeriesScoreTenEntry.setScore(10);
+        diaryEntryRepository.save(scoreTenEntry);
+        diaryEntryRepository.save(scoreNineEntry);
+        diaryEntryRepository.saveAndFlush(otherSeriesScoreTenEntry);
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
+                lucas.getId(), null, null, null, null, "1399", 10, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(DiaryEntry::getScore)
+                .containsExactly(10);
+        assertThat(result.getContent().getFirst().getContent().getSeriesTmdbId()).isEqualTo("1399");
     }
 
     @Test
@@ -181,7 +229,7 @@ class DiaryEntryRepositoryTest {
         entityManager.clear();
 
         Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
-                lucas.getId(), null, LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), null, PageRequest.of(0, 10));
+                lucas.getId(), null, LocalDate.of(2024, 1, 1), LocalDate.of(2024, 12, 31), null, null, null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
     }
@@ -196,7 +244,7 @@ class DiaryEntryRepositoryTest {
         entityManager.clear();
 
         Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
-                lucas.getId(), ContentType.EPISODE, null, null, null, PageRequest.of(0, 10));
+                lucas.getId(), ContentType.EPISODE, null, null, null, null, null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(entry -> entry.getContent().getType())
                 .containsExactly(ContentType.EPISODE);
@@ -212,7 +260,7 @@ class DiaryEntryRepositoryTest {
         entityManager.clear();
 
         Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
-                lucas.getId(), null, null, null, true, PageRequest.of(0, 10));
+                lucas.getId(), null, null, null, true, null, null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(entry -> entry.getContent().getId())
                 .containsExactly(fightClub.getId());
@@ -225,7 +273,7 @@ class DiaryEntryRepositoryTest {
         entityManager.clear();
 
         Page<DiaryEntry> result = diaryEntryRepository.findByUserIdWithFilters(
-                lucas.getId(), null, null, null, null, PageRequest.of(0, 10));
+                lucas.getId(), null, null, null, null, null, null, PageRequest.of(0, 10));
 
         assertThat(result.getContent()).hasSize(1);
     }
