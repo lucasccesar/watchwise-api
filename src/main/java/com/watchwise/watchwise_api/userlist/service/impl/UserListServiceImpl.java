@@ -444,9 +444,9 @@ public class UserListServiceImpl implements UserListService {
                                 ownerId, seriesTmdbIds);
                 ownerEpisodeAverages = computeEpisodeAverageRatings(ownerEntries, items);
             }
-            List<DiaryEntry> publicEntries =
-                    diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(seriesTmdbIds);
-            publicEpisodeAverages = computeEpisodeAverageRatings(publicEntries, items);
+            List<DiaryEntryRepository.PublicEpisodeRatingAggregate> publicAggregates =
+                    diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(seriesTmdbIds);
+            publicEpisodeAverages = computePublicEpisodeAverageRatings(publicAggregates, items);
         }
 
         Set<UUID> contentIds = items.stream()
@@ -514,6 +514,54 @@ public class UserListServiceImpl implements UserListService {
         }
 
         return result;
+    }
+
+    private Map<UUID, Double> computePublicEpisodeAverageRatings(
+            List<DiaryEntryRepository.PublicEpisodeRatingAggregate> aggregates,
+            List<UserListItemResponseDTO> items) {
+        Map<String, EpisodeRatingTotals> totalsBySeries = new HashMap<>();
+        Map<String, EpisodeRatingTotals> totalsBySeason = new HashMap<>();
+        Map<String, EpisodeRatingTotals> totalsByEpisode = new HashMap<>();
+
+        for (DiaryEntryRepository.PublicEpisodeRatingAggregate aggregate : aggregates) {
+            String seriesTmdbId = aggregate.getSeriesTmdbId();
+            String seasonKey = seriesTmdbId + "|" + aggregate.getSeasonNumber();
+            String episodeKey = seasonKey + "|" + aggregate.getEpisodeNumber();
+            EpisodeRatingTotals totals = new EpisodeRatingTotals(aggregate.getScoreSum(), aggregate.getScoreCount());
+            totalsBySeries.merge(seriesTmdbId, totals, EpisodeRatingTotals::plus);
+            totalsBySeason.merge(seasonKey, totals, EpisodeRatingTotals::plus);
+            totalsByEpisode.merge(episodeKey, totals, EpisodeRatingTotals::plus);
+        }
+
+        Map<UUID, Double> result = new HashMap<>();
+        for (UserListItemResponseDTO item : items) {
+            ContentRefDTO content = item.content();
+            if (content == null) {
+                continue;
+            }
+
+            EpisodeRatingTotals totals = switch (content.type()) {
+                case SERIES -> totalsBySeries.get(content.tmdbId());
+                case SEASON -> totalsBySeason.get(content.seriesTmdbId() + "|" + content.seasonNumber());
+                case EPISODE -> totalsByEpisode.get(
+                        content.seriesTmdbId() + "|" + content.seasonNumber() + "|" + content.episodeNumber());
+                default -> null;
+            };
+            if (totals != null) {
+                result.put(item.id(), totals.average());
+            }
+        }
+        return result;
+    }
+
+    private record EpisodeRatingTotals(long scoreSum, long scoreCount) {
+        EpisodeRatingTotals plus(EpisodeRatingTotals other) {
+            return new EpisodeRatingTotals(scoreSum + other.scoreSum, scoreCount + other.scoreCount);
+        }
+
+        double average() {
+            return (double) scoreSum / scoreCount;
+        }
     }
 
     private Comparator<UserListItemResponseDTO> ratingComparator(

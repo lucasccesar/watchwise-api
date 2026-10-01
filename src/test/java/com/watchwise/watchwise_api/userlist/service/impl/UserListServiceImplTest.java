@@ -891,10 +891,10 @@ class UserListServiceImplTest {
                 .thenReturn(List.of(
                         buildEpisodeEntry("100", 1, 1, 4),
                         buildEpisodeEntry("100", 1, 2, 6)));
-        when(diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(Set.of("100")))
-                .thenReturn(List.of(
-                        buildEpisodeEntry("100", 1, 1, 8),
-                        buildEpisodeEntry("100", 1, 2, 10)));
+        doReturn(List.of(
+                buildPublicEpisodeRatingAggregate("100", 1, 1, 8L, 1L),
+                buildPublicEpisodeRatingAggregate("100", 1, 2, 10L, 1L)))
+                .when(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(Set.of("100"));
         doReturn(List.of(
                 buildContentStats(series.content().id(), 7.0),
                 buildContentStats(season.content().id(), 6.5),
@@ -915,6 +915,37 @@ class UserListServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUserListById] Should Weight Public Series And Season Averages By Rating Counts")
+    void shouldWeightPublicSeriesAndSeasonAveragesByRatingCounts() {
+        UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
+        UserListItemResponseDTO series = buildRatingItem(ContentType.SERIES, "100", null, null, null, 1);
+        UserListItemResponseDTO season = buildRatingItem(ContentType.SEASON, null, "100", 1, null, 2);
+        UserListItemResponseDTO firstEpisode = buildRatingItem(ContentType.EPISODE, null, "100", 1, 1, 3);
+        UserListItemResponseDTO secondEpisode = buildRatingItem(ContentType.EPISODE, null, "100", 1, 2, 4);
+        UserListItemResponseDTO unratedSeason = buildRatingItem(ContentType.SEASON, null, "100", 2, null, 5);
+        List<UserListItemResponseDTO> items = List.of(series, season, firstEpisode, secondEpisode, unratedSeason);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(items, 0.0));
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(5L), anyLong(), anyLong(), any()))
+                .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+        doReturn(List.of(
+                buildPublicEpisodeRatingAggregate("100", 1, 1, 14L, 2L),
+                buildPublicEpisodeRatingAggregate("100", 1, 2, 10L, 1L)))
+                .when(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(Set.of("100"));
+
+        UserListDetailedResponseDTO result = userListService.getUserListById(
+                lucasId, list.getId(), null, null, null, null);
+
+        assertThat(result.items()).containsExactly(
+                series.withRatingAverages(null, 8.0, null),
+                season.withRatingAverages(null, 8.0, null),
+                firstEpisode.withRatingAverages(null, 7.0, null),
+                secondEpisode.withRatingAverages(null, 10.0, null),
+                unratedSeason.withRatingAverages(null, null, null));
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Sort By Public Episode Average In Both Directions With Nulls Last")
     void shouldSortByPublicEpisodeAverageInBothDirectionsWithNullsLast() {
         UserList list = buildList(lucas, "My list", null, UserListVisibility.PUBLIC);
@@ -931,10 +962,10 @@ class UserListServiceImplTest {
                 .thenReturn(List.of(
                         buildEpisodeEntry("100", 1, 1, 10),
                         buildEpisodeEntry("200", 1, 1, 1)));
-        when(diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(Set.of("100", "200")))
-                .thenReturn(List.of(
-                        buildEpisodeEntry("100", 1, 1, 2),
-                        buildEpisodeEntry("200", 1, 1, 8)));
+        doReturn(List.of(
+                buildPublicEpisodeRatingAggregate("100", 1, 1, 2L, 1L),
+                buildPublicEpisodeRatingAggregate("200", 1, 1, 8L, 1L)))
+                .when(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(Set.of("100", "200"));
 
         UserListDetailedResponseDTO ascending = userListService.getUserListById(
                 lucasId, list.getId(), null, null, "globalEpisodeAvgRating", "asc");
@@ -978,7 +1009,7 @@ class UserListServiceImplTest {
         assertThat(descending.items()).extracting(UserListItemResponseDTO::id)
                 .containsExactly(highRated.id(), lowRated.id(), unrated.id());
         verify(diaryEntryRepository, never()).findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(any(), any());
-        verify(diaryEntryRepository, never()).findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(any());
+        verify(diaryEntryRepository, never()).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(any());
     }
 
     @Test
@@ -1010,8 +1041,8 @@ class UserListServiceImplTest {
                 .thenReturn(new UserListItemsWithState(List.of(series), 0.0));
         when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(1L), anyLong(), anyLong(), any()))
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
-        when(diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(Set.of("100")))
-                .thenReturn(List.of(buildEpisodeEntry("100", 1, 1, 8)));
+        doReturn(List.of(buildPublicEpisodeRatingAggregate("100", 1, 1, 8L, 1L)))
+                .when(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(Set.of("100"));
         doReturn(List.of(buildContentStats(series.content().id(), 7.0)))
                 .when(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(series.content().id()));
 
@@ -1058,6 +1089,18 @@ class UserListServiceImplTest {
                 .containsExactly(9.0, 3.0);
         assertThat(followerResult.items()).extracting(UserListItemResponseDTO::episodeAverageRating)
                 .containsExactly(9.0, 3.0);
+    }
+
+    private DiaryEntryRepository.PublicEpisodeRatingAggregate buildPublicEpisodeRatingAggregate(
+            String seriesTmdbId, int seasonNumber, int episodeNumber, long scoreSum, long scoreCount) {
+        DiaryEntryRepository.PublicEpisodeRatingAggregate aggregate =
+                mock(DiaryEntryRepository.PublicEpisodeRatingAggregate.class);
+        when(aggregate.getSeriesTmdbId()).thenReturn(seriesTmdbId);
+        when(aggregate.getSeasonNumber()).thenReturn(seasonNumber);
+        when(aggregate.getEpisodeNumber()).thenReturn(episodeNumber);
+        when(aggregate.getScoreSum()).thenReturn(scoreSum);
+        when(aggregate.getScoreCount()).thenReturn(scoreCount);
+        return aggregate;
     }
 
     private DiaryEntry buildEpisodeEntry(String seriesTmdbId, int seasonNumber, int episodeNumber, int score) {

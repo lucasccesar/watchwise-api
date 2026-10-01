@@ -1058,29 +1058,44 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findScoredPublicEpisodeEntriesBySeriesTmdbIdIn] Should Return Only Public Scored Episodes - When Private And Unscored Entries Exist")
-    void shouldReturnOnlyPublicScoredEpisodeEntriesForRequestedSeries() {
+    @DisplayName("[findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn] Should Sum And Count Only Public Scored Episodes For Requested Series")
+    void shouldAggregateOnlyPublicScoredEpisodeEntriesForRequestedSeries() {
         contentRepository.deleteAll();
         marina.setIsProfilePublic(false);
         Content publicScoredEpisode = contentRepository.save(buildEpisode("100", 1, 1));
-        Content privateScoredEpisode = contentRepository.save(buildEpisode("100", 1, 2));
-        Content publicUnscoredEpisode = contentRepository.save(buildEpisode("100", 1, 3));
+        Content otherSeriesEpisode = contentRepository.save(buildEpisode("200", 1, 1));
+        Content season = contentRepository.save(buildSeason("100", 1));
 
         DiaryEntry publicScoredEntry = buildEntry(lucas, publicScoredEpisode);
         publicScoredEntry.setScore(8);
-        DiaryEntry privateScoredEntry = buildEntry(marina, privateScoredEpisode);
+        DiaryEntry publicRewatchEntry = buildEntry(lucas, publicScoredEpisode, 2);
+        publicRewatchEntry.setScore(6);
+        DiaryEntry privateScoredEntry = buildEntry(marina, publicScoredEpisode);
         privateScoredEntry.setScore(9);
-        DiaryEntry publicUnscoredEntry = buildEntry(lucas, publicUnscoredEpisode);
-        DiaryEntry savedPublicScoredEntry = diaryEntryRepository.save(publicScoredEntry);
+        DiaryEntry publicUnscoredEntry = buildEntry(lucas, publicScoredEpisode, 3);
+        DiaryEntry otherSeriesEntry = buildEntry(lucas, otherSeriesEpisode);
+        otherSeriesEntry.setScore(10);
+        DiaryEntry seasonEntry = buildEntry(lucas, season);
+        seasonEntry.setScore(10);
+        diaryEntryRepository.save(publicScoredEntry);
+        diaryEntryRepository.save(publicRewatchEntry);
         diaryEntryRepository.save(privateScoredEntry);
         diaryEntryRepository.save(publicUnscoredEntry);
+        diaryEntryRepository.save(otherSeriesEntry);
+        diaryEntryRepository.save(seasonEntry);
         diaryEntryRepository.flush();
         entityManager.clear();
 
-        List<DiaryEntry> result = diaryEntryRepository.findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(List.of("100"));
+        List<DiaryEntryRepository.PublicEpisodeRatingAggregate> result =
+                diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(List.of("100"));
 
-        assertThat(result).extracting(DiaryEntry::getId)
-                .containsExactly(savedPublicScoredEntry.getId());
+        assertThat(result).extracting(
+                        DiaryEntryRepository.PublicEpisodeRatingAggregate::getSeriesTmdbId,
+                        DiaryEntryRepository.PublicEpisodeRatingAggregate::getSeasonNumber,
+                        DiaryEntryRepository.PublicEpisodeRatingAggregate::getEpisodeNumber,
+                        DiaryEntryRepository.PublicEpisodeRatingAggregate::getScoreSum,
+                        DiaryEntryRepository.PublicEpisodeRatingAggregate::getScoreCount)
+                .containsExactly(tuple("100", 1, 1, 14L, 2L));
     }
 
     @Test

@@ -929,14 +929,28 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
     @Query("""
-            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            SELECT d.content.seriesTmdbId AS seriesTmdbId,
+                   d.content.seasonNumber AS seasonNumber,
+                   d.content.episodeNumber AS episodeNumber,
+                   SUM(d.score) AS scoreSum,
+                   COUNT(d.score) AS scoreCount
+            FROM DiaryEntry d
             WHERE d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
             AND d.content.seriesTmdbId IN :seriesTmdbIds
             AND d.score IS NOT NULL
             AND d.user.isProfilePublic = true
+            GROUP BY d.content.seriesTmdbId, d.content.seasonNumber, d.content.episodeNumber
             """)
-    List<DiaryEntry> findScoredPublicEpisodeEntriesBySeriesTmdbIdIn(
+    List<PublicEpisodeRatingAggregate> findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(
             @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    interface PublicEpisodeRatingAggregate {
+        String getSeriesTmdbId();
+        Integer getSeasonNumber();
+        Integer getEpisodeNumber();
+        Long getScoreSum();
+        Long getScoreCount();
+    }
 
     // --- Delete all diary entries for a series, every watchNumber (DELETE /diary/series/{seriesTmdbId}) ---
     // Episode side reuses findEpisodeEntriesBySeriesForUser above (same filter, already unscoped by watchNumber).
