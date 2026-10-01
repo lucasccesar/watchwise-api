@@ -71,6 +71,10 @@ public class DailyChallenge {
     @Column(name = "answer_snapshot", columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> answerSnapshot;
 
+    public void setAnswerSnapshot(Map<String, Object> answerSnapshot) {
+        this.answerSnapshot = answerSnapshot;
+    }
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "display_snapshot", columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> displaySnapshot;
