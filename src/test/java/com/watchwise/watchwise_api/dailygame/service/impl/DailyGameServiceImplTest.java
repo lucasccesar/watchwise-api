@@ -927,7 +927,9 @@ class DailyGameServiceImplTest {
                         "episodeName", "Episode",
                         "title", "Episode",
                         "imageUrl", "/still.jpg"))
-                .displaySnapshot(Map.of("imageUrl", "/still.jpg"))
+                .displaySnapshot(Map.of("imagePaths", List.of(
+                        "/still-1.jpg", "/still-2.jpg", "/still-3.jpg",
+                        "/still-4.jpg", "/still-5.jpg", "/still-6.jpg")))
                 .createdAt(NOW)
                 .updatedAt(NOW)
                 .build();

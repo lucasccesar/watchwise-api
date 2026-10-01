@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DailyChallengeResponseAssemblerTest {
 
@@ -55,7 +56,7 @@ class DailyChallengeResponseAssemblerTest {
         assertThat(terminal.answer().imageUrl()).isEqualTo(switch (gameType) {
             case MOVIE_BY_INFO, SERIES_BY_INFO -> "https://image.tmdb.org/t/p/w500/secret.jpg";
             case ACTOR_BY_MOVIE_FILMOGRAPHY, ACTOR_BY_SERIES_FILMOGRAPHY
-                    -> "https://image.tmdb.org/t/p/w185/secret.jpg";
+                    -> null;
             default -> throw new IllegalStateException("Unexpected game type: " + gameType);
         });
     }
@@ -105,7 +106,8 @@ class DailyChallengeResponseAssemblerTest {
                 .answerKey("EPISODE:1396:1:3")
                 .imagePath("/third.jpg")
                 .answerSnapshot(Map.of("title", "Episode 3"))
-                .displaySnapshot(Map.of("imagePaths", List.of("/third.jpg", "/second.jpg", "/first.jpg")))
+                .displaySnapshot(Map.of("imagePaths", List.of(
+                        "/third.jpg", "/second.jpg", "/first.jpg", "/fourth.jpg", "/fifth.jpg", "/sixth.jpg")))
                 .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
                 .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
                 .build();
@@ -122,7 +124,10 @@ class DailyChallengeResponseAssemblerTest {
         assertThat(completed.imageUrls()).containsExactly(
                 "https://image.tmdb.org/t/p/w300/third.jpg",
                 "https://image.tmdb.org/t/p/w300/second.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg");
+                "https://image.tmdb.org/t/p/w300/first.jpg",
+                "https://image.tmdb.org/t/p/w300/fourth.jpg",
+                "https://image.tmdb.org/t/p/w300/fifth.jpg",
+                "https://image.tmdb.org/t/p/w300/sixth.jpg");
     }
 
     @Test
@@ -148,7 +153,8 @@ class DailyChallengeResponseAssemblerTest {
                         "episodeNumber", 3,
                         "title", "Pilot",
                         "imageUrl", "/third.jpg"))
-                .displaySnapshot(Map.of("imagePaths", List.of("/third.jpg", "/second.jpg", "/first.jpg")))
+                .displaySnapshot(Map.of("imagePaths", List.of(
+                        "/third.jpg", "/second.jpg", "/first.jpg", "/fourth.jpg", "/fifth.jpg", "/sixth.jpg")))
                 .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
                 .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
                 .build();
@@ -168,8 +174,8 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     @Test
-    @DisplayName("[images] Should Preserve Legacy Image Fallback - When A Stored Episode Has Fewer Than Six Stills")
-    void shouldPreserveLegacyImageFallbackWhenAStoredEpisodeHasFewerThanSixStills() {
+    @DisplayName("[images] Should Reject A Stored Episode - When It Has Fewer Than Six Stills")
+    void shouldRejectAStoredEpisodeWhenItHasFewerThanSixStills() {
         DailyChallenge challenge = DailyChallenge.builder()
                 .id(UUID.randomUUID())
                 .challengeDate(LocalDate.of(2026, 9, 27))
@@ -186,16 +192,9 @@ class DailyChallengeResponseAssemblerTest {
                 .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
                 .build();
 
-        DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(
-                challenge, result(5, DailyGameResultStatus.IN_PROGRESS));
-
-        assertThat(response.visibleImageUrls()).containsExactly(
-                "https://image.tmdb.org/t/p/w300/second.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg",
-                "https://image.tmdb.org/t/p/w300/first.jpg");
+        assertThatThrownBy(() -> assembler.toAttemptResponse(
+                challenge, result(5, DailyGameResultStatus.IN_PROGRESS)))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException.class);
     }
 
     @Test

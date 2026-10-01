@@ -34,10 +34,11 @@ public class MovieByPosterGenerator implements DailyChallengeGenerator {
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         return DailyChallengeGenerationSupport.value(
-                        tmdbClient.getPopularMovies(DailyChallengeGenerationSupport.randomPage(),
+                        tmdbClient.getTopRatedMovies(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .flatMap(page -> DailyChallengeGenerationSupport.randomItem(page.results(), movie ->
-                        movie != null && !excludedAnswerKeys.contains("MOVIE:" + movie.id())))
+                        movie != null && !excludedAnswerKeys.contains("MOVIE:" + movie.id())
+                                && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(movie.originalLanguage())))
                 .filter(this::isUsable)
                 .map(movie -> snapshotAssembler.moviePoster(movie, TmdbImageUrlBuilder.posterUrl(movie.posterPath())));
     }

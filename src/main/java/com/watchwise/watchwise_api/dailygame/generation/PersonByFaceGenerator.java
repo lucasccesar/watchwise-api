@@ -42,19 +42,27 @@ public class PersonByFaceGenerator implements DailyChallengeGenerator {
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         Optional<TmdbMovieSearchResult> movie = DailyChallengeGenerationSupport.randomItem(
-                tmdbClient.getPopularMovies(DailyChallengeGenerationSupport.randomPage(),
-                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+                tmdbClient.getTopRatedMovies(DailyChallengeGenerationSupport.randomPage(),
+                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), item ->
+                        item != null && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(
+                                item.originalLanguage()));
         Optional<TmdbTvSearchResult> series = DailyChallengeGenerationSupport.randomItem(
-                tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
-                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
+                tmdbClient.getTopRatedSeries(DailyChallengeGenerationSupport.randomPage(),
+                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), item ->
+                        item != null && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(
+                                item.originalLanguage()));
         Map<Integer, PersonCandidate> people = new LinkedHashMap<>();
         movie.filter(item -> DailyChallengeGenerationSupport.validId(item.id()))
                 .flatMap(item -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getMovieFullDetails(item.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
+                .filter(details -> !DailyChallengeGenerationSupport.isAsianOriginalLanguage(
+                        details.originalLanguage()))
                 .ifPresent(details -> addMoviePeople(people, details));
         series.filter(item -> DailyChallengeGenerationSupport.validId(item.id()))
                 .flatMap(item -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getTvFullDetails(item.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
+                .filter(details -> !DailyChallengeGenerationSupport.isAsianOriginalLanguage(
+                        details.originalLanguage()))
                 .ifPresent(details -> addSeriesPeople(people, details));
 
         return DailyChallengeGenerationSupport.randomItem(new ArrayList<>(people.values()), person ->

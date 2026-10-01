@@ -108,7 +108,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Choose A Supported Discovery Page - When Generating A Movie Poster Challenge")
     void shouldChooseASupportedDiscoveryPageWhenGeneratingAMoviePosterChallenge() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
 
         DailyChallengeCandidate candidate = new MovieByPosterGenerator(tmdbClient, snapshotAssembler)
@@ -119,22 +119,42 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.targetKind()).isEqualTo(DailyGameTargetKind.MOVIE);
         assertThat(candidate.answerKey()).isEqualTo("MOVIE:550");
         assertThat(candidate.imagePath()).isEqualTo("https://image.tmdb.org/t/p/w500/fight.jpg");
-        verify(tmdbClient).getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE));
+        verify(tmdbClient).getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE));
     }
 
     @Test
     @DisplayName("[generate] Should Reject The Candidate - When A Movie Poster Is Missing")
     void shouldRejectTheCandidateWhenAMoviePosterIsMissing() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", null, "1999-10-15"))));
 
         assertThat(new MovieByPosterGenerator(tmdbClient, snapshotAssembler).generate(CHALLENGE_DATE)).isEmpty();
     }
 
     @Test
+    @DisplayName("[generate] Should Reject Asian Movie Sources")
+    void shouldRejectAsianMovieSources() {
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult(
+                        "129", "Spirited Away", "/spirited-away.jpg", "2001-07-20", "ja"))));
+
+        assertThat(new MovieByPosterGenerator(tmdbClient, snapshotAssembler).generate(CHALLENGE_DATE)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[generate] Should Reject Asian Series Sources")
+    void shouldRejectAsianSeriesSources() {
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
+                .thenReturn(found(seriesPage(new TmdbTvSearchResult(
+                        "1399", "Asian Series", "/series.jpg", "2020-01-01", "ko"))));
+
+        assertThat(new SeriesByPosterGenerator(tmdbClient, snapshotAssembler).generate(CHALLENGE_DATE)).isEmpty();
+    }
+
+    @Test
     @DisplayName("[generate] Should Skip An Excluded Answer Key - When An Alternate Movie Is Available")
     void shouldSkipAnExcludedAnswerKeyWhenAnAlternateMovieIsAvailable() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(new TmdbSearchPage<>(1, List.of(
                         new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"),
                         new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10")), 1, 2)));
@@ -149,7 +169,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Create The Series Answer Key - When A Popular Series Is Eligible")
     void shouldCreateTheSeriesAnswerKeyWhenAPopularSeriesIsEligible() {
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
 
         DailyChallengeCandidate candidate = new SeriesByPosterGenerator(tmdbClient, snapshotAssembler)
@@ -163,9 +183,9 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Deduplicate People By ID - When Movie And Series Credits Overlap")
     void shouldDeduplicatePeopleByIdWhenMovieAndSeriesCreditsOverlap() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
                 .thenReturn(found(movieDetails("550", "Fight Club", new TmdbCredits(
@@ -186,7 +206,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Use Composite Episode Identity - When Specials Future Episodes And Missing Stills Exist")
     void shouldUseCompositeEpisodeIdentityWhenSpecialsFutureEpisodesAndMissingStillsExist() {
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         TmdbSeasonFullDetails season = new TmdbSeasonFullDetails(1, "Season 1", null, null, "2008-01-20", 1, List.of(
                         new TmdbEpisodeSummary(0, "Special", null, "2008-01-01", 10, "/special.jpg", List.of()),
@@ -230,7 +250,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Reject The Episode - When It Has Fewer Than Six Unique Still Images")
     void shouldRejectTheEpisodeWhenItHasFewerThanSixUniqueStillImages() {
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)))));
@@ -248,7 +268,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Choose The Second Episode - When The First Episode Has Too Few Stills")
     void shouldChooseTheSecondEpisodeWhenTheFirstEpisodeHasTooFewStills() {
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 2, null)))));
@@ -268,7 +288,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Choose The Second Season - When The First Season Has No Eligible Episode")
     void shouldChooseTheSecondSeasonWhenTheFirstSeasonHasNoEligibleEpisode() {
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
                 List.of(
@@ -293,7 +313,7 @@ class DailyChallengeGeneratorTest {
     void shouldAttemptANewSeriesWhenThePreviousSeriesHasNoEligibleEpisode() {
         TmdbTvSearchResult firstSeries = new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20");
         TmdbTvSearchResult secondSeries = new TmdbTvSearchResult("66732", "Stranger Things", "/stranger-things.jpg", "2016-07-15");
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(new TmdbSearchPage<>(1, List.of(firstSeries, secondSeries), 1, 2)));
         lenient().when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("1396", "Breaking Bad", null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, null)))));
@@ -319,7 +339,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Preserve Clue Order And Omit Certification - When BR Certification Is Missing")
     void shouldPreserveClueOrderAndOmitCertificationWhenBRCertificationIsMissing() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
                 .thenReturn(found(movieDetailsWithInfo("550")));
@@ -346,7 +366,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Include BR Certification - When A BR Rating Exists")
     void shouldIncludeBRCertificationWhenABRRatingExists() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
                 .thenReturn(found(movieDetailsWithInfo("550")));
@@ -365,7 +385,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Omit Null Nested Metadata - When TMDB Lists Contain Null Elements")
     void shouldOmitNullNestedMetadataWhenTmdbListsContainNullElements() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
                 .thenReturn(found(movieDetailsWithNullNestedMetadata("550")));
@@ -382,7 +402,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Omit Certification And Financial Hints - When Series Metadata Has No BR Rating")
     void shouldOmitCertificationAndFinancialHintsWhenSeriesMetadataHasNoBRRating() {
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
                 .thenReturn(found(seriesDetailsWithInfo("1396")));
@@ -410,7 +430,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Reject The Movie - When Only Title Poster And Year Are Available")
     void shouldRejectTheMovieWhenOnlyTitlePosterAndYearAreAvailable() {
-        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
         when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
                 .thenReturn(found(movieDetails("550", "Fight Club", new TmdbCredits(List.of(), List.of()))));
@@ -423,7 +443,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Reject The Series - When Only Title Poster And Year Are Available")
     void shouldRejectTheSeriesWhenOnlyTitlePosterAndYearAreAvailable() {
-        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
                 .thenReturn(found(new TmdbTvFullDetails(
@@ -439,7 +459,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Use The Movie As Source - When An Eligible Movie Actor Exists")
     void shouldUseTheMovieAsSourceWhenAnEligibleMovieActorExists() {
-        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10"))));
         when(tmdbClient.getMovieFullDetails("680", LANGUAGE))
                 .thenReturn(found(movieDetails("680", "Pulp Fiction", new TmdbCredits(
@@ -463,9 +483,39 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
+    @DisplayName("[generate] Should Select Only From The First Four Eligible Movie Actors")
+    void shouldSelectOnlyFromTheFirstFourEligibleMovieActors() {
+        List<TmdbCastMember> cast = java.util.stream.IntStream.rangeClosed(1, 5)
+                .mapToObj(index -> new TmdbCastMember(index, "Actor " + index, "Role", "/actor-" + index + ".jpg"))
+                .toList();
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg",
+                        "1994-09-10"))));
+        when(tmdbClient.getMovieFullDetails("680", LANGUAGE))
+                .thenReturn(found(movieDetails("680", "Pulp Fiction", new TmdbCredits(cast, List.of()))));
+        for (int index = 1; index <= 5; index++) {
+            when(tmdbClient.getPersonAggregate(String.valueOf(index), LANGUAGE))
+                    .thenReturn(found(personAggregate(String.valueOf(index), "Actor " + index,
+                            new TmdbPersonAggregateCredit("10" + index, "movie", "Movie " + index,
+                                    null, "/movie.jpg", "2000-01-01", null, "Role", null),
+                            new TmdbPersonAggregateCredit("20" + index, "movie", "Movie Two " + index,
+                                    null, "/movie-two.jpg", "2001-01-01", null, "Role", null))));
+        }
+
+        Set<String> selected = new java.util.HashSet<>();
+        ActorByMovieFilmographyGenerator generator = new ActorByMovieFilmographyGenerator(
+                tmdbClient, snapshotAssembler, new DailyGameFilmographyServiceImpl(tmdbClient));
+        for (int attempt = 0; attempt < 50; attempt++) {
+            selected.add(generator.generate(CHALLENGE_DATE).orElseThrow().answerKey());
+        }
+
+        assertThat(selected).doesNotContain("PERSON:5");
+    }
+
+    @Test
     @DisplayName("[generate] Should Reject The Actor - When The Movie Filmography Has Fewer Than Two Eligible Works")
     void shouldRejectTheActorWhenTheMovieFilmographyHasFewerThanTwoEligibleWorks() {
-        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(moviePage(new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10"))));
         when(tmdbClient.getMovieFullDetails("680", LANGUAGE))
                 .thenReturn(found(movieDetails("680", "Pulp Fiction", new TmdbCredits(
@@ -483,7 +533,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Use Aggregate Cast And Series Source - When An Eligible Series Actor Exists")
     void shouldUseAggregateCastAndSeriesSourceWhenAnEligibleSeriesActorExists() {
-        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
                 .thenReturn(found(seriesDetails("1396", "Breaking Bad", new TmdbAggregateCredits(
@@ -512,7 +562,7 @@ class DailyChallengeGeneratorTest {
     @Test
     @DisplayName("[generate] Should Reject The Actor - When The Default Major Role Projection Has Fewer Than Two Works")
     void shouldRejectTheActorWhenTheDefaultMajorRoleProjectionHasFewerThanTwoWorks() {
-        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult(
                         "1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))

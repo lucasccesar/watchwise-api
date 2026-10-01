@@ -33,6 +33,8 @@ import java.util.stream.IntStream;
 @Component
 public class DailyChallengeResponseAssembler {
 
+    private static final int MINIMUM_EPISODE_STILLS = 6;
+
     private final DailyGameAttemptDetailsCodec attemptDetailsCodec;
 
     public DailyChallengeResponseAssembler() {
@@ -187,6 +189,7 @@ public class DailyChallengeResponseAssembler {
         int score = result == null ? 0 : result.getScore();
         boolean terminal = status == DailyGameViewStatus.COMPLETED || status == DailyGameViewStatus.FAILED;
         boolean hiddenImageGame = hidesImageUntilTerminal(challenge.getGameType());
+        boolean actorFilmographyGame = isActorFilmographyGame(challenge.getGameType());
         boolean informationGame = isInformationGame(challenge.getGameType());
         int visibleHintCount = terminal ? allHints.size() : Math.min(allHints.size(), Math.max(1, attemptsUsed + 1));
         List<DailyGameHintDTO> hints = informationGame
@@ -196,10 +199,14 @@ public class DailyChallengeResponseAssembler {
                         .map(hint -> new DailyGameHintDTO(hint.getPosition(), hint.getHintType(), hint.getHintValue()))
                         .toList();
         List<String> imagePaths = imagePaths(challenge);
+        if (challenge.getTargetKind() == DailyGameTargetKind.EPISODE
+                && imagePaths.size() < MINIMUM_EPISODE_STILLS) {
+            throw new com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException();
+        }
         int currentImageIndex = Math.min(attemptsUsed, imagePaths.size() - 1);
         int visiblePositions = challenge.getTargetKind() == DailyGameTargetKind.EPISODE
                 ? attemptsUsed + 1 : 1;
-        List<String> visibleImageUrls = hiddenImageGame && !terminal
+        List<String> visibleImageUrls = actorFilmographyGame || hiddenImageGame && !terminal
                 ? List.of()
                 : IntStream.range(0, visiblePositions)
                         .mapToObj(index -> imageUrl(challenge, imagePaths.get(Math.min(index, imagePaths.size() - 1))))
@@ -210,7 +217,7 @@ public class DailyChallengeResponseAssembler {
                 : null;
         return new DailyGameView(
                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
-                status, hiddenImageGame && !terminal
+                status, actorFilmographyGame || hiddenImageGame && !terminal
                         ? null : imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
                 result == null ? null : result.getCompletedAt(), terminal ? toAnswer(challenge) : null,
                 visibleImageUrls, imageUrls, result != null && result.isShareOnCompletion(),
@@ -221,6 +228,11 @@ public class DailyChallengeResponseAssembler {
         return gameType == DailyGameType.MOVIE_BY_INFO
                 || gameType == DailyGameType.SERIES_BY_INFO
                 || gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
+                || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
+    }
+
+    private boolean isActorFilmographyGame(DailyGameType gameType) {
+        return gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
                 || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
     }
 
@@ -325,8 +337,9 @@ public class DailyChallengeResponseAssembler {
                 ? snapshotValue(snapshot, "seriesPosterPath") : null;
         Integer seriesYear = targetKind == DailyGameTargetKind.EPISODE
                 ? snapshotInteger(snapshot, "seriesYear") : null;
+        String answerImageUrl = isActorFilmographyGame(challenge.getGameType()) ? null : imageUrl(challenge);
         return new DailyGameAnswerDTO(targetKind, tmdbId, personTmdbId, seriesTmdbId,
-                challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, imageUrl(challenge), seriesName,
+                challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, answerImageUrl, seriesName,
                 posterUrl(seriesPosterPath), seriesYear);
     }
 
@@ -385,6 +398,7 @@ public class DailyChallengeResponseAssembler {
                     .filter(String.class::isInstance)
                     .map(String.class::cast)
                     .filter(path -> !path.isBlank())
+                    .distinct()
                     .toList();
             if (!validPaths.isEmpty()) {
                 return validPaths;

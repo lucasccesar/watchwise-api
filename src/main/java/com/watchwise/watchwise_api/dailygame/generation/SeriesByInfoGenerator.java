@@ -37,11 +37,12 @@ public class SeriesByInfoGenerator implements DailyChallengeGenerator {
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         return DailyChallengeGenerationSupport.value(
-                        tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
+                        tmdbClient.getTopRatedSeries(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .flatMap(page -> DailyChallengeGenerationSupport.randomItem(page.results(), series ->
                         series != null && DailyChallengeGenerationSupport.validId(series.id())
-                                && !excludedAnswerKeys.contains("SERIES:" + series.id())))
+                                && !excludedAnswerKeys.contains("SERIES:" + series.id())
+                                && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(series.originalLanguage())))
                 .flatMap(series -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getTvFullDetails(series.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
                 .filter(this::hasRequiredMetadata)
@@ -66,6 +67,7 @@ public class SeriesByInfoGenerator implements DailyChallengeGenerator {
     private boolean hasRequiredMetadata(TmdbTvFullDetails series) {
         return series != null && DailyChallengeGenerationSupport.validId(series.id())
                 && series.name() != null && !series.name().isBlank()
+                && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(series.originalLanguage())
                 && DailyChallengeGenerationSupport.validImage(series.posterPath());
     }
 

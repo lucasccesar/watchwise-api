@@ -8,18 +8,38 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
+import java.util.Locale;
+import java.util.Set;
 
 final class DailyChallengeGenerationSupport {
+
+    private static final Set<String> ASIAN_ORIGINAL_LANGUAGES = Set.of(
+            "ar", "az", "bn", "bo", "fa", "fil", "gu", "he", "hi", "hy", "id", "ja", "jv",
+            "ka", "kk", "km", "ko", "ku", "ky", "lo", "ml", "mn", "mr", "ms", "my", "ne", "pa",
+            "ps", "si", "su", "ta", "te", "th", "tl", "tr", "ug", "ur", "uz", "vi", "yue", "zh");
 
     private DailyChallengeGenerationSupport() {
     }
 
     static int randomPage() {
-        return ThreadLocalRandom.current().nextInt(1, 51);
+        return ThreadLocalRandom.current().nextInt(1, 21);
+    }
+
+    static boolean isAsianOriginalLanguage(String originalLanguage) {
+        if (originalLanguage == null || originalLanguage.isBlank()) {
+            return false;
+        }
+        String normalized = originalLanguage.trim().toLowerCase(Locale.ROOT).split("[-_]", 2)[0];
+        return ASIAN_ORIGINAL_LANGUAGES.contains(normalized);
     }
 
     static <T> Optional<T> randomItem(TmdbLookupResult<TmdbSearchPage<T>> lookup) {
         return value(lookup).flatMap(page -> randomItem(page.results()));
+    }
+
+    static <T> Optional<T> randomItem(
+            TmdbLookupResult<TmdbSearchPage<T>> lookup, Predicate<T> predicate) {
+        return value(lookup).flatMap(page -> randomItem(page.results(), predicate));
     }
 
     static <T> Optional<T> randomItem(List<T> items) {

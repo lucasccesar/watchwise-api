@@ -74,8 +74,8 @@ public class DailyGameInfoComparisonServiceImpl implements DailyGameInfoComparis
                 candidate.tmdbId(), LANGUAGE)));
         List<String> platforms = providers(movie.watchProviders());
         List<String> genres = names(movie.genres(), genre -> genre == null ? null : genre.name());
-        List<String> cast = names(movie.credits() == null ? null : movie.credits().cast(),
-                value -> value == null ? null : value.name());
+        List<String> cast = limitCandidateCast(names(movie.credits() == null ? null : movie.credits().cast(),
+                value -> value == null ? null : value.name()));
         List<String> productionCompanies = names(movie.productionCompanies(),
                 value -> value == null ? null : value.name());
         String director = movie.credits() == null ? null : movie.credits().crew() == null ? null
@@ -106,8 +106,9 @@ public class DailyGameInfoComparisonServiceImpl implements DailyGameInfoComparis
                 candidate.tmdbId(), LANGUAGE)));
         List<String> platforms = providers(series.watchProviders());
         List<String> genres = names(series.genres(), genre -> genre == null ? null : genre.name());
-        List<String> cast = names(series.aggregateCredits() == null ? null : series.aggregateCredits().cast(),
-                value -> value == null ? null : value.name());
+        List<String> cast = limitCandidateCast(names(
+                series.aggregateCredits() == null ? null : series.aggregateCredits().cast(),
+                value -> value == null ? null : value.name()));
         List<String> productionCompanies = names(series.productionCompanies(),
                 value -> value == null ? null : value.name());
         List<String> creators = names(series.createdBy(), value -> value == null ? null : value.name());
@@ -249,6 +250,10 @@ public class DailyGameInfoComparisonServiceImpl implements DailyGameInfoComparis
         values.stream().map(this::trimmed).filter(value -> value != null)
                 .forEach(value -> normalized.putIfAbsent(key(value), value));
         return List.copyOf(normalized.values());
+    }
+
+    private List<String> limitCandidateCast(List<String> cast) {
+        return cast.stream().limit(10).toList();
     }
 
     private List<String> providers(TmdbWatchProviders watchProviders) {

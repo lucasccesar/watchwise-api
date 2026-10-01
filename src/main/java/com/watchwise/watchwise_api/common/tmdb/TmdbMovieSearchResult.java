@@ -8,5 +8,10 @@ public record TmdbMovieSearchResult(
         String id,
         String title,
         @JsonProperty("poster_path") String posterPath,
-        @JsonProperty("release_date") String releaseDate) {
+        @JsonProperty("release_date") String releaseDate,
+        @JsonProperty("original_language") String originalLanguage) {
+
+    public TmdbMovieSearchResult(String id, String title, String posterPath, String releaseDate) {
+        this(id, title, posterPath, releaseDate, null);
+    }
 }

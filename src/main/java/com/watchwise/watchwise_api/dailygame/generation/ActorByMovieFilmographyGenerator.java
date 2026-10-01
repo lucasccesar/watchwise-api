@@ -44,9 +44,11 @@ public class ActorByMovieFilmographyGenerator implements DailyChallengeGenerator
         return DailyChallengeGenerationSupport.randomItem(
                         tmdbClient.getTopRatedMovies(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .filter(movie -> movie != null && DailyChallengeGenerationSupport.validId(movie.id()))
+                .filter(movie -> movie != null && DailyChallengeGenerationSupport.validId(movie.id())
+                        && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(movie.originalLanguage()))
                 .flatMap(movie -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getMovieFullDetails(movie.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
+                .filter(movie -> !DailyChallengeGenerationSupport.isAsianOriginalLanguage(movie.originalLanguage()))
                 .flatMap(movie -> eligibleActor(movie, excludedAnswerKeys, budget)
                         .map(candidate -> snapshotAssembler.actorFromMovie(movie.id(), candidate.actor(),
                                 TmdbImageUrlBuilder.profileUrl(candidate.actor().profilePath()), candidate.snapshot().entries())));
@@ -69,7 +71,7 @@ public class ActorByMovieFilmographyGenerator implements DailyChallengeGenerator
                         String.valueOf(actor.id()), gameType(), budget)))
                 .filter(candidate -> candidate.snapshot().entries().size() >= 2)
                 .toList();
-        return DailyChallengeGenerationSupport.randomItem(eligible);
+        return DailyChallengeGenerationSupport.randomItem(eligible.stream().limit(4).toList());
     }
 
     private record ActorCandidate<T>(T actor, DailyGameFilmographyService.FilmographySnapshot snapshot) {

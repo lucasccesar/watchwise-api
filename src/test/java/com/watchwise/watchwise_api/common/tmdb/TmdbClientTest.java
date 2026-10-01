@@ -169,13 +169,13 @@ class TmdbClientTest {
                 .andExpect(queryParam("language", "en-US"))
                 .andRespond(withSuccess("""
                         {"page":3,"total_pages":4,"total_results":75,"results":[
-                          {"id":680,"title":"Pulp Fiction","poster_path":"/pulp.jpg","release_date":"1994-09-10"}]}
+                          {"id":680,"title":"Pulp Fiction","poster_path":"/pulp.jpg","release_date":"1994-09-10","original_language":"en"}]}
                         """, MediaType.APPLICATION_JSON));
 
         var result = tmdbClient.getTopRatedMovies(3, "en-US").toOptional().orElseThrow();
 
         assertThat(result.results()).containsExactly(
-                new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10"));
+                new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10", "en"));
         mockServer.verify();
     }
 
@@ -205,13 +205,13 @@ class TmdbClientTest {
                 .andExpect(queryParam("language", "en-US"))
                 .andRespond(withSuccess("""
                         {"page":5,"total_pages":7,"total_results":120,"results":[
-                          {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
+                          {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20","original_language":"en"}]}
                         """, MediaType.APPLICATION_JSON));
 
         var result = tmdbClient.getTopRatedSeries(5, "en-US").toOptional().orElseThrow();
 
         assertThat(result.results()).containsExactly(
-                new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"));
+                new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20", "en"));
         mockServer.verify();
     }
 

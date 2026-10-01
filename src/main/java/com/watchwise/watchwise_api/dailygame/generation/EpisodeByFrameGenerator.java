@@ -45,12 +45,13 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         List<TmdbTvSearchResult> series = DailyChallengeGenerationSupport.value(
-                        tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
+                        tmdbClient.getTopRatedSeries(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .map(page -> shuffled(page.results()))
                 .orElse(List.of());
         return series.stream()
-                .filter(item -> item != null && DailyChallengeGenerationSupport.validId(item.id()))
+                .filter(item -> item != null && DailyChallengeGenerationSupport.validId(item.id())
+                        && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(item.originalLanguage()))
                 .map(item -> findEpisode(item, challengeDate, excludedAnswerKeys))
                 .flatMap(Optional::stream)
                 .findFirst();
@@ -61,6 +62,8 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
         TmdbLookup<TmdbTvFullDetails> lookup = new TmdbLookup<>(tmdbClient.getTvFullDetails(series.id(),
                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE));
         return lookup.value()
+                .filter(details -> !DailyChallengeGenerationSupport.isAsianOriginalLanguage(
+                        details.originalLanguage()))
                 .flatMap(details -> findEpisode(series.id(), details, challengeDate, excludedAnswerKeys));
     }
 

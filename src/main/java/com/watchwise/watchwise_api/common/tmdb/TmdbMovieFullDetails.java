@@ -10,6 +10,7 @@ public record TmdbMovieFullDetails(
         String id,
         String title,
         @JsonProperty("original_title") String originalTitle,
+        @JsonProperty("original_language") String originalLanguage,
         String overview,
         @JsonProperty("poster_path") String posterPath,
         @JsonProperty("backdrop_path") String backdropPath,
@@ -44,8 +45,33 @@ public record TmdbMovieFullDetails(
             Long budget,
             Long revenue,
             List<TmdbProductionCompany> productionCompanies,
+            TmdbVideos videos,
+            String status,
+            TmdbExternalIds externalIds) {
+        this(id, title, originalTitle, null, overview, posterPath, backdropPath, releaseDate, runtime,
+                genres, productionCountries, credits, watchProviders, alternativeTitles, budget, revenue,
+                productionCompanies, videos, status, externalIds);
+    }
+
+    public TmdbMovieFullDetails(
+            String id,
+            String title,
+            String originalTitle,
+            String overview,
+            String posterPath,
+            String backdropPath,
+            String releaseDate,
+            Integer runtime,
+            List<TmdbGenre> genres,
+            List<TmdbProductionCountry> productionCountries,
+            TmdbCredits credits,
+            TmdbWatchProviders watchProviders,
+            TmdbMovieAlternativeTitles alternativeTitles,
+            Long budget,
+            Long revenue,
+            List<TmdbProductionCompany> productionCompanies,
             TmdbVideos videos) {
-        this(id, title, originalTitle, overview, posterPath, backdropPath, releaseDate, runtime,
+        this(id, title, originalTitle, null, overview, posterPath, backdropPath, releaseDate, runtime,
                 genres, productionCountries, credits, watchProviders, alternativeTitles, budget,
                 revenue, productionCompanies, videos, null, null);
     }

@@ -158,6 +158,25 @@ class DailyGameInfoComparisonServiceTest {
     }
 
     @Test
+    @DisplayName("[compare] Should Limit Candidate Cast Feedback To Ten Names")
+    void shouldLimitCandidateCastFeedbackToTenNames() {
+        List<String> candidateCast = java.util.stream.IntStream.rangeClosed(1, 12)
+                .mapToObj(index -> "Actor " + index)
+                .toList();
+        DailyChallenge challenge = movieChallenge(snapshot("cast", List.of("Actor 1")));
+        TmdbMovieFullDetails candidate = movie("680", "Pulp Fiction", 1994, 50L,
+                List.of(), List.of(), candidateCast, List.of(), List.of());
+        when(tmdbClient.getMovieFullDetails("680", LANGUAGE)).thenReturn(found(candidate));
+
+        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
+                .compare(challenge, movieIdentity("680"));
+
+        @SuppressWarnings("unchecked")
+        List<String> returnedCast = (List<String>) feedback.cast().displayValue();
+        assertThat(returnedCast).containsExactlyElementsOf(candidateCast.subList(0, 10));
+    }
+
+    @Test
     @DisplayName("[compare] Should Use Secret Direction And One Year Partial Threshold - When Years Differ")
     void shouldUseSecretDirectionAndOneYearPartialThresholdWhenYearsDiffer() {
         DailyChallenge challenge = movieChallenge(snapshot("year", 2000));

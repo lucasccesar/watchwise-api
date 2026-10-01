@@ -34,10 +34,11 @@ public class SeriesByPosterGenerator implements DailyChallengeGenerator {
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         return DailyChallengeGenerationSupport.value(
-                        tmdbClient.getPopularSeries(DailyChallengeGenerationSupport.randomPage(),
+                        tmdbClient.getTopRatedSeries(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .flatMap(page -> DailyChallengeGenerationSupport.randomItem(page.results(), series ->
-                        series != null && !excludedAnswerKeys.contains("SERIES:" + series.id())))
+                        series != null && !excludedAnswerKeys.contains("SERIES:" + series.id())
+                                && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(series.originalLanguage())))
                 .filter(this::isUsable)
                 .map(series -> snapshotAssembler.seriesPoster(series,
                         TmdbImageUrlBuilder.posterUrl(series.posterPath())));

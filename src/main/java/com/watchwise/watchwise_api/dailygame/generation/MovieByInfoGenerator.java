@@ -37,11 +37,12 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
     @Override
     public Optional<DailyChallengeCandidate> generate(LocalDate challengeDate, Set<String> excludedAnswerKeys) {
         return DailyChallengeGenerationSupport.value(
-                        tmdbClient.getPopularMovies(DailyChallengeGenerationSupport.randomPage(),
+                        tmdbClient.getTopRatedMovies(DailyChallengeGenerationSupport.randomPage(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .flatMap(page -> DailyChallengeGenerationSupport.randomItem(page.results(), movie ->
                         movie != null && DailyChallengeGenerationSupport.validId(movie.id())
-                                && !excludedAnswerKeys.contains("MOVIE:" + movie.id())))
+                                && !excludedAnswerKeys.contains("MOVIE:" + movie.id())
+                                && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(movie.originalLanguage())))
                 .flatMap(movie -> DailyChallengeGenerationSupport.value(
                         tmdbClient.getMovieFullDetails(movie.id(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
                 .filter(this::hasRequiredMetadata)
@@ -66,6 +67,7 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
     private boolean hasRequiredMetadata(TmdbMovieFullDetails movie) {
         return movie != null && DailyChallengeGenerationSupport.validId(movie.id())
                 && movie.title() != null && !movie.title().isBlank()
+                && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(movie.originalLanguage())
                 && DailyChallengeGenerationSupport.validImage(movie.posterPath());
     }
 
