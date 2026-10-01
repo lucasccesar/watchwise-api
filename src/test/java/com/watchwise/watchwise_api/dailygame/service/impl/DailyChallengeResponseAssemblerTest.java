@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameActorGuessDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
@@ -20,6 +21,8 @@ import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -32,6 +35,61 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DailyChallengeResponseAssemblerTest {
 
     private final DailyChallengeResponseAssembler assembler = new DailyChallengeResponseAssembler();
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = DailyGameType.class, names = {
+            "MOVIE_BY_INFO", "ACTOR_BY_MOVIE_FILMOGRAPHY", "ACTOR_BY_SERIES_FILMOGRAPHY"})
+    @DisplayName("[images] Should Hide Open Information And Filmography Images Until Terminal")
+    void shouldHideOpenInformationAndFilmographyImagesUntilTerminal(DailyGameType gameType) {
+        DailyChallenge challenge = challenge(gameType, "/secret.jpg");
+        List<DailyChallengeHint> legacyHints = List.of(hint(challenge, 1, "YEAR", "1999"));
+
+        DailyGameStateDTO open = assembler.toState(challenge, null, legacyHints, true, true);
+
+        assertThat(open.imageUrl()).isNull();
+        assertThat(open.visibleImageUrls()).isEmpty();
+
+        DailyGameStateDTO terminal = assembler.toState(
+                challenge, result(0, DailyGameResultStatus.COMPLETED), legacyHints, true, true);
+
+        assertThat(terminal.answer().imageUrl()).isEqualTo(switch (gameType) {
+            case MOVIE_BY_INFO -> "https://image.tmdb.org/t/p/w500/secret.jpg";
+            case ACTOR_BY_MOVIE_FILMOGRAPHY, ACTOR_BY_SERIES_FILMOGRAPHY
+                    -> "https://image.tmdb.org/t/p/w185/secret.jpg";
+            default -> throw new IllegalStateException("Unexpected game type: " + gameType);
+        });
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = DailyGameType.class, names = {"MOVIE_BY_INFO", "SERIES_BY_INFO"})
+    @DisplayName("[hints] Should Hide Legacy Hints For Information Games")
+    void shouldHideLegacyHintsForInformationGames(DailyGameType gameType) {
+        DailyChallenge challenge = challenge(gameType, "/secret.jpg");
+        List<DailyChallengeHint> legacyHints = List.of(
+                hint(challenge, 1, "YEAR", "1999"),
+                hint(challenge, 2, "GENRE", "Drama"));
+
+        DailyGameStateDTO notPlayed = assembler.toState(challenge, null, legacyHints, true, true);
+        DailyGameStateDTO inProgress = assembler.toState(
+                challenge, result(1, DailyGameResultStatus.IN_PROGRESS), legacyHints, true, true);
+
+        assertThat(notPlayed.hints()).isEmpty();
+        assertThat(inProgress.hints()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[hints] Should Preserve The Allowed Hint Prefix For Poster Games")
+    void shouldPreserveTheAllowedHintPrefixForPosterGames() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "/poster.jpg");
+        List<DailyChallengeHint> legacyHints = List.of(
+                hint(challenge, 1, "YEAR", "1999"),
+                hint(challenge, 2, "GENRE", "Drama"));
+
+        DailyGameStateDTO state = assembler.toState(
+                challenge, result(0, DailyGameResultStatus.IN_PROGRESS), legacyHints, true, true);
+
+        assertThat(state.hints()).extracting("hintValue").containsExactly("1999");
+    }
 
     @Test
     @DisplayName("[images] Should Expose Previous And Terminal Images - When The Episode Game Advances")
@@ -274,16 +332,30 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     private DailyChallenge challenge(String imagePath) {
+        return challenge(DailyGameType.MOVIE_BY_POSTER, imagePath);
+    }
+
+    private DailyChallenge challenge(DailyGameType gameType, String imagePath) {
         return DailyChallenge.builder()
                 .id(UUID.randomUUID())
                 .challengeDate(LocalDate.of(2026, 9, 27))
-                .gameType(DailyGameType.MOVIE_BY_POSTER)
-                .targetKind(DailyGameTargetKind.MOVIE)
+                .gameType(gameType)
+                .targetKind(gameType.targetKind())
                 .targetTmdbId("550")
                 .answerKey("MOVIE:550")
                 .imagePath(imagePath)
                 .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
                 .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+                .build();
+    }
+
+    private DailyChallengeHint hint(DailyChallenge challenge, int position, String type, String value) {
+        return DailyChallengeHint.builder()
+                .id(UUID.randomUUID())
+                .dailyChallenge(challenge)
+                .position(position)
+                .hintType(type)
+                .hintValue(value)
                 .build();
     }
 

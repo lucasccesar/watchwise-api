@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
 import org.springframework.stereotype.Component;
@@ -185,28 +186,45 @@ public class DailyChallengeResponseAssembler {
         int attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
         int score = result == null ? 0 : result.getScore();
         boolean terminal = status == DailyGameViewStatus.COMPLETED || status == DailyGameViewStatus.FAILED;
+        boolean hiddenImageGame = hidesImageUntilTerminal(challenge.getGameType());
+        boolean informationGame = isInformationGame(challenge.getGameType());
         int visibleHintCount = terminal ? allHints.size() : Math.min(allHints.size(), Math.max(1, attemptsUsed + 1));
-        List<DailyGameHintDTO> hints = allHints.stream()
-                .limit(visibleHintCount)
-                .map(hint -> new DailyGameHintDTO(hint.getPosition(), hint.getHintType(), hint.getHintValue()))
-                .toList();
+        List<DailyGameHintDTO> hints = informationGame
+                ? List.of()
+                : allHints.stream()
+                        .limit(visibleHintCount)
+                        .map(hint -> new DailyGameHintDTO(hint.getPosition(), hint.getHintType(), hint.getHintValue()))
+                        .toList();
         List<String> imagePaths = imagePaths(challenge);
         int currentImageIndex = Math.min(attemptsUsed, imagePaths.size() - 1);
         int visiblePositions = challenge.getTargetKind() == DailyGameTargetKind.EPISODE
                 ? attemptsUsed + 1 : 1;
-        List<String> visibleImageUrls = IntStream.range(0, visiblePositions)
-                .mapToObj(index -> imageUrl(challenge, imagePaths.get(Math.min(index, imagePaths.size() - 1))))
-                .toList();
+        List<String> visibleImageUrls = hiddenImageGame && !terminal
+                ? List.of()
+                : IntStream.range(0, visiblePositions)
+                        .mapToObj(index -> imageUrl(challenge, imagePaths.get(Math.min(index, imagePaths.size() - 1))))
+                        .toList();
         List<String> imageUrls = status == DailyGameViewStatus.COMPLETED
                 && challenge.getTargetKind() == DailyGameTargetKind.EPISODE
                 ? imagePaths.stream().map(path -> imageUrl(challenge, path)).toList()
                 : null;
         return new DailyGameView(
                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
-                status, imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
+                status, hiddenImageGame && !terminal
+                        ? null : imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
                 result == null ? null : result.getCompletedAt(), terminal ? toAnswer(challenge) : null,
                 visibleImageUrls, imageUrls, result != null && result.isShareOnCompletion(),
                 result != null && result.getSharedAt() != null);
+    }
+
+    private boolean hidesImageUntilTerminal(DailyGameType gameType) {
+        return gameType == DailyGameType.MOVIE_BY_INFO
+                || gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
+                || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
+    }
+
+    private boolean isInformationGame(DailyGameType gameType) {
+        return gameType == DailyGameType.MOVIE_BY_INFO || gameType == DailyGameType.SERIES_BY_INFO;
     }
 
     private List<DailyGameAttemptDTO> attempts(UserDailyGameResult result, boolean includeAttempts) {
