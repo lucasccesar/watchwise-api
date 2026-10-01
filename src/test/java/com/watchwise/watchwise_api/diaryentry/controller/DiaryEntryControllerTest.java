@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
@@ -80,11 +81,11 @@ class DiaryEntryControllerTest {
     void shouldReturnPageEnvelopeWithContentAndMetadataWhenGettingDiaryEntries() {
         UUID targetUserId = UUID.randomUUID();
         DiaryEntryResponseDTO dto = buildResponseDto();
-        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, 2024, 1, 10, null, null, null, null))
+        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, 2024, 1, 10, null, null, null, null, null, null))
                 .thenReturn(new PageImpl<>(List.of(dto), PageRequest.of(0, 10), 1));
 
         ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> result =
-                diaryEntryController.getDiaryEntries(targetUserId, 2024, 1, 10, null, null, null, null);
+                diaryEntryController.getDiaryEntries(targetUserId, 2024, 1, 10, null, null, null, null, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody().content()).containsExactly(dto);
@@ -94,15 +95,45 @@ class DiaryEntryControllerTest {
     }
 
     @Test
+    @DisplayName("[getDiaryEntries] Should Forward Series And Score Filters - When Provided")
+    void shouldForwardSeriesAndScoreFiltersWhenGettingDiaryEntries() {
+        UUID targetUserId = UUID.randomUUID();
+        when(diaryEntryService.getDiaryEntries(
+                currentUserId, targetUserId, 2024, 1, 10, null, null, null, null, "1399", 10))
+                .thenReturn(Page.empty());
+
+        diaryEntryController.getDiaryEntries(targetUserId, 2024, 1, 10, null, null, null, null, "1399", 10);
+
+        verify(diaryEntryService).getDiaryEntries(
+                currentUserId, targetUserId, 2024, 1, 10, null, null, null, null, "1399", 10);
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Return The Service Result - When Called")
+    void shouldReturnDiarySeriesOptionsWhenCalled() {
+        UUID targetUserId = UUID.randomUUID();
+        List<DiarySeriesOptionDTO> expected =
+                List.of(new DiarySeriesOptionDTO("1399", "The Office", 235L));
+        when(diaryEntryService.getDiarySeriesOptions(currentUserId, targetUserId)).thenReturn(expected);
+
+        ResponseEntity<List<DiarySeriesOptionDTO>> result =
+                diaryEntryController.getDiarySeriesOptions(targetUserId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).containsExactlyElementsOf(expected);
+        verify(diaryEntryService).getDiarySeriesOptions(currentUserId, targetUserId);
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingDiaryEntries() {
         UUID targetUserId = UUID.randomUUID();
-        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, null, null, null, null, null, null, null))
+        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, null, null, null, null, null, null, null, null, null))
                 .thenReturn(Page.empty());
 
-        diaryEntryController.getDiaryEntries(targetUserId, null, null, null, null, null, null, null);
+        diaryEntryController.getDiaryEntries(targetUserId, null, null, null, null, null, null, null, null, null);
 
-        verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, null, null, null, null, null, null);
+        verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, null, null, null, null, null, null, null, null);
     }
 
     @Test
