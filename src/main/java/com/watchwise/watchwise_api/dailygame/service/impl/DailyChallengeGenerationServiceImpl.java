@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeGenerator;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintRepository;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyChallengeGenerationService;
+import com.watchwise.watchwise_api.dailygame.service.DailyChallengeSnapshotRepairService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
     private final AdvisoryLock advisoryLock;
     private final DailyChallengeRepository challengeRepository;
     private final DailyChallengeHintRepository hintRepository;
+    private final DailyChallengeSnapshotRepairService snapshotRepairService;
     private final Map<DailyGameType, DailyChallengeGenerator> generators;
     private final int generationMaxCandidates;
     private final Clock clock;
@@ -40,12 +42,14 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
             AdvisoryLock advisoryLock,
             DailyChallengeRepository challengeRepository,
             DailyChallengeHintRepository hintRepository,
+            DailyChallengeSnapshotRepairService snapshotRepairService,
             List<DailyChallengeGenerator> generators,
             @Value("${app.daily-games.generation-max-candidates}") int generationMaxCandidates,
             Clock clock) {
         this.advisoryLock = advisoryLock;
         this.challengeRepository = challengeRepository;
         this.hintRepository = hintRepository;
+        this.snapshotRepairService = snapshotRepairService;
         this.generators = indexGenerators(generators);
         this.generationMaxCandidates = generationMaxCandidates;
         this.clock = clock;
@@ -62,6 +66,8 @@ public class DailyChallengeGenerationServiceImpl implements DailyChallengeGenera
 
     private void generateMissingModality(LocalDate challengeDate, DailyGameType gameType) {
         if (challengeRepository.existsByChallengeDateAndGameType(challengeDate, gameType)) {
+            challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
+                    .ifPresent(snapshotRepairService::repairIfIncomplete);
             return;
         }
         advisoryLock.lock("daily-games-answer|" + gameType);

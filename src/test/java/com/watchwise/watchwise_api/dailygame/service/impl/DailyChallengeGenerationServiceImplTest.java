@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeCandidate;
 import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeGenerator;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintRepository;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
+import com.watchwise.watchwise_api.dailygame.service.DailyChallengeSnapshotRepairService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +58,40 @@ class DailyChallengeGenerationServiceImplTest {
 
     @Mock
     private DailyChallengeHintRepository hintRepository;
+
+    @Mock
+    private DailyChallengeSnapshotRepairService snapshotRepairService;
+
+    @Test
+    @DisplayName("[ensureGenerated] Should Repair Existing Challenge Without Regenerating - When The Modality Already Exists")
+    void shouldRepairExistingChallengeWithoutRegeneratingWhenTheModalityAlreadyExists() {
+        DailyChallengeGenerator existingGenerator = mock(DailyChallengeGenerator.class);
+        when(existingGenerator.gameType()).thenReturn(DailyGameType.MOVIE_BY_INFO);
+        Map<DailyGameType, DailyChallengeGenerator> generators = generatorsReturningCandidates();
+        generators.put(DailyGameType.MOVIE_BY_INFO, existingGenerator);
+        DailyChallenge existing = DailyChallenge.builder()
+                .challengeDate(DATE)
+                .gameType(DailyGameType.MOVIE_BY_INFO)
+                .targetKind(DailyGameTargetKind.MOVIE)
+                .answerKey("MOVIE:550")
+                .imagePath("/legacy-image.jpg")
+                .answerSnapshot(Map.of())
+                .displaySnapshot(Map.of())
+                .build();
+        when(challengeRepository.existsByChallengeDateAndGameType(eq(DATE), any())).thenReturn(true);
+        when(challengeRepository.findByChallengeDateAndGameType(any(LocalDate.class), any(DailyGameType.class)))
+                .thenReturn(Optional.empty());
+        when(challengeRepository.findByChallengeDateAndGameType(DATE, DailyGameType.MOVIE_BY_INFO))
+                .thenReturn(Optional.of(existing));
+
+        service(generators, 2).ensureGenerated(DATE);
+
+        verify(challengeRepository).findByChallengeDateAndGameType(DATE, DailyGameType.MOVIE_BY_INFO);
+        verify(snapshotRepairService).repairIfIncomplete(existing);
+        verify(existingGenerator, never()).generate(eq(DATE), any());
+        verify(challengeRepository, never()).saveAndFlush(any(DailyChallenge.class));
+        verify(advisoryLock, never()).lock("daily-games-answer|MOVIE_BY_INFO");
+    }
 
     @Test
     @DisplayName("[ensureGenerated] Should Lock And Persist Only Missing Modalities - When The Same Date Is Generated Repeatedly")
@@ -217,7 +252,7 @@ class DailyChallengeGenerationServiceImplTest {
     private DailyChallengeGenerationServiceImpl service(Map<DailyGameType, DailyChallengeGenerator> generators,
                                                         int maxCandidates) {
         return new DailyChallengeGenerationServiceImpl(advisoryLock, challengeRepository, hintRepository,
-                List.copyOf(generators.values()), maxCandidates, CLOCK);
+                snapshotRepairService, List.copyOf(generators.values()), maxCandidates, CLOCK);
     }
 
     private void stubOnlyMovieIsMissing() {
