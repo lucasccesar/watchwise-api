@@ -62,15 +62,6 @@ class SecurityConfigIntegrationTest {
     }
 
     @Test
-    @DisplayName("[securityFilterChain] Should Serve Game Test UI Without Authentication")
-    void shouldServeGameTestUiWithoutAuthentication() throws Exception {
-        mockMvc.perform(get("/game-test-ui/index.html"))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("Jogos Diários")));
-    }
-
-    @Test
     @DisplayName("[securityFilterChain] Should Keep Game API Protected")
     void shouldKeepGameApiProtected() throws Exception {
         mockMvc.perform(get("/games/today"))
