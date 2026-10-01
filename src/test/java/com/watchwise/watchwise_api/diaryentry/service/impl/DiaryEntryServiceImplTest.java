@@ -33,6 +33,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
@@ -246,6 +247,28 @@ class DiaryEntryServiceImplTest {
                 List.of(), null, null, null, null, null, null, null, null, null);
     }
 
+    private TmdbTvFullDetails seriesDetailsWithName(String name) {
+        return new TmdbTvFullDetails(null, name, null, null, null, null, null, null, null, null, null,
+                List.of(), null, null, null, null, null, null, null, null, null);
+    }
+
+    private DiaryEntryRepository.DiarySeriesCount seriesCount(String seriesTmdbId, Long entriesCount) {
+        return new DiarySeriesCountRow(seriesTmdbId, entriesCount);
+    }
+
+    private record DiarySeriesCountRow(String seriesTmdbId, Long entriesCount)
+            implements DiaryEntryRepository.DiarySeriesCount {
+        @Override
+        public String getSeriesTmdbId() {
+            return seriesTmdbId;
+        }
+
+        @Override
+        public Long getEntriesCount() {
+            return entriesCount;
+        }
+    }
+
     private TmdbTvFullDetails seriesDetailsWithEpisodeCount(int episodeCount) {
         return new TmdbTvFullDetails(null, null, null, null, null, null, null, null, null, null, null,
                 List.of(new TmdbSeasonSummary(1, "Season 1", null, null, episodeCount, null)),
@@ -393,13 +416,15 @@ class DiaryEntryServiceImplTest {
     void shouldQueryByWatchedDateRangeWhenYearIsProvided() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findByUserIdWithFilters(
-                eq(lucasId), isNull(), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), isNull(), any(PageRequest.class)))
+                eq(lucasId), isNull(), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), isNull(),
+                isNull(), isNull(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         diaryEntryService.getDiaryEntries(lucasId, lucasId, 2024, 1, 10, null, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdWithFilters(
-                eq(lucasId), isNull(), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), isNull(), any(PageRequest.class));
+                eq(lucasId), isNull(), eq(LocalDate.of(2024, 1, 1)), eq(LocalDate.of(2024, 12, 31)), isNull(),
+                isNull(), isNull(), any(PageRequest.class));
         verify(diaryEntryRepository, never()).findByUserIdOrderByCreatedAtDesc(any(), any());
     }
 
@@ -434,13 +459,13 @@ class DiaryEntryServiceImplTest {
     void shouldQueryWithFiltersWhenTypeIsProvided() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findByUserIdWithFilters(
-                eq(lucasId), eq(ContentType.EPISODE), isNull(), isNull(), isNull(), any(PageRequest.class)))
+                eq(lucasId), eq(ContentType.EPISODE), isNull(), isNull(), isNull(), isNull(), isNull(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, ContentType.EPISODE, null, null, null);
 
         verify(diaryEntryRepository).findByUserIdWithFilters(
-                eq(lucasId), eq(ContentType.EPISODE), isNull(), isNull(), isNull(), any(PageRequest.class));
+                eq(lucasId), eq(ContentType.EPISODE), isNull(), isNull(), isNull(), isNull(), isNull(), any(PageRequest.class));
     }
 
     @Test
@@ -448,13 +473,137 @@ class DiaryEntryServiceImplTest {
     void shouldQueryWithFiltersWhenHasReviewIsProvided() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findByUserIdWithFilters(
-                eq(lucasId), isNull(), isNull(), isNull(), eq(true), any(PageRequest.class)))
+                eq(lucasId), isNull(), isNull(), isNull(), eq(true), isNull(), isNull(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, true);
 
         verify(diaryEntryRepository).findByUserIdWithFilters(
-                eq(lucasId), isNull(), isNull(), isNull(), eq(true), any(PageRequest.class));
+                eq(lucasId), isNull(), isNull(), isNull(), eq(true), isNull(), isNull(), any(PageRequest.class));
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Forward Series And Score Filters - When Both Are Provided")
+    void shouldForwardSeriesAndScoreFiltersWhenBothAreProvided() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findByUserIdWithFilters(
+                eq(lucasId), isNull(), isNull(), isNull(), isNull(), eq("1399"), eq(10), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 10, null, null, null, null, "1399", 10);
+
+        verify(diaryEntryRepository).findByUserIdWithFilters(
+                eq(lucasId), isNull(), isNull(), isNull(), isNull(), eq("1399"), eq(10), any(PageRequest.class));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Map And Sort Options - When Series Counts Exist")
+    void shouldMapAndSortOptionsWhenSeriesCountsExist() {
+        lucas.setPreferredLanguage("pt-BR");
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesEntryCountsByUserId(lucasId)).thenReturn(List.of(
+                seriesCount("1399", 3L),
+                seriesCount("550", 2L),
+                seriesCount("999", 2L),
+                seriesCount("111", 2L),
+                seriesCount("000", 2L)));
+        when(tmdbClient.getTvFullDetails("1399", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithName("Zeta")));
+        when(tmdbClient.getTvFullDetails("550", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithName("Beta")));
+        when(tmdbClient.getTvFullDetails("999", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithName("alpha")));
+        when(tmdbClient.getTvFullDetails("111", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithName("ALPHA")));
+        when(tmdbClient.getTvFullDetails("000", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithName(null)));
+
+        List<DiarySeriesOptionDTO> result = diaryEntryService.getDiarySeriesOptions(lucasId, lucasId);
+
+        assertThat(result).extracting(
+                DiarySeriesOptionDTO::seriesTmdbId,
+                DiarySeriesOptionDTO::title,
+                DiarySeriesOptionDTO::entriesCount)
+                .containsExactly(
+                        tuple("1399", "Zeta", 3L),
+                        tuple("111", "ALPHA", 2L),
+                        tuple("999", "alpha", 2L),
+                        tuple("550", "Beta", 2L),
+                        tuple("000", null, 2L));
+        verify(tmdbClient).getTvFullDetails("1399", "pt-BR");
+        verify(tmdbClient).getTvFullDetails("550", "pt-BR");
+        verify(tmdbClient).getTvFullDetails("999", "pt-BR");
+        verify(tmdbClient).getTvFullDetails("111", "pt-BR");
+        verify(tmdbClient).getTvFullDetails("000", "pt-BR");
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Return Null Title - When TMDB Does Not Find A Series")
+    void shouldReturnNullTitleWhenTmdbDoesNotFindASeries() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesEntryCountsByUserId(lucasId))
+                .thenReturn(List.of(seriesCount("1399", 2L)));
+        when(tmdbClient.getTvFullDetails("1399", lucas.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
+
+        List<DiarySeriesOptionDTO> result = diaryEntryService.getDiarySeriesOptions(lucasId, lucasId);
+
+        assertThat(result).containsExactly(new DiarySeriesOptionDTO("1399", null, 2L));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Throw TmdbUnavailableException - When TMDB Is Unavailable")
+    void shouldThrowTmdbUnavailableExceptionWhenTmdbIsUnavailable() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findSeriesEntryCountsByUserId(lucasId))
+                .thenReturn(List.of(seriesCount("1399", 2L)));
+        when(tmdbClient.getTvFullDetails("1399", lucas.getPreferredLanguage()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        assertThatThrownBy(() -> diaryEntryService.getDiarySeriesOptions(lucasId, lucasId))
+                .isInstanceOf(TmdbUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Throw BadRequestException - When Score Is Outside The Allowed Range")
+    void shouldThrowBadRequestExceptionWhenScoreIsOutsideTheAllowedRange() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 10, null, null, null, null, null, 11))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("score must be between 1 and 10");
+
+        verifyNoInteractions(diaryEntryRepository, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Throw BadRequestException - When Series ID Is Blank")
+    void shouldThrowBadRequestExceptionWhenSeriesIdIsBlank() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 10, null, null, null, null, "  ", null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("seriesTmdbId cannot be blank");
+
+        verifyNoInteractions(diaryEntryRepository, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Authorize Before Loading Counts Or TMDB Details - When Target Profile Is Private")
+    void shouldAuthorizeBeforeLoadingCountsOrTmdbDetailsWhenTargetProfileIsPrivate() {
+        lucas.setIsProfilePublic(false);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
+                .thenReturn(false);
+
+        assertThatThrownBy(() -> diaryEntryService.getDiarySeriesOptions(marinaId, lucasId))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessage("This user profile is private");
+
+        verifyNoInteractions(diaryEntryRepository, tmdbClient);
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
@@ -21,7 +22,14 @@ import java.util.UUID;
 public interface DiaryEntryService {
 
     Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
-            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview);
+            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview, String seriesTmdbId, Integer score);
+
+    default Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
+            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview) {
+        return getDiaryEntries(viewerId, userId, year, pageNumber, pageSize, type, dateFrom, dateTo, hasReview, null, null);
+    }
+
+    List<DiarySeriesOptionDTO> getDiarySeriesOptions(UUID viewerId, UUID userId);
 
     Page<SeriesInProgressResponseDTO> getSeriesInProgress(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize);
 

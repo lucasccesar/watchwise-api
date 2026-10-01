@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
@@ -32,6 +33,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
@@ -73,6 +75,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -113,11 +116,19 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     @Override
     public Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
-            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview) {
+            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview, String seriesTmdbId, Integer score) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
         assertCanViewDiary(viewerId, userId, target);
+
+        String normalizedSeriesTmdbId = seriesTmdbId == null ? null : seriesTmdbId.trim();
+        if (seriesTmdbId != null && normalizedSeriesTmdbId.isEmpty()) {
+            throw new BadRequestException("seriesTmdbId cannot be blank");
+        }
+        if (score != null && (score < 1 || score > 10)) {
+            throw new BadRequestException("score must be between 1 and 10");
+        }
 
         if (year != null && (dateFrom != null || dateTo != null)) {
             throw new BadRequestException("year cannot be combined with dateFrom/dateTo");
@@ -125,12 +136,14 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         LocalDate effectiveDateFrom = dateFrom != null ? dateFrom : (year != null ? startOfYear(year) : null);
         LocalDate effectiveDateTo = dateTo != null ? dateTo : (year != null ? endOfYear(year) : null);
-        boolean hasExtraFilters = type != null || effectiveDateFrom != null || effectiveDateTo != null || hasReview != null;
+        boolean hasExtraFilters = type != null || effectiveDateFrom != null || effectiveDateTo != null
+                || hasReview != null || normalizedSeriesTmdbId != null || score != null;
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         Page<DiaryEntry> entries = hasExtraFilters
-                ? diaryEntryRepository.findByUserIdWithFilters(userId, type, effectiveDateFrom, effectiveDateTo, hasReview, pageRequest)
+                ? diaryEntryRepository.findByUserIdWithFilters(
+                        userId, type, effectiveDateFrom, effectiveDateTo, hasReview, normalizedSeriesTmdbId, score, pageRequest)
                 : diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(userId, pageRequest);
 
         List<UUID> entryIds = entries.getContent().stream().map(DiaryEntry::getId).toList();
@@ -143,6 +156,34 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 likedEntryIds.contains(entry.getId()),
                 watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
                 customPosterByContentId.get(entry.getContent().getId())));
+    }
+
+    @Override
+    public List<DiarySeriesOptionDTO> getDiarySeriesOptions(UUID viewerId, UUID userId) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+
+        assertCanViewDiary(viewerId, userId, target);
+
+        Comparator<DiarySeriesOptionDTO> comparator = Comparator
+                .comparing(DiarySeriesOptionDTO::entriesCount, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(DiarySeriesOptionDTO::title, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
+                .thenComparing(DiarySeriesOptionDTO::seriesTmdbId, Comparator.nullsLast(Comparator.naturalOrder()));
+
+        return diaryEntryRepository.findSeriesEntryCountsByUserId(userId).stream()
+                .map(row -> new DiarySeriesOptionDTO(
+                        row.getSeriesTmdbId(), resolveSeriesTitle(row.getSeriesTmdbId(), target.getPreferredLanguage()),
+                        row.getEntriesCount()))
+                .sorted(comparator)
+                .toList();
+    }
+
+    private String resolveSeriesTitle(String seriesTmdbId, String language) {
+        return switch (tmdbClient.getTvFullDetails(seriesTmdbId, language)) {
+            case TmdbLookupResult.Found<TmdbTvFullDetails> found -> found.value().name();
+            case TmdbLookupResult.NotFound<TmdbTvFullDetails> ignored -> null;
+            case TmdbLookupResult.Unavailable<TmdbTvFullDetails> ignored -> throw tmdbUnavailable();
+        };
     }
 
     @Override
