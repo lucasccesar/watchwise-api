@@ -618,7 +618,7 @@ class DiaryEntryControllerIntegrationTest {
                         .param("score", "10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(1))
-                .andExpect(jsonPath("$.content[0].content.seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.content[0].content.tmdbId").value("1399"))
                 .andExpect(jsonPath("$.content[0].score").value(10));
     }
 
