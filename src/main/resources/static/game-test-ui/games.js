@@ -400,16 +400,12 @@
     if (grid) {
       clear(grid);
       (filmography.entries || []).forEach(function (entry) {
-        const image = mediaImage(entry.posterUrl, entry.title || "Obra de filmografia");
         const title = entry.revealed ? (entry.title || "Obra revelada") : "Obra oculta";
-        const details = [entry.year, entry.genres && entry.genres.length ? entry.genres.join(", ") : null, entry.episodeCount ? entry.episodeCount + " episódios" : null, entry.character].filter(Boolean).join(" · ");
-        const cardChildren = [];
-        if (image) cardChildren.push(image);
-        cardChildren.push(node("div", { className: "film-card-body" }, [
+        const details = [entry.year, entry.genres && entry.genres.length ? entry.genres.join(", ") : null, entry.episodeCount ? entry.episodeCount + " episódios" : null].filter(Boolean).join(" · ");
+        const cardChildren = [node("div", { className: "film-card-body" }, [
           node("strong", { text: title }),
           node("small", { text: details || "Metadados não disponíveis" }),
-          entry.period ? node("small", { text: entry.period }) : null
-        ]));
+        ])];
         grid.append(node("article", { className: "film-card" + (entry.highlighted ? " highlighted" : "" ) }, cardChildren));
       });
       if (!grid.childElementCount) grid.append(node("div", { className: "empty", text: "A filmografia aparecerá após o primeiro palpite." }));

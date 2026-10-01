@@ -56,9 +56,13 @@ class DailyChallengeResponseAssemblerTest {
         assertThat(terminal.answer().imageUrl()).isEqualTo(switch (gameType) {
             case MOVIE_BY_INFO, SERIES_BY_INFO -> "https://image.tmdb.org/t/p/w500/secret.jpg";
             case ACTOR_BY_MOVIE_FILMOGRAPHY, ACTOR_BY_SERIES_FILMOGRAPHY
-                    -> null;
+                    -> "https://image.tmdb.org/t/p/w185/secret.jpg";
             default -> throw new IllegalStateException("Unexpected game type: " + gameType);
         });
+        if (gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
+                || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY) {
+            assertThat(terminal.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w185/secret.jpg");
+        }
     }
 
     @ParameterizedTest(name = "{0}")
@@ -286,7 +290,7 @@ class DailyChallengeResponseAssemblerTest {
         assertThat(major.filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
                 .containsExactly("10:Major");
         assertThat(all.filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
-                .containsExactly("10:Major", "20:Guest");
+                .containsExactly("20:Guest", "10:Major");
     }
 
     @Test
@@ -308,7 +312,7 @@ class DailyChallengeResponseAssemblerTest {
             assertThat(entry.posterUrl()).isNull();
         });
         assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::workId)
-                .containsExactly("10", "20", "30");
+                .containsExactly("30", "20", "10");
     }
 
     @Test
@@ -352,9 +356,28 @@ class DailyChallengeResponseAssemblerTest {
                 .extracting(entry -> entry.workId() + ":" + entry.title() + ":"
                         + entry.revealed() + ":" + entry.highlighted())
                 .containsExactly(
-                        "10:null:false:false",
+                        "30:null:false:false",
                         "20:Shared Movie:true:true",
-                        "30:null:false:false");
+                        "10:null:false:false");
+    }
+
+    @Test
+    @DisplayName("[filmography] Should Sort Legacy Entries And Hide Role Metadata - When Snapshot Is Unordered")
+    void shouldSortLegacyEntriesAndHideRoleMetadataWhenSnapshotIsUnordered() {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "Old Movie", "movie", 2000),
+                filmographyWork("20", "Recent Movie", "movie", 2024),
+                filmographyWork("30", "Middle Movie", "movie", 2010)));
+
+        DailyGameStateDTO state = assembler.toState(challenge, null, List.of(), true, true);
+
+        assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::year)
+                .containsExactly(2024, 2010, 2000);
+        assertThat(state.filmography().entries()).allSatisfy(entry -> {
+            assertThat(entry.character()).isNull();
+            assertThat(entry.period()).isNull();
+            assertThat(entry.posterUrl()).isNull();
+        });
     }
 
     private DailyGameInfoFeedbackDTO infoFeedback() {

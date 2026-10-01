@@ -67,6 +67,8 @@ class DailyGameFilmographyServiceTest {
             assertThat(entry.year()).isEqualTo(1999);
             assertThat(entry.genres()).containsExactly("18");
             assertThat(entry.posterUrl()).isNull();
+            assertThat(entry.period()).isNull();
+            assertThat(entry.character()).isNull();
         });
     }
 
@@ -86,7 +88,7 @@ class DailyGameFilmographyServiceTest {
         assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("MOVIE:200");
         assertThat(feedback.entries()).extracting(entry -> entry.workId() + ":" + entry.title() + ":"
                         + entry.revealed() + ":" + entry.highlighted())
-                .containsExactly("100:null:false:false", "200:Shared Movie:true:true");
+                .containsExactly("200:Shared Movie:true:true", "100:null:false:false");
         verify(tmdbClient).getPersonAggregate("2", LANGUAGE);
     }
 
@@ -103,10 +105,10 @@ class DailyGameFilmographyServiceTest {
 
         DailyGameFilmographyFeedbackDTO feedback = service.compare(challenge, "2", true);
 
-        assertThat(feedback.sharedMajorRoleWorkKeys()).containsExactly("MOVIE:100", "MOVIE:200");
-        assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("MOVIE:100", "MOVIE:200");
+        assertThat(feedback.sharedMajorRoleWorkKeys()).containsExactly("MOVIE:200", "MOVIE:100");
+        assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("MOVIE:200", "MOVIE:100");
         assertThat(feedback.entries()).extracting(entry -> entry.workId() + ":" + entry.title())
-                .containsExactly("100:First Shared", "200:Second Shared", "300:null");
+                .containsExactly("300:null", "200:Second Shared", "100:First Shared");
     }
 
     @Test
@@ -118,10 +120,23 @@ class DailyGameFilmographyServiceTest {
 
         assertThat(service.snapshot("2", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY).entries())
                 .extracting(entry -> entry.get("workId"))
-                .containsExactly("100", "200");
+                .containsExactly("200", "100");
         assertThat(service.snapshot("2", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY).entries())
                 .extracting(entry -> entry.get("mediaType"))
                 .containsExactly("movie", "movie");
+    }
+
+    @Test
+    @DisplayName("[snapshot] Should Order Works By Most Recent Year - When Credits Arrive Out Of Order")
+    void shouldOrderWorksByMostRecentYearWhenCreditsArriveOutOfOrder() {
+        stubPerson("2", "Guessed Actor",
+                credit("100", "Old Movie", "movie", "1999-01-01", null, null),
+                credit("200", "Recent Movie", "movie", "2024-01-01", null, null),
+                credit("300", "Middle Movie", "movie", "2010-01-01", null, null));
+
+        assertThat(service.snapshot("2", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY).entries())
+                .extracting(entry -> entry.get("year"))
+                .containsExactly(2024, 2010, 1999);
     }
 
     @Test
@@ -235,7 +250,7 @@ class DailyGameFilmographyServiceTest {
 
         assertThat(snapshot.entries()).hasSize(2);
         assertThat(snapshot.entries()).extracting(entry -> entry.get("totalEpisodes"))
-                .containsExactly(21, null);
+                .containsExactly(null, 21);
         verify(tmdbClient).getTvFullDetails("10", LANGUAGE);
         org.mockito.Mockito.verify(tmdbClient, org.mockito.Mockito.never())
                 .getTvFullDetails("20", LANGUAGE);

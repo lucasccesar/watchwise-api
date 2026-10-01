@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -152,7 +153,10 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
             }
             merged.computeIfAbsent(work.key(), ignored -> new MutableWork(work)).merge(work);
         }
-        return merged.values().stream().map(MutableWork::toWork).toList();
+        return merged.values().stream()
+                .map(MutableWork::toWork)
+                .sorted(workComparator())
+                .toList();
     }
 
     private Work normalizeCredit(TmdbPersonAggregateCredit credit, String expectedMediaType,
@@ -250,6 +254,7 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
         return rawEntries.stream()
                 .map(entry -> snapshotWork(entry, expectedMediaType))
                 .filter(Objects::nonNull)
+                .sorted(workComparator())
                 .toList();
     }
 
@@ -300,7 +305,11 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
     private DailyGameFilmographyEntryDTO toEntry(Work work, boolean revealed, boolean highlighted) {
         return new DailyGameFilmographyEntryDTO(work.id(), revealed ? work.title() : null,
                 revealed, highlighted, work.year(), work.genres(), null, work.episodeCount(),
-                work.period(), work.character());
+                null, null);
+    }
+
+    private Comparator<Work> workComparator() {
+        return Comparator.comparing(Work::year, Comparator.nullsLast(Comparator.reverseOrder()));
     }
 
     private Set<String> keys(List<Work> works) {

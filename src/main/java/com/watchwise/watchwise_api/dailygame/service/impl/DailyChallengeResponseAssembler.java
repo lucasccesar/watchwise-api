@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCode
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -189,7 +190,6 @@ public class DailyChallengeResponseAssembler {
         int score = result == null ? 0 : result.getScore();
         boolean terminal = status == DailyGameViewStatus.COMPLETED || status == DailyGameViewStatus.FAILED;
         boolean hiddenImageGame = hidesImageUntilTerminal(challenge.getGameType());
-        boolean actorFilmographyGame = isActorFilmographyGame(challenge.getGameType());
         boolean informationGame = isInformationGame(challenge.getGameType());
         int visibleHintCount = terminal ? allHints.size() : Math.min(allHints.size(), Math.max(1, attemptsUsed + 1));
         List<DailyGameHintDTO> hints = informationGame
@@ -206,7 +206,7 @@ public class DailyChallengeResponseAssembler {
         int currentImageIndex = Math.min(attemptsUsed, imagePaths.size() - 1);
         int visiblePositions = challenge.getTargetKind() == DailyGameTargetKind.EPISODE
                 ? attemptsUsed + 1 : 1;
-        List<String> visibleImageUrls = actorFilmographyGame || hiddenImageGame && !terminal
+        List<String> visibleImageUrls = hiddenImageGame && !terminal
                 ? List.of()
                 : IntStream.range(0, visiblePositions)
                         .mapToObj(index -> imageUrl(challenge, imagePaths.get(Math.min(index, imagePaths.size() - 1))))
@@ -217,7 +217,7 @@ public class DailyChallengeResponseAssembler {
                 : null;
         return new DailyGameView(
                 challenge.getGameType(), challenge.getTargetKind(), maxAttempts, attemptsUsed, attemptsRemaining,
-                status, actorFilmographyGame || hiddenImageGame && !terminal
+                status, hiddenImageGame && !terminal
                         ? null : imageUrl(challenge, imagePaths.get(currentImageIndex)), hints, score,
                 result == null ? null : result.getCompletedAt(), terminal ? toAnswer(challenge) : null,
                 visibleImageUrls, imageUrls, result != null && result.isShareOnCompletion(),
@@ -228,11 +228,6 @@ public class DailyChallengeResponseAssembler {
         return gameType == DailyGameType.MOVIE_BY_INFO
                 || gameType == DailyGameType.SERIES_BY_INFO
                 || gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
-                || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
-    }
-
-    private boolean isActorFilmographyGame(DailyGameType gameType) {
-        return gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
                 || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
     }
 
@@ -266,7 +261,10 @@ public class DailyChallengeResponseAssembler {
                 : challenge.getAnswerSnapshot().get("filmography");
         List<DailyGameFilmographyEntryDTO> entries = rawFilmography instanceof List<?> values
                 ? values.stream().map(value -> filmographyEntry(value, series, majorRoles, revealed))
-                .filter(java.util.Objects::nonNull).toList() : List.of();
+                .filter(java.util.Objects::nonNull)
+                .sorted(Comparator.comparing(DailyGameFilmographyEntryDTO::year,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList() : List.of();
         return new DailyGameFilmographyStateDTO(majorRoles, guessedActors, entries);
     }
 
@@ -285,7 +283,7 @@ public class DailyChallengeResponseAssembler {
         boolean isRevealed = revealed.contains((series ? "SERIES:" : "MOVIE:") + workId);
         return new DailyGameFilmographyEntryDTO(workId, isRevealed ? title : null, isRevealed, isRevealed,
                 integer(raw.get("year")), strings(raw.get("genres")), null,
-                episodeCount, string(raw.get("period")), string(raw.get("character")));
+                episodeCount, null, null);
     }
 
     private boolean isMajorRole(int episodeCount, Integer totalEpisodes) {
@@ -337,7 +335,7 @@ public class DailyChallengeResponseAssembler {
                 ? snapshotValue(snapshot, "seriesPosterPath") : null;
         Integer seriesYear = targetKind == DailyGameTargetKind.EPISODE
                 ? snapshotInteger(snapshot, "seriesYear") : null;
-        String answerImageUrl = isActorFilmographyGame(challenge.getGameType()) ? null : imageUrl(challenge);
+        String answerImageUrl = imageUrl(challenge);
         return new DailyGameAnswerDTO(targetKind, tmdbId, personTmdbId, seriesTmdbId,
                 challenge.getSeasonNumber(), challenge.getEpisodeNumber(), title, answerImageUrl, seriesName,
                 posterUrl(seriesPosterPath), seriesYear);
