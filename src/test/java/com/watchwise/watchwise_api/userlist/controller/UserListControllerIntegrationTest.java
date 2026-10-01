@@ -588,12 +588,13 @@ class UserListControllerIntegrationTest {
     void shouldPaginateResultsWhenPageAndSizeAreProvided() throws Exception {
         RegisteredUser user = registerUser("getlistspage");
         User entity = userRepository.findById(user.id()).orElseThrow();
-        persistList(entity, "List 1", true);
-        persistList(entity, "List 2", true);
+        for (int index = 1; index <= 11; index++) {
+            persistList(entity, "List " + index, true);
+        }
 
-        mockMvc.perform(getUserListsRequest(user, user.id()).param("page", "1").param("size", "1"))
+        mockMvc.perform(getUserListsRequest(user, user.id()).param("page", "1").param("size", "10"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content.length()").value(10))
                 .andExpect(jsonPath("$.totalPages").value(2))
                 .andExpect(jsonPath("$.hasNext").value(true));
     }

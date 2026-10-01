@@ -505,7 +505,7 @@ class UserListServiceImplTest {
         userListService.getUserLists(lucasId, lucasId, 1, null, null, null, null);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(10);
     }
 
     @Test
@@ -513,10 +513,10 @@ class UserListServiceImplTest {
     void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimit() {
         stubEmptyOwnListsPage();
 
-        userListService.getUserLists(lucasId, lucasId, 1, 1001, null, null, null);
+        userListService.getUserLists(lucasId, lucasId, 1, 11, null, null, null);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(10);
     }
 
     @Test
@@ -524,10 +524,10 @@ class UserListServiceImplTest {
     void shouldUseProvidedPageSizeWhenPageSizeIsValid() {
         stubEmptyOwnListsPage();
 
-        userListService.getUserLists(lucasId, lucasId, 1, 25, null, null, null);
+        userListService.getUserLists(lucasId, lucasId, 1, 10, null, null, null);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(25);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(10);
     }
 
     @Test
@@ -535,10 +535,22 @@ class UserListServiceImplTest {
     void shouldUseProvidedPageSizeWhenPageSizeIsAtMaxLimit() {
         stubEmptyOwnListsPage();
 
-        userListService.getUserLists(lucasId, lucasId, 1, 1000, null, null, null);
+        userListService.getUserLists(lucasId, lucasId, 1, 10, null, null, null);
 
         verify(userListRepository).findByUserId(eq(lucasId), pageRequestCaptor.capture());
-        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(1000);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("[getUserLists] Should Throw BadRequestException - When Page Size Is Below Minimum")
+    void shouldThrowBadRequestExceptionWhenPageSizeIsBelowMinimum() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+
+        assertThatThrownBy(() -> userListService.getUserLists(lucasId, lucasId, 1, 9, null, null, null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Page size must be greater than or equal to 10");
+
+        verify(userListRepository, never()).findByUserId(any(), any());
     }
 
     @Test
@@ -594,9 +606,10 @@ class UserListServiceImplTest {
         when(userListRepository.findByUserIdOrderByItemsCount(eq(lucasId), any(), eq("DESC"), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
-        userListService.getUserLists(lucasId, lucasId, 1, 10, "itemsCount", "desc", null);
+        userListService.getUserLists(lucasId, lucasId, 1, 11, "itemsCount", "desc", null);
 
-        verify(userListRepository).findByUserIdOrderByItemsCount(eq(lucasId), any(), eq("DESC"), any(PageRequest.class));
+        verify(userListRepository).findByUserIdOrderByItemsCount(eq(lucasId), any(), eq("DESC"), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(10);
         verifyNoInteractions(userListMapper);
     }
 

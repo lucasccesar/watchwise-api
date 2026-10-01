@@ -18,14 +18,21 @@ public class PageRequestFactory {
 
     public PageRequest build(Integer pageNumber, Integer pageSize, int maxPageSize) {
         validateMaxPageSize(maxPageSize);
-        return build(pageNumber, pageSize, maxPageSize, null, null);
+        return buildInternal(pageNumber, pageSize, maxPageSize, null, null);
     }
 
     public PageRequest build(Integer pageNumber, Integer pageSize, String sortBy, String sortDirection) {
-        return build(pageNumber, pageSize, MAX_PAGE_SIZE, sortBy, sortDirection);
+        return buildInternal(pageNumber, pageSize, MAX_PAGE_SIZE, sortBy, sortDirection);
     }
 
-    private PageRequest build(Integer pageNumber, Integer pageSize, int maxPageSize, String sortBy, String sortDirection) {
+    public PageRequest build(Integer pageNumber, Integer pageSize, int maxPageSize,
+            String sortBy, String sortDirection) {
+        validateMaxPageSize(maxPageSize);
+        return buildInternal(pageNumber, pageSize, maxPageSize, sortBy, sortDirection);
+    }
+
+    private PageRequest buildInternal(Integer pageNumber, Integer pageSize, int maxPageSize,
+            String sortBy, String sortDirection) {
         int queryPageNumber;
         int queryPageSize;
 

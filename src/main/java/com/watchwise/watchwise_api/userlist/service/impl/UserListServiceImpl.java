@@ -82,6 +82,7 @@ public class UserListServiceImpl implements UserListService {
     private final UserContentPosterService userContentPosterService;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
+    private static final int USER_LIST_PAGE_SIZE = 10;
     private static final Set<String> GENERIC_SORT_FIELDS = Set.of("rank", "updatedAt", "name", "likesCount");
     private static final Set<String> AGGREGATE_SORT_FIELDS = Set.of("itemsCount", "commentsCount");
 
@@ -100,6 +101,7 @@ public class UserListServiceImpl implements UserListService {
             throw new BadRequestException("sortBy must be one of: rank, updatedAt, name, likesCount, itemsCount, commentsCount");
         }
         assertValidSortDirection(sortDirection);
+        validateUserListPageSize(pageSize);
 
         List<UserListVisibility> visibilities = isOwner
                 ? List.of(UserListVisibility.values())
@@ -107,20 +109,27 @@ public class UserListServiceImpl implements UserListService {
 
         Page<UserList> lists;
         if (sortBy != null && AGGREGATE_SORT_FIELDS.contains(sortBy)) {
-            PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+            PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize, USER_LIST_PAGE_SIZE);
             String direction = "desc".equals(sortDirection) ? "DESC" : "ASC";
             List<String> visibilityNames = visibilities.stream().map(Enum::name).toList();
             lists = "itemsCount".equals(sortBy)
                     ? userListRepository.findByUserIdOrderByItemsCount(userId, visibilityNames, direction, pageRequest)
                     : userListRepository.findByUserIdOrderByCommentsCount(userId, visibilityNames, direction, pageRequest);
         } else {
-            PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize, sortBy, sortDirection);
+            PageRequest pageRequest = pageRequestFactory.build(
+                    pageNumber, pageSize, USER_LIST_PAGE_SIZE, sortBy, sortDirection);
             lists = isOwner
                     ? userListRepository.findByUserId(userId, pageRequest)
                     : userListRepository.findByUserIdAndVisibilityIn(userId, visibilities, pageRequest);
         }
 
         return mapToResponseDtoPage(lists, viewerId, contentId);
+    }
+
+    private void validateUserListPageSize(Integer pageSize) {
+        if (pageSize != null && pageSize < USER_LIST_PAGE_SIZE) {
+            throw new BadRequestException("Page size must be greater than or equal to " + USER_LIST_PAGE_SIZE);
+        }
     }
 
     @Override
