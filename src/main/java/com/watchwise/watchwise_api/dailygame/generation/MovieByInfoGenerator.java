@@ -7,7 +7,6 @@ import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,9 +16,6 @@ import java.util.Set;
 public class MovieByInfoGenerator implements DailyChallengeGenerator {
 
     private static final String RATING_REGION = "BR";
-    private static final List<String> ADDITIONAL_COMPARISON_FIELDS = List.of(
-            "platforms", "genres", "certification", "director", "cast", "productionCompanies", "revenue");
-
     private final TmdbClient tmdbClient;
     private final DailyChallengeSnapshotAssembler snapshotAssembler;
 
@@ -63,23 +59,8 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
     }
 
     private boolean hasComparableInfo(Map<String, Object> answerSnapshot) {
-        return answerSnapshot.get("year") instanceof Number
-                && ADDITIONAL_COMPARISON_FIELDS.stream()
-                .map(answerSnapshot::get)
-                .anyMatch(this::isNonEmpty);
-    }
-
-    private boolean isNonEmpty(Object value) {
-        if (value == null) {
-            return false;
-        }
-        if (value instanceof String string) {
-            return !string.isBlank();
-        }
-        if (value instanceof Collection<?> collection) {
-            return !collection.isEmpty();
-        }
-        return true;
+        return DailyChallengeInfoSupport.hasComparableInfo(
+                answerSnapshot, DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS);
     }
 
     private boolean hasRequiredMetadata(TmdbMovieFullDetails movie) {

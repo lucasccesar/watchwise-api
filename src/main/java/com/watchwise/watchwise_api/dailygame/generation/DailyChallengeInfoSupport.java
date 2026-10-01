@@ -8,12 +8,40 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvContentRatings;
 import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
-final class DailyChallengeInfoSupport {
+public final class DailyChallengeInfoSupport {
+
+    public static final List<String> MOVIE_COMPARABLE_FIELDS = List.of(
+            "platforms", "genres", "certification", "director", "cast", "productionCompanies", "revenue");
+    public static final List<String> SERIES_COMPARABLE_FIELDS = List.of(
+            "platforms", "genres", "certification", "creators", "cast", "productionCompanies", "seasons");
 
     private DailyChallengeInfoSupport() {
+    }
+
+    public static boolean hasComparableInfo(Map<String, Object> answerSnapshot, List<String> comparableFields) {
+        return answerSnapshot != null
+                && answerSnapshot.get("year") instanceof Number
+                && comparableFields.stream()
+                .map(answerSnapshot::get)
+                .anyMatch(DailyChallengeInfoSupport::isNonEmpty);
+    }
+
+    private static boolean isNonEmpty(Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof String string) {
+            return !string.isBlank();
+        }
+        if (value instanceof Collection<?> collection) {
+            return !collection.isEmpty();
+        }
+        return true;
     }
 
     static String providers(TmdbWatchProviders providers, String region) {

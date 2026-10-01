@@ -219,6 +219,7 @@ public class DailyChallengeResponseAssembler {
 
     private boolean hidesImageUntilTerminal(DailyGameType gameType) {
         return gameType == DailyGameType.MOVIE_BY_INFO
+                || gameType == DailyGameType.SERIES_BY_INFO
                 || gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
                 || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
     }

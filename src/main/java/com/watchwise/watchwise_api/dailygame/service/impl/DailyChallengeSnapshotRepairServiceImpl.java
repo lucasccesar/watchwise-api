@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeCandidate;
+import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeInfoSupport;
 import com.watchwise.watchwise_api.dailygame.generation.DailyChallengeSnapshotAssembler;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyChallengeSnapshotRepairService;
@@ -59,11 +60,15 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
     }
 
     private boolean repairMovieInformation(DailyChallenge challenge) {
+        if (DailyChallengeInfoSupport.hasComparableInfo(
+                challenge.getAnswerSnapshot(), DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)) {
+            return false;
+        }
         if (!usable(challenge.getTargetTmdbId()) || !usable(challenge.getImagePath())) {
             return false;
         }
         TmdbMovieFullDetails movie = found(tmdbClient.getMovieFullDetails(challenge.getTargetTmdbId(), LANGUAGE));
-        if (!validMovieMetadata(movie)) {
+        if (!validMovieMetadata(movie, challenge.getTargetTmdbId())) {
             return false;
         }
         TmdbMovieReleaseDates releaseDates = found(
@@ -74,15 +79,23 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
         String certification = movieCertification(releaseDates);
         DailyChallengeCandidate candidate = snapshotAssembler.movieInfo(
                 movie, challenge.getImagePath(), List.of(), certification);
+        if (!DailyChallengeInfoSupport.hasComparableInfo(
+                candidate.answerSnapshot(), DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)) {
+            return false;
+        }
         return mergeAndSave(challenge, candidate.answerSnapshot());
     }
 
     private boolean repairSeriesInformation(DailyChallenge challenge) {
+        if (DailyChallengeInfoSupport.hasComparableInfo(
+                challenge.getAnswerSnapshot(), DailyChallengeInfoSupport.SERIES_COMPARABLE_FIELDS)) {
+            return false;
+        }
         if (!usable(challenge.getTargetTmdbId()) || !usable(challenge.getImagePath())) {
             return false;
         }
         TmdbTvFullDetails series = found(tmdbClient.getTvFullDetails(challenge.getTargetTmdbId(), LANGUAGE));
-        if (!validSeriesMetadata(series)) {
+        if (!validSeriesMetadata(series, challenge.getTargetTmdbId())) {
             return false;
         }
         TmdbTvContentRatings ratings = found(
@@ -93,12 +106,16 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
         String certification = tvCertification(ratings);
         DailyChallengeCandidate candidate = snapshotAssembler.seriesInfo(
                 series, challenge.getImagePath(), List.of(), certification);
+        if (!DailyChallengeInfoSupport.hasComparableInfo(
+                candidate.answerSnapshot(), DailyChallengeInfoSupport.SERIES_COMPARABLE_FIELDS)) {
+            return false;
+        }
         return mergeAndSave(challenge, candidate.answerSnapshot());
     }
 
     private boolean repairFilmography(DailyChallenge challenge) {
         Map<String, Object> existingSnapshot = challenge.getAnswerSnapshot();
-        if (existingSnapshot != null && usable(existingSnapshot.get("filmography"))) {
+        if (hasCompleteFilmography(existingSnapshot)) {
             return false;
         }
         if (!usable(challenge.getTargetTmdbId())) {
@@ -119,7 +136,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
         }
         boolean changed = false;
         for (Map.Entry<String, Object> entry : candidateSnapshot.entrySet()) {
-            if (!usable(repairedSnapshot.get(entry.getKey()))) {
+            if (isMissingOrInvalid(repairedSnapshot.get(entry.getKey()), entry.getKey())) {
                 repairedSnapshot.put(entry.getKey(), entry.getValue());
                 changed = true;
             }
@@ -139,20 +156,18 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
         return null;
     }
 
-    private boolean validMovieMetadata(TmdbMovieFullDetails movie) {
-        return movie != null && validId(movie.id()) && nonBlank(movie.title()) && validImage(movie.posterPath());
+    private boolean validMovieMetadata(TmdbMovieFullDetails movie, String targetTmdbId) {
+        return movie != null && validId(targetTmdbId) && targetTmdbId.equals(movie.id())
+                && nonBlank(movie.title());
     }
 
-    private boolean validSeriesMetadata(TmdbTvFullDetails series) {
-        return series != null && validId(series.id()) && nonBlank(series.name()) && validImage(series.posterPath());
+    private boolean validSeriesMetadata(TmdbTvFullDetails series, String targetTmdbId) {
+        return series != null && validId(targetTmdbId) && targetTmdbId.equals(series.id())
+                && nonBlank(series.name());
     }
 
     private boolean validId(String value) {
         return value != null && value.matches("[1-9]\\d*");
-    }
-
-    private boolean validImage(String value) {
-        return nonBlank(value);
     }
 
     private boolean nonBlank(String value) {
@@ -201,5 +216,13 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
             return !map.isEmpty();
         }
         return true;
+    }
+
+    private boolean hasCompleteFilmography(Map<String, Object> snapshot) {
+        return snapshot != null && snapshot.get("filmography") instanceof List<?> entries && !entries.isEmpty();
+    }
+
+    private boolean isMissingOrInvalid(Object value, String key) {
+        return "filmography".equals(key) ? !(value instanceof List<?> entries && !entries.isEmpty()) : !usable(value);
     }
 }

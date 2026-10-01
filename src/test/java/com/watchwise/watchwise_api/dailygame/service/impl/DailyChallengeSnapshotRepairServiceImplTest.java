@@ -34,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
 
@@ -241,6 +242,179 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     }
 
     @Test
+    @DisplayName("[repairIfIncomplete] Should Skip TMDB - When The Movie Snapshot Is Complete")
+    void shouldSkipTmdbWhenTheMovieSnapshotIsComplete() {
+        Map<String, Object> completeSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "550", "title", "Fight Club",
+                "imageUrl", IMAGE_PATH, "year", 2000, "genres", List.of("Drama")));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", completeSnapshot,
+                "MOVIE:550");
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        verifyNoInteractions(tmdbClient);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Skip TMDB - When The Series Snapshot Is Complete")
+    void shouldSkipTmdbWhenTheSeriesSnapshotIsComplete() {
+        Map<String, Object> completeSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "SERIES", "tmdbId", "1396", "title", "Breaking Bad",
+                "imageUrl", IMAGE_PATH, "year", 2008, "genres", List.of("Drama")));
+        DailyChallenge challenge = challenge(DailyGameType.SERIES_BY_INFO, "1396", "1396", completeSnapshot,
+                "SERIES:1396");
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        verifyNoInteractions(tmdbClient);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Partial Canonical Movie Snapshot - Without Saving")
+    void shouldRejectPartialCanonicalMovieSnapshotWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "550", "title", "Fight Club"));
+        Map<String, Object> originalDisplaySnapshot = new LinkedHashMap<>(Map.of("imageUrl", IMAGE_PATH));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550").toBuilder().displaySnapshot(originalDisplaySnapshot).build();
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE)).thenReturn(found(movieDetailsWithoutComparableData()));
+        when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+                .thenReturn(found(new TmdbMovieReleaseDates("550", List.of())));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        assertThat(challenge.getTargetTmdbId()).isEqualTo("550");
+        assertThat(challenge.getSourceTmdbId()).isEqualTo("550");
+        assertThat(challenge.getAnswerKey()).isEqualTo("MOVIE:550");
+        assertThat(challenge.getImagePath()).isEqualTo(IMAGE_PATH);
+        assertThat(challenge.getChallengeDate()).isEqualTo(CHALLENGE_DATE);
+        assertThat(challenge.getDisplaySnapshot()).isSameAs(originalDisplaySnapshot);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Mismatched Movie Identity - Without Saving")
+    void shouldRejectMismatchedMovieIdentityWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "550", "title", "Fight Club"));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550");
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE)).thenReturn(found(movieDetails("999")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        assertThat(challenge.getAnswerKey()).isEqualTo("MOVIE:550");
+        assertThat(challenge.getImagePath()).isEqualTo(IMAGE_PATH);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Mismatched Series Identity - Without Saving")
+    void shouldRejectMismatchedSeriesIdentityWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "SERIES", "tmdbId", "1396", "title", "Breaking Bad"));
+        DailyChallenge challenge = challenge(DailyGameType.SERIES_BY_INFO, "1396", "1396", originalSnapshot,
+                "SERIES:1396");
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetails("999")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        assertThat(challenge.getAnswerKey()).isEqualTo("SERIES:1396");
+        assertThat(challenge.getImagePath()).isEqualTo(IMAGE_PATH);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Blank Movie Title - Without Saving")
+    void shouldRejectBlankMovieTitleWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "550", "title", "Fight Club"));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550");
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                .thenReturn(found(movieDetails("550", "/poster.jpg", " ")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Blank Series Name - Without Saving")
+    void shouldRejectBlankSeriesNameWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "SERIES", "tmdbId", "1396", "title", "Breaking Bad"));
+        DailyChallenge challenge = challenge(DailyGameType.SERIES_BY_INFO, "1396", "1396", originalSnapshot,
+                "SERIES:1396");
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
+                .thenReturn(found(seriesDetails("1396", "/poster.jpg", " ")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Preserve Stored Image - When The Remote Movie Poster Is Missing")
+    void shouldPreserveStoredImageWhenTheRemoteMoviePosterIsMissing() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "550", "title", "Fight Club"));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550");
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE)).thenReturn(found(movieDetails("550", null)));
+        when(tmdbClient.getMovieReleaseDates("550", LANGUAGE)).thenReturn(found(movieReleaseDates("550")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+
+        assertThat(challenge.getImagePath()).isEqualTo(IMAGE_PATH);
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("imageUrl", IMAGE_PATH);
+        verify(challengeRepository).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Replace Malformed Filmography Map")
+    void shouldReplaceMalformedFilmographyMap() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "287", "title", "Brad Pitt",
+                "filmography", Map.of("unexpected", "shape")));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
+                originalSnapshot, "PERSON:287");
+        List<Map<String, Object>> entries = List.of(Map.of("workId", "680", "title", "Pulp Fiction"));
+        when(filmographyService.snapshot("287", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
+                .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(entries));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("filmography", entries);
+        verify(challengeRepository).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Replace Malformed Filmography Scalar")
+    void shouldReplaceMalformedFilmographyScalar() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "287", "title", "Brad Pitt",
+                "filmography", "unexpected shape"));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
+                originalSnapshot, "PERSON:287");
+        List<Map<String, Object>> entries = List.of(Map.of("workId", "680", "title", "Pulp Fiction"));
+        when(filmographyService.snapshot("287", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
+                .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(entries));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("filmography", entries);
+        verify(challengeRepository).saveAndFlush(challenge);
+    }
+
+    @Test
     @DisplayName("[repairIfIncomplete] Should Leave Movie Snapshot Untouched - When Certification Is Unavailable")
     void shouldLeaveMovieSnapshotUntouchedWhenCertificationIsUnavailable() {
         Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
@@ -299,9 +473,23 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     }
 
     private static TmdbMovieFullDetails movieDetails(String id) {
-        return new TmdbMovieFullDetails(id, "Fight Club", "Fight Club", null, "/poster.jpg", null,
+        return movieDetails(id, "/poster.jpg");
+    }
+
+    private static TmdbMovieFullDetails movieDetails(String id, String posterPath) {
+        return movieDetails(id, posterPath, "Fight Club");
+    }
+
+    private static TmdbMovieFullDetails movieDetails(String id, String posterPath, String title) {
+        return new TmdbMovieFullDetails(id, title, title, null, posterPath, null,
                 "2000-01-01", null, List.of(new TmdbGenre(18, "Drama")), List.of(),
                 new TmdbCredits(List.of(), List.of()), null, null, null, null, List.of(), null);
+    }
+
+    private static TmdbMovieFullDetails movieDetailsWithoutComparableData() {
+        return new TmdbMovieFullDetails("550", "Fight Club", "Fight Club", null, "/poster.jpg", null,
+                "2000-01-01", null, List.of(), List.of(), new TmdbCredits(List.of(), List.of()),
+                null, null, null, null, List.of(), null);
     }
 
     private static TmdbMovieFullDetails incompleteMovieDetails() {
@@ -316,7 +504,11 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     }
 
     private static TmdbTvFullDetails seriesDetails(String id) {
-        return new TmdbTvFullDetails(id, "Breaking Bad", "Breaking Bad", null, "/poster.jpg", null,
+        return seriesDetails(id, "/poster.jpg", "Breaking Bad");
+    }
+
+    private static TmdbTvFullDetails seriesDetails(String id, String posterPath, String name) {
+        return new TmdbTvFullDetails(id, name, name, null, posterPath, null,
                 "2000-01-01", List.of(), List.of(new TmdbGenre(18, "Drama")), List.of(), List.of(),
                 List.of(), null, new TmdbAggregateCredits(List.of(), List.of()), null, null, 5, 62,
                 List.of(), null, "Ended");

@@ -38,7 +38,7 @@ class DailyChallengeResponseAssemblerTest {
 
     @ParameterizedTest(name = "{0}")
     @EnumSource(value = DailyGameType.class, names = {
-            "MOVIE_BY_INFO", "ACTOR_BY_MOVIE_FILMOGRAPHY", "ACTOR_BY_SERIES_FILMOGRAPHY"})
+            "MOVIE_BY_INFO", "SERIES_BY_INFO", "ACTOR_BY_MOVIE_FILMOGRAPHY", "ACTOR_BY_SERIES_FILMOGRAPHY"})
     @DisplayName("[images] Should Hide Open Information And Filmography Images Until Terminal")
     void shouldHideOpenInformationAndFilmographyImagesUntilTerminal(DailyGameType gameType) {
         DailyChallenge challenge = challenge(gameType, "/secret.jpg");
@@ -53,7 +53,7 @@ class DailyChallengeResponseAssemblerTest {
                 challenge, result(0, DailyGameResultStatus.COMPLETED), legacyHints, true, true);
 
         assertThat(terminal.answer().imageUrl()).isEqualTo(switch (gameType) {
-            case MOVIE_BY_INFO -> "https://image.tmdb.org/t/p/w500/secret.jpg";
+            case MOVIE_BY_INFO, SERIES_BY_INFO -> "https://image.tmdb.org/t/p/w500/secret.jpg";
             case ACTOR_BY_MOVIE_FILMOGRAPHY, ACTOR_BY_SERIES_FILMOGRAPHY
                     -> "https://image.tmdb.org/t/p/w185/secret.jpg";
             default -> throw new IllegalStateException("Unexpected game type: " + gameType);
