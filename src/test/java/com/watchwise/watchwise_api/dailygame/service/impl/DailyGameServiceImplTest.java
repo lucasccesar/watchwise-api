@@ -755,7 +755,7 @@ class DailyGameServiceImplTest {
                 .findFirst()
                 .orElseThrow();
 
-        assertThat(state.hints()).extracting(item -> item.position()).containsExactly(1, 2);
+        assertThat(state.hints()).isEmpty();
         assertThat(state.answer()).isNull();
     }
 
@@ -782,7 +782,7 @@ class DailyGameServiceImplTest {
                 .orElseThrow();
 
         assertThat(state.status()).isEqualTo(DailyGameViewStatus.COMPLETED);
-        assertThat(state.hints()).extracting(item -> item.position()).containsExactly(1, 2, 3);
+        assertThat(state.hints()).isEmpty();
         assertThat(state.answer()).isNotNull();
     }
 

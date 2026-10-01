@@ -291,7 +291,7 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     @Test
-    @DisplayName("[filmography] Should Return All Movie Works Redacted With Metadata - When No Result Exists")
+    @DisplayName("[toState] Should Return All Movie Works Redacted With Metadata - When No Result Exists")
     void shouldReturnAllMovieWorksRedactedWithMetadataWhenNoResultExists() {
         DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
                 filmographyWork("10", "First Movie", "movie", 2000),
@@ -313,7 +313,7 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     @Test
-    @DisplayName("[filmography] Should Keep Only Eligible Major Series Works Redacted - When No Result Exists")
+    @DisplayName("[toState] Should Keep Only Eligible Major Series Works Redacted - When No Result Exists")
     void shouldKeepOnlyEligibleMajorSeriesWorksRedactedWhenNoResultExists() {
         DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, List.of(
                 seriesFilmographyWork("10", "Major Series", 6, 2),
@@ -334,7 +334,7 @@ class DailyChallengeResponseAssemblerTest {
     }
 
     @Test
-    @DisplayName("[filmography] Should Reveal Only The Shared Movie Work - When An Attempt Contains Shared Keys")
+    @DisplayName("[toState] Should Reveal Only The Shared Movie Work - When An Attempt Contains Shared Keys")
     void shouldRevealOnlyTheSharedMovieWorkWhenAnAttemptContainsSharedKeys() {
         DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
                 filmographyWork("10", "Secret Movie", "movie", 2000),
