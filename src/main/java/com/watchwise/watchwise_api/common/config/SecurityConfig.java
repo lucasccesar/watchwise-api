@@ -108,6 +108,7 @@ public class SecurityConfig {
                         .ignoringRequestMatchers("/auth/register", "/auth/login", "/auth/oauth/**", "/auth/refresh", "/auth/logout"))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/game-test-ui/**").permitAll()
                         .requestMatchers("/auth/logout-all").authenticated()
                         .requestMatchers("/auth/**", "/error").permitAll()
                         .anyRequest().authenticated())

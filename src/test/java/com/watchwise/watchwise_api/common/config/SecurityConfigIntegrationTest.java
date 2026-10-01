@@ -62,6 +62,23 @@ class SecurityConfigIntegrationTest {
     }
 
     @Test
+    @DisplayName("[securityFilterChain] Should Serve Game Test UI Without Authentication")
+    void shouldServeGameTestUiWithoutAuthentication() throws Exception {
+        mockMvc.perform(get("/game-test-ui/index.html"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Jogos Diários")));
+    }
+
+    @Test
+    @DisplayName("[securityFilterChain] Should Keep Game API Protected")
+    void shouldKeepGameApiProtected() throws Exception {
+        mockMvc.perform(get("/games/today"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.path").value("/games/today"));
+    }
+
+    @Test
     @DisplayName("[securityFilterChain] Should Return Unauthorized - When Access Token Cookie Is Malformed")
     void shouldReturnUnauthorizedWhenAccessTokenCookieIsMalformed() throws Exception {
         mockMvc.perform(get(PROTECTED_ROUTE).cookie(new Cookie(CookieUtil.ACCESS_TOKEN_COOKIE, "not-a-valid-jwt")))

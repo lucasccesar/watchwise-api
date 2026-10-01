@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watchwise · Jogos Diários</title>
+  <link rel="stylesheet" href="games.css">
+</head>
+<body>
+<main class="shell">
+  <header class="topbar">
+    <a class="brand" href="index.html">Watchwise · Jogos Diários</a>
+    <div id="session-panel" class="session hidden">
+      <span>Conectado como <strong id="session-username"></strong></span>
+      <button id="logout-button" class="secondary" type="button">Sair</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <p class="eyebrow">Área temporária de testes</p>
+    <h1>Veja os oito jogos diários funcionando.</h1>
+    <p>Use esta tela para abrir cada modalidade, pesquisar candidatos, enviar tentativas e conferir os retornos reais da API.</p>
+  </section>
+
+  <section id="login-panel" class="panel login-panel">
+    <div class="panel-heading"><h2>Entrar para jogar</h2><span class="subtle">cookie JWT + CSRF</span></div>
+    <form id="login-form" class="form-grid">
+      <label>Usuário ou e-mail<input id="login-identifier" autocomplete="username" value="lucas" required></label>
+      <label>Senha<input id="login-password" type="password" autocomplete="current-password" value="Lucas123" required></label>
+      <button id="login-button" type="submit">Entrar</button>
+    </form>
+  </section>
+
+  <div id="page-error" class="error" role="alert"></div>
+
+  <section id="dashboard-panel" class="hidden">
+    <div class="panel">
+      <div class="panel-heading"><h2>Jogos de hoje</h2><span id="dashboard-date" class="subtle">Carregando…</span></div>
+      <div id="games-grid" class="games-grid"><div class="loading">Carregando jogos…</div></div>
+    </div>
+
+    <div class="dashboard-columns">
+      <section class="panel">
+        <div class="panel-heading"><h2>Histórico recente</h2><button id="reload-button" class="secondary" type="button">Atualizar</button></div>
+        <ul id="history-list" class="list"><li class="loading">Carregando…</li></ul>
+      </section>
+      <section class="panel">
+        <div class="panel-heading"><h2>Ranking geral</h2></div>
+        <ul id="ranking-list" class="list"><li class="loading">Carregando…</li></ul>
+      </section>
+    </div>
+  </section>
+</main>
+<script src="games.js"></script>
+<script>GameTestUi.start({ page: "dashboard" });</script>
+</body>
+</html>
