@@ -284,7 +284,7 @@ public class DailyChallengeResponseAssembler {
                 || (majorRoles && !isMajorRole(episodeCount, totalEpisodes)))) return null;
         boolean isRevealed = revealed.contains((series ? "SERIES:" : "MOVIE:") + workId);
         return new DailyGameFilmographyEntryDTO(workId, isRevealed ? title : null, isRevealed, isRevealed,
-                integer(raw.get("year")), strings(raw.get("genres")), string(raw.get("posterUrl")),
+                integer(raw.get("year")), strings(raw.get("genres")), null,
                 episodeCount, string(raw.get("period")), string(raw.get("character")));
     }
 

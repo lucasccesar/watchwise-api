@@ -305,7 +305,7 @@ class DailyChallengeResponseAssemblerTest {
             assertThat(entry.highlighted()).isFalse();
             assertThat(entry.year()).isNotNull();
             assertThat(entry.genres()).containsExactly("18");
-            assertThat(entry.posterUrl()).startsWith("/");
+            assertThat(entry.posterUrl()).isNull();
         });
         assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::workId)
                 .containsExactly("10", "20", "30");
@@ -328,7 +328,7 @@ class DailyChallengeResponseAssemblerTest {
             assertThat(entry.highlighted()).isFalse();
             assertThat(entry.year()).isEqualTo(2000);
             assertThat(entry.genres()).containsExactly("18");
-            assertThat(entry.posterUrl()).isEqualTo("/10.jpg");
+            assertThat(entry.posterUrl()).isNull();
         });
     }
 

@@ -299,7 +299,7 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
 
     private DailyGameFilmographyEntryDTO toEntry(Work work, boolean revealed, boolean highlighted) {
         return new DailyGameFilmographyEntryDTO(work.id(), revealed ? work.title() : null,
-                revealed, highlighted, work.year(), work.genres(), work.posterUrl(), work.episodeCount(),
+                revealed, highlighted, work.year(), work.genres(), null, work.episodeCount(),
                 work.period(), work.character());
     }
 

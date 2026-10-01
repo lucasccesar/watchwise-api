@@ -66,7 +66,7 @@ class DailyGameFilmographyServiceTest {
             assertThat(entry.highlighted()).isFalse();
             assertThat(entry.year()).isEqualTo(1999);
             assertThat(entry.genres()).containsExactly("18");
-            assertThat(entry.posterUrl()).isEqualTo("/100.jpg");
+            assertThat(entry.posterUrl()).isNull();
         });
     }
 

@@ -325,6 +325,40 @@
     });
   }
 
+  function renderEpisodeFeedback(game) {
+    const container = byId("guess-feedback");
+    if (!container) return;
+    const latest = game.currentAttempt && game.currentAttempt.episodeFeedback
+      ? game.currentAttempt.episodeFeedback
+      : (game.attempts || []).slice().reverse().find(function (attempt) {
+          return attempt.episodeFeedback;
+        });
+    const feedback = game.guessFeedback || (latest && latest.episodeFeedback);
+    clear(container);
+    if (!feedback) {
+      setVisible(container, false);
+      return;
+    }
+    container.append(node("div", { className: "panel-heading" }, [
+      node("h2", { text: "Feedback do palpite" }),
+      node("span", { className: "subtle", text: feedback.exactMatch ? "Acerto completo" : "Parte da coordenada conferida" })
+    ]));
+    const values = [
+      ["Série", feedback.seriesCorrect],
+      ["Temporada", feedback.seasonCorrect],
+      ["Episódio", feedback.episodeCorrect]
+    ];
+    const grid = node("div", { className: "feedback-grid" });
+    values.forEach(function ([label, correct]) {
+      grid.append(node("div", { className: "feedback-item " + (correct ? "feedback-good" : "feedback-bad") }, [
+        node("strong", { text: label }),
+        node("span", { text: correct ? "Acertou" : "Errou" })
+      ]));
+    });
+    container.append(grid);
+    setVisible(container, true);
+  }
+
   function renderInfoTable(game) {
     const body = byId("info-table-body");
     if (!body) return;
@@ -369,14 +403,14 @@
         const image = mediaImage(entry.posterUrl, entry.title || "Obra de filmografia");
         const title = entry.revealed ? (entry.title || "Obra revelada") : "Obra oculta";
         const details = [entry.year, entry.genres && entry.genres.length ? entry.genres.join(", ") : null, entry.episodeCount ? entry.episodeCount + " episódios" : null, entry.character].filter(Boolean).join(" · ");
-        grid.append(node("article", { className: "film-card" + (entry.highlighted ? " highlighted" : "" ) }, [
-          image || node("div", { className: "image-placeholder", text: "Sem pôster" }),
-          node("div", { className: "film-card-body" }, [
-            node("strong", { text: title }),
-            node("small", { text: details || "Metadados não disponíveis" }),
-            entry.period ? node("small", { text: entry.period }) : null
-          ])
+        const cardChildren = [];
+        if (image) cardChildren.push(image);
+        cardChildren.push(node("div", { className: "film-card-body" }, [
+          node("strong", { text: title }),
+          node("small", { text: details || "Metadados não disponíveis" }),
+          entry.period ? node("small", { text: entry.period }) : null
         ]));
+        grid.append(node("article", { className: "film-card" + (entry.highlighted ? " highlighted" : "" ) }, cardChildren));
       });
       if (!grid.childElementCount) grid.append(node("div", { className: "empty", text: "A filmografia aparecerá após o primeiro palpite." }));
     }
@@ -399,6 +433,7 @@
     if (date) date.textContent = state.config && state.config.date ? state.config.date : "Desafio de hoje";
     renderStats(game);
     renderImages(game);
+    renderEpisodeFeedback(game);
     renderHints(game);
     renderAttempts(game);
     renderInfoTable(game);
