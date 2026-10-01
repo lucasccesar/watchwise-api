@@ -63,7 +63,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
             return false;
         }
         TmdbMovieFullDetails movie = found(tmdbClient.getMovieFullDetails(challenge.getTargetTmdbId(), LANGUAGE));
-        if (movie == null) {
+        if (!validMovieMetadata(movie)) {
             return false;
         }
         TmdbMovieReleaseDates releaseDates = found(
@@ -82,7 +82,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
             return false;
         }
         TmdbTvFullDetails series = found(tmdbClient.getTvFullDetails(challenge.getTargetTmdbId(), LANGUAGE));
-        if (series == null) {
+        if (!validSeriesMetadata(series)) {
             return false;
         }
         TmdbTvContentRatings ratings = found(
@@ -137,6 +137,26 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
             return found.value();
         }
         return null;
+    }
+
+    private boolean validMovieMetadata(TmdbMovieFullDetails movie) {
+        return movie != null && validId(movie.id()) && nonBlank(movie.title()) && validImage(movie.posterPath());
+    }
+
+    private boolean validSeriesMetadata(TmdbTvFullDetails series) {
+        return series != null && validId(series.id()) && nonBlank(series.name()) && validImage(series.posterPath());
+    }
+
+    private boolean validId(String value) {
+        return value != null && value.matches("[1-9]\\d*");
+    }
+
+    private boolean validImage(String value) {
+        return nonBlank(value);
+    }
+
+    private boolean nonBlank(String value) {
+        return value != null && !value.isBlank();
     }
 
     private String movieCertification(TmdbMovieReleaseDates releaseDates) {

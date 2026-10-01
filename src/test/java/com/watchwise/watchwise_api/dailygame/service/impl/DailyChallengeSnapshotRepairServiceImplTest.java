@@ -35,6 +35,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class DailyChallengeSnapshotRepairServiceImplTest {
@@ -202,6 +203,44 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     }
 
     @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Incomplete Found Movie Metadata - Without Saving")
+    void shouldRejectIncompleteFoundMovieMetadataWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "MOVIE", "tmdbId", "550", "title", "Fight Club"));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", originalSnapshot,
+                "MOVIE:550");
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                .thenReturn(found(incompleteMovieDetails()));
+        lenient().when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+                .thenReturn(found(movieReleaseDates("550")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verify(tmdbClient, never()).getMovieReleaseDates("550", LANGUAGE);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Reject Incomplete Found Series Metadata - Without Saving")
+    void shouldRejectIncompleteFoundSeriesMetadataWithoutSaving() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "SERIES", "tmdbId", "1396", "title", "Breaking Bad"));
+        DailyChallenge challenge = challenge(DailyGameType.SERIES_BY_INFO, "1396", "1396", originalSnapshot,
+                "SERIES:1396");
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
+                .thenReturn(found(incompleteSeriesDetails()));
+        lenient().when(tmdbClient.getTvContentRatings("1396", LANGUAGE))
+                .thenReturn(found(tvContentRatings("1396")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verify(tmdbClient, never()).getTvContentRatings("1396", LANGUAGE);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
+    @Test
     @DisplayName("[repairIfIncomplete] Should Leave Movie Snapshot Untouched - When Certification Is Unavailable")
     void shouldLeaveMovieSnapshotUntouchedWhenCertificationIsUnavailable() {
         Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
@@ -265,6 +304,12 @@ class DailyChallengeSnapshotRepairServiceImplTest {
                 new TmdbCredits(List.of(), List.of()), null, null, null, null, List.of(), null);
     }
 
+    private static TmdbMovieFullDetails incompleteMovieDetails() {
+        return new TmdbMovieFullDetails("invalid-id", " ", " ", null, " ", null,
+                "2000-01-01", null, List.of(new TmdbGenre(18, "Drama")), List.of(),
+                new TmdbCredits(List.of(), List.of()), null, null, null, null, List.of(), null);
+    }
+
     private static TmdbMovieReleaseDates movieReleaseDates(String id) {
         return new TmdbMovieReleaseDates(id, List.of(new TmdbRegionReleaseDates("BR", List.of(
                 new TmdbMovieReleaseDate("12", "pt", "2000-01-01", null, 3)))));
@@ -272,6 +317,13 @@ class DailyChallengeSnapshotRepairServiceImplTest {
 
     private static TmdbTvFullDetails seriesDetails(String id) {
         return new TmdbTvFullDetails(id, "Breaking Bad", "Breaking Bad", null, "/poster.jpg", null,
+                "2000-01-01", List.of(), List.of(new TmdbGenre(18, "Drama")), List.of(), List.of(),
+                List.of(), null, new TmdbAggregateCredits(List.of(), List.of()), null, null, 5, 62,
+                List.of(), null, "Ended");
+    }
+
+    private static TmdbTvFullDetails incompleteSeriesDetails() {
+        return new TmdbTvFullDetails("invalid-id", " ", " ", null, " ", null,
                 "2000-01-01", List.of(), List.of(new TmdbGenre(18, "Drama")), List.of(), List.of(),
                 List.of(), null, new TmdbAggregateCredits(List.of(), List.of()), null, null, 5, 62,
                 List.of(), null, "Ended");
