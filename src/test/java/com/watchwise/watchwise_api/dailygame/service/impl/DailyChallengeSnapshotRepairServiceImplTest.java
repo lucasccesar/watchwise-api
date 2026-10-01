@@ -571,6 +571,24 @@ class DailyChallengeSnapshotRepairServiceImplTest {
         verify(challengeRepository, never()).saveAndFlush(challenge);
     }
 
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Leave Filmography Snapshot Untouched - When A Returned Entry Is Invalid")
+    void shouldLeaveFilmographySnapshotUntouchedWhenAReturnedEntryIsInvalid() {
+        Map<String, Object> originalSnapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "287", "title", "Brad Pitt"));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "287", "550",
+                originalSnapshot, "PERSON:287");
+        List<Map<String, Object>> invalidEntries = List.of(Map.of(
+                "workId", "680", "title", "Pulp Fiction", "mediaType", "tv"));
+        when(filmographyService.snapshot("287", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
+                .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(invalidEntries));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isFalse();
+
+        assertThat(challenge.getAnswerSnapshot()).isSameAs(originalSnapshot);
+        verify(challengeRepository, never()).saveAndFlush(challenge);
+    }
+
     private DailyChallenge actorChallenge(
             DailyGameType gameType, String personTmdbId, String sourceTmdbId, String answerKey) {
         return challenge(gameType, personTmdbId, sourceTmdbId,

@@ -79,10 +79,29 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
-    @DisplayName("[hasComparableInfo] Should Ignore Arbitrary Map Values - When Checking Comparable Fields")
-    void shouldIgnoreArbitraryMapValuesWhenCheckingComparableFields() {
+    @DisplayName("[hasComparableInfo] Should Accept Supported Values And Require A Numeric Year")
+    void shouldAcceptSupportedValuesAndRequireANumericYear() {
+        assertThat(DailyChallengeInfoSupport.hasComparableInfo(
+                Map.of("year", 2000, "certification", "PG-13"),
+                DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isTrue();
+        assertThat(DailyChallengeInfoSupport.hasComparableInfo(
+                Map.of("year", 2000, "genres", List.of("Drama")),
+                DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isTrue();
+        assertThat(DailyChallengeInfoSupport.hasComparableInfo(
+                Map.of("year", 2000, "revenue", 1),
+                DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isTrue();
+
         assertThat(DailyChallengeInfoSupport.hasComparableInfo(
                 Map.of("year", 2000, "genres", Map.of("unexpected", "shape")),
+                DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isFalse();
+        assertThat(DailyChallengeInfoSupport.hasComparableInfo(
+                Map.of("year", 2000, "genres", List.of()),
+                DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isFalse();
+        assertThat(DailyChallengeInfoSupport.hasComparableInfo(
+                Map.of("year", 2000, "genres", new Object()),
+                DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isFalse();
+        assertThat(DailyChallengeInfoSupport.hasComparableInfo(
+                Map.of("year", "2000", "genres", List.of("Drama")),
                 DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)).isFalse();
     }
 
