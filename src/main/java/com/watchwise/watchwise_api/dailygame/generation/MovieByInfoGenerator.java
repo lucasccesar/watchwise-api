@@ -1,15 +1,15 @@
 package com.watchwise.watchwise_api.dailygame.generation;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -17,6 +17,8 @@ import java.util.Set;
 public class MovieByInfoGenerator implements DailyChallengeGenerator {
 
     private static final String RATING_REGION = "BR";
+    private static final List<String> ADDITIONAL_COMPARISON_FIELDS = List.of(
+            "platforms", "genres", "certification", "director", "cast", "productionCompanies", "revenue");
 
     private final TmdbClient tmdbClient;
     private final DailyChallengeSnapshotAssembler snapshotAssembler;
@@ -52,30 +54,32 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
 
     private Optional<DailyChallengeCandidate> buildCandidate(TmdbMovieFullDetails movie) {
         String imagePath = TmdbImageUrlBuilder.posterUrl(movie.posterPath());
-        List<DailyChallengeCandidate.HintSnapshot> hints = new ArrayList<>();
-        addHint(hints, "PLATFORM", DailyChallengeInfoSupport.providers(movie.watchProviders(), RATING_REGION));
-        addHint(hints, "GENRES", movie.genres() == null ? null : DailyChallengeGenerationSupport.joinNonBlank(
-                movie.genres().stream().map(genre -> genre == null ? null : genre.name()).toList()));
-        addHint(hints, "YEAR", DailyChallengeGenerationSupport.date(movie.releaseDate())
-                .map(date -> String.valueOf(date.getYear())).orElse(null));
         String certification = DailyChallengeInfoSupport.movieCertification(
                         DailyChallengeGenerationSupport.value(tmdbClient.getMovieReleaseDates(movie.id(),
                                 TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)).orElse(null), RATING_REGION)
                 .orElse(null);
-        addHint(hints, "CERTIFICATION", certification);
-        addHint(hints, "DIRECTOR", director(movie));
-        addHint(hints, "CAST", movie.credits() == null || movie.credits().cast() == null ? null
-                : DailyChallengeGenerationSupport.joinNonBlank(movie.credits().cast().stream()
-                .map(cast -> cast == null ? null : cast.name()).toList()));
-        addHint(hints, "PRODUCTION_COMPANIES", movie.productionCompanies() == null ? null
-                : DailyChallengeGenerationSupport.joinNonBlank(movie.productionCompanies().stream()
-                .map(company -> company == null ? null : company.name()).toList()));
-        addHint(hints, "REVENUE", movie.revenue() == null || movie.revenue() <= 0 ? null
-                : String.valueOf(movie.revenue()));
-        if (hints.isEmpty()) {
-            return Optional.empty();
+        DailyChallengeCandidate candidate = snapshotAssembler.movieInfo(movie, imagePath, List.of(), certification);
+        return hasComparableInfo(candidate.answerSnapshot()) ? Optional.of(candidate) : Optional.empty();
+    }
+
+    private boolean hasComparableInfo(Map<String, Object> answerSnapshot) {
+        return answerSnapshot.get("year") instanceof Number
+                && ADDITIONAL_COMPARISON_FIELDS.stream()
+                .map(answerSnapshot::get)
+                .anyMatch(this::isNonEmpty);
+    }
+
+    private boolean isNonEmpty(Object value) {
+        if (value == null) {
+            return false;
         }
-        return Optional.of(snapshotAssembler.movieInfo(movie, imagePath, hints, certification));
+        if (value instanceof String string) {
+            return !string.isBlank();
+        }
+        if (value instanceof Collection<?> collection) {
+            return !collection.isEmpty();
+        }
+        return true;
     }
 
     private boolean hasRequiredMetadata(TmdbMovieFullDetails movie) {
@@ -84,21 +88,4 @@ public class MovieByInfoGenerator implements DailyChallengeGenerator {
                 && DailyChallengeGenerationSupport.validImage(movie.posterPath());
     }
 
-    private String director(TmdbMovieFullDetails movie) {
-        if (movie.credits() == null || movie.credits().crew() == null) {
-            return null;
-        }
-        return movie.credits().crew().stream()
-                .filter(crew -> crew != null && crew.job() != null && "Director".equalsIgnoreCase(crew.job()))
-                .map(TmdbCrewMember::name)
-                .filter(name -> name != null && !name.isBlank())
-                .findFirst()
-                .orElse(null);
-    }
-
-    private void addHint(List<DailyChallengeCandidate.HintSnapshot> hints, String type, String value) {
-        if (value != null && !value.isBlank()) {
-            hints.add(DailyChallengeSnapshotAssembler.hint(type, value));
-        }
-    }
 }

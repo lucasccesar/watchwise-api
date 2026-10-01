@@ -304,9 +304,7 @@ class DailyChallengeGeneratorTest {
                 .generate(CHALLENGE_DATE)
                 .orElseThrow();
 
-        assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
-                .containsExactly("PLATFORM", "GENRES", "YEAR", "DIRECTOR", "CAST", "PRODUCTION_COMPANIES", "REVENUE");
-        assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("CERTIFICATION"));
+        assertThat(candidate.hints()).isEmpty();
         assertThat(candidate.answerSnapshot())
                 .containsEntry("platforms", List.of("Netflix"))
                 .containsEntry("genres", List.of("Drama", "Thriller"))
@@ -333,11 +331,7 @@ class DailyChallengeGeneratorTest {
                 .generate(CHALLENGE_DATE)
                 .orElseThrow();
 
-        assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
-                .contains("CERTIFICATION");
-        assertThat(candidate.hints()).filteredOn(hint -> hint.hintType().equals("CERTIFICATION"))
-                .extracting(DailyChallengeCandidate.HintSnapshot::hintValue)
-                .containsExactly("18");
+        assertThat(candidate.hints()).isEmpty();
         assertThat(candidate.answerSnapshot()).containsEntry("certification", "18");
     }
 
@@ -355,8 +349,7 @@ class DailyChallengeGeneratorTest {
                 .generate(CHALLENGE_DATE)
                 .orElseThrow();
 
-        assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
-                .containsExactly("GENRES", "YEAR");
+        assertThat(candidate.hints()).isEmpty();
     }
 
     @Test
@@ -374,10 +367,7 @@ class DailyChallengeGeneratorTest {
                 .generate(CHALLENGE_DATE)
                 .orElseThrow();
 
-        assertThat(candidate.hints()).extracting(DailyChallengeCandidate.HintSnapshot::hintType)
-                .containsExactly("PLATFORM", "GENRES", "YEAR", "CREATOR", "CAST", "NETWORKS_PRODUCTION_COMPANIES", "COUNTS");
-        assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("REVENUE"));
-        assertThat(candidate.hints()).noneMatch(hint -> hint.hintType().equals("CERTIFICATION"));
+        assertThat(candidate.hints()).isEmpty();
         assertThat(candidate.answerSnapshot())
                 .containsEntry("platforms", List.of("Netflix"))
                 .containsEntry("genres", List.of("Drama"))
@@ -388,6 +378,35 @@ class DailyChallengeGeneratorTest {
                 .containsEntry("seasons", 5)
                 .doesNotContainKey("certification")
                 .doesNotContainKey("revenue");
+    }
+
+    @Test
+    @DisplayName("[generate] Should Reject The Movie - When Only Title Poster And Year Are Available")
+    void shouldRejectTheMovieWhenOnlyTitlePosterAndYearAreAvailable() {
+        when(tmdbClient.getPopularMovies(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE))
+                .thenReturn(found(movieDetails("550", "Fight Club", new TmdbCredits(List.of(), List.of()))));
+        when(tmdbClient.getMovieReleaseDates("550", LANGUAGE))
+                .thenReturn(found(new TmdbMovieReleaseDates("550", List.of())));
+
+        assertThat(new MovieByInfoGenerator(tmdbClient, snapshotAssembler).generate(CHALLENGE_DATE)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[generate] Should Reject The Series - When Only Title Poster And Year Are Available")
+    void shouldRejectTheSeriesWhenOnlyTitlePosterAndYearAreAvailable() {
+        when(tmdbClient.getPopularSeries(intThat(page -> page >= 1 && page <= 50), eq(LANGUAGE)))
+                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
+                .thenReturn(found(new TmdbTvFullDetails(
+                        "1396", "Breaking Bad", "Breaking Bad", null, "/breaking-bad.jpg", null, "2008-01-20",
+                        List.of(), List.of(), List.of(), List.of(), List.of(), null, new TmdbAggregateCredits(List.of(), List.of()),
+                        null, null, null, null, List.of(), null, "Ended")));
+        when(tmdbClient.getTvContentRatings("1396", LANGUAGE))
+                .thenReturn(found(new TmdbTvContentRatings("1396", List.of())));
+
+        assertThat(new SeriesByInfoGenerator(tmdbClient, snapshotAssembler).generate(CHALLENGE_DATE)).isEmpty();
     }
 
     @Test
