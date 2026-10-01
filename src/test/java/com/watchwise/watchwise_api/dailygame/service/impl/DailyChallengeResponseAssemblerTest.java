@@ -290,10 +290,116 @@ class DailyChallengeResponseAssemblerTest {
                 .containsExactly("10:Major", "20:Guest");
     }
 
+    @Test
+    @DisplayName("[filmography] Should Return All Movie Works Redacted With Metadata - When No Result Exists")
+    void shouldReturnAllMovieWorksRedactedWithMetadataWhenNoResultExists() {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "First Movie", "movie", 2000),
+                filmographyWork("20", "Second Movie", "movie", 2001),
+                filmographyWork("30", "Third Movie", "movie", 2002)));
+
+        DailyGameStateDTO state = assembler.toState(challenge, null, List.of(), true, true);
+
+        assertThat(state.filmography().entries()).hasSize(3).allSatisfy(entry -> {
+            assertThat(entry.title()).isNull();
+            assertThat(entry.revealed()).isFalse();
+            assertThat(entry.highlighted()).isFalse();
+            assertThat(entry.year()).isNotNull();
+            assertThat(entry.genres()).containsExactly("18");
+            assertThat(entry.posterUrl()).startsWith("/");
+        });
+        assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::workId)
+                .containsExactly("10", "20", "30");
+    }
+
+    @Test
+    @DisplayName("[filmography] Should Keep Only Eligible Major Series Works Redacted - When No Result Exists")
+    void shouldKeepOnlyEligibleMajorSeriesWorksRedactedWhenNoResultExists() {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, List.of(
+                seriesFilmographyWork("10", "Major Series", 6, 2),
+                seriesFilmographyWork("20", "Guest Series", 7, 2)));
+
+        DailyGameStateDTO state = assembler.toState(challenge, null, List.of(), true, true);
+
+        assertThat(state.filmography().majorRoles()).isTrue();
+        assertThat(state.filmography().entries()).singleElement().satisfies(entry -> {
+            assertThat(entry.workId()).isEqualTo("10");
+            assertThat(entry.title()).isNull();
+            assertThat(entry.revealed()).isFalse();
+            assertThat(entry.highlighted()).isFalse();
+            assertThat(entry.year()).isEqualTo(2000);
+            assertThat(entry.genres()).containsExactly("18");
+            assertThat(entry.posterUrl()).isEqualTo("/10.jpg");
+        });
+    }
+
+    @Test
+    @DisplayName("[filmography] Should Reveal Only The Shared Movie Work - When An Attempt Contains Shared Keys")
+    void shouldRevealOnlyTheSharedMovieWorkWhenAnAttemptContainsSharedKeys() {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "Secret Movie", "movie", 2000),
+                filmographyWork("20", "Shared Movie", "movie", 2001),
+                filmographyWork("30", "Other Movie", "movie", 2002)));
+        UserDailyGameResult result = result();
+        DailyGameFilmographyFeedbackDTO feedback = new DailyGameFilmographyFeedbackDTO(
+                new DailyGameActorGuessDTO("2", "Guessed Actor"),
+                List.of(), List.of("MOVIE:20"), List.of());
+        result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null,
+                new DailyGameAttemptDTO(1, null, null, null, feedback)));
+
+        DailyGameStateDTO state = assembler.toState(challenge, result, List.of(), true, true);
+
+        assertThat(state.filmography().entries())
+                .extracting(entry -> entry.workId() + ":" + entry.title() + ":"
+                        + entry.revealed() + ":" + entry.highlighted())
+                .containsExactly(
+                        "10:null:false:false",
+                        "20:Shared Movie:true:true",
+                        "30:null:false:false");
+    }
+
     private DailyGameInfoFeedbackDTO infoFeedback() {
         DailyGameComparisonCellDTO match = new DailyGameComparisonCellDTO(
                 DailyGameComparisonStatus.MATCH, null, "value", List.of(), null);
         return new DailyGameInfoFeedbackDTO(match, match, match, match, match, match, match, match);
+    }
+
+    private Map<String, Object> filmographyWork(String workId, String title, String mediaType, int year) {
+        return Map.of(
+                "workId", workId,
+                "title", title,
+                "mediaType", mediaType,
+                "year", year,
+                "genres", List.of("18"),
+                "posterUrl", "/" + workId + ".jpg",
+                "period", year + "-01-01",
+                "character", "Character");
+    }
+
+    private Map<String, Object> seriesFilmographyWork(
+            String workId, String title, int totalEpisodes, int episodeCount) {
+        Map<String, Object> work = new java.util.LinkedHashMap<>(
+                filmographyWork(workId, title, "tv", 2000));
+        work.put("episodeCount", episodeCount);
+        work.put("totalEpisodes", totalEpisodes);
+        return work;
+    }
+
+    private DailyChallenge filmographyChallenge(
+            DailyGameType gameType, List<Map<String, Object>> filmography) {
+        return DailyChallenge.builder()
+                .id(UUID.randomUUID())
+                .challengeDate(LocalDate.of(2026, 9, 27))
+                .gameType(gameType)
+                .targetKind(DailyGameTargetKind.PERSON)
+                .targetTmdbId("1")
+                .answerKey("PERSON:1")
+                .imagePath("/actor.jpg")
+                .answerSnapshot(Map.of("title", "Secret Actor", "filmography", filmography))
+                .displaySnapshot(Map.of("imageUrl", "/actor.jpg"))
+                .createdAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+                .updatedAt(LocalDateTime.of(2026, 9, 27, 0, 0))
+                .build();
     }
 
     @Test

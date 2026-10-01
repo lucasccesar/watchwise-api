@@ -64,6 +64,9 @@ class DailyGameFilmographyServiceTest {
             assertThat(entry.title()).isNull();
             assertThat(entry.revealed()).isFalse();
             assertThat(entry.highlighted()).isFalse();
+            assertThat(entry.year()).isEqualTo(1999);
+            assertThat(entry.genres()).containsExactly("18");
+            assertThat(entry.posterUrl()).isEqualTo("/100.jpg");
         });
     }
 
@@ -81,8 +84,9 @@ class DailyGameFilmographyServiceTest {
 
         assertThat(feedback.sharedMajorRoleWorkKeys()).containsExactly("MOVIE:200");
         assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("MOVIE:200");
-        assertThat(feedback.entries()).extracting(entry -> entry.workId() + ":" + entry.title())
-                .containsExactly("100:null", "200:Shared Movie");
+        assertThat(feedback.entries()).extracting(entry -> entry.workId() + ":" + entry.title() + ":"
+                        + entry.revealed() + ":" + entry.highlighted())
+                .containsExactly("100:null:false:false", "200:Shared Movie:true:true");
         verify(tmdbClient).getPersonAggregate("2", LANGUAGE);
     }
 
