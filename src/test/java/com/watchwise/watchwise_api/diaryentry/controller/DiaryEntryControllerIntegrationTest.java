@@ -207,6 +207,10 @@ class DiaryEntryControllerIntegrationTest {
         return get("/users/" + targetUserId + "/diary").cookie(viewer.accessToken());
     }
 
+    private MockHttpServletRequestBuilder getDiarySeriesOptionsRequest(RegisteredUser viewer, UUID targetUserId) {
+        return get("/users/" + targetUserId + "/diary/series").cookie(viewer.accessToken());
+    }
+
     private MockHttpServletRequestBuilder getSeriesInProgressRequest(RegisteredUser viewer, UUID targetUserId) {
         return get("/users/" + targetUserId + "/series-in-progress").cookie(viewer.accessToken());
     }
@@ -298,11 +302,16 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     private DiaryEntry persistEntry(User user, Content content) {
+        return persistEntry(user, content, null, 1);
+    }
+
+    private DiaryEntry persistEntry(User user, Content content, Integer score, int watchNumber) {
         LocalDateTime now = LocalDateTime.now();
         return diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
                 .content(content)
-                .watchNumber(1)
+                .score(score)
+                .watchNumber(watchNumber)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -331,6 +340,31 @@ class DiaryEntryControllerIntegrationTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
+    }
+
+    private Content persistSeries(String seriesTmdbId) {
+        return persistContent(seriesTmdbId, ContentType.SERIES);
+    }
+
+    private void persistDiarySeriesFixtures(User user) {
+        Content series1399 = persistSeries("1399");
+        Content season1399 = persistSeason("1399", 1, null);
+        Content episode1399 = persistEpisode("1399", 1, 1, null, null);
+        Content episode1396 = persistEpisode("1396", 1, 1, null, null);
+        Content movie = persistContent("550", ContentType.MOVIE);
+
+        persistEntry(user, series1399, 10, 1);
+        persistEntry(user, season1399, 9, 1);
+        persistEntry(user, episode1399, null, 1);
+        persistEntry(user, episode1399, 9, 2);
+        persistEntry(user, episode1396, 10, 1);
+        persistEntry(user, movie, 10, 1);
+    }
+
+    private TmdbLookupResult<TmdbTvFullDetails> foundTvWithTitle(String seriesTmdbId, String title) {
+        return new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                seriesTmdbId, title, null, null, null, null, null, List.of(), List.of(), List.of(), List.of(), List.of(),
+                null, null, null, null, null, null, List.of(), null, null));
     }
 
     private Content persistEpisodeWithRuntime(String seriesTmdbId, int seasonNumber, int episodeNumber,
@@ -570,6 +604,127 @@ class DiaryEntryControllerIntegrationTest {
 
         mockMvc.perform(getDiaryRequest(target, target.id()))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Filter By Series And Exact Score - When Both Filters Are Provided")
+    void shouldFilterBySeriesAndExactScoreWhenBothFiltersAreProvided() throws Exception {
+        RegisteredUser user = registerUser("getdiaryseriesandscore");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistDiarySeriesFixtures(entity);
+
+        mockMvc.perform(getDiaryRequest(user, user.id())
+                        .param("seriesTmdbId", "1399")
+                        .param("score", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].content.seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.content[0].score").value(10));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Map Titles And Count Every Diary Entry Level - When Entries Exist")
+    void shouldMapTitlesAndCountEveryDiaryEntryLevelWhenEntriesExist() throws Exception {
+        RegisteredUser user = registerUser("getdiaryseriesoptions");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        entity.setPreferredLanguage("pt-BR");
+        userRepository.save(entity);
+        persistDiarySeriesFixtures(entity);
+        when(tmdbClient.getTvFullDetails("1399", "pt-BR"))
+                .thenReturn(foundTvWithTitle("1399", "The Office"));
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR"))
+                .thenReturn(foundTvWithTitle("1396", "Freaks and Geeks"));
+
+        mockMvc.perform(getDiarySeriesOptionsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$[0].title").value("The Office"))
+                .andExpect(jsonPath("$[0].entriesCount").value(4))
+                .andExpect(jsonPath("$[1].seriesTmdbId").value("1396"))
+                .andExpect(jsonPath("$[1].title").value("Freaks and Geeks"))
+                .andExpect(jsonPath("$[1].entriesCount").value(1));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Return A Null Title - When TMDB Reports NotFound")
+    void shouldReturnNullTitleWhenTmdbReportsNotFoundForDiarySeriesOption() throws Exception {
+        RegisteredUser user = registerUser("getdiaryseriesnotfound");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistEntry(entity, persistSeries("1399"), 10, 1);
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
+
+        mockMvc.perform(getDiarySeriesOptionsRequest(user, user.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$[0].title").value(nullValue()))
+                .andExpect(jsonPath("$[0].entriesCount").value(1));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Return BadGateway - When TMDB Is Unavailable")
+    void shouldReturnBadGatewayWhenTmdbIsUnavailableForDiarySeriesOptions() throws Exception {
+        RegisteredUser user = registerUser("getdiaryseriesunavailable");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistEntry(entity, persistSeries("1399"), 10, 1);
+        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(getDiarySeriesOptionsRequest(user, user.id()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Return BadRequest - When Score Is Outside The Allowed Range")
+    void shouldReturnBadRequestWhenScoreIsOutsideTheAllowedRange() throws Exception {
+        RegisteredUser user = registerUser("getdiaryinvalidscore");
+
+        mockMvc.perform(getDiaryRequest(user, user.id()).param("score", "11"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("score must be between 1 and 10"));
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Return BadRequest - When Series Id Is Blank")
+    void shouldReturnBadRequestWhenSeriesIdIsBlank() throws Exception {
+        RegisteredUser user = registerUser("getdiaryblankseriesid");
+
+        mockMvc.perform(getDiaryRequest(user, user.id()).param("seriesTmdbId", "   "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("seriesTmdbId cannot be blank"));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Return NotFound - When Target User Does Not Exist")
+    void shouldReturnNotFoundWhenTargetUserDoesNotExistForDiarySeriesOptions() throws Exception {
+        RegisteredUser viewer = registerUser("getdiaryseriesmissinguser");
+
+        mockMvc.perform(getDiarySeriesOptionsRequest(viewer, UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Return Forbidden - When Target Profile Is Private")
+    void shouldReturnForbiddenWhenTargetProfileIsPrivateForDiarySeriesOptions() throws Exception {
+        RegisteredUser viewer = registerUser("getdiaryseriesprivateviewer");
+        RegisteredUser target = registerUser("getdiaryseriesprivatetarget", false);
+
+        mockMvc.perform(getDiarySeriesOptionsRequest(viewer, target.id()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
+
+    @Test
+    @DisplayName("[getDiarySeriesOptions] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForDiarySeriesOptions() throws Exception {
+        RegisteredUser user = registerUser("getdiaryseriesnoauth");
+
+        mockMvc.perform(get("/users/" + user.id() + "/diary/series"))
+                .andExpect(status().isUnauthorized());
     }
 
     // ---------- GET /users/{userId}/series-in-progress ----------
