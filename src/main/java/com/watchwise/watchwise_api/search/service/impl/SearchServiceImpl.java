@@ -39,6 +39,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SearchServiceImpl implements SearchService {
 
+    private static final int LIST_SEARCH_PAGE_SIZE = 10;
+
     private final UserRepository userRepository;
     private final UserListRepository userListRepository;
     private final UserListItemService userListItemService;
@@ -55,6 +57,10 @@ public class SearchServiceImpl implements SearchService {
                 pageNumber,
                 PageRequestFactory.DEFAULT_PAGE_SIZE,
                 PageRequestFactory.DEFAULT_PAGE_SIZE);
+        PageRequest listPageRequest = pageRequestFactory.build(
+                pageNumber,
+                LIST_SEARCH_PAGE_SIZE,
+                LIST_SEARCH_PAGE_SIZE);
         int page = pageRequest.getPageNumber() + 1;
         int resultLimit = pageRequest.getPageSize();
 
@@ -63,7 +69,7 @@ public class SearchServiceImpl implements SearchService {
             return new SearchResultDTO(
                     externalResults.contents(),
                     externalResults.people(),
-                    searchLists(viewerId, trimmedQuery, pageRequest),
+                    searchLists(viewerId, trimmedQuery, listPageRequest),
                     searchUsers(trimmedQuery, pageRequest),
                     List.of());
         }
@@ -73,7 +79,7 @@ public class SearchServiceImpl implements SearchService {
             case SERIES -> searchSeries(trimmedQuery, viewer.getPreferredLanguage(), page, resultLimit);
             case PERSON -> searchPeople(trimmedQuery, viewer.getPreferredLanguage(), page, resultLimit);
             case LIST -> new SearchResultDTO(
-                    List.of(), List.of(), searchLists(viewerId, trimmedQuery, pageRequest), List.of(), List.of());
+                    List.of(), List.of(), searchLists(viewerId, trimmedQuery, listPageRequest), List.of(), List.of());
             case USER -> new SearchResultDTO(
                     List.of(), List.of(), List.of(), searchUsers(trimmedQuery, pageRequest), List.of());
             case PICKS_TEMPLATE -> new SearchResultDTO(
