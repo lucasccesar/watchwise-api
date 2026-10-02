@@ -939,6 +939,55 @@ class UserListServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getUserListById] Should Return An Empty Page With Unchanged Metadata - When Requested Page Is Beyond The End")
+    void shouldReturnAnEmptyPageWithUnchangedMetadataWhenRequestedPageIsBeyondTheEnd() {
+        UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
+        List<UserListItemResponseDTO> allItems = IntStream.rangeClosed(1, 31)
+                .mapToObj(position -> buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), position))
+                .toList();
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(allItems, 0.0));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+
+        userListService.getUserListById(lucasId, list.getId(), null, null, null, null, 3, 99);
+
+        ArgumentCaptor<List<UserListItemResponseDTO>> itemsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Integer> itemsPageCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> itemsSizeCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Long> itemsTotalElementsCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Integer> itemsTotalPagesCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Boolean> itemsHasNextCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(userListMapper).userListToDetailedResponseDto(
+                eq(list), itemsCaptor.capture(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(),
+                eq(UserListItemScope.MOVIE_OR_SERIES), itemsPageCaptor.capture(), itemsSizeCaptor.capture(),
+                itemsTotalElementsCaptor.capture(), itemsTotalPagesCaptor.capture(), itemsHasNextCaptor.capture());
+
+        assertThat(itemsCaptor.getValue()).isEmpty();
+        assertThat(itemsPageCaptor.getValue()).isEqualTo(3);
+        assertThat(itemsSizeCaptor.getValue()).isEqualTo(30);
+        assertThat(itemsTotalElementsCaptor.getValue()).isEqualTo(31L);
+        assertThat(itemsTotalPagesCaptor.getValue()).isEqualTo(2);
+        assertThat(itemsHasNextCaptor.getValue()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Reject A Zero Page Number")
+    void shouldRejectAZeroPageNumber() {
+        UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+
+        assertThatThrownBy(() -> userListService.getUserListById(
+                lucasId, list.getId(), null, null, null, null, 0, null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Page number must be greater than 0");
+
+        verify(userListMapper, never()).userListToDetailedResponseDto(
+                any(), anyList(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(),
+                anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean());
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Apply Type And Genre Before Pagination")
     void shouldApplyTypeAndGenreBeforePagination() {
         UserList list = buildList(lucas, "Mixed", null, UserListVisibility.PUBLIC);

@@ -246,6 +246,10 @@ public class UserListServiceImpl implements UserListService {
             throw new ForbiddenException("The list owner's episode ratings are private");
         }
 
+        if (pageNumber != null && pageNumber <= 0) {
+            throw new BadRequestException("Page number must be greater than 0");
+        }
+
         UserListItemsWithState itemsWithState = userListItemService.getItemsWithState(viewerId, listId);
         List<UserListItemResponseDTO> allItems = itemsWithState.items();
         List<UserListItemResponseDTO> items = filterAndSortItems(

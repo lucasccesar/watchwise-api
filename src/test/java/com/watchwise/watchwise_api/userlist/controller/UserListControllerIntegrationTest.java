@@ -339,6 +339,26 @@ class UserListControllerIntegrationTest {
                 .build());
     }
 
+    private UserListItem persistEpisodeItem(
+            UserList list, String seriesTmdbId, int seasonNumber, int episodeNumber, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        Content content = contentRepository.save(Content.builder()
+                .type(ContentType.EPISODE)
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+        return userListItemRepository.save(UserListItem.builder()
+                .userList(list)
+                .content(content)
+                .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
     private void logEpisode(RegisteredUser actor, String seriesTmdbId, int seasonNumber, int episodeNumber, int score) throws Exception {
         mockMvc.perform(post("/diary")
                         .cookie(actor.accessToken(), actor.csrfToken())
@@ -981,6 +1001,98 @@ class UserListControllerIntegrationTest {
 
         mockMvc.perform(getUserListByIdRequest(user, list.getId(), "unknownField", null))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Cap Episode Items At 24 And Preserve Metadata - When Size Exceeds The Episode Limit")
+    void shouldCapEpisodeItemsAt24AndPreserveMetadataWhenSizeExceedsTheEpisodeLimit() throws Exception {
+        RegisteredUser user = registerUser("getbyidepisodepagecap");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Episode list", UserListVisibility.PUBLIC);
+        for (int episodeNumber = 1; episodeNumber <= 25; episodeNumber++) {
+            persistEpisodeItem(list, "series-episode-cap", 1, episodeNumber, episodeNumber);
+        }
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()).param("page", "1").param("size", "99"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(24))
+                .andExpect(jsonPath("$.itemsSize").value(24))
+                .andExpect(jsonPath("$.itemsTotalElements").value(25))
+                .andExpect(jsonPath("$.itemsTotalPages").value(2))
+                .andExpect(jsonPath("$.itemsHasNext").value(true));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Cap Movie Items At 30 And Preserve Metadata - When Size Exceeds The Movie Limit")
+    void shouldCapMovieItemsAt30AndPreserveMetadataWhenSizeExceedsTheMovieLimit() throws Exception {
+        RegisteredUser user = registerUser("getbyidmoviepagecap");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Movie list", UserListVisibility.PUBLIC);
+        for (int movieNumber = 1; movieNumber <= 31; movieNumber++) {
+            persistContentItem(list, "movie-page-cap-" + movieNumber, movieNumber);
+        }
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()).param("page", "1").param("size", "99"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(30))
+                .andExpect(jsonPath("$.itemsSize").value(30))
+                .andExpect(jsonPath("$.itemsTotalElements").value(31))
+                .andExpect(jsonPath("$.itemsTotalPages").value(2))
+                .andExpect(jsonPath("$.itemsHasNext").value(true));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return An Empty Page With Unchanged Metadata - When Page Is Beyond The End")
+    void shouldReturnAnEmptyPageWithUnchangedMetadataWhenPageIsBeyondTheEnd() throws Exception {
+        RegisteredUser user = registerUser("getbyidpagebeyondend");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Movie list", UserListVisibility.PUBLIC);
+        for (int movieNumber = 1; movieNumber <= 31; movieNumber++) {
+            persistContentItem(list, "movie-page-end-" + movieNumber, movieNumber);
+        }
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()).param("page", "3").param("size", "99"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.itemsPage").value(3))
+                .andExpect(jsonPath("$.itemsSize").value(30))
+                .andExpect(jsonPath("$.itemsTotalElements").value(31))
+                .andExpect(jsonPath("$.itemsTotalPages").value(2))
+                .andExpect(jsonPath("$.itemsHasNext").value(false));
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return An ApiError - When Item Page Size Is Zero")
+    void shouldReturnAnApiErrorWhenItemPageSizeIsZero() throws Exception {
+        RegisteredUser user = registerUser("getbyidsizezero");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Movie list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()).param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Page size must be greater than 0"))
+                .andExpect(jsonPath("$.path").value("/lists/" + list.getId()))
+                .andExpect(jsonPath("$.detail").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Return An ApiError - When Item Page Is Zero")
+    void shouldReturnAnApiErrorWhenItemPageIsZero() throws Exception {
+        RegisteredUser user = registerUser("getbyidpagezero");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Movie list", UserListVisibility.PUBLIC);
+
+        mockMvc.perform(getUserListByIdRequest(user, list.getId()).param("page", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Page number must be greater than 0"))
+                .andExpect(jsonPath("$.path").value("/lists/" + list.getId()))
+                .andExpect(jsonPath("$.detail").doesNotExist());
     }
 
     @Test
