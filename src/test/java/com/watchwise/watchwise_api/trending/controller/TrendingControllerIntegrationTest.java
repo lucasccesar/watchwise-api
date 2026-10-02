@@ -133,13 +133,13 @@ class TrendingControllerIntegrationTest {
                 .andExpect(jsonPath("$.movies[0].type").value("MOVIE"))
                 .andExpect(jsonPath("$.movies[0].title").value("The Matrix"))
                 .andExpect(jsonPath("$.movies[0].posterUrl").value("https://image.tmdb.org/t/p/w500/matrix.jpg"))
-                .andExpect(jsonPath("$.movies[0].releaseYear").value(1999))
+                .andExpect(jsonPath("$.movies[0].year").value(1999))
                 .andExpect(jsonPath("$.series").isArray())
                 .andExpect(jsonPath("$.series[0].tmdbId").value("1396"))
                 .andExpect(jsonPath("$.series[0].type").value("SERIES"))
                 .andExpect(jsonPath("$.series[0].title").value("Breaking Bad"))
                 .andExpect(jsonPath("$.series[0].posterUrl").value("https://image.tmdb.org/t/p/w500/breaking-bad.jpg"))
-                .andExpect(jsonPath("$.series[0].releaseYear").value(2008));
+                .andExpect(jsonPath("$.series[0].year").value(2008));
 
         verify(trendingService).getTrending(user.id(), TrendingTimeWindow.DAY, 21);
     }
