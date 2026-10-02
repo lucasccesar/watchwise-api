@@ -151,21 +151,21 @@ class UserListControllerTest {
         UserListDetailedResponseDTO dto = buildDetailedResponseDto();
         when(userListService.getUserListById(currentUserId, listId, null, null, null, null, null, null)).thenReturn(dto);
 
-        ResponseEntity<UserListDetailedResponseDTO> result = userListController.getUserListById(listId, null, null, null, null);
+        ResponseEntity<UserListDetailedResponseDTO> result = userListController.getUserListById(listId, null, null, null, null, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
     }
 
     @Test
-    @DisplayName("[getUserListById] Should Resolve The Current User Id From The Security Context - When Called")
-    void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingUserListById() {
+    @DisplayName("[getUserListById] Should Resolve The Current User Id And Forward Page And Size - When Called")
+    void shouldResolveTheCurrentUserIdAndForwardPageAndSizeWhenGettingUserListById() {
         UUID listId = UUID.randomUUID();
-        when(userListService.getUserListById(currentUserId, listId, null, null, null, null, null, null)).thenReturn(buildDetailedResponseDto());
+        when(userListService.getUserListById(currentUserId, listId, null, null, null, null, 2, 24)).thenReturn(buildDetailedResponseDto());
 
-        userListController.getUserListById(listId, null, null, null, null);
+        userListController.getUserListById(listId, null, null, null, null, 2, 24);
 
-        verify(userListService).getUserListById(currentUserId, listId, null, null, null, null, null, null);
+        verify(userListService).getUserListById(currentUserId, listId, null, null, null, null, 2, 24);
     }
 
     @Test

@@ -77,10 +77,12 @@ public class UserListController {
             @RequestParam(required = false) ContentType type,
             @RequestParam(required = false) String genre,
             @RequestParam(required = false) String sortBy,
-            @RequestParam(required = false) String sortDirection
+            @RequestParam(required = false) String sortDirection,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
     ) {
         UserListDetailedResponseDTO list = userListService.getUserListById(
-                getCurrentUserId(), listId, type, genre, sortBy, sortDirection, null, null);
+                getCurrentUserId(), listId, type, genre, sortBy, sortDirection, page, size);
         return ResponseEntity.ok(list);
     }
 
