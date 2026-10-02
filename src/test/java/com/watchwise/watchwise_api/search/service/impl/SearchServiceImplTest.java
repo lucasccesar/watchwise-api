@@ -49,6 +49,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -390,12 +391,16 @@ class SearchServiceImplTest {
         when(userListItemService.countNestedListsByListIds(List.of())).thenReturn(Map.of());
 
         service.search(viewerId, " Sci-fi ", SearchType.LIST, 2, 99);
+        service.search(viewerId, " Sci-fi ", SearchType.LIST, 2, 1);
 
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
-        verify(userListRepository).findVisibleByNameContainingIgnoreCase(
+        verify(userListRepository, times(2)).findVisibleByNameContainingIgnoreCase(
                 eq(viewerId), eq("Sci-fi"), pageableCaptor.capture());
-        assertThat(pageableCaptor.getValue().getPageNumber()).isEqualTo(1);
-        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(20);
+        assertThat(pageableCaptor.getAllValues()).hasSize(2)
+                .allSatisfy(pageable -> {
+                    assertThat(pageable.getPageNumber()).isEqualTo(1);
+                    assertThat(pageable.getPageSize()).isEqualTo(10);
+                });
         verifyNoInteractions(tmdbClient);
     }
 
