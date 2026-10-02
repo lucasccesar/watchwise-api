@@ -60,11 +60,13 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -858,6 +860,121 @@ class UserListServiceImplTest {
         UserListDetailedResponseDTO result = userListService.getUserListById(lucasId, list.getId(), null, "Drama", null, null);
 
         assertThat(result.items()).containsExactly(dramaItem);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Clamp Episode List Page Size To 24 And Return Second Page")
+    void shouldClampEpisodeListPageSizeTo24AndReturnSecondPage() {
+        UserList list = buildList(lucas, "Episodes", null, UserListVisibility.PUBLIC);
+        List<UserListItemResponseDTO> allItems = IntStream.rangeClosed(1, 30)
+                .mapToObj(position -> buildItemResponseDtoWithContent(ContentType.EPISODE, null, List.of("Drama"), position))
+                .toList();
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(allItems, 0.0));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.EPISODE);
+
+        userListService.getUserListById(lucasId, list.getId(), null, null, null, null, 2, 99);
+
+        ArgumentCaptor<List<UserListItemResponseDTO>> itemsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Long> itemsCountCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Integer> itemsPageCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> itemsSizeCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Long> itemsTotalElementsCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Integer> itemsTotalPagesCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Boolean> itemsHasNextCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(userListMapper).userListToDetailedResponseDto(
+                eq(list), itemsCaptor.capture(), anyDouble(), anyBoolean(), itemsCountCaptor.capture(),
+                anyLong(), anyLong(), eq(UserListItemScope.EPISODE), itemsPageCaptor.capture(),
+                itemsSizeCaptor.capture(), itemsTotalElementsCaptor.capture(), itemsTotalPagesCaptor.capture(),
+                itemsHasNextCaptor.capture());
+
+        assertThat(itemsCaptor.getValue()).containsExactlyElementsOf(allItems.subList(24, 30));
+        assertThat(itemsPageCaptor.getValue()).isEqualTo(2);
+        assertThat(itemsSizeCaptor.getValue()).isEqualTo(24);
+        assertThat(itemsTotalElementsCaptor.getValue()).isEqualTo(30L);
+        assertThat(itemsTotalPagesCaptor.getValue()).isEqualTo(2);
+        assertThat(itemsHasNextCaptor.getValue()).isFalse();
+        assertThat(itemsCountCaptor.getValue()).isEqualTo(30L);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Clamp Non-Episode List Page Size To 30")
+    void shouldClampNonEpisodeListPageSizeTo30() {
+        UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
+        List<UserListItemResponseDTO> allItems = IntStream.rangeClosed(1, 31)
+                .mapToObj(position -> buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), position))
+                .toList();
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(allItems, 0.0));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+
+        userListService.getUserListById(lucasId, list.getId(), null, null, null, null, 1, 99);
+
+        ArgumentCaptor<List<UserListItemResponseDTO>> itemsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Long> itemsCountCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Integer> itemsPageCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> itemsSizeCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Long> itemsTotalElementsCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Integer> itemsTotalPagesCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Boolean> itemsHasNextCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(userListMapper).userListToDetailedResponseDto(
+                eq(list), itemsCaptor.capture(), anyDouble(), anyBoolean(), itemsCountCaptor.capture(),
+                anyLong(), anyLong(), eq(UserListItemScope.MOVIE_OR_SERIES), itemsPageCaptor.capture(),
+                itemsSizeCaptor.capture(), itemsTotalElementsCaptor.capture(), itemsTotalPagesCaptor.capture(),
+                itemsHasNextCaptor.capture());
+
+        assertThat(itemsCaptor.getValue()).containsExactlyElementsOf(allItems.subList(0, 30));
+        assertThat(itemsPageCaptor.getValue()).isEqualTo(1);
+        assertThat(itemsSizeCaptor.getValue()).isEqualTo(30);
+        assertThat(itemsTotalElementsCaptor.getValue()).isEqualTo(31L);
+        assertThat(itemsTotalPagesCaptor.getValue()).isEqualTo(2);
+        assertThat(itemsHasNextCaptor.getValue()).isTrue();
+        assertThat(itemsCountCaptor.getValue()).isEqualTo(31L);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Apply Type And Genre Before Pagination")
+    void shouldApplyTypeAndGenreBeforePagination() {
+        UserList list = buildList(lucas, "Mixed", null, UserListVisibility.PUBLIC);
+        List<UserListItemResponseDTO> nonMatchingItems = List.of(
+                buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), 1),
+                buildItemResponseDtoWithContent(ContentType.EPISODE, null, List.of("Comedy"), 2),
+                buildItemResponseDtoWithContent(ContentType.MOVIE, null, List.of("Drama"), 3),
+                buildItemResponseDtoWithContent(ContentType.EPISODE, null, List.of("Comedy"), 4));
+        List<UserListItemResponseDTO> matchingItems = IntStream.rangeClosed(5, 30)
+                .mapToObj(position -> buildItemResponseDtoWithContent(ContentType.EPISODE, null, List.of("Drama"), position))
+                .toList();
+        List<UserListItemResponseDTO> allItems = new ArrayList<>(nonMatchingItems);
+        allItems.addAll(matchingItems);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(allItems, 0.0));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MIXED);
+
+        userListService.getUserListById(lucasId, list.getId(), ContentType.EPISODE, "Drama", null, null, 2, 24);
+
+        ArgumentCaptor<List<UserListItemResponseDTO>> itemsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Long> itemsCountCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Integer> itemsPageCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Integer> itemsSizeCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Long> itemsTotalElementsCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<Integer> itemsTotalPagesCaptor = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<Boolean> itemsHasNextCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(userListMapper).userListToDetailedResponseDto(
+                eq(list), itemsCaptor.capture(), anyDouble(), anyBoolean(), itemsCountCaptor.capture(),
+                anyLong(), anyLong(), eq(UserListItemScope.MIXED), itemsPageCaptor.capture(),
+                itemsSizeCaptor.capture(), itemsTotalElementsCaptor.capture(), itemsTotalPagesCaptor.capture(),
+                itemsHasNextCaptor.capture());
+
+        assertThat(itemsCaptor.getValue()).containsExactlyElementsOf(matchingItems.subList(24, 26));
+        assertThat(itemsPageCaptor.getValue()).isEqualTo(2);
+        assertThat(itemsSizeCaptor.getValue()).isEqualTo(24);
+        assertThat(itemsTotalElementsCaptor.getValue()).isEqualTo(26L);
+        assertThat(itemsTotalPagesCaptor.getValue()).isEqualTo(2);
+        assertThat(itemsHasNextCaptor.getValue()).isFalse();
+        assertThat(itemsCountCaptor.getValue()).isEqualTo(30L);
     }
 
     @Test
