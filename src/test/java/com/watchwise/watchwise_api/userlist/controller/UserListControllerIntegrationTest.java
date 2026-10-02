@@ -621,12 +621,12 @@ class UserListControllerIntegrationTest {
         RegisteredUser owner = registerUser("discovervisibilityowner");
         User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
 
-        UserList publicThree = persistList(ownerEntity, "Public three", UserListVisibility.PUBLIC);
-        publicThree.setLikesCount(3);
-        userListRepository.save(publicThree);
         UserList publicTen = persistList(ownerEntity, "Public ten", UserListVisibility.PUBLIC);
         publicTen.setLikesCount(10);
         userListRepository.save(publicTen);
+        UserList publicThree = persistList(ownerEntity, "Public three", UserListVisibility.PUBLIC);
+        publicThree.setLikesCount(3);
+        userListRepository.save(publicThree);
         UserList privateHundred = persistList(ownerEntity, "Private hundred", UserListVisibility.PRIVATE);
         privateHundred.setLikesCount(100);
         userListRepository.save(privateHundred);
@@ -638,7 +638,9 @@ class UserListControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(2))
                 .andExpect(jsonPath("$.content[0].name").value("Public ten"))
-                .andExpect(jsonPath("$.content[1].name").value("Public three"));
+                .andExpect(jsonPath("$.content[0].likesCount").value(10))
+                .andExpect(jsonPath("$.content[1].name").value("Public three"))
+                .andExpect(jsonPath("$.content[1].likesCount").value(3));
     }
 
     @Test
