@@ -265,7 +265,7 @@ class SearchServiceImplTest {
                 listId, new UserPreviewDTO(owner.getId(), "marina", "marina.png", false), "Sci-fi 100%_\\", List.of(preview), 2L));
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
         verify(userListRepository).findVisibleByNameContainingIgnoreCase(eq(viewerId), eq("sci-fi 100\\%\\_\\\\"), pageableCaptor.capture());
-        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(20);
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(10);
         verify(userListItemService).getPreviewItemsByListIds(List.of(listId));
         verify(userListItemService).countNestedListsByListIds(List.of(listId));
         verifyNoInteractions(tmdbClient);
