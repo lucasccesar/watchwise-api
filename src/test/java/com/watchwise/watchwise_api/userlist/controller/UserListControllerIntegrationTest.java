@@ -190,6 +190,10 @@ class UserListControllerIntegrationTest {
         return get("/users/" + targetUserId + "/lists").cookie(viewer.accessToken());
     }
 
+    private MockHttpServletRequestBuilder getDiscoverListsRequest(RegisteredUser viewer) {
+        return get("/lists/discover").cookie(viewer.accessToken());
+    }
+
     private MockHttpServletRequestBuilder getUserListByIdRequest(RegisteredUser viewer, UUID listId) {
         return get("/lists/" + listId).cookie(viewer.accessToken());
     }
@@ -606,6 +610,77 @@ class UserListControllerIntegrationTest {
 
         mockMvc.perform(get("/users/" + user.id() + "/lists"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    // ---------- GET /lists/discover ----------
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Return Only Public Lists Ordered By Likes - When Viewer Is Authenticated")
+    void shouldReturnOnlyPublicListsOrderedByLikesWhenViewerIsAuthenticated() throws Exception {
+        RegisteredUser viewer = registerUser("discovervisibilityviewer");
+        RegisteredUser owner = registerUser("discovervisibilityowner");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+
+        UserList publicThree = persistList(ownerEntity, "Public three", UserListVisibility.PUBLIC);
+        publicThree.setLikesCount(3);
+        userListRepository.save(publicThree);
+        UserList publicTen = persistList(ownerEntity, "Public ten", UserListVisibility.PUBLIC);
+        publicTen.setLikesCount(10);
+        userListRepository.save(publicTen);
+        UserList privateHundred = persistList(ownerEntity, "Private hundred", UserListVisibility.PRIVATE);
+        privateHundred.setLikesCount(100);
+        userListRepository.save(privateHundred);
+        UserList followersFifty = persistList(ownerEntity, "Followers fifty", UserListVisibility.FOLLOWERS);
+        followersFifty.setLikesCount(50);
+        userListRepository.save(followersFifty);
+
+        mockMvc.perform(getDiscoverListsRequest(viewer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].name").value("Public ten"))
+                .andExpect(jsonPath("$.content[1].name").value("Public three"));
+    }
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Cap Results At Ten - When Size Exceeds The Server Limit")
+    void shouldCapResultsAtTenWhenSizeExceedsTheServerLimit() throws Exception {
+        RegisteredUser viewer = registerUser("discovercapviewer");
+        RegisteredUser owner = registerUser("discovercapowner");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+
+        for (int index = 1; index <= 11; index++) {
+            UserList list = persistList(ownerEntity, "Discover list " + index, UserListVisibility.PUBLIC);
+            list.setLikesCount(index);
+            userListRepository.save(list);
+        }
+
+        mockMvc.perform(getDiscoverListsRequest(viewer).param("page", "1").param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(10))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.hasNext").value(true));
+    }
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForDiscoverLists() throws Exception {
+        mockMvc.perform(get("/lists/discover"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Return An ApiError - When Size Is Below The Server Limit")
+    void shouldReturnAnApiErrorWhenSizeIsBelowTheServerLimit() throws Exception {
+        RegisteredUser viewer = registerUser("discoverbadsize");
+
+        mockMvc.perform(getDiscoverListsRequest(viewer).param("size", "9"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Page size must be greater than or equal to 10"))
+                .andExpect(jsonPath("$.path").value("/lists/discover"))
+                .andExpect(jsonPath("$.detail").doesNotExist());
     }
 
     // ---------- GET /users/me/liked-lists ----------
