@@ -1,16 +1,24 @@
 HELP.md
 target/
+/.m2-local/
+/.m2-repository/
+/.maven-home/
 .mvn/wrapper/maven-wrapper.jar
 /.agents/
 /.claude/
 /.codex/
-/.superpowers/
+/.superpowers/*
 /.worktrees/
-/docs/
 /CLAUDE.md
-/AGENTS.md
+/docs/archive/
 graphify-out/
 # .superpowers/
+!AGENTS.md
+!/.superpowers/sdd/
+/.superpowers/sdd/*
+!/.superpowers/sdd/2026-10-02-trending/
+/.superpowers/sdd/2026-10-02-trending/*
+!/.superpowers/sdd/2026-10-02-trending/progress.md
 !**/src/main/**/target/
 !**/src/test/**/target/
 
