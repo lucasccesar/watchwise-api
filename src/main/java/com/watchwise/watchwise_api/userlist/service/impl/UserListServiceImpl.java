@@ -126,6 +126,15 @@ public class UserListServiceImpl implements UserListService {
         return mapToResponseDtoPage(lists, viewerId, contentId);
     }
 
+    @Override
+    public Page<UserListResponseDTO> getDiscoverLists(UUID viewerId, Integer pageNumber, Integer pageSize) {
+        validateUserListPageSize(pageSize);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize, USER_LIST_PAGE_SIZE);
+        Page<UserList> lists = userListRepository
+                .findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(UserListVisibility.PUBLIC, pageRequest);
+        return mapToResponseDtoPage(lists, viewerId, null);
+    }
+
     private void validateUserListPageSize(Integer pageSize) {
         if (pageSize != null && pageSize < USER_LIST_PAGE_SIZE) {
             throw new BadRequestException("Page size must be greater than or equal to " + USER_LIST_PAGE_SIZE);

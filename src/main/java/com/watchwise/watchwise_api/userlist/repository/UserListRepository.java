@@ -29,6 +29,9 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
 
     Page<UserList> findByUserIdAndVisibilityIn(UUID userId, Collection<UserListVisibility> visibilities, Pageable pageable);
 
+    Page<UserList> findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
+            UserListVisibility visibility, Pageable pageable);
+
     @Query(
             value = """
             SELECT ul FROM UserList ul JOIN FETCH ul.user

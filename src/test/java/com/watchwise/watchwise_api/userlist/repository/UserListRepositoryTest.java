@@ -158,6 +158,38 @@ class UserListRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc] Should Return Public Lists In Discover Order")
+    void shouldReturnPublicListsInDiscoverOrder() {
+        LocalDateTime baseTime = LocalDateTime.of(2026, 10, 1, 12, 0);
+        UserList mostLiked = userListRepository.save(
+                buildListWithStats(lucas, "Most liked", UserListVisibility.PUBLIC, 8, baseTime.minusDays(3)));
+        UserList earlierTie = userListRepository.save(
+                buildListWithStats(lucas, "Earlier tie", UserListVisibility.PUBLIC, 5, baseTime.minusDays(2)));
+        UserList laterTie = userListRepository.save(
+                buildListWithStats(lucas, "Later tie", UserListVisibility.PUBLIC, 5, baseTime.minusDays(1)));
+        UserList leastLiked = userListRepository.save(
+                buildListWithStats(lucas, "Least liked", UserListVisibility.PUBLIC, 1, baseTime.minusDays(4)));
+        UserList privateList = userListRepository.saveAndFlush(
+                buildListWithStats(lucas, "Private list", UserListVisibility.PRIVATE, 99, baseTime));
+        entityManager.clear();
+
+        Page<UserList> result = userListRepository.findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
+                UserListVisibility.PUBLIC, PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(UserList::getId)
+                .containsExactly(mostLiked.getId(), laterTie.getId(), earlierTie.getId(), leastLiked.getId());
+        assertThat(result.getContent()).extracting(UserList::getId).doesNotContain(privateList.getId());
+        assertThat(result.getTotalElements()).isEqualTo(4);
+
+        Page<UserList> firstResult = userListRepository.findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
+                UserListVisibility.PUBLIC, PageRequest.of(0, 1));
+
+        assertThat(firstResult.getContent()).extracting(UserList::getId).containsExactly(mostLiked.getId());
+        assertThat(firstResult.getTotalElements()).isEqualTo(4);
+        assertThat(firstResult.getTotalPages()).isEqualTo(4);
+    }
+
+    @Test
     @DisplayName("[findVisibleByNameContainingIgnoreCase] Should Return Only Lists Visible To Viewer - When Names Match")
     void shouldReturnOnlyListsVisibleToViewerWhenNamesMatch() {
         userListRepository.save(buildListWithVisibility(lucas, "My private space list", UserListVisibility.PRIVATE));
@@ -377,6 +409,18 @@ class UserListRepositoryTest {
                 .visibility(visibility)
                 .createdAt(now)
                 .updatedAt(now)
+                .build();
+    }
+
+    private UserList buildListWithStats(
+            User user, String name, UserListVisibility visibility, int likesCount, LocalDateTime createdAt) {
+        return UserList.builder()
+                .user(user)
+                .name(name)
+                .visibility(visibility)
+                .likesCount(likesCount)
+                .createdAt(createdAt)
+                .updatedAt(createdAt)
                 .build();
     }
 

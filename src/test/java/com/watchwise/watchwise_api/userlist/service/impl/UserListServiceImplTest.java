@@ -625,6 +625,60 @@ class UserListServiceImplTest {
         verify(userListRepository).findByUserIdOrderByCommentsCount(eq(lucasId), any(), eq("ASC"), any(PageRequest.class));
     }
 
+    // ---------- getDiscoverLists ----------
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Return Mapped Public Lists - When They Exist")
+    void shouldReturnMappedPublicListsWhenTheyExist() {
+        UserList list = buildList(marina, "Marina's public list", null, UserListVisibility.PUBLIC);
+        UserListResponseDTO dto = buildResponseDto(list);
+        stubResponseMapping(list, lucasId);
+        when(userListRepository.findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
+                eq(UserListVisibility.PUBLIC), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(list)));
+        when(userListMapper.userListToResponseDto(list, List.of(), 0L, 0.0, false, 0L, 0L, 0L, null, null))
+                .thenReturn(dto);
+
+        Page<UserListResponseDTO> result = userListService.getDiscoverLists(lucasId, 1, 10);
+
+        assertThat(result.getContent()).containsExactly(dto);
+        verify(userListRepository).findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
+                eq(UserListVisibility.PUBLIC), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isZero();
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Use Page Size Ten - When Page Size Is Missing Or Larger Than Ten")
+    void shouldUsePageSizeTenWhenPageSizeIsMissingOrLargerThanTen() {
+        UserList list = buildList(marina, "Marina's public list", null, UserListVisibility.PUBLIC);
+        stubResponseMapping(list, lucasId);
+        when(userListRepository.findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
+                eq(UserListVisibility.PUBLIC), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(list)));
+        when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(),
+                anyLong(), anyLong(), anyLong(), any(), any()))
+                .thenReturn(buildResponseDto(list));
+
+        userListService.getDiscoverLists(lucasId, 1, null);
+        userListService.getDiscoverLists(lucasId, 1, 11);
+
+        verify(userListRepository, times(2)).findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
+                eq(UserListVisibility.PUBLIC), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getAllValues()).extracting(PageRequest::getPageSize)
+                .containsExactly(10, 10);
+    }
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Reject Small Page Size - When Page Size Is Less Than Ten")
+    void shouldRejectSmallPageSizeWhenPageSizeIsLessThanTen() {
+        assertThatThrownBy(() -> userListService.getDiscoverLists(lucasId, 1, 9))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Page size must be greater than or equal to 10");
+
+        verifyNoInteractions(userListRepository);
+    }
+
     // ---------- getLikedLists ----------
 
     @Test
@@ -1874,6 +1928,18 @@ class UserListServiceImplTest {
     private void stubEmptyOwnListsPage() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(userListRepository.findByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
+    }
+
+    private void stubResponseMapping(UserList list, UUID viewerId) {
+        List<UUID> listIds = List.of(list.getId());
+        when(userListItemService.getPreviewItemsByListIds(listIds)).thenReturn(Map.of());
+        when(userListItemService.countNestedListsByListIds(listIds)).thenReturn(Map.of());
+        when(userListItemService.getWatchedPercentagesByListIds(listIds, viewerId)).thenReturn(Map.of());
+        when(likeService.getLikedListIds(viewerId, listIds)).thenReturn(Set.of());
+        when(userListItemService.getItemsCountByListIds(listIds)).thenReturn(Map.of());
+        when(userListItemService.getTotalRuntimeMinutesByListIds(listIds)).thenReturn(Map.of());
+        when(commentRepository.countByListIdIn(listIds)).thenReturn(List.of());
+        when(userListItemService.getItemScopeByListIds(listIds, Map.of())).thenReturn(Map.of());
     }
 
     private User buildUser(UUID id, String username, boolean isProfilePublic) {
