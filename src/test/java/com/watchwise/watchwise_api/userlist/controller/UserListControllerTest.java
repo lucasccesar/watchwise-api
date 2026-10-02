@@ -122,6 +122,29 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getDiscoverLists] Should Return Ok With The Service Result Wrapped In A Page Envelope - When Called")
+    void shouldReturnOkWithTheServiceResultWrappedInAPageEnvelopeWhenGettingDiscoverLists() {
+        UserListResponseDTO dto = buildResponseDto();
+        Page<UserListResponseDTO> page = new PageImpl<>(List.of(dto));
+        when(userListService.getDiscoverLists(currentUserId, 1, 10)).thenReturn(page);
+
+        ResponseEntity<PageResponseDTO<UserListResponseDTO>> result = userListController.getDiscoverLists(1, 10);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody().content()).containsExactly(dto);
+    }
+
+    @Test
+    @DisplayName("[getDiscoverLists] Should Pass The Exact Current User Id And Optional Parameters To The Service - When Called Without Parameters")
+    void shouldPassTheExactCurrentUserIdAndOptionalParametersToTheServiceWhenGettingDiscoverListsWithoutParameters() {
+        when(userListService.getDiscoverLists(currentUserId, null, null)).thenReturn(Page.empty());
+
+        userListController.getDiscoverLists(null, null);
+
+        verify(userListService).getDiscoverLists(currentUserId, null, null);
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenGettingUserListById() {
         UUID listId = UUID.randomUUID();

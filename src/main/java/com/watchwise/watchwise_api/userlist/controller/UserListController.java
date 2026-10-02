@@ -48,6 +48,15 @@ public class UserListController {
         return ResponseEntity.ok(PageResponseDTO.of(lists));
     }
 
+    @GetMapping("/lists/discover")
+    public ResponseEntity<PageResponseDTO<UserListResponseDTO>> getDiscoverLists(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        Page<UserListResponseDTO> lists = userListService.getDiscoverLists(getCurrentUserId(), page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(lists));
+    }
+
     @PostMapping("/users/me/lists")
     public ResponseEntity<UserListResponseDTO> createUserList(@Valid @RequestBody UserListCreationDTO userListCreationDTO) {
         UserListResponseDTO created = userListService.createUserList(getCurrentUserId(), userListCreationDTO);
