@@ -40,6 +40,7 @@ class TmdbClientTest {
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
     }
 
@@ -212,6 +213,60 @@ class TmdbClientTest {
 
         assertThat(result.results()).containsExactly(
                 new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20", "en"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTrendingMovies] Should Parse Movie Page - When TMDB Responds")
+    void shouldParseTrendingMoviePageWhenTmdbResponds() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":5,"total_results":90,"results":[
+                          {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getTrendingMovies("day", "pt-BR").toOptional().orElseThrow();
+
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.totalPages()).isEqualTo(5);
+        assertThat(result.results()).containsExactly(
+                new TmdbTrendingMovieResult("603", "The Matrix", "/matrix.jpg", "1999-03-31"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getTrendingSeries] Should Parse Series Page - When TMDB Responds")
+    void shouldParseTrendingSeriesPageWhenTmdbResponds() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/week?language=de-DE"))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":8,"total_results":120,"results":[
+                          {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.getTrendingSeries("week", "de-DE").toOptional().orElseThrow();
+
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.totalPages()).isEqualTo(8);
+        assertThat(result.results()).containsExactly(
+                new TmdbTrendingTvResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[trending] Should Not Cache Unavailable Results - When TMDB Fails Twice")
+    void shouldNotCacheUnavailableTrendingResultWhenTmdbFailsTwice() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":1,"total_results":1,"results":[
+                          {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertThat(tmdbClient.getTrendingMovies("day", "pt-BR").isUnavailable()).isTrue();
+        assertThat(tmdbClient.getTrendingMovies("day", "pt-BR").toOptional()).isPresent();
         mockServer.verify();
     }
 

@@ -54,6 +54,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
         "app.tmdb.search-cache-max-size=10000",
         "app.tmdb.discovery-cache-ttl-minutes=10",
         "app.tmdb.discovery-cache-max-size=10000",
+        "app.tmdb.trending-cache-ttl-minutes=10",
+        "app.tmdb.trending-cache-max-size=10000",
         "app.tmdb.tv-content-ratings-cache-ttl-minutes=60",
         "app.tmdb.tv-content-ratings-cache-max-size=10000"
 })
@@ -95,14 +97,16 @@ class TmdbClientCachingTest {
                 Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTvSearchResult>>> tmdbTvDiscoveryCache,
                 Cache<String, TmdbLookupResult<TmdbTvContentRatings>> tmdbTvContentRatingsCache,
                 Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache,
-                Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache) {
+                Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache,
+                Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>>> tmdbTrendingMovieCache,
+                Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
                     tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
                     tmdbEpisodeImagesCache,
                     tmdbMovieReleaseDatesCache, tmdbCalendarSeasonDetailsCache,
                     tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache,
                     tmdbMovieDiscoveryCache, tmdbTvDiscoveryCache, tmdbTvContentRatingsCache,
-                    tmdbPersonAggregateCache, tmdbPersonDetailsCache);
+                    tmdbPersonAggregateCache, tmdbPersonDetailsCache, tmdbTrendingMovieCache, tmdbTrendingTvCache);
         }
     }
 
@@ -160,6 +164,12 @@ class TmdbClientCachingTest {
     @Autowired
     private Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache;
 
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>>> tmdbTrendingMovieCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache;
+
     @BeforeEach
     void resetExpectationsAndCache() {
         mockServer.reset();
@@ -179,6 +189,8 @@ class TmdbClientCachingTest {
         tmdbTvContentRatingsCache.invalidateAll();
         tmdbPersonAggregateCache.invalidateAll();
         tmdbPersonDetailsCache.invalidateAll();
+        tmdbTrendingMovieCache.invalidateAll();
+        tmdbTrendingTvCache.invalidateAll();
     }
 
     @Test
@@ -532,6 +544,58 @@ class TmdbClientCachingTest {
         mockServer.verify();
     }
 
+    @Test
+    @DisplayName("[trending movies] Should Cache By Window And Language - When The Same Lookup Repeats")
+    void shouldCacheTrendingMoviesByWindowAndLanguageWhenTheSameLookupRepeats() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+                .andRespond(trendingMovieSuccess());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/week?language=pt-BR"))
+                .andRespond(trendingMovieSuccess());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=en-US"))
+                .andRespond(trendingMovieSuccess());
+
+        var first = tmdbClient.getTrendingMovies("day", "pt-BR");
+        var sameKey = tmdbClient.getTrendingMovies("day", "pt-BR");
+        var otherWindow = tmdbClient.getTrendingMovies("week", "pt-BR");
+        var otherLanguage = tmdbClient.getTrendingMovies("day", "en-US");
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(sameKey).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(otherWindow).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(otherLanguage).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[trending series] Should Cache By Window And Language - When The Same Lookup Repeats")
+    void shouldCacheTrendingSeriesByWindowAndLanguageWhenTheSameLookupRepeats() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/day?language=pt-BR"))
+                .andRespond(trendingTvSuccess());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/week?language=pt-BR"))
+                .andRespond(trendingTvSuccess());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/day?language=en-US"))
+                .andRespond(trendingTvSuccess());
+
+        var first = tmdbClient.getTrendingSeries("day", "pt-BR");
+        var sameKey = tmdbClient.getTrendingSeries("day", "pt-BR");
+        var otherWindow = tmdbClient.getTrendingSeries("week", "pt-BR");
+        var otherLanguage = tmdbClient.getTrendingSeries("day", "en-US");
+
+        assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(sameKey).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(otherWindow).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(otherLanguage).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        mockServer.verify();
+    }
+
     @ParameterizedTest
     @MethodSource("newEndpointCases")
     @DisplayName("[new TMDB endpoint] Should Mark Remote Then Cached - When The Same Lookup Repeats")
@@ -632,6 +696,18 @@ class TmdbClientCachingTest {
                 {"page":%d,"total_pages":2,"total_results":21,"results":[
                   {"id":603,"title":"%s","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
                 """.formatted(page, title), MediaType.APPLICATION_JSON);
+    }
+
+    private ResponseCreator trendingMovieSuccess() {
+        return withSuccess("""
+                {"page":1,"total_pages":1,"total_results":0,"results":[]}
+                """, MediaType.APPLICATION_JSON);
+    }
+
+    private ResponseCreator trendingTvSuccess() {
+        return withSuccess("""
+                {"page":1,"total_pages":1,"total_results":0,"results":[]}
+                """, MediaType.APPLICATION_JSON);
     }
 
     @Test

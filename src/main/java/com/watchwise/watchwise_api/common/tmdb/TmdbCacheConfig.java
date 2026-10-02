@@ -117,6 +117,20 @@ public class TmdbCacheConfig {
     }
 
     @Bean
+    public Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>>> tmdbTrendingMovieCache(
+            @Value("${app.tmdb.trending-cache-ttl-minutes}") long ttlMinutes,
+            @Value("${app.tmdb.trending-cache-max-size}") long maximumSize) {
+        return newBoundedMinuteCache(ttlMinutes, maximumSize);
+    }
+
+    @Bean
+    public Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache(
+            @Value("${app.tmdb.trending-cache-ttl-minutes}") long ttlMinutes,
+            @Value("${app.tmdb.trending-cache-max-size}") long maximumSize) {
+        return newBoundedMinuteCache(ttlMinutes, maximumSize);
+    }
+
+    @Bean
     public Cache<String, TmdbLookupResult<TmdbTvContentRatings>> tmdbTvContentRatingsCache(
             @Value("${app.tmdb.tv-content-ratings-cache-ttl-minutes}") long ttlMinutes,
             @Value("${app.tmdb.tv-content-ratings-cache-max-size}") long maximumSize) {
