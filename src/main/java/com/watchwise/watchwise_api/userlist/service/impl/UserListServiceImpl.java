@@ -44,6 +44,7 @@ import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -228,7 +229,7 @@ public class UserListServiceImpl implements UserListService {
 
     @Override
     public UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
-            String sortBy, String sortDirection) {
+            String sortBy, String sortDirection, Integer pageNumber, Integer pageSize) {
         UserList userList = userListRepository.findById(listId)
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
@@ -254,9 +255,17 @@ public class UserListServiceImpl implements UserListService {
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
         long commentsCount = commentRepository.countByListId(listId);
         UserListItemScope itemScope = userListItemService.getItemScope(listId);
+        int maxPageSize = itemScope == UserListItemScope.EPISODE ? 24 : 30;
+        PageRequest itemPageRequest = pageRequestFactory.build(pageNumber, pageSize, maxPageSize);
+        long offset = itemPageRequest.getOffset();
+        int fromIndex = offset >= items.size() ? items.size() : (int) offset;
+        int toIndex = Math.min(fromIndex + itemPageRequest.getPageSize(), items.size());
+        Page<UserListItemResponseDTO> page = new PageImpl<>(
+                items.subList(fromIndex, toIndex), itemPageRequest, items.size());
 
-        return userListMapper.userListToDetailedResponseDto(userList, items, watchedPercentage, likedByMe,
-                allItems.size(), commentsCount, totalRuntimeMinutes, itemScope);
+        return userListMapper.userListToDetailedResponseDto(userList, page.getContent(), watchedPercentage, likedByMe,
+                allItems.size(), commentsCount, totalRuntimeMinutes, itemScope, page.getNumber() + 1, page.getSize(),
+                page.getTotalElements(), page.getTotalPages(), page.hasNext());
     }
 
     @Override
@@ -663,9 +672,11 @@ public class UserListServiceImpl implements UserListService {
         double watchedPercentage = itemsWithState.watchedPercentage();
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(savedList.getId());
         UserListItemScope itemScope = resolveItemScopeFromLoadedItems(items);
+        int itemsCount = items.size();
+        int itemsTotalPages = items.isEmpty() ? 0 : 1;
 
         return userListMapper.userListToDetailedResponseDto(savedList, items, watchedPercentage, false,
-                items.size(), 0L, totalRuntimeMinutes, itemScope);
+                itemsCount, 0L, totalRuntimeMinutes, itemScope, 1, itemsCount, itemsCount, itemsTotalPages, false);
     }
 
     @Override

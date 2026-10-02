@@ -79,7 +79,8 @@ public class UserListController {
             @RequestParam(required = false) String sortBy,
             @RequestParam(required = false) String sortDirection
     ) {
-        UserListDetailedResponseDTO list = userListService.getUserListById(getCurrentUserId(), listId, type, genre, sortBy, sortDirection);
+        UserListDetailedResponseDTO list = userListService.getUserListById(
+                getCurrentUserId(), listId, type, genre, sortBy, sortDirection, null, null);
         return ResponseEntity.ok(list);
     }
 

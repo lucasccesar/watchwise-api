@@ -149,7 +149,7 @@ class UserListControllerTest {
     void shouldReturnOkWithTheServiceResultWhenGettingUserListById() {
         UUID listId = UUID.randomUUID();
         UserListDetailedResponseDTO dto = buildDetailedResponseDto();
-        when(userListService.getUserListById(currentUserId, listId, null, null, null, null)).thenReturn(dto);
+        when(userListService.getUserListById(currentUserId, listId, null, null, null, null, null, null)).thenReturn(dto);
 
         ResponseEntity<UserListDetailedResponseDTO> result = userListController.getUserListById(listId, null, null, null, null);
 
@@ -161,11 +161,11 @@ class UserListControllerTest {
     @DisplayName("[getUserListById] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenGettingUserListById() {
         UUID listId = UUID.randomUUID();
-        when(userListService.getUserListById(currentUserId, listId, null, null, null, null)).thenReturn(buildDetailedResponseDto());
+        when(userListService.getUserListById(currentUserId, listId, null, null, null, null, null, null)).thenReturn(buildDetailedResponseDto());
 
         userListController.getUserListById(listId, null, null, null, null);
 
-        verify(userListService).getUserListById(currentUserId, listId, null, null, null, null);
+        verify(userListService).getUserListById(currentUserId, listId, null, null, null, null, null, null);
     }
 
     @Test
@@ -299,7 +299,8 @@ class UserListControllerTest {
                 UUID.randomUUID(),
                 new ContentRefDTO(UUID.randomUUID(), "100", ContentType.MOVIE, null, null, null, null, null, now, now),
                 null, 1, null, now, now);
-        return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now, List.of(item), 0, false, 1L, 0L, 0L, 1, null);
+        return new UserListDetailedResponseDTO(UUID.randomUUID(), "My list", null, UserListVisibility.PUBLIC, 0.0, now, now,
+                List.of(item), 1, 20, 1L, 1, false, 0, false, 1L, 0L, 0L, 1, null);
     }
 
     private UserListProgressResponseDTO buildProgressResponseDto() {
