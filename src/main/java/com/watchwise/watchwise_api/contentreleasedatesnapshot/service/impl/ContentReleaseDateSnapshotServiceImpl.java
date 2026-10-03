@@ -25,12 +25,15 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 
 @Service
@@ -38,23 +41,27 @@ public class ContentReleaseDateSnapshotServiceImpl implements ContentReleaseDate
 
     private static final long SNAPSHOT_TTL_HOURS = 24;
     private static final long REFRESH_RETRY_MINUTES = 60;
+    private static final long REFRESH_LEASE_MINUTES = 10;
     private static final Logger log = LoggerFactory.getLogger(ContentReleaseDateSnapshotServiceImpl.class);
 
     private final ContentReleaseDateSnapshotRepository snapshotRepository;
     private final TmdbClient tmdbClient;
     private final NewTransactionExecutor newTransactionExecutor;
     private final ExecutorService snapshotRefreshExecutor;
+    private final ExecutorService snapshotResolutionExecutor;
     private final Map<SnapshotKey, Boolean> refreshes = new ConcurrentHashMap<>();
 
     public ContentReleaseDateSnapshotServiceImpl(
             ContentReleaseDateSnapshotRepository snapshotRepository,
             TmdbClient tmdbClient,
             NewTransactionExecutor newTransactionExecutor,
-            @Qualifier("contentReleaseDateSnapshotExecutor") ExecutorService snapshotRefreshExecutor) {
+            @Qualifier("contentReleaseDateSnapshotExecutor") ExecutorService snapshotRefreshExecutor,
+            @Qualifier("contentReleaseDateSnapshotResolutionExecutor") ExecutorService snapshotResolutionExecutor) {
         this.snapshotRepository = snapshotRepository;
         this.tmdbClient = tmdbClient;
         this.newTransactionExecutor = newTransactionExecutor;
         this.snapshotRefreshExecutor = snapshotRefreshExecutor;
+        this.snapshotResolutionExecutor = snapshotResolutionExecutor;
     }
 
     @Override
@@ -73,17 +80,18 @@ public class ContentReleaseDateSnapshotServiceImpl implements ContentReleaseDate
         loadExisting(snapshots, ContentType.SERIES, null, series.stream()
                 .map(entry -> entry.getContent().getTmdbId()).toList());
 
+        Map<SnapshotKey, MissingSnapshot> missing = new LinkedHashMap<>();
         for (WatchlistEntry entry : entries) {
             Content content = entry.getContent();
             SnapshotKey key = SnapshotKey.of(entry.getType(), content.getTmdbId(), region);
             ContentReleaseDateSnapshot existing = snapshots.get(key);
             if (existing == null) {
-                ContentReleaseDateSnapshot snapshot = fetchAndPersist(content.getTmdbId(), entry.getType(), region);
-                snapshots.put(key, snapshot);
+                missing.putIfAbsent(key, new MissingSnapshot(key, content.getTmdbId(), entry.getType(), region));
             } else if (isDue(existing)) {
                 scheduleRefresh(key, existing);
             }
         }
+        resolveMissing(missing, snapshots);
 
         Map<UUID, LocalDate> dates = new HashMap<>();
         for (WatchlistEntry entry : entries) {
@@ -116,13 +124,48 @@ public class ContentReleaseDateSnapshotServiceImpl implements ContentReleaseDate
     @Override
     public void refreshDue() {
         for (ContentReleaseDateSnapshot snapshot : snapshotRepository.findByNextCheckAtBefore(LocalDateTime.now())) {
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime leaseUntil = now.plusMinutes(REFRESH_LEASE_MINUTES);
+            if (!claim(snapshot, now, leaseUntil)) {
+                continue;
+            }
             try {
                 fetchAndPersist(snapshot.getTmdbId(), snapshot.getType(), snapshot.getRegion());
-            } catch (TmdbUnavailableException ignored) {
-                // Keep the previous value until a later refresh succeeds.
-                snapshot.setNextCheckAt(LocalDateTime.now().plusHours(1));
-                snapshotRepository.save(snapshot);
+            } catch (TmdbUnavailableException exception) {
+                markRetry(snapshot.getId(), leaseUntil);
+            } catch (RuntimeException exception) {
+                log.warn("Release-date snapshot refresh failed for {}", snapshot.getId(), exception);
+                markRetry(snapshot.getId(), leaseUntil);
             }
+        }
+    }
+
+    private void resolveMissing(
+            Map<SnapshotKey, MissingSnapshot> missing,
+            Map<SnapshotKey, ContentReleaseDateSnapshot> snapshots) {
+        if (missing.isEmpty()) {
+            return;
+        }
+        List<Future<ResolvedSnapshot>> futures = missing.values().stream()
+                .map(request -> snapshotResolutionExecutor.submit(() -> new ResolvedSnapshot(
+                        request.key(), fetchAndPersist(request.tmdbId(), request.type(), request.region))))
+                .toList();
+        try {
+            for (Future<ResolvedSnapshot> future : futures) {
+                ResolvedSnapshot resolved = future.get();
+                snapshots.put(resolved.key(), resolved.snapshot());
+            }
+        } catch (InterruptedException exception) {
+            futures.forEach(future -> future.cancel(true));
+            Thread.currentThread().interrupt();
+            throw new TmdbUnavailableException("TMDB resolution was interrupted");
+        } catch (ExecutionException exception) {
+            futures.forEach(future -> future.cancel(true));
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("Could not resolve release-date snapshot", cause);
         }
     }
 
@@ -199,28 +242,50 @@ public class ContentReleaseDateSnapshotServiceImpl implements ContentReleaseDate
         if (refreshes.putIfAbsent(key, Boolean.TRUE) != null) {
             return;
         }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime leaseUntil = now.plusMinutes(REFRESH_LEASE_MINUTES);
+        if (!claim(previous, now, leaseUntil)) {
+            refreshes.remove(key);
+            return;
+        }
         try {
             snapshotRefreshExecutor.execute(() -> {
                 try {
                     fetchAndPersist(previous.getTmdbId(), previous.getType(), previous.getRegion());
                 } catch (TmdbUnavailableException exception) {
-                    markRetry(previous);
+                    markRetry(previous.getId(), leaseUntil);
                 } catch (RuntimeException exception) {
                     log.warn("Release-date snapshot refresh failed for {}", key, exception);
+                    markRetry(previous.getId(), leaseUntil);
                 } finally {
                     refreshes.remove(key);
                 }
             });
         } catch (RejectedExecutionException exception) {
             refreshes.remove(key);
+            markRetry(previous.getId(), leaseUntil);
             log.warn("Release-date snapshot refresh was rejected for {}", key, exception);
         }
     }
 
-    private void markRetry(ContentReleaseDateSnapshot snapshot) {
-        snapshot.setNextCheckAt(LocalDateTime.now().plusMinutes(REFRESH_RETRY_MINUTES));
+    private boolean claim(ContentReleaseDateSnapshot snapshot, LocalDateTime now, LocalDateTime leaseUntil) {
+        if (snapshot.getId() == null) {
+            return false;
+        }
         try {
-            newTransactionExecutor.runInNewTransaction(() -> snapshotRepository.saveAndFlush(snapshot));
+            return newTransactionExecutor.runInNewTransaction(() -> snapshotRepository.claimDue(
+                    snapshot.getId(), now, leaseUntil)) > 0;
+        } catch (RuntimeException exception) {
+            log.warn("Could not claim release-date snapshot {}", snapshot.getId(), exception);
+            return false;
+        }
+    }
+
+    private void markRetry(UUID snapshotId, LocalDateTime leaseUntil) {
+        LocalDateTime retryAt = LocalDateTime.now().plusMinutes(REFRESH_RETRY_MINUTES);
+        try {
+            newTransactionExecutor.runInNewTransaction(() -> snapshotRepository.rescheduleClaimed(
+                    snapshotId, leaseUntil, retryAt));
         } catch (RuntimeException exception) {
             log.warn("Could not persist release-date snapshot retry time", exception);
         }
@@ -264,5 +329,13 @@ public class ContentReleaseDateSnapshotServiceImpl implements ContentReleaseDate
         static SnapshotKey of(ContentType type, String tmdbId, String region) {
             return new SnapshotKey(type, tmdbId, type == ContentType.SERIES ? null : region);
         }
+    }
+
+    private record MissingSnapshot(
+            SnapshotKey key, String tmdbId, ContentType type, String region) {
+    }
+
+    private record ResolvedSnapshot(
+            SnapshotKey key, ContentReleaseDateSnapshot snapshot) {
     }
 }

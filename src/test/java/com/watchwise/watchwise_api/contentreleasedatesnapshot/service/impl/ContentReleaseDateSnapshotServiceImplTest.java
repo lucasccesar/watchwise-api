@@ -16,9 +16,9 @@ import com.watchwise.watchwise_api.contentreleasedatesnapshot.repository.Content
 import com.watchwise.watchwise_api.contentreleasedatesnapshot.service.ContentReleaseDateSnapshotService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -27,7 +27,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -53,14 +58,23 @@ class ContentReleaseDateSnapshotServiceImplTest {
     @Mock
     private ExecutorService snapshotRefreshExecutor;
 
+    private ExecutorService snapshotResolutionExecutor;
+    private ContentReleaseDateSnapshotServiceImpl snapshotService;
+
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
+        snapshotResolutionExecutor = Executors.newFixedThreadPool(4);
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+        snapshotService = new ContentReleaseDateSnapshotServiceImpl(
+                snapshotRepository, tmdbClient, newTransactionExecutor,
+                snapshotRefreshExecutor, snapshotResolutionExecutor);
     }
 
-    @InjectMocks
-    private ContentReleaseDateSnapshotServiceImpl snapshotService;
+    @AfterEach
+    void tearDown() {
+        snapshotResolutionExecutor.shutdownNow();
+    }
 
     @Test
     void shouldPersistMovieReleaseDateFromAppendedReleaseDatesForOwnerRegion() {
@@ -115,12 +129,56 @@ class ContentReleaseDateSnapshotServiceImplTest {
     }
 
     @Test
+    void shouldResolveMissingSnapshotsWithBoundedConcurrency() {
+        User owner = User.builder().id(UUID.randomUUID()).preferredRegion("BR").build();
+        List<WatchlistEntry> entries = IntStream.range(0, 8)
+                .mapToObj(index -> {
+                    Content series = Content.builder().id(UUID.randomUUID()).tmdbId(String.valueOf(1000 + index))
+                            .type(ContentType.SERIES).build();
+                    return WatchlistEntry.builder().id(UUID.randomUUID()).user(owner).content(series)
+                            .type(ContentType.SERIES).position(index + 1).build();
+                })
+                .toList();
+        List<String> tmdbIds = entries.stream().map(entry -> entry.getContent().getTmdbId()).toList();
+        when(snapshotRepository.findByTypeAndRegionIsNullAndTmdbIdIn(ContentType.SERIES, tmdbIds))
+                .thenReturn(List.of());
+        when(snapshotRepository.saveAndFlush(any(ContentReleaseDateSnapshot.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        AtomicInteger active = new AtomicInteger();
+        AtomicInteger maximum = new AtomicInteger();
+        CyclicBarrier barrier = new CyclicBarrier(4);
+        when(tmdbClient.getTvFullDetails(any(String.class), eq(TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)))
+                .thenAnswer(invocation -> {
+                    int current = active.incrementAndGet();
+                    maximum.updateAndGet(previous -> Math.max(previous, current));
+                    try {
+                        barrier.await(2, java.util.concurrent.TimeUnit.SECONDS);
+                        Thread.sleep(20);
+                        return new TmdbLookupResult.NotFound<>();
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("resolution interrupted", exception);
+                    } catch (java.util.concurrent.BrokenBarrierException
+                             | java.util.concurrent.TimeoutException exception) {
+                        throw new IllegalStateException("resolution did not reach the concurrency boundary", exception);
+                    } finally {
+                        active.decrementAndGet();
+                    }
+                });
+
+        snapshotService.resolve(owner, entries);
+
+        assertThat(maximum.get()).isGreaterThan(1).isLessThanOrEqualTo(4);
+    }
+
+    @Test
     void shouldServeExpiredSnapshotAndScheduleRefreshAsynchronously() {
         User owner = User.builder().id(UUID.randomUUID()).preferredRegion("BR").build();
         Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE).build();
         WatchlistEntry entry = WatchlistEntry.builder()
                 .id(UUID.randomUUID()).user(owner).content(movie).type(ContentType.MOVIE).position(1).build();
         ContentReleaseDateSnapshot snapshot = ContentReleaseDateSnapshot.builder()
+                .id(UUID.randomUUID())
                 .tmdbId("550").type(ContentType.MOVIE).region("BR")
                 .releaseDate(java.time.LocalDate.of(2027, 2, 3))
                 .status(ContentReleaseDateSnapshot.Status.FOUND)
@@ -130,6 +188,8 @@ class ContentReleaseDateSnapshotServiceImplTest {
         when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
                 eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
                 .thenReturn(List.of(snapshot));
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(1);
 
         var result = snapshotService.resolve(owner, List.of(entry));
 
@@ -139,10 +199,72 @@ class ContentReleaseDateSnapshotServiceImplTest {
     }
 
     @Test
+    void shouldClaimExpiredSnapshotBeforeSchedulingRefresh() {
+        User owner = User.builder().id(UUID.randomUUID()).preferredRegion("BR").build();
+        Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE).build();
+        WatchlistEntry entry = WatchlistEntry.builder()
+                .id(UUID.randomUUID()).user(owner).content(movie).type(ContentType.MOVIE).position(1).build();
+        ContentReleaseDateSnapshot snapshot = ContentReleaseDateSnapshot.builder()
+                .id(UUID.randomUUID())
+                .tmdbId("550").type(ContentType.MOVIE).region("BR")
+                .releaseDate(java.time.LocalDate.of(2027, 2, 3))
+                .status(ContentReleaseDateSnapshot.Status.FOUND)
+                .lastCheckedAt(LocalDateTime.now().minusDays(2))
+                .nextCheckAt(LocalDateTime.now().minusHours(1))
+                .build();
+        when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
+                eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
+                .thenReturn(List.of(snapshot));
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(1);
+
+        snapshotService.resolve(owner, List.of(entry));
+
+        verify(snapshotRepository).claimDue(
+                eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class));
+        verify(snapshotRefreshExecutor).execute(any(Runnable.class));
+    }
+
+    @Test
+    void shouldNotOverwriteSnapshotAfterConcurrentRefreshBeforeRetry() {
+        User owner = User.builder().id(UUID.randomUUID()).preferredRegion("BR").build();
+        Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE).build();
+        WatchlistEntry entry = WatchlistEntry.builder()
+                .id(UUID.randomUUID()).user(owner).content(movie).type(ContentType.MOVIE).position(1).build();
+        ContentReleaseDateSnapshot snapshot = ContentReleaseDateSnapshot.builder()
+                .id(UUID.randomUUID())
+                .tmdbId("550").type(ContentType.MOVIE).region("BR")
+                .releaseDate(java.time.LocalDate.of(2027, 2, 3))
+                .status(ContentReleaseDateSnapshot.Status.FOUND)
+                .lastCheckedAt(LocalDateTime.now().minusDays(2))
+                .nextCheckAt(LocalDateTime.now().minusHours(1))
+                .build();
+        when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
+                eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
+                .thenReturn(List.of(snapshot));
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(1);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+        AtomicReference<Runnable> refresh = new AtomicReference<>();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            refresh.set(invocation.getArgument(0));
+            return null;
+        }).when(snapshotRefreshExecutor).execute(any(Runnable.class));
+
+        snapshotService.resolve(owner, List.of(entry));
+        snapshot.setNextCheckAt(LocalDateTime.now().plusHours(4));
+        refresh.get().run();
+
+        verify(snapshotRepository, org.mockito.Mockito.never()).saveAndFlush(any());
+    }
+
+    @Test
     void shouldReuseFreshSnapshotDuringWriteThrough() {
         User owner = User.builder().id(UUID.randomUUID()).preferredRegion("BR").build();
         Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE).build();
         ContentReleaseDateSnapshot snapshot = ContentReleaseDateSnapshot.builder()
+                .id(UUID.randomUUID())
                 .tmdbId("550").type(ContentType.MOVIE).region("BR")
                 .releaseDate(java.time.LocalDate.of(2027, 2, 3))
                 .status(ContentReleaseDateSnapshot.Status.FOUND)
@@ -182,6 +304,7 @@ class ContentReleaseDateSnapshotServiceImplTest {
         WatchlistEntry entry = WatchlistEntry.builder()
                 .id(UUID.randomUUID()).user(owner).content(movie).type(ContentType.MOVIE).position(1).build();
         ContentReleaseDateSnapshot snapshot = ContentReleaseDateSnapshot.builder()
+                .id(UUID.randomUUID())
                 .tmdbId("550").type(ContentType.MOVIE).region("BR")
                 .releaseDate(java.time.LocalDate.of(2027, 2, 3))
                 .status(ContentReleaseDateSnapshot.Status.FOUND)
@@ -191,6 +314,8 @@ class ContentReleaseDateSnapshotServiceImplTest {
         when(snapshotRepository.findByTypeAndRegionAndTmdbIdIn(
                 eq(ContentType.MOVIE), eq("BR"), eq(List.of("550"))))
                 .thenReturn(List.of(snapshot));
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(1);
         when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
         org.mockito.Mockito.doAnswer(invocation -> {
@@ -202,6 +327,30 @@ class ContentReleaseDateSnapshotServiceImplTest {
 
         assertThat(result.releaseDates()).containsEntry(entry.getId(), java.time.LocalDate.of(2027, 2, 3));
         assertThat(snapshot.getReleaseDate()).isEqualTo(java.time.LocalDate.of(2027, 2, 3));
-        verify(snapshotRepository).saveAndFlush(snapshot);
+        verify(snapshotRepository).rescheduleClaimed(
+                eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class));
+    }
+
+    @Test
+    void shouldBackoffAndContinueWhenRefreshFailsUnexpectedly() {
+        ContentReleaseDateSnapshot snapshot = ContentReleaseDateSnapshot.builder()
+                .id(UUID.randomUUID())
+                .tmdbId("550").type(ContentType.MOVIE).region("BR")
+                .releaseDate(java.time.LocalDate.of(2027, 2, 3))
+                .status(ContentReleaseDateSnapshot.Status.FOUND)
+                .lastCheckedAt(LocalDateTime.now().minusDays(2))
+                .nextCheckAt(LocalDateTime.now().minusHours(1))
+                .build();
+        when(snapshotRepository.findByNextCheckAtBefore(any(LocalDateTime.class)))
+                .thenReturn(List.of(snapshot));
+        when(snapshotRepository.claimDue(eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(1);
+        when(tmdbClient.getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenThrow(new IllegalStateException("unexpected TMDB client failure"));
+
+        snapshotService.refreshDue();
+
+        verify(snapshotRepository).rescheduleClaimed(
+                eq(snapshot.getId()), any(LocalDateTime.class), any(LocalDateTime.class));
     }
 }

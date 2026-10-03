@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.contentreleasedatesnapshot.repository;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.contentreleasedatesnapshot.entity.ContentReleaseDateSnapshot;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -28,6 +29,30 @@ public interface ContentReleaseDateSnapshotRepository extends JpaRepository<Cont
             ContentType type, String tmdbId);
 
     List<ContentReleaseDateSnapshot> findByNextCheckAtBefore(LocalDateTime now);
+
+    @Modifying
+    @Query("""
+            UPDATE ContentReleaseDateSnapshot snapshot
+            SET snapshot.nextCheckAt = :leaseUntil
+            WHERE snapshot.id = :snapshotId
+              AND snapshot.nextCheckAt <= :now
+            """)
+    int claimDue(
+            @Param("snapshotId") UUID snapshotId,
+            @Param("now") LocalDateTime now,
+            @Param("leaseUntil") LocalDateTime leaseUntil);
+
+    @Modifying
+    @Query("""
+            UPDATE ContentReleaseDateSnapshot snapshot
+            SET snapshot.nextCheckAt = :retryAt
+            WHERE snapshot.id = :snapshotId
+              AND snapshot.nextCheckAt = :leaseUntil
+            """)
+    int rescheduleClaimed(
+            @Param("snapshotId") UUID snapshotId,
+            @Param("leaseUntil") LocalDateTime leaseUntil,
+            @Param("retryAt") LocalDateTime retryAt);
 
     @Query(value = """
             SELECT count(*)
