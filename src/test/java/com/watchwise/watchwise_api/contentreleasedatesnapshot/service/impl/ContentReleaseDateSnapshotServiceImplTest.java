@@ -26,9 +26,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -58,12 +61,12 @@ class ContentReleaseDateSnapshotServiceImplTest {
     @Mock
     private ExecutorService snapshotRefreshExecutor;
 
-    private ExecutorService snapshotResolutionExecutor;
+    private BoundedTrackingExecutor snapshotResolutionExecutor;
     private ContentReleaseDateSnapshotServiceImpl snapshotService;
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
-        snapshotResolutionExecutor = Executors.newFixedThreadPool(4);
+        snapshotResolutionExecutor = new BoundedTrackingExecutor(4);
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
         snapshotService = new ContentReleaseDateSnapshotServiceImpl(
@@ -169,6 +172,71 @@ class ContentReleaseDateSnapshotServiceImplTest {
         snapshotService.resolve(owner, entries);
 
         assertThat(maximum.get()).isGreaterThan(1).isLessThanOrEqualTo(4);
+        assertThat(snapshotResolutionExecutor.peakOutstanding()).isLessThanOrEqualTo(4);
+    }
+
+    private static final class BoundedTrackingExecutor extends AbstractExecutorService {
+
+        private final ExecutorService delegate;
+        private final int maximumOutstanding;
+        private final AtomicInteger outstanding = new AtomicInteger();
+        private final AtomicInteger peakOutstanding = new AtomicInteger();
+
+        private BoundedTrackingExecutor(int maximumOutstanding) {
+            this.delegate = Executors.newFixedThreadPool(maximumOutstanding);
+            this.maximumOutstanding = maximumOutstanding;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            int current = outstanding.incrementAndGet();
+            peakOutstanding.updateAndGet(previous -> Math.max(previous, current));
+            if (current > maximumOutstanding) {
+                outstanding.decrementAndGet();
+                throw new RejectedExecutionException("Too many outstanding tasks");
+            }
+            try {
+                delegate.execute(() -> {
+                    try {
+                        command.run();
+                    } finally {
+                        outstanding.decrementAndGet();
+                    }
+                });
+            } catch (RuntimeException exception) {
+                outstanding.decrementAndGet();
+                throw exception;
+            }
+        }
+
+        @Override
+        public void shutdown() {
+            delegate.shutdown();
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            return delegate.shutdownNow();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return delegate.isShutdown();
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return delegate.isTerminated();
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            return delegate.awaitTermination(timeout, unit);
+        }
+
+        private int peakOutstanding() {
+            return peakOutstanding.get();
+        }
     }
 
     @Test

@@ -314,8 +314,9 @@ class WatchlistEntryControllerIntegrationTest {
 
     private TmdbTvFullDetails tvDetails(String id, String firstAirDate) {
         return new TmdbTvFullDetails(
-                id, null, null, null, null, null, firstAirDate, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null);
+                id, null, null, null, null, null, firstAirDate,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null);
     }
 
     @Test

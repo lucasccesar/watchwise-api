@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -42,6 +43,7 @@ public class ContentReleaseDateSnapshotServiceImpl implements ContentReleaseDate
     private static final long SNAPSHOT_TTL_HOURS = 24;
     private static final long REFRESH_RETRY_MINUTES = 60;
     private static final long REFRESH_LEASE_MINUTES = 10;
+    private static final int MAX_RESOLUTION_BATCH_SIZE = 4;
     private static final Logger log = LoggerFactory.getLogger(ContentReleaseDateSnapshotServiceImpl.class);
 
     private final ContentReleaseDateSnapshotRepository snapshotRepository;
@@ -146,26 +148,35 @@ public class ContentReleaseDateSnapshotServiceImpl implements ContentReleaseDate
         if (missing.isEmpty()) {
             return;
         }
-        List<Future<ResolvedSnapshot>> futures = missing.values().stream()
-                .map(request -> snapshotResolutionExecutor.submit(() -> new ResolvedSnapshot(
-                        request.key(), fetchAndPersist(request.tmdbId(), request.type(), request.region))))
-                .toList();
-        try {
-            for (Future<ResolvedSnapshot> future : futures) {
-                ResolvedSnapshot resolved = future.get();
-                snapshots.put(resolved.key(), resolved.snapshot());
+        List<MissingSnapshot> requests = new ArrayList<>(missing.values());
+        for (int start = 0; start < requests.size(); start += MAX_RESOLUTION_BATCH_SIZE) {
+            int end = Math.min(start + MAX_RESOLUTION_BATCH_SIZE, requests.size());
+            List<Future<ResolvedSnapshot>> futures = new ArrayList<>(end - start);
+            try {
+                for (int index = start; index < end; index++) {
+                    MissingSnapshot request = requests.get(index);
+                    futures.add(snapshotResolutionExecutor.submit(() -> new ResolvedSnapshot(
+                            request.key(), fetchAndPersist(request.tmdbId(), request.type(), request.region))));
+                }
+                for (Future<ResolvedSnapshot> future : futures) {
+                    ResolvedSnapshot resolved = future.get();
+                    snapshots.put(resolved.key(), resolved.snapshot());
+                }
+            } catch (InterruptedException exception) {
+                futures.forEach(future -> future.cancel(true));
+                Thread.currentThread().interrupt();
+                throw new TmdbUnavailableException("TMDB resolution was interrupted");
+            } catch (ExecutionException exception) {
+                futures.forEach(future -> future.cancel(true));
+                Throwable cause = exception.getCause();
+                if (cause instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                throw new IllegalStateException("Could not resolve release-date snapshot", cause);
+            } catch (RuntimeException exception) {
+                futures.forEach(future -> future.cancel(true));
+                throw exception;
             }
-        } catch (InterruptedException exception) {
-            futures.forEach(future -> future.cancel(true));
-            Thread.currentThread().interrupt();
-            throw new TmdbUnavailableException("TMDB resolution was interrupted");
-        } catch (ExecutionException exception) {
-            futures.forEach(future -> future.cancel(true));
-            Throwable cause = exception.getCause();
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            throw new IllegalStateException("Could not resolve release-date snapshot", cause);
         }
     }
 
