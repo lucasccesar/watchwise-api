@@ -724,7 +724,7 @@ class TmdbClientCachingTest {
                     """, MediaType.APPLICATION_JSON).createResponse(request);
         };
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(slowSuccess);
 
         int concurrentCallers = 8;
@@ -756,7 +756,7 @@ class TmdbClientCachingTest {
     @DisplayName("[getMovieFullDetails] Should Not Throw And Should Cache - When TMDB Responds Successfully")
     void shouldNotThrowAndShouldCacheWhenMovieFullDetailsRespondsSuccessfully() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "603", "title": "The Matrix"}
                         """, MediaType.APPLICATION_JSON));
@@ -773,7 +773,7 @@ class TmdbClientCachingTest {
     @DisplayName("[getMovieFullDetails] Should Cache A Confirmed NotFound - When TMDB Responds With 404")
     void shouldCacheAConfirmedNotFoundWhenMovieFullDetailsRespondsWith404() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/999999999?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/999999999?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
                         .body("{\"status_message\": \"The resource you requested could not be found.\"}"));
 
@@ -789,13 +789,13 @@ class TmdbClientCachingTest {
     @DisplayName("[getMovieFullDetails] Should Not Cache - When TMDB Fails Twice In A Row")
     void shouldNotCacheWhenMovieFullDetailsFailsTwiceInARow() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "603", "title": "The Matrix"}
                         """, MediaType.APPLICATION_JSON));

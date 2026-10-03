@@ -4,13 +4,13 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
-import org.springframework.data.domain.Page;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistPageResponseDTO;
 
 import java.util.UUID;
 
 public interface WatchlistEntryService {
 
-    Page<WatchlistEntryResponseDTO> getWatchlist(UUID viewerId, UUID userId, ContentType type, Integer pageNumber, Integer pageSize);
+    WatchlistPageResponseDTO getWatchlist(UUID viewerId, UUID userId, ContentType type, Integer pageNumber, Integer pageSize);
 
     WatchlistEntryResponseDTO insertEntry(UUID userId, ContentType type, WatchlistEntryCreationDTO watchlistEntryCreationDTO);
 

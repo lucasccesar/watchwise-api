@@ -7,10 +7,14 @@ import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDate;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
+import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentreleasedatesnapshot.repository.ContentReleaseDateSnapshotRepository;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -36,12 +40,16 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -75,6 +83,9 @@ class WatchlistEntryControllerIntegrationTest {
     private ContentRepository contentRepository;
 
     @Autowired
+    private ContentReleaseDateSnapshotRepository releaseDateSnapshotRepository;
+
+    @Autowired
     private WatchlistEntryRepository watchlistEntryRepository;
 
     @Autowired
@@ -92,6 +103,7 @@ class WatchlistEntryControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         watchlistEntryRepository.deleteAll();
+        releaseDateSnapshotRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -174,7 +186,12 @@ class WatchlistEntryControllerIntegrationTest {
     }
 
     private MockHttpServletRequestBuilder getWatchlistRequest(RegisteredUser viewer, UUID targetUserId, ContentType type) {
-        return get("/users/" + targetUserId + "/watchlist/" + type).cookie(viewer.accessToken());
+        MockHttpServletRequestBuilder request = get("/users/" + targetUserId + "/watchlist")
+                .cookie(viewer.accessToken());
+        if (type != null) {
+            request.param("type", type.name());
+        }
+        return request;
     }
 
     private String contentBody(String tmdbId) {
@@ -215,7 +232,7 @@ class WatchlistEntryControllerIntegrationTest {
                 .build());
     }
 
-    // ---------- GET /users/{userId}/watchlist/{type} ----------
+    // ---------- GET /users/{userId}/watchlist ----------
 
     @Test
     @DisplayName("[getWatchlist] Should Return The Entries Ordered By Position - When Entries Exist")
@@ -236,7 +253,69 @@ class WatchlistEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[1].position").value(2))
                 .andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.totalPages").value(1))
-                .andExpect(jsonPath("$.hasNext").value(false));
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.upcomingCount").value(0));
+    }
+
+    @Test
+    @DisplayName("[getWatchlist] Should Return Both Types In Global Order - When Type Is Omitted")
+    void shouldReturnBothTypesInGlobalOrderWhenTypeIsOmitted() throws Exception {
+        RegisteredUser user = registerUser("getwatchlistglobal");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
+        persistEntry(entity, persistContent("1396", ContentType.SERIES), ContentType.SERIES, 2);
+        persistEntry(entity, persistContent("680", ContentType.MOVIE), ContentType.MOVIE, 3);
+
+        mockMvc.perform(getWatchlistRequest(user, user.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[*].position").value(org.hamcrest.Matchers.contains(1, 2, 3)))
+                .andExpect(jsonPath("$.content[*].type")
+                        .value(org.hamcrest.Matchers.contains("MOVIE", "SERIES", "MOVIE")))
+                .andExpect(jsonPath("$.totalElements").value(3));
+    }
+
+    @Test
+    @DisplayName("[getWatchlist] Should Resolve Regional Dates And Count Future Series")
+    void shouldResolveRegionalDatesAndCountFutureSeries() throws Exception {
+        RegisteredUser user = registerUser("getwatchlistdates");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        entity.setPreferredRegion("BR");
+        userRepository.save(entity);
+        LocalDate usMovie = LocalDate.now().plusDays(5);
+        LocalDate futureMovie = LocalDate.now().plusDays(10);
+        LocalDate futureSeries = LocalDate.now().plusDays(20);
+        LocalDate today = LocalDate.now();
+
+        when(tmdbClient.getMovieFullDetails(eq("550"), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
+                        "550", "Fight Club", new TmdbMovieReleaseDates("550", List.of(
+                                new TmdbRegionReleaseDates("US", List.of(
+                                        new TmdbMovieReleaseDate(null, null, usMovie.toString(), null, 3))),
+                                new TmdbRegionReleaseDates("BR", List.of(
+                                        new TmdbMovieReleaseDate(null, null, futureMovie.toString(), null, 3))))))));
+        when(tmdbClient.getTvFullDetails(eq("1396"), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(tvDetails("1396", futureSeries.toString())));
+        when(tmdbClient.getTvFullDetails(eq("9999"), any()))
+                .thenReturn(new TmdbLookupResult.Found<>(tvDetails("9999", today.toString())));
+
+        persistEntry(entity, persistContent("550", ContentType.MOVIE), ContentType.MOVIE, 1);
+        persistEntry(entity, persistContent("1396", ContentType.SERIES), ContentType.SERIES, 2);
+        persistEntry(entity, persistContent("9999", ContentType.SERIES), ContentType.SERIES, 3);
+        persistEntry(entity, persistContent("680", ContentType.MOVIE), ContentType.MOVIE, 4);
+
+        mockMvc.perform(getWatchlistRequest(user, user.id(), null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].releaseDate").value(futureMovie.toString()))
+                .andExpect(jsonPath("$.content[1].releaseDate").value(futureSeries.toString()))
+                .andExpect(jsonPath("$.content[2].releaseDate").value(today.toString()))
+                .andExpect(jsonPath("$.content[3].releaseDate").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.upcomingCount").value(1));
+    }
+
+    private TmdbTvFullDetails tvDetails(String id, String firstAirDate) {
+        return new TmdbTvFullDetails(
+                id, null, null, null, null, null, firstAirDate, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Test
@@ -310,7 +389,9 @@ class WatchlistEntryControllerIntegrationTest {
     void shouldReturnBadRequestWithConsistentBodyWhenTypeIsNotAValidEnumValue() throws Exception {
         RegisteredUser user = registerUser("getwatchlistinvalidenum");
 
-        mockMvc.perform(get("/users/" + user.id() + "/watchlist/NOT_A_TYPE").cookie(user.accessToken()))
+        mockMvc.perform(get("/users/" + user.id() + "/watchlist")
+                        .param("type", "NOT_A_TYPE")
+                        .cookie(user.accessToken()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").exists())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values: MOVIE, SERIES")))
@@ -323,7 +404,7 @@ class WatchlistEntryControllerIntegrationTest {
     void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForGet() throws Exception {
         RegisteredUser user = registerUser("getwatchlistnoauth");
 
-        mockMvc.perform(get("/users/" + user.id() + "/watchlist/MOVIE"))
+        mockMvc.perform(get("/users/" + user.id() + "/watchlist").param("type", "MOVIE"))
                 .andExpect(status().isUnauthorized());
     }
 

@@ -51,6 +51,22 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
             return mapFailure(detailsLookup);
         }
 
+        TmdbMovieReleaseDates embeddedReleaseDates = details.value().releaseDates();
+        if (embeddedReleaseDates != null) {
+            return new ContentScheduleLookup.Found(
+                    new ContentSchedule(
+                            ContentScheduleKey.movie(tmdbId),
+                            CalendarMovieReleaseDateSelector.select(embeddedReleaseDates, region).orElse(null),
+                            details.value().status(),
+                            List.of(),
+                            true,
+                            false,
+                            nonBlankOr(details.value().title(), tmdbId),
+                            details.value().posterPath(),
+                            Map.of()),
+                    details.origin());
+        }
+
         TmdbLookupResult<TmdbMovieReleaseDates> releaseLookup = tmdbClient.getMovieReleaseDates(tmdbId, language);
         if (releaseLookup instanceof TmdbLookupResult.Found<TmdbMovieReleaseDates> found) {
             return new ContentScheduleLookup.Found(
@@ -64,7 +80,7 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
                             nonBlankOr(details.value().title(), tmdbId),
                             details.value().posterPath(),
                             Map.of()),
-                    found.origin());
+                    details.origin());
         }
         return new ContentScheduleLookup.Found(
                 new ContentSchedule(

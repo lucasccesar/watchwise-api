@@ -110,7 +110,7 @@ class WatchlistEntryRepositoryTest {
     @DisplayName("[findByUserIdAndTypeOrderByPositionAsc] Should Not Include Entries Of A Different Type - When Filtering")
     void shouldNotIncludeEntriesOfADifferentTypeWhenFiltering() {
         watchlistEntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
-        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 1));
+        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 2));
         entityManager.clear();
 
         List<WatchlistEntry> result = watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(lucas.getId(), ContentType.MOVIE);
@@ -135,7 +135,7 @@ class WatchlistEntryRepositoryTest {
     void shouldReturnRequestedPageOrderedByPositionWhenPaginated() {
         watchlistEntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
         watchlistEntryRepository.save(buildEntry(lucas, pulpFiction, ContentType.MOVIE, 2));
-        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 1));
+        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 3));
         entityManager.clear();
 
         Page<WatchlistEntry> firstPage = watchlistEntryRepository
@@ -149,8 +149,8 @@ class WatchlistEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[save] Should Throw DataIntegrityViolationException - When Position Is Already Taken For That User And Type")
-    void shouldThrowDataIntegrityViolationExceptionWhenPositionIsAlreadyTakenForThatUserAndType() {
+    @DisplayName("[save] Should Throw DataIntegrityViolationException - When Position Is Already Taken For That User")
+    void shouldThrowDataIntegrityViolationExceptionWhenPositionIsAlreadyTakenForThatUser() {
         watchlistEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
         entityManager.clear();
 
@@ -191,14 +191,29 @@ class WatchlistEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[save] Should Allow Same Position For Different Types - When Same User")
-    void shouldAllowSamePositionForDifferentTypesWhenSameUser() {
+    @DisplayName("[save] Should Reject Same Position For Different Types - When Same User")
+    void shouldRejectSamePositionForDifferentTypesWhenSameUser() {
         watchlistEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
         entityManager.clear();
 
-        WatchlistEntry saved = watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 1));
+        assertThatThrownBy(() -> watchlistEntryRepository.saveAndFlush(
+                buildEntry(lucas, breakingBad, ContentType.SERIES, 1)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
 
-        assertThat(saved.getId()).isNotNull();
+    @Test
+    @DisplayName("[findByUserIdOrderByPositionAsc] Should Return Movie And Series In One Global Order")
+    void shouldReturnMovieAndSeriesInOneGlobalOrder() {
+        watchlistEntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
+        watchlistEntryRepository.save(buildEntry(lucas, breakingBad, ContentType.SERIES, 2));
+        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, pulpFiction, ContentType.MOVIE, 3));
+        entityManager.clear();
+
+        List<WatchlistEntry> result = watchlistEntryRepository.findByUserIdOrderByPositionAsc(lucas.getId());
+
+        assertThat(result).extracting(WatchlistEntry::getPosition).containsExactly(1, 2, 3);
+        assertThat(result).extracting(WatchlistEntry::getType)
+                .containsExactly(ContentType.MOVIE, ContentType.SERIES, ContentType.MOVIE);
     }
 
     @Test
@@ -278,7 +293,7 @@ class WatchlistEntryRepositoryTest {
         Content watchlistedEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
         Content inProgressOnlyEpisode = contentRepository.save(buildEpisode("119051", 1, 1));
         watchlistEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
-        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 1));
+        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, breakingBad, ContentType.SERIES, 2));
         watchlistEntryRepository.saveAndFlush(buildEntry(marina, breakingBad, ContentType.SERIES, 1));
         diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, watchlistedEpisode));
         diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, inProgressOnlyEpisode));

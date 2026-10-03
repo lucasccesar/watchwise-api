@@ -500,7 +500,7 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Request Credits Watch Providers And Alternative Titles Appended - When Called")
     void shouldRequestCreditsWatchProvidersAndAlternativeTitlesAppendedWhenCalled() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "603", "title": "The Matrix", "release_date": "1999-03-31", "runtime": 136}
                         """, MediaType.APPLICATION_JSON));
@@ -516,10 +516,10 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Return Unavailable - When TMDB Fails Twice In A Row")
     void shouldReturnUnavailableWhenMovieFullDetailsFailsTwiceInARow() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withServerError());
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withServerError());
 
         TmdbLookupResult<TmdbMovieFullDetails> result = tmdbClient.getMovieFullDetails("603", "en-US");
@@ -532,7 +532,7 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Return NotFound Without Retrying - When TMDB Responds With 404")
     void shouldReturnNotFoundWithoutRetryingWhenMovieFullDetailsRespondsWith404() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/999999999?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/999999999?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
                         .body("{\"status_message\": \"The resource you requested could not be found.\"}"));
 
@@ -595,7 +595,7 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Append External IDs - When Called")
     void shouldAppendExternalIdsWhenMovieFullDetailsCalled() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id":"603","external_ids":{"imdb_id":"tt0133093"}}
                         """, MediaType.APPLICATION_JSON));
@@ -739,7 +739,7 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Request Videos Appended - When Called")
     void shouldRequestVideosAppendedWhenMovieFullDetailsCalled() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "603", "title": "The Matrix"}
                         """, MediaType.APPLICATION_JSON));
@@ -753,7 +753,7 @@ class TmdbClientTest {
     @DisplayName("[getMovieFullDetails] Should Parse Budget Revenue Production Companies Crew And Videos - When TMDB Responds")
     void shouldParseBudgetRevenueProductionCompaniesCrewAndVideosWhenMovieFullDetailsResponds() {
         mockServer.expect(requestTo(
-                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids&language=en-US"))
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": "603", "title": "The Matrix", "budget": 63000000, "revenue": 463500000,
                          "production_companies": [{"id": 79, "name": "Village Roadshow Pictures", "logo_path": "/village.png", "origin_country": "US"}],

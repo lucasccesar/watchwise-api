@@ -241,7 +241,7 @@ public class TmdbClient {
         return cachedLookup(tmdbMovieFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/movie/{id}")
-                                .queryParam("append_to_response", "credits,watch/providers,alternative_titles,videos,external_ids")
+                                .queryParam("append_to_response", "credits,watch/providers,alternative_titles,videos,external_ids,release_dates")
                                 .queryParam("language", language)
                                 .build(tmdbId))
                         .retrieve()

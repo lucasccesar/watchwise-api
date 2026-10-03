@@ -1,16 +1,15 @@
 package com.watchwise.watchwise_api.watchlist.controller;
 
-import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistPageResponseDTO;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -32,15 +31,16 @@ public class WatchlistEntryController {
     @Value("${app.rate-limit.watchlist-action.window-minutes}")
     private long watchlistActionWindowMinutes;
 
-    @GetMapping("/{userId}/watchlist/{type}")
-    public ResponseEntity<PageResponseDTO<WatchlistEntryResponseDTO>> getWatchlist(
+    @GetMapping("/{userId}/watchlist")
+    public ResponseEntity<WatchlistPageResponseDTO> getWatchlist(
             @PathVariable UUID userId,
-            @PathVariable MovieOrSeriesType type,
+            @RequestParam(required = false) MovieOrSeriesType type,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
-        Page<WatchlistEntryResponseDTO> entries = watchlistEntryService.getWatchlist(getCurrentUserId(), userId, type.toContentType(), page, size);
-        return ResponseEntity.ok(PageResponseDTO.of(entries));
+        WatchlistPageResponseDTO entries = watchlistEntryService.getWatchlist(
+                getCurrentUserId(), userId, type == null ? null : type.toContentType(), page, size);
+        return ResponseEntity.ok(entries);
     }
 
     @PostMapping("/me/watchlist/{type}")

@@ -19,7 +19,22 @@ public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, 
 
     long countByUserIdAndType(UUID userId, ContentType type);
 
-    List<WatchlistEntry> findByUserIdAndTypeOrderByPositionAsc(UUID userId, ContentType type);
+    long countByUserId(UUID userId);
+
+    @Query("""
+            SELECT w FROM WatchlistEntry w JOIN FETCH w.content
+            WHERE w.user.id = :userId
+            ORDER BY w.position ASC
+            """)
+    List<WatchlistEntry> findByUserIdOrderByPositionAsc(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT w FROM WatchlistEntry w JOIN FETCH w.content
+            WHERE w.user.id = :userId AND w.type = :type
+            ORDER BY w.position ASC
+            """)
+    List<WatchlistEntry> findByUserIdAndTypeOrderByPositionAsc(
+            @Param("userId") UUID userId, @Param("type") ContentType type);
 
     @Query("""
             SELECT w FROM WatchlistEntry w JOIN FETCH w.content
@@ -29,26 +44,34 @@ public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, 
     Page<WatchlistEntry> findByUserIdAndTypeOrderByPositionAsc(
             @Param("userId") UUID userId, @Param("type") ContentType type, Pageable pageable);
 
+    @Query("""
+            SELECT w FROM WatchlistEntry w JOIN FETCH w.content
+            WHERE w.user.id = :userId
+            ORDER BY w.position ASC
+            """)
+    Page<WatchlistEntry> findByUserIdOrderByPositionAsc(
+            @Param("userId") UUID userId, Pageable pageable);
+
     Optional<WatchlistEntry> findByUserIdAndTypeAndContentId(UUID userId, ContentType type, UUID contentId);
 
     @Modifying
     @Query("""
             UPDATE WatchlistEntry w SET w.position = w.position + :offset
-            WHERE w.user.id = :userId AND w.type = :type
+            WHERE w.user.id = :userId
             AND w.position >= :rangeStart AND w.position <= :rangeEnd
             """)
     void parkPositionsInRange(
-            @Param("userId") UUID userId, @Param("type") ContentType type,
+            @Param("userId") UUID userId,
             @Param("rangeStart") int rangeStart, @Param("rangeEnd") int rangeEnd, @Param("offset") int offset);
 
     @Modifying
     @Query("""
             UPDATE WatchlistEntry w SET w.position = w.position - :offset + :delta
-            WHERE w.user.id = :userId AND w.type = :type
+            WHERE w.user.id = :userId
             AND w.position > :offset
             """)
     void settleParkedPositions(
-            @Param("userId") UUID userId, @Param("type") ContentType type,
+            @Param("userId") UUID userId,
             @Param("offset") int offset, @Param("delta") int delta);
 
     // --- Content tracking job (daily TMDB change detection) ---
