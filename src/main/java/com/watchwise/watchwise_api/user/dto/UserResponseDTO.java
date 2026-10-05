@@ -9,6 +9,7 @@ import java.util.UUID;
 public record UserResponseDTO(
         UUID id,
         String username,
+        String name,
         String email,
         String description,
         String profilePicture,
@@ -30,7 +31,7 @@ public record UserResponseDTO(
 ) {
     public UserResponseDTO(UUID id, String username, String email, String description, String profilePicture,
             Boolean isProfilePublic, LocalDateTime createdAt, LocalDateTime updatedAt) {
-        this(id, username, email, description, profilePicture, isProfilePublic, createdAt, updatedAt,
+        this(id, username, username, email, description, profilePicture, isProfilePublic, createdAt, updatedAt,
                 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), null, 0L, 0L, null, null);
     }
 }

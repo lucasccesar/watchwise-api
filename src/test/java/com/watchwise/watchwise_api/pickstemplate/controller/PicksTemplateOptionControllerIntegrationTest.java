@@ -103,7 +103,7 @@ class PicksTemplateOptionControllerIntegrationTest {
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                         .content("""
                                 {"username":"%s","email":"%s@email.com","password":"Password123"}
-                                """.formatted(username, username)))
+                                """.formatted(username, username, username)))
                 .andExpect(status().isCreated())
                 .andReturn();
         Cookie accessToken = result.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);

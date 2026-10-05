@@ -18,19 +18,23 @@ import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepositor
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.feed.service.FeedService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapItemDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.HomeRecentlyWatchedDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
 import com.watchwise.watchwise_api.summary.dto.SeriesInProgressPreviewDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
@@ -51,6 +55,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -115,6 +120,15 @@ class SummaryServiceImplTest {
     @Mock
     private UserContentPosterService userContentPosterService;
 
+    @Mock
+    private NotificationRepository notificationRepository;
+
+    @Mock
+    private FeedService feedService;
+
+    @Mock
+    private HomeNextEpisodeAssembler homeNextEpisodeAssembler;
+
     @InjectMocks
     private SummaryServiceImpl summaryService;
 
@@ -136,12 +150,21 @@ class SummaryServiceImplTest {
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.findSeriesInProgressByUserId(any(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
+        lenient().when(diaryEntryService.getSeriesInProgress(any(), any(), any(), any()))
+                .thenReturn(Page.empty());
         lenient().when(diaryEntryRepository.countByUserIdAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countEpisodeEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(any(), any(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countDistinctMoviesByUserId(any())).thenReturn(0L);
+        lenient().when(notificationRepository.existsByUserIdAndIsReadFalse(any())).thenReturn(false);
+        lenient().when(feedService.getFeed(any(), any(), any()))
+                .thenReturn(new CursorPageResponseDTO<>(List.of(), 3, null, false));
+        lenient().when(homeNextEpisodeAssembler.assemble(any(), any())).thenReturn(List.of());
         lenient().when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(any(), any()))
                 .thenReturn(List.of());
         lenient().when(diaryEntryMapper.diaryEntryToResponseDto(any(), anyBoolean()))
@@ -392,16 +415,21 @@ class SummaryServiceImplTest {
         when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(6000L);
         when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(3000L);
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(42L);
+        when(diaryEntryRepository.countDistinctMoviesByUserId(lucasId)).thenReturn(40L);
         when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(128L);
-        DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
+        SeriesInProgressResponseDTO row = new SeriesInProgressResponseDTO(
+                "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, 12, 25.0);
+        when(diaryEntryService.getSeriesInProgress(eq(lucasId), eq(lucasId), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(row)));
+        when(homeNextEpisodeAssembler.assemble(eq(lucas), any()))
+                .thenReturn(List.of(new SeriesInProgressPreviewDTO(
+                        "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, 12, 25.0)));
         when(diaryEntryRepository.countByUserIdAndWatchedDateBetween(eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
                 .thenReturn(List.of(dailyWatchCount(LocalDate.of(2024, 5, 1), 3)));
         when(diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(
                 eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
                 .thenReturn(List.of(genreCount("Action", 2)));
-        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(
+        when(diaryEntryRepository.countEpisodeEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(
                 eq(lucasId), any(LocalDate.class), any(LocalDate.class)))
                 .thenReturn(List.of(genreCount("Drama", 5)));
 
@@ -410,13 +438,14 @@ class SummaryServiceImplTest {
         assertThat(result.totalMinutesWatchedMovies()).isEqualTo(6000L);
         assertThat(result.totalMinutesWatchedEpisodes()).isEqualTo(3000L);
         assertThat(result.totalMoviesWatched()).isEqualTo(42L);
+        assertThat(result.totalDistinctMoviesWatched()).isEqualTo(40L);
         assertThat(result.totalEpisodesWatched()).isEqualTo(128L);
         assertThat(result.nextEpisodes()).containsExactly(new SeriesInProgressPreviewDTO(
-                "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, null, null));
-        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class));
+                "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, 12, 25.0));
+        verify(diaryEntryService).getSeriesInProgress(eq(lucasId), eq(lucasId), eq(1), eq(4));
         assertThat(result.watchCountByDayLast30Days()).containsExactly(new DailyWatchCountDTO(LocalDate.of(2024, 5, 1), 3));
         assertThat(result.genreCountsMoviesLast30Days()).containsExactly(new GenreCountDTO("Action", 2));
-        assertThat(result.genreCountsSeriesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));
+        assertThat(result.genreCountsEpisodesLast30Days()).containsExactly(new GenreCountDTO("Drama", 5));
     }
 
     @Test
@@ -435,16 +464,9 @@ class SummaryServiceImplTest {
                 .thenReturn(List.of(oldestMovie, newestMovie));
         when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.EPISODE), any()))
                 .thenReturn(List.of(oldestEpisode, newestEpisode));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
-                .thenAnswer(invocation -> {
-                    DiaryEntry entry = invocation.getArgument(0);
-                    return new DiaryEntryResponseDTO(entry.getId(), lucasId, null, null, null, null, 1, null, null, false, false,
-                            entry.getCreatedAt(), entry.getCreatedAt(), 0, false);
-                });
-
         HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
 
-        assertThat(result.recentlyWatched()).extracting(DiaryEntryResponseDTO::id)
+        assertThat(result.recentlyWatched()).extracting(HomeRecentlyWatchedDTO::id)
                 .containsExactly(newestEpisode.getId(), newestMovie.getId(), oldestEpisode.getId(), oldestMovie.getId());
     }
 
@@ -461,8 +483,6 @@ class SummaryServiceImplTest {
                 eq(lucasId), eq(ContentType.MOVIE), any())).thenReturn(List.of(movieEntry));
         when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
                 eq(lucasId), eq(ContentType.EPISODE), any())).thenReturn(List.of(episodeEntry));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), eq(false)))
-                .thenAnswer(invocation -> buildDiaryEntryResponseDto(invocation.getArgument(0)));
         when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any()))
                 .thenReturn(Map.of(
                         movieContent.getId(), "https://image.tmdb.org/t/p/w342/lucas-movie.png",
@@ -470,7 +490,7 @@ class SummaryServiceImplTest {
 
         HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
 
-        assertThat(result.recentlyWatched()).extracting(DiaryEntryResponseDTO::customPosterUrl)
+        assertThat(result.recentlyWatched()).extracting(HomeRecentlyWatchedDTO::customPosterUrl)
                 .containsExactly(
                         "https://image.tmdb.org/t/p/w342/lucas-episode.png",
                         "https://image.tmdb.org/t/p/w342/lucas-movie.png");

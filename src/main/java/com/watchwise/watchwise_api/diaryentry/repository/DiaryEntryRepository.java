@@ -628,6 +628,23 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     long countByUserIdAndContentType(@Param("userId") UUID userId, @Param("contentType") ContentType contentType);
 
     @Query("""
+            SELECT COUNT(DISTINCT d.content.tmdbId) FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
+            """)
+    long countDistinctMoviesByUserId(@Param("userId") UUID userId);
+
+    @Query("""
+            SELECT COUNT(DISTINCT CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                    THEN d.content.tmdbId ELSE d.content.seriesTmdbId END)
+            FROM DiaryEntry d
+            WHERE d.user.id = :userId
+            AND d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.SERIES,
+                                   com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
+            """)
+    long countDistinctSeriesByUserId(@Param("userId") UUID userId);
+
+    @Query("""
             SELECT MIN(d.watchedDate) FROM DiaryEntry d
             WHERE d.user.id = :userId
             AND d.content.type = :contentType
@@ -805,6 +822,21 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             ORDER BY count DESC
             """, nativeQuery = true)
     List<GenreCount> countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(
+            @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query(value = """
+            SELECT genre AS genre, COUNT(d.id) AS count
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(sc.genres) AS genre
+            WHERE d.user_id = :userId
+            AND c.type = 'EPISODE'
+            AND d.watched_date BETWEEN :start AND :end
+            GROUP BY genre
+            ORDER BY count DESC
+            """, nativeQuery = true)
+    List<GenreCount> countEpisodeEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(
             @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);
 
     @Query("""

@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.user.dto;
 
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -8,6 +9,7 @@ import org.hibernate.validator.constraints.URL;
 
 public record PostUserDTO(
         @Size(max=60, min = 3) @NotEmpty String username,
+        @Size(max=120) @NotBlank String name,
         @Size(max=60, min=11) @NotEmpty @Email String email,
         @Size(max=255, min=8)
         @NotEmpty
@@ -23,6 +25,11 @@ public record PostUserDTO(
 ) {
     public PostUserDTO(String username, String email, String password, String description,
             String profilePicture, Boolean isProfilePublic) {
-        this(username, email, password, description, profilePicture, isProfilePublic, null);
+        this(username, username, email, password, description, profilePicture, isProfilePublic, null);
+    }
+
+    public PostUserDTO(String username, String name, String email, String password, String description,
+            String profilePicture, Boolean isProfilePublic) {
+        this(username, name, email, password, description, profilePicture, isProfilePublic, null);
     }
 }

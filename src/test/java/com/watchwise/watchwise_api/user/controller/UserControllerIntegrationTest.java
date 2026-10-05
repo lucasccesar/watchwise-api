@@ -104,6 +104,21 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[register] Should Return BadRequest - When Display Name Is Missing")
+    void shouldReturnBadRequestWhenDisplayNameIsMissing() throws Exception {
+        mockMvc.perform(post("/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "username": "missingname",
+                                    "email": "missingname@email.com",
+                                    "password": "Password123"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("[getCurrentUser] Should Return UserResponseDTO - When Access Token Cookie Is Valid")
     void shouldReturnUserResponseDtoWhenAccessTokenCookieIsValid() throws Exception {
         Cookie accessTokenCookie = registerAndGetAccessToken("meuser", "meuser@email.com");
@@ -111,6 +126,7 @@ class UserControllerIntegrationTest {
         mockMvc.perform(get("/users/me").cookie(accessTokenCookie))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("meuser"))
+                .andExpect(jsonPath("$.name").value("meuser"))
                 .andExpect(jsonPath("$.email").value("meuser@email.com"));
     }
 
@@ -1042,6 +1058,7 @@ class UserControllerIntegrationTest {
         LocalDateTime now = LocalDateTime.now();
         return User.builder()
                 .username(username)
+                .name(username)
                 .email(email)
                 .password(passwordEncoder.encode("Password123"))
                 .isProfilePublic(true)
@@ -1093,11 +1110,12 @@ class UserControllerIntegrationTest {
         String body = """
                 {
                     "username": "%s",
+                    "name": "%s",
                     "email": "%s",
                     "password": "Password123",
                     "isProfilePublic": %s
                 }
-                """.formatted(username, email, isProfilePublic);
+                """.formatted(username, username, email, isProfilePublic);
 
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)

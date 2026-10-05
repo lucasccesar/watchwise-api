@@ -100,10 +100,11 @@ class TrendingControllerIntegrationTest {
         String body = """
                 {
                     "username": "%s",
+                    "name": "%s","username": "%s",
                     "email": "%s@email.com",
                     "password": "Password123"
                 }
-                """.formatted(username, username);
+                """.formatted(username, username, username);
 
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)

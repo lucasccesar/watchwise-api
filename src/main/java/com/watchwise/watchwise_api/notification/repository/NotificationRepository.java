@@ -21,6 +21,8 @@ import java.util.UUID;
 
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
 
+    boolean existsByUserIdAndIsReadFalse(UUID userId);
+
     @EntityGraph(attributePaths = {"content", "latestActor"})
     Page<Notification> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 

@@ -6,9 +6,14 @@ import java.util.UUID;
 public record PublicUserDTO(
         UUID id,
         String username,
+        String name,
         String description,
         String profilePicture,
         Boolean isProfilePublic,
         LocalDateTime createdAt
 ) {
+    public PublicUserDTO(UUID id, String username, String description, String profilePicture,
+            Boolean isProfilePublic, LocalDateTime createdAt) {
+        this(id, username, username, description, profilePicture, isProfilePublic, createdAt);
+    }
 }

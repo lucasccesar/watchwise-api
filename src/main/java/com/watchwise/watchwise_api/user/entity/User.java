@@ -29,6 +29,10 @@ public class User {
     @Setter
     private String username;
 
+    @Column(length = 120, nullable = false)
+    @Setter
+    private String name;
+
     @Column(length = 60, nullable = false, unique = true)
     @Setter
     private String email;

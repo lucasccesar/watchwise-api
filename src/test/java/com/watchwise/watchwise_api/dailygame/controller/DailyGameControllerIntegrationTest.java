@@ -519,10 +519,11 @@ class DailyGameControllerIntegrationTest {
                 .content("""
                         {
                             "username": "%s",
+                            "name": "%s","username": "%s",
                             "email": "%s@email.com",
                             "password": "Password123"
                         }
-                        """.formatted(username, username));
+                        """.formatted(username, username, username));
     }
 
     private MockHttpServletRequestBuilder attemptRequest(

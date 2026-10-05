@@ -143,11 +143,12 @@ class WatchlistEntryControllerIntegrationTest {
         String body = """
                 {
                     "username": "%s",
+                    "name": "%s","username": "%s",
                     "email": "%s@email.com",
                     "password": "Password123",
                     "isProfilePublic": %s
                 }
-                """.formatted(username, username, isProfilePublic);
+                """.formatted(username, username, username, isProfilePublic);
 
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)

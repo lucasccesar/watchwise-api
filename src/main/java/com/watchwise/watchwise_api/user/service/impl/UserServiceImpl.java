@@ -70,11 +70,14 @@ public class UserServiceImpl implements UserService {
 
         String trimmedUsername = postUserDTO.username().trim();
         validateUsernameLength(trimmedUsername);
+        String trimmedName = postUserDTO.name() == null ? null : postUserDTO.name().trim();
+        validateName(trimmedName);
 
         User mapperUser = userMapper.postUserDtoToUser(postUserDTO);
         mapperUser.setPassword(passwordEncoder.encode(postUserDTO.password()));
         mapperUser.setEmail(postUserDTO.email().toLowerCase().trim());
         mapperUser.setUsername(trimmedUsername);
+        mapperUser.setName(trimmedName);
         mapperUser.setIsEmailVerified(true);
 
         LocalDateTime now = LocalDateTime.now();
@@ -143,6 +146,14 @@ public class UserServiceImpl implements UserService {
             validateUsernameLength(newUsername);
             if (!newUsername.equals(user.getUsername())) {
                 user.setUsername(newUsername);
+            }
+        }
+
+        if (patchUserDTO.name() != null) {
+            String newName = patchUserDTO.name().trim();
+            validateName(newName);
+            if (!newName.equals(user.getName())) {
+                user.setName(newName);
             }
         }
 
@@ -254,6 +265,12 @@ public class UserServiceImpl implements UserService {
                 stats.totalMinutesWatchedEpisodes(), stats.minutesWatchedMoviesLast30Days(),
                 stats.minutesWatchedEpisodesLast30Days(), stats.totalTheaterVisits(), stats.genreCountsMovies(),
                 stats.genreCountsSeries(), stats.followersCount(), stats.followingCount());
+    }
+
+    private void validateName(String trimmedName) {
+        if (trimmedName == null || trimmedName.isEmpty()) {
+            throw new BadRequestException("Name must be provided");
+        }
     }
 
     @Override

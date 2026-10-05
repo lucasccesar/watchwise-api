@@ -619,10 +619,11 @@ class ContentControllerIntegrationTest {
         String body = """
                 {
                     "username": "%s",
+                    "name": "%s","username": "%s",
                     "email": "%s",
                     "password": "Password123"
                 }
-                """.formatted(username, email);
+                """.formatted(username, username, email);
 
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)

@@ -9,6 +9,7 @@ import java.util.UUID;
 public record PublicUserProfileDTO(
         UUID id,
         String username,
+        String name,
         String description,
         String profilePicture,
         Boolean isProfilePublic,
@@ -24,4 +25,14 @@ public record PublicUserProfileDTO(
         long followersCount,
         long followingCount
 ) {
+    public PublicUserProfileDTO(UUID id, String username, String description, String profilePicture,
+            Boolean isProfilePublic, LocalDateTime createdAt, long totalMinutesWatchedMovies,
+            long totalMinutesWatchedEpisodes, long minutesWatchedMoviesLast30Days,
+            long minutesWatchedEpisodesLast30Days, long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies,
+            List<GenreCountDTO> genreCountsSeries, String banner, long followersCount, long followingCount) {
+        this(id, username, username, description, profilePicture, isProfilePublic, createdAt,
+                totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, minutesWatchedMoviesLast30Days,
+                minutesWatchedEpisodesLast30Days, totalTheaterVisits, genreCountsMovies, genreCountsSeries,
+                banner, followersCount, followingCount);
+    }
 }

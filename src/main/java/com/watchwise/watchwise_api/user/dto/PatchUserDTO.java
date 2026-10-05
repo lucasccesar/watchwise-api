@@ -8,6 +8,7 @@ import org.hibernate.validator.constraints.URL;
 
 public record PatchUserDTO(
         @Size(max=60, min = 3) String username,
+        @Size(max=120) String name,
         @Size(max=60, min=11) @Email String email,
         @Size(max=255, min=8)
         @Pattern(
@@ -26,12 +27,19 @@ public record PatchUserDTO(
         String preferredRegion
 ) {
     public PatchUserDTO(String username, String email, String password, String description,
+            String profilePicture, Boolean isProfilePublic, String currentPassword, String banner,
+            String preferredLanguage, String preferredRegion) {
+        this(username, null, email, password, description, profilePicture, isProfilePublic, currentPassword,
+                banner, preferredLanguage, preferredRegion);
+    }
+
+    public PatchUserDTO(String username, String email, String password, String description,
             String profilePicture, Boolean isProfilePublic, String currentPassword) {
-        this(username, email, password, description, profilePicture, isProfilePublic, currentPassword, null, null, null);
+        this(username, null, email, password, description, profilePicture, isProfilePublic, currentPassword, null, null, null);
     }
 
     public PatchUserDTO(String username, String email, String password, String description,
             String profilePicture, Boolean isProfilePublic, String currentPassword, String banner) {
-        this(username, email, password, description, profilePicture, isProfilePublic, currentPassword, banner, null, null);
+        this(username, null, email, password, description, profilePicture, isProfilePublic, currentPassword, banner, null, null);
     }
 }

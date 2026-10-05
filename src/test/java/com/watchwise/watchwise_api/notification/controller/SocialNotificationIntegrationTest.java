@@ -219,10 +219,11 @@ class SocialNotificationIntegrationTest {
         String body = """
                 {
                     "username": "%s",
+                    "name": "%s","username": "%s",
                     "email": "%s@email.com",
                     "password": "Password123"
                 }
-                """.formatted(username, username);
+                """.formatted(username, username, username);
 
         MvcResult result = mockMvc.perform(post("/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
