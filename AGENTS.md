@@ -42,7 +42,7 @@ The logical model and dev-stages doc use Portuguese entity names; all Java code 
 | LISTA         | `UserList`       | user-created custom list; avoid bare `List` — collides with `java.util.List` |
 | ITEM_LISTA    | `UserListItem`   | belongs to a `UserList` |
 | LOG           | `DiaryEntry`     | maps to `/diary` endpoints; logging, rating, and reviewing a `Content` are a single action — `score` and `comment` are optional fields inline on `DiaryEntry` itself, no separate `Rating` entity |
-| CURTIDA       | `Like`           | targets exactly one of a `Comment`, a `DiaryEntry`, or a `UserList` (never a list-of-lists — same lock as `Comment`) |
+| CURTIDA       | `Like`           | targets exactly one of a `Comment`, a `DiaryEntry`, or a `UserList` |
 | SEGUIDOR      | `Follower`       | user-follows-user |
 | SEGUE_PESSOA  | `FollowedPerson` | user follows a TMDB person (actor/director), not a `User` |
 | TOP5          | `Top5Entry`      | |

@@ -28,7 +28,7 @@ lógico original. O diagrama visual equivalente está em [`database-schema.html`
 | `followers` (`SEGUIDOR`) | Chave composta de seguidor/seguido, status e `created_at`. |
 | `followed_people` (`SEGUE_PESSOA`) | Usuário + `person_tmdb_id`, com unicidade por usuário/pessoa. |
 | `top5_entries` (`TOP5`) | Usuário, conteúdo, tipo e posição; unicidade por tipo/posição e tipo/conteúdo. |
-| `watchlist_entries` (`WATCHLIST`) | Usuário, conteúdo, tipo e posição; sem limite de itens, mas com deslocamento ordenado. |
+| `watchlist_entries` (`WATCHLIST`) | Usuário, conteúdo, tipo e posição global; sem limite de itens, com unicidade em `(user_id, position)` e deslocamento ordenado. |
 | `dropped_entries` (`DROPPED`) | Usuário, conteúdo, tipo, comentário opcional e contador de likes; unicidade por usuário/tipo/conteúdo. |
 | `diary_entries` (`LOG`) | Usuário, conteúdo, nota/review, data assistida, rewatch, flags de geração e likes. |
 | `user_lists` (`LISTA`) | Dono, nome, descrição, visibilidade e likes. |
@@ -46,11 +46,28 @@ lógico original. O diagrama visual equivalente está em [`database-schema.html`
 | `tracked_content_states` | Estado compartilhado de rastreamento de conteúdo e datas conhecidas. |
 | `tracked_person_states` | Estado compartilhado de rastreamento por `person_tmdb_id`. |
 | `tracked_person_credits` | Créditos observados por pessoa rastreada. |
+| `content_release_date_snapshots` | Data de lançamento materializada por `(tmdb_id, region)` para filmes e por `tmdb_id` para séries, com status e agenda de atualização. |
 | `series_progress_metadata` | Snapshot agregado compartilhado por série; detalhado abaixo. |
 | `series_progress_season_metadata` | Snapshot agregado compartilhado por série/temporada; detalhado abaixo. |
 | `daily_challenges` | Desafio diário global por data GMT e modalidade, com coordenadas TMDB e snapshots JSONB. |
 | `daily_challenge_hints` | Pistas ordenadas e congeladas de um desafio, com cascade na exclusão do desafio. |
 | `user_daily_game_results` | Estado agregado de tentativas e pontuação de um usuário em um desafio, com detalhes JSONB transitórios da data GMT atual. |
+
+### `content_release_date_snapshots`
+
+| Coluna | Tipo | Regra |
+| --- | --- | --- |
+| `id` | `UUID` | PK. |
+| `tmdb_id` | `VARCHAR(20)` | Identidade TMDB do filme ou série. |
+| `type` | `VARCHAR(6)` | `MOVIE` ou `SERIES`. |
+| `region` | `VARCHAR(2)` | Obrigatória para `MOVIE`; nula para `SERIES`. |
+| `release_date` | `DATE` | Nullable quando o TMDB não fornece uma data válida. |
+| `status` | `VARCHAR(11)` | `FOUND`, `NOT_FOUND` ou `UNAVAILABLE`. |
+| `last_checked_at` / `next_check_at` | `TIMESTAMP` | Última consulta e próxima tentativa de atualização. |
+
+`uq_content_release_date_snapshots_movie` garante uma linha por `(tmdb_id, region)` para filmes;
+`uq_content_release_date_snapshots_series` garante uma linha por `tmdb_id` para séries. O índice
+`idx_content_release_date_snapshots_due` apoia o job de refresh por `next_check_at`.
 
 ### `notifications` (`NOTIFICACAO`)
 

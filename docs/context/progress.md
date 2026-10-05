@@ -1,6 +1,6 @@
 # Progresso do projeto
 
-Última atualização: 2026-08-20.
+Última atualização: 2026-10-02.
 
 Este documento resume o que já foi construído no Watchwise API, em ordem cronológica por dia de
 desenvolvimento: o quê, por quê e como. Serve como retrato do estado atual do projeto — para a visão
@@ -4655,3 +4655,65 @@ Foi adicionado o endpoint autenticado `GET /lists/discover`, que retorna somente
 decrescente de curtidas, com limite efetivo de dez itens por pagina. A cobertura inclui testes focados de
 controller, servico e repositorio, alem de testes de integracao para visibilidade, ordenacao, limite,
 autenticacao e tamanho invalido.
+
+## 2026-10-04 — Interações sociais em listas-de-listas
+
+Os guards `assertListAcceptsComments` e `assertListAcceptsLikes` foram removidos: qualquer `UserList`
+visível, inclusive uma lista travada como lista-de-listas, pode receber comentários e likes diretos. A
+visibilidade da lista, a idempotência das curtidas, a exigência de replies no mesmo alvo, as notificações
+sociais e os contadores `commentsCount`/`likesCount` permanecem com o comportamento anterior.
+
+A regra anterior que excluía listas-de-listas foi substituída e continua preservada nas entradas históricas
+anteriores; o contrato atual em `openapi.yaml`, as regras de negócio e esta entrada descrevem a regra vigente.
+
+## 2026-10-02 — Trending do TMDB
+
+Foi adicionado o endpoint autenticado `GET /trending`, com as janelas `day` e `week`, tamanhos 12 e 21,
+rate limit por usuario e resposta agregada de filmes e series no formato de `SearchContentDTO`. O servico
+usa o idioma preferido do viewer, preserva a ordem do TMDB, mantem posters w500 e retorna `502` quando
+qualquer secao fica indisponivel. A validacao dos parametros ocorre antes do rate limit, que usa a chave
+`trending|<viewer UUID>` com 30 requisicoes por 5 minutos.
+
+Foram adicionados testes unitarios e de integracao para autenticacao, validacao, rate limit, resposta
+agregada e indisponibilidade do TMDB. A suite focada passou com 113 testes, e a suite Maven completa
+passou com 3.440 testes, 0 falhas e 0 erros, usando PostgreSQL via Testcontainers.
+## 2026-10-02 — Limite da busca local de listas
+
+A pesquisa de listas passou a usar 10 resultados por página nos dois caminhos: `type=LIST` e o array
+`lists` da busca agregada sem tipo. O parâmetro `size` permanece compatível, mas não altera o tamanho
+fixo das páginas de listas; visibilidade, ordenação e enriquecimento foram preservados.
+
+## 2026-10-02 — Paginação dos itens de UserList
+
+`GET /lists/{listId}` passou a aceitar `page` e `size` opcionais para os itens da lista, com semântica
+1-based na API, página padrão 1 e tamanho padrão 20. Os filtros de tipo/gênero e a ordenação são aplicados
+ao conjunto completo antes do recorte da página. O `itemScope` é resolvido a partir da lista completa e
+define o teto de `size`: 24 para `EPISODE` e 30 para todos os demais escopos; valores acima do teto são
+limitados.
+
+A resposta detalhada ganhou `itemsPage`, `itemsSize`, `itemsTotalElements`, `itemsTotalPages` e
+`itemsHasNext`. `itemsCount` e os demais agregados da lista continuam refletindo o conjunto completo,
+sem serem recalculados somente com os itens da página.
+
+## 2026-10-03 — Verificação final da watchlist
+
+A resolução síncrona de snapshots ausentes passou a submeter no máximo quatro tarefas por lote, mantendo
+a concorrência limitada e evitando o crescimento ilimitado da fila quando uma watchlist contém muitas
+séries. A suíte completa foi revalidada com PostgreSQL via Testcontainers após a correção.
+
+## 2026-10-02 — Watchlist global e snapshots de lançamento
+
+`GET /users/{userId}/watchlist` passou a aceitar `type` opcional, misturando filmes e séries na ordem
+global de `position`; o filtro por tipo preserva as posições originais. A resposta ganhou
+`upcomingCount` e `releaseDate` contextual à região do dono para filmes e à `first_air_date` para
+séries. O GET resolve filmes somente para a página e todas as séries do filtro para manter a
+contagem global exata, reutiliza snapshots frescos, serve snapshots vencidos enquanto agenda refresh
+assíncrono e retorna `502` quando não consegue preencher um snapshot ausente.
+
+As posições foram migradas para unicidade global por usuário, com reindexação histórica por criação,
+lock transacional nas mutações e deslocamento em massa atravessando filmes e séries. A inclusão faz
+write-through das datas e um job periódico atualiza snapshots vencidos com lease condicional no banco,
+backoff de 60 minutos em falhas e no máximo quatro resoluções síncronas simultâneas. Datas ausentes
+ou inválidas ficam nulas e fora da contagem de séries futuras. A cobertura unitária de watchlist e snapshots passou;
+as integrações PostgreSQL/Testcontainers foram compiladas, mas não executadas neste workspace porque o
+Docker não está disponível.

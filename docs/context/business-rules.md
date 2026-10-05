@@ -697,21 +697,21 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 
 ## WatchlistEntry
 
-- **`type` só aceita `MOVIE` ou `SERIES`** — mesmas duas camadas de defesa do Top5Entry: `@PathVariable
-  MovieOrSeriesType` nos endpoints (erro de binding já correto, sem `SEASON`/`EPISODE` na lista de
-  valores aceitos) mais `WatchlistEntryServiceImpl.validateType` como segunda camada pra chamadas
-  diretas ao service.
+- **`type` só aceita `MOVIE` ou `SERIES`** — os endpoints de mutação usam `@PathVariable
+  MovieOrSeriesType`, o GET usa o mesmo enum como query parameter opcional, e o erro de binding já
+  rejeita `SEASON`/`EPISODE`; `WatchlistEntryServiceImpl.validateType` permanece como segunda camada
+  para chamadas diretas ao service.
 - **Sem teto de entradas** — diferente do Top5 (máximo 5), a watchlist não tem limite superior; a
   constraint `ck_watchlist_entries_position` só exige `position >= 1`, sem `BETWEEN`.
-- **Inserir sempre entra na última posição** (`WatchlistEntryServiceImpl.insertEntry`) — diferente do
-  Top5, o `POST` não aceita `position` no corpo; a entrada nova sempre recebe `count + 1`. Não existe
-  shift nem eviction no insert (não há o que deslocar, já que nada nunca entra no meio).
+- **Inserir sempre entra na última posição global** (`WatchlistEntryServiceImpl.insertEntry`) — diferente
+  do Top5, o `POST` não aceita `position` no corpo; a entrada nova sempre recebe `countByUserId + 1`,
+  contando filmes e séries juntos. Não existe shift nem eviction no insert.
 - **A única forma de uma entrada avançar na watchlist é reordenar explicitamente**
   (`WatchlistEntryServiceImpl.moveEntry`, `PATCH /users/me/watchlist/{type}/{watchlistEntryId}`) — move
-  a entrada para a `position` informada (deve estar entre `1` e o total de entradas atuais; pedir uma
-  posição além do total é rejeitado com `400`, já que "mover para o fim" não é uma operação válida
+  a entrada para a `position` informada (deve estar entre `1` e o total global de entradas atuais; pedir
+  uma posição além do total é rejeitado com `400`, já que "mover para o fim" não é uma operação válida
   aqui — pra isso, remove e insere de novo). Se `position` for igual à posição atual, não faz nada (não
-  salva nem desloca). Diferente do Top5, que não tem operação de mover.
+  salva nem desloca). O `type` da rota valida a entrada, mas não limita o intervalo deslocado.
 - **`moveEntry` usa uma posição temporária para nunca colidir com a constraint de posição única**
   (`WatchlistEntryServiceImpl.performMove`) — antes de deslocar qualquer entrada intermediária, a
   entrada sendo movida é salva numa posição temporária (`count + 1`, fora da faixa válida usada por
@@ -729,12 +729,32 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   posição real, viva ou ainda não processada dentro da mesma instrução, o resultado é correto
   independentemente da ordem interna em que o Postgres processa as linhas da instrução `UPDATE`
   (diferente de um `UPDATE ... SET position = position ± 1` direto sobre o intervalo, que pode disparar
-  `duplicate key` dependendo dessa ordem, já que a constraint `uq_watchlist_entries_user_id_type_position`
+  `duplicate key` dependendo dessa ordem, já que a constraint `uq_watchlist_entries_user_id_position`
   não é `DEFERRABLE`). Remover uma entrada fecha o buraco da mesma forma: as posições depois da removida
   são decrementadas em 1 (`removeEntry`), mesmo comportamento do Top5, só que via essa técnica em massa
   em vez de um loop.
 - **Mesmo conteúdo não pode entrar duas vezes na watchlist do mesmo tipo** (constraint
   `uq_watchlist_entries_user_id_type_content_id` → `409`).
+- **A posição é única globalmente por usuário, sem separar `type`** (constraint
+  `uq_watchlist_entries_user_id_position`, migration `V66__make-watchlist-position-global.sql`). A
+  migration reindexa as linhas existentes por `created_at ASC, id ASC`; inserção, remoção e movimento
+  usam `AdvisoryLock` com a chave `watchlist|<userId>` para preservar posições sem lacunas em chamadas
+  concorrentes. Remoções automáticas de Diary e Dropped passam pelo mesmo fechamento global.
+- **Datas de lançamento são snapshots compartilhados, não campos de `Content`**
+  (`ContentReleaseDateSnapshotServiceImpl` e `content_release_date_snapshots`) — filme usa a data
+  selecionada em `release_dates` pela `preferredRegion` do dono, série usa `first_air_date`, e data
+  ausente ou inválida permanece nula. O GET resolve os filmes somente da página, mas resolve todas
+  as séries do conjunto filtrado para que `upcomingCount` seja global e exato: snapshot ausente é
+  preenchido de forma síncrona e falha transitória vira `502`; snapshot vencido mantém a data anterior
+  e agenda refresh assíncrono com uma tarefa por chave. A tarefa reivindica o snapshot com lease
+  condicional no banco, evitando refresh duplicado entre instâncias; falhas também entram em backoff
+  de 60 minutos sem sobrescrever uma atualização concorrente bem-sucedida. A resolução síncrona de
+  snapshots ausentes usa no máximo quatro chamadas simultâneas ao TMDB e submete as resoluções em lotes
+  desse mesmo tamanho, evitando crescimento ilimitado da fila do executor. `upcomingCount` conta somente
+  séries com snapshot `FOUND` e data posterior ao dia atual, respeitando o filtro opcional.
+- **POST reutiliza snapshot fresco** (`ContentReleaseDateSnapshotServiceImpl.writeThrough`); só busca
+  o TMDB quando a chave ainda não existe ou o snapshot venceu. O job periódico tenta novamente snapshots
+  vencidos e, em falha, preserva a data/status anteriores e agenda uma nova tentativa.
 - **`removeEntryIfPresent` é a variante best-effort de `removeEntry`** (`WatchlistEntryServiceImpl`,
   ambos compartilham `deleteAndCloseGap`) — não lança `NotFoundException` quando não há entrada pra
   remover, e é resolvida por `userId`+`type`+`contentId` (não por id da entrada), já que quem chama
@@ -1486,8 +1506,9 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   sort em memória de `filterAndSortItems`) — os dois herdariam o mesmo bug silenciosamente se só a
   fábrica fosse corrigida.
 - **Filtro/ordenação de itens em `GET /lists/{listId}`** — aplicado inteiramente em memória sobre a
-  lista de itens já carregada (`UserListServiceImpl.filterAndSortItems`), já que essa rota nunca foi
-  paginada e a lista inteira é buscada de qualquer forma. `type` filtra por `content.type`; `genre`
+  lista de itens já carregada (`UserListServiceImpl.filterAndSortItems`), antes do recorte da página;
+  a lista inteira é buscada para que filtros, ordenação e agregados sejam resolvidos sobre o conjunto
+  completo. `type` filtra por `content.type`; `genre`
   filtra por `content.genres().contains(...)`; `sortBy` aceita `position` (default)/`dateAdded`
   (`createdAt` do item)/`duration` (`content.runtimeMinutes`, portanto a média persistida de `SERIES`,
   `0` quando ausente) — valor fora dessa
@@ -1495,6 +1516,15 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   não o resultado filtrado — são estatísticas do recurso, não da view atual. Ordenar por "alfabética"
   ou "data de lançamento" não é suportado — `Content` nunca guarda título nem data de lançamento
   (dados só existem no TMDB), então isso é sempre trabalho do cliente.
+- **Paginação dos itens de `GET /lists/{listId}`** (`UserListServiceImpl.getUserListById`) — `page` e
+  `size` são opcionais e usam semântica 1-based na API (`page` omitido = 1; `size` omitido = 20).
+  `page < 1` e `size < 1` retornam `400`; `size` acima do teto é limitado. O `itemScope` (escopo
+  completo da lista, resolvido sem os filtros nem o recorte da página) define o teto: `EPISODE` usa
+  24 itens e todos os demais escopos usam 30. `type`/`genre` e `sortBy`/`sortDirection` são
+  aplicados ao conjunto completo antes do recorte da página. `itemsPage`, `itemsSize`,
+  `itemsTotalElements`, `itemsTotalPages` e `itemsHasNext` descrevem a página e o conjunto filtrado;
+  `itemsCount`, `watchedPercentage`, `totalRuntimeMinutes`, `commentsCount` e `itemScope` continuam
+  representando a lista completa, sem serem recalculados a partir da página atual.
 - **`GET /users/me/liked-lists` é sempre auto-visão, sem checagem de visibilidade de terceiro**
   (`UserListServiceImpl.getLikedLists`) — diferente de `getUserLists` (que resolve perfil privado do
   dono + visibilidade por lista PUBLIC/FOLLOWERS/PRIVATE), aqui o viewer só pode estar pedindo as
@@ -1701,14 +1731,13 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   content/list/diary entry") se existe mas aponta pra um alvo diferente do informado na própria
   chamada. Sem limite de profundidade de resposta (diferente de `UserListItem`, que trava lista-de-
   listas em um nível) — uma resposta pode responder a outra resposta indefinidamente.
-- **Uma lista travada como "de listas" nunca recebe comentário** (`assertListAcceptsComments`, só em
-  `createCommentOnList`) — reaproveita `UserListItemRepository.existsByUserListIdAndChildListIdIsNotNull`,
-  a mesma query que `UserListItemServiceImpl.assertListIsNotLockedAsListOfLists` usa pra travar a
-  própria lista contra itens de conteúdo. Uma lista comum (incluindo uma lista filha aninhada dentro de
-  uma lista-de-listas) aceita comentário normalmente; só a lista-de-listas em si, nunca. `400` se
-  violado. A checagem só roda no `POST` — `GET /lists/{listId}/comments` numa lista-de-listas
-  simplesmente devolve uma página vazia (estruturalmente nunca pode ter comentários), sem custo extra
-  de validação nem erro.
+- **Comentários e likes diretos em `UserList` seguem a visibilidade da lista, sem distinção pelo tipo de
+  itens** (`CommentServiceImpl`/`LikeServiceImpl`) — qualquer lista visível, inclusive uma lista travada
+  como lista-de-listas, pode receber comentários e likes. Dono, `PUBLIC`, `FOLLOWERS` com status aceito e
+  `PRIVATE` continuam seguindo a mesma regra de acesso de `GET /lists/{listId}`. Replies continuam
+  exigindo `parentCommentId` do mesmo alvo; likes continuam idempotentes, inclusive `unlikeList` quando não
+  existe uma curtida prévia. As notificações sociais e os contadores (`commentsCount`/`likesCount`) mantêm
+  o comportamento existente.
 - **Visibilidade de `UserList` reaproveitada de `UserListServiceImpl`/`UserListItemServiceImpl`, mas
   duplicada em vez de compartilhada** (`CommentServiceImpl.assertListIsVisibleTo`) — mesma decisão de
   design já tomada nesses dois services (o método não é exposto pela interface `UserListService`), então
@@ -1774,17 +1803,6 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   regra padrão de perfil público/dono/segue-aceito. `403` nos dois casos ("This list is private"/"This
   diary entry is private") — a checagem só roda enquanto a curtida ainda não existe; uma curtida já
   registrada nunca é revogada por uma mudança de visibilidade posterior.
-- **Curtida direta em `UserList` (`likeList`/`unlikeList`), acrescentada a pedido do usuário** — inclui
-  `list_id` em `likes` (migration `V25`, terceiro alvo do `ck_likes_target`, mesmo espírito do
-  polimorfismo de três alvos de `Comment`, mais `uq_likes_user_id_list_id`). Reaproveita
-  `LikeServiceImpl.assertListIsVisibleTo` (a mesma regra `PUBLIC`/`FOLLOWERS`/`PRIVATE` já usada por
-  `likeComment` quando o alvo do comentário é uma lista) e o mesmo padrão idempotente de
-  `likeComment`/`likeDiaryEntry` (`NewTransactionExecutor` + `REQUIRES_NEW`). Decisão consultada com o
-  usuário: uma lista travada como "de listas" não pode ser curtida diretamente — mesma trava de
-  `assertListAcceptsComments` (`LikeServiceImpl.assertListAcceptsLikes`, reaproveitando
-  `UserListItemRepository.existsByUserListIdAndChildListIdIsNotNull`), `400` ("This list is a list of
-  lists and cannot receive likes") caso violado. `unlikeList` é idempotente, mesmo padrão de
-  `unlikeComment`/`unlikeDiaryEntry` (`DELETE` em massa, não `find`+`delete` de entidade).
 - **`CommentRepository.findByIdWithTargets`, novo `@Query` com `LEFT JOIN FETCH` em `list`/`list.user`/
   `diaryEntry`/`diaryEntry.user`** — usado só por `LikeServiceImpl.likeComment`, evita
   `LazyInitializationException` ao ler o dono do alvo fora de uma transação aberta explicitamente
@@ -1915,6 +1933,26 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **O viewer vem exclusivamente da sessão autenticada** (`SearchController`) — o endpoint não aceita
   um identificador de usuário no request; o UUID resolvido do principal é usado para escopar a consulta
   de listas visíveis.
+
+- **A busca local de listas usa página fixa de 10 resultados** (`SearchServiceImpl.search`) — a regra vale
+  para `type=LIST` e para o array `lists` da busca agregada sem tipo; o `size` recebido não altera esse
+  tamanho, enquanto a página solicitada e as regras de visibilidade permanecem iguais.
+
+## Trending
+
+- **Janela e tamanho sao listas fechadas** (`TrendingController`) — `timeWindow` e obrigatorio e aceita
+  somente `day` ou `week`; `size` assume 12 quando omitido e aceita somente 12 ou 21. A validacao
+  acontece antes do rate limit, portanto requisicoes invalidas nao consomem quota.
+- **Quota e isolada por viewer autenticado** (`TrendingController`) — a chave e `trending|<viewer UUID>`
+  e permite 30 requisicoes em cinco minutos; o endpoint nao aceita um identificador de usuario no
+  request e preserva a autenticacao por cookie JWT existente.
+- **Trending e um proxy agregado sem persistencia** (`TrendingServiceImpl`) — o idioma preferido do
+  viewer e enviado ao TMDB nas chamadas independentes de filmes e series. Cada secao preserva a ordem
+  externa, limita-se a `size`, nao busca paginas adicionais e usa `TmdbImageUrlBuilder.posterUrl` para
+  gerar posters completos em w500.
+- **Falha externa invalida o agregado inteiro** (`TrendingServiceImpl`/`GlobalExceptionHandler`) —
+  resposta 404 do TMDB vira secao vazia, mas indisponibilidade de filmes ou series lanca
+  `TmdbUnavailableException` e retorna `502 Bad Gateway`, sem resposta parcial.
 
 ## Summary
 

@@ -91,11 +91,11 @@
   buraco. Ambas as operações mexem em várias linhas de uma vez e precisam ser atômicas.
 </p>
 <p>
-  <strong>WATCHLIST</strong> tem a mesma forma do <strong>TOP5</strong> (por <code>usuario_id</code> +
-  <code>tipo</code>, com <code>posicao</code> deslocando em inserção/remoção do mesmo jeito) mas sem
-  teto de 5 — não existe eviction, e <code>posicao</code> é sempre opcional (entra no final quando
-  omitida). Constraints: <code>UNIQUE(usuario_id, tipo, posicao)</code> e
-  <code>UNIQUE(usuario_id, tipo, conteudo_id)</code>. É a lista de "quero assistir depois", distinta de
+  <strong>WATCHLIST</strong> tem a mesma forma do <strong>TOP5</strong>, mas sua <code>posicao</code> é
+  global por <code>usuario_id</code>, sem separar <code>tipo</code>; filmes e séries compartilham a fila
+  e não existe eviction nem teto de 5. Constraints: <code>UNIQUE(usuario_id, posicao)</code> e
+  <code>UNIQUE(usuario_id, tipo, conteudo_id)</code>. A migration reindexa as posições antigas por
+  criação e as operações usam lock transacional por usuário. É a lista de "quero assistir depois", distinta de
   <strong>LISTA</strong> — que é uma lista nomeada e criada livremente pelo usuário (ex: "Melhores ficções
   científicas dos anos 90"), não uma fila por tipo de conteúdo.
 </p>
@@ -115,6 +115,13 @@
   <code>conteudo_id</code> — abandonar volta a ser "não quero mais assistir", então não faz sentido
   continuar marcado como "quero assistir"; desmarcar como abandonado não reinsere de volta na
   watchlist.
+</p>
+<p>
+  <strong>CONTENT_RELEASE_DATE_SNAPSHOTS</strong> materializa datas do TMDB sem alterar
+  <code>CONTEUDO</code>: filmes usam uma linha por <code>(tmdb_id, region)</code> e séries uma linha por
+  <code>tmdb_id</code> com <code>region</code> nula. A linha guarda <code>release_date</code>, status,
+  <code>last_checked_at</code> e <code>next_check_at</code>; o GET da watchlist usa o snapshot da região
+  preferida do dono e o job atualiza linhas vencidas.
 </p>
 <p>
   <strong>Registrar um <code>LOG</code> remove automaticamente de <code>WATCHLIST</code> e de
@@ -505,6 +512,16 @@ const def = `erDiagram
     int posicao
     timestamp created_at
     timestamp updated_at
+  }
+  CONTENT_RELEASE_DATE_SNAPSHOTS {
+    uuid id PK
+    string tmdb_id
+    string type "MOVIE ou SERIES"
+    string region "obrigatória para MOVIE; nula para SERIES"
+    date release_date "nullable"
+    string status "FOUND, NOT_FOUND ou UNAVAILABLE"
+    timestamp last_checked_at
+    timestamp next_check_at
   }
   DROPPED {
     int id PK

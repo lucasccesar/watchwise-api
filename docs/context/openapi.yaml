@@ -34,6 +34,7 @@ tags:
   - name: Likes
   - name: Notifications
   - name: Search
+  - name: Trending
   - name: Feed
   - name: Games
 
@@ -753,19 +754,22 @@ paths:
         "403": { description: Cookie CSRF ausente ou inválido }
         "404": { description: "Entrada não encontrada, não pertence ao usuário autenticado, ou não é desse type" }
 
-  /users/{userId}/watchlist/{type}:
+  /users/{userId}/watchlist:
     get:
       tags: [Watchlist]
       summary: Obter a watchlist (quero assistir) de filmes ou séries do usuário
       description: >
-        type só aceita MOVIE ou SERIES — SEASON/EPISODE não são válidos para a watchlist, igual ao
-        Top 5. Diferente do Top 5, não tem teto de 5 entradas, então a resposta é paginada. Mesma
-        regra de acesso de GET /users/{userId}/followers: se o perfil de {userId} for público, ou
-        se for o próprio dono do perfil, qualquer usuário autenticado pode ver; se for privado, só
-        quem já o segue de verdade (relação com status ACCEPTED) pode ver — do contrário, 403.
+        type é opcional e só aceita MOVIE ou SERIES. Quando omitido, a resposta mistura os dois tipos
+        na ordem global de position; quando informado, o filtro preserva a position global e pode
+        produzir lacunas. A resposta é paginada e inclui upcomingCount, a quantidade global de séries
+        com releaseDate posterior ao dia atual. A data de cada item é contextual à região preferida
+        do dono da watchlist para filmes e à first_air_date do TMDB para séries. Snapshot ausente é
+        preenchido antes da resposta; snapshot vencido pode ser servido enquanto o refresh ocorre em
+        segundo plano. A visibilidade segue GET /users/{userId}/followers: perfil público ou próprio
+        dono permite a leitura; perfil privado exige relação ACCEPTED.
       parameters:
         - $ref: "#/components/parameters/userId"
-        - $ref: "#/components/parameters/watchlistType"
+        - $ref: "#/components/parameters/watchlistTypeQuery"
         - $ref: "#/components/parameters/page"
         - $ref: "#/components/parameters/size"
       responses:
@@ -781,21 +785,26 @@ paths:
                       content:
                         type: array
                         items: { $ref: "#/components/schemas/WatchlistEntry" }
+                      upcomingCount:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: Quantidade global de series com data posterior ao dia atual.
         "400": { description: "type não é MOVIE nem SERIES, número/tamanho de página inválido, ou userId não é um UUID válido" }
         "403": { description: Perfil privado e quem pede não é seguidor aceito }
         "404": { description: Usuário não encontrado }
+        "502": { description: TMDB indisponível ao preencher um snapshot ausente de data de lançamento }
 
   /users/me/watchlist/{type}:
     post:
       tags: [Watchlist]
       summary: Adicionar um conteúdo à watchlist do usuário autenticado
       description: >
-        Insere content sempre na última posição da watchlist desse type — diferente do Top 5, não
-        existe teto nem eviction, e diferente do POST de Top 5, position não é aceito no corpo: um
-        item novo sempre entra no fim da fila, nunca opinando sobre onde entrar. A única forma de
-        adiantar um item é reordenar depois via PATCH. Um conteúdo já presente na watchlist desse
-        type não pode ser inserido de novo (409). Só o tmdbId é necessário: type já vem fixado no
-        path e só MOVIE/SERIES são aceitos.
+        Insere content sempre na última posição global da watchlist — filmes e séries compartilham a
+        mesma sequência, sem teto de itens nem eviction. position não é aceito no corpo: um item novo
+        sempre entra no fim da fila. A única forma de adiantar um item é reordenar depois via PATCH.
+        Um conteúdo já presente na watchlist desse type não pode ser inserido de novo (409). O
+        snapshot de data de lançamento é aquecido durante a inclusão.
       parameters:
         - $ref: "#/components/parameters/watchlistType"
       requestBody:
@@ -835,9 +844,10 @@ paths:
       description: >
         Move a entrada para position, deslocando as entradas entre a posição antiga e a nova uma
         casa para abrir espaço — é a única forma de uma entrada avançar na watchlist, já que o
-        insert sempre entra no fim. position deve estar entre 1 e o total de entradas atuais dessa
-        watchlist (não é possível "mover para o fim" além do que já existe; para isso, remova e
-        insira de novo). Se position for igual à posição atual da entrada, não faz nada.
+        insert sempre entra no fim. position deve estar entre 1 e o total de entradas atuais da
+        watchlist global (não é possível "mover para o fim" além do que já existe; para isso, remova
+        e insira de novo). Se position for igual à posição atual da entrada, não faz nada. O tipo no
+        path continua obrigatório para validar a entrada, embora a posição atravesse os dois tipos.
       parameters:
         - $ref: "#/components/parameters/watchlistType"
         - name: watchlistEntryId
@@ -1011,8 +1021,8 @@ paths:
         janelas de 30 dias (watchCountByDayLast30Days/genreCounts*Last30Days) são rolantes a partir
         de hoje, não o mês calendário do Month in Review. O preview de calendário de 7 dias da tela
         (episódios/filmes que vão ser lançados) não está aqui — depende de data de lançamento
-        (TMDB), que Content nunca guarda; o cliente cruza nextEpisodes + GET /users/me/watchlist/{type}
-        com o TMDB.
+        (TMDB), que Content nunca guarda; o cliente cruza nextEpisodes + GET
+        /users/{userId}/watchlist?type=MOVIE|SERIES com o TMDB.
       parameters:
         - $ref: "#/components/parameters/userId"
       responses:
@@ -2111,7 +2121,10 @@ paths:
         item único usadas por POST /lists/{listId}/items. Só aceita content (Conteudo) por item —
         para adicionar uma lista aninhada como item, crie a lista aqui (sem itens ou com outros
         filmes/séries) e use POST /lists/{listId}/items depois. items exige entre 1 e 100
-        entradas. visibility omitido tem default PUBLIC, igual a POST /users/me/lists.
+        entradas. visibility omitido tem default PUBLIC, igual a POST /users/me/lists. Na resposta
+        201, items é o conjunto completo de itens criados, na ordem enviada — não uma página;
+        itemsSize e itemsTotalElements são iguais à quantidade de itens criados, itemsTotalPages é
+        0 quando o conjunto está vazio e 1 caso contrário, e itemsHasNext é sempre false.
       requestBody:
         required: true
         content:
@@ -2177,6 +2190,11 @@ paths:
         e o viewer não o seguir), aqui uma lista PUBLIC é acessível diretamente por qualquer
         usuário autenticado mesmo que o perfil do dono seja privado. FOLLOWERS exige que o viewer
         siga o dono com status aceito (ou seja o próprio dono); PRIVATE só o próprio dono.
+        Os filtros type/genre e a ordenação são aplicados ao conjunto completo de itens antes do
+        recorte da página. page e size são opcionais: a API usa páginas 1-based, com page=1 e
+        size=20 quando omitidos. O tamanho efetivo é limitado a 24 para listas com itemScope
+        EPISODE e a 30 para todos os demais escopos; valores acima do limite são reduzidos ao
+        limite correspondente.
       parameters:
         - $ref: "#/components/parameters/listId"
         - name: type
@@ -2190,7 +2208,7 @@ paths:
         - name: sortBy
           in: query
           description: >
-            Aplicado em memória sobre a lista de itens já carregada (sem paginação própria).
+            Aplicado em memória sobre a lista de itens já carregada, antes do recorte da página.
             alfabética e data de lançamento não são suportadas — Content nunca guarda título nem
             data de lançamento (dados só do TMDB); isso é sempre responsabilidade do cliente.
             episodeAvgRating ordena por DiaryEntry.score médio dos episódios (EPISODE) do dono da
@@ -2209,13 +2227,24 @@ paths:
           in: query
           description: "asc ou desc. Valor desconhecido é 400."
           schema: { type: string, enum: [asc, desc] }
+        - name: page
+          in: query
+          description: Número da página dos itens, com semântica 1-based. Assume 1 quando omitido; valores menores que 1 retornam 400.
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: size
+          in: query
+          description: >
+            Itens por página; assume 20 quando omitido. O máximo efetivo é 24 para listas cujo
+            itemScope é EPISODE e 30 para todos os outros escopos. Valores acima do máximo são
+            limitados ao teto correspondente; valores menores que 1 retornam 400.
+          schema: { type: integer, minimum: 1, default: 20 }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema: { $ref: "#/components/schemas/UserListDetailed" }
-        "400": { description: "listId não é um UUID válido, ou sortBy desconhecido" }
+        "400": { description: "listId não é um UUID válido, sortBy desconhecido, page menor que 1 ou size menor que 1" }
         "403": { description: "Lista é FOLLOWERS e o viewer não segue o dono, lista é PRIVATE e o viewer não é o dono, ou sortBy=episodeAvgRating não é permitido para o viewer pela privacidade do perfil do dono" }
         "404": { description: Lista não encontrada }
     patch:
@@ -2491,7 +2520,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Comment" }
-        "400": { description: "A lista é uma lista-de-listas e não pode receber comentários, ou parentCommentId aponta para um comentário que não pertence a essa lista" }
+        "400": { description: "parentCommentId aponta para um comentário que não pertence a essa lista" }
         "401": { description: Não autenticado }
         "403": { description: "A lista é privada, ou o viewer não segue o dono com status aceito" }
         "404": { description: "Lista não encontrada, ou parentCommentId não encontrado" }
@@ -2501,14 +2530,14 @@ paths:
       tags: [Likes]
       summary: Curtir uma lista
       description: >
-        Só listas de conteúdo (não listas-de-listas) podem ser curtidas — mesma trava usada em
-        `POST /lists/{listId}/comments`. Segue a mesma regra de visibilidade de `GET /lists/{listId}`
-        (dono, `PUBLIC`, ou `FOLLOWERS` com status aceito).
+        Qualquer lista visível, inclusive uma lista-de-listas, pode ser curtida. Segue a mesma regra de
+        visibilidade de `GET /lists/{listId}` (dono, `PUBLIC`, ou `FOLLOWERS` com status aceito). A operação
+        é idempotente: curtir novamente não cria outra curtida, e remover uma curtida inexistente continua
+        sem erro; o `likesCount` da lista mantém o comportamento existente.
       parameters:
         - $ref: "#/components/parameters/listId"
       responses:
         "204": { description: Curtido }
-        "400": { description: "A lista é uma lista-de-listas e não pode ser curtida" }
         "403": { description: "A lista é privada, ou o viewer não segue o dono com status aceito" }
         "404": { description: Lista não encontrada }
     delete:
@@ -2996,7 +3025,7 @@ paths:
           schema: { type: integer, minimum: 1, default: 1 }
         - name: size
           in: query
-          description: Mantido por compatibilidade; o valor é ignorado e cada array do resultado usa sempre 20 itens por página.
+          description: Mantido por compatibilidade. `contents`, `people`, `users` e `templates` preservam o tamanho geral da busca; `lists` usa página fixa de 10 itens e ignora `size`, podendo retornar menos na última página ou quando não há 10 resultados.
           schema: { type: integer, minimum: 1, maximum: 20, default: 20 }
       responses:
         "200":
@@ -3012,6 +3041,52 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
         "502": { description: TMDB indisponível durante uma busca externa }
+
+  # ---------- TRENDING ----------
+  /trending:
+    get:
+      tags: [Trending]
+      summary: Listar filmes e series em alta no TMDB
+      description: >
+        Retorna as secoes de filmes e series em alta, usando o idioma preferido
+        do usuario autenticado. A ordem de cada secao e a ordem recebida do TMDB;
+        cada lista pode conter menos itens que `size` quando a resposta externa
+        tiver menos resultados. O poster usa URL completa no tamanho w500.
+      parameters:
+        - name: timeWindow
+          in: query
+          required: true
+          schema: { type: string, enum: [day, week] }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, enum: [12, 21], default: 12 }
+      responses:
+        "200":
+          description: Filmes e series em alta, separados por secao.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrendingResponse" }
+        "400":
+          description: timeWindow ausente ou invalido, ou size fora de 12 e 21.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "401":
+          description: Nao autenticado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "429":
+          description: Mais de 30 requisicoes do usuario em cinco minutos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "502":
+          description: TMDB indisponivel ao carregar qualquer uma das secoes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
 
   # ---------- GAMES ----------
   /games/today:
@@ -3870,6 +3945,12 @@ components:
       required: true
       description: Só MOVIE ou SERIES são válidos para a watchlist.
       schema: { type: string, enum: [MOVIE, SERIES] }
+    watchlistTypeQuery:
+      name: type
+      in: query
+      required: false
+      description: Filtro opcional; só MOVIE ou SERIES são válidos para a watchlist.
+      schema: { type: string, enum: [MOVIE, SERIES] }
     droppedType:
       name: type
       in: path
@@ -4351,6 +4432,11 @@ components:
         type: { type: string, enum: [MOVIE, SERIES] }
         content: { $ref: "#/components/schemas/ContentRef" }
         position: { type: integer, minimum: 1 }
+        releaseDate:
+          type: string
+          format: date
+          nullable: true
+          description: Data contextual ao dono da watchlist; nula quando o TMDB não fornece uma data válida.
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -4991,9 +5077,7 @@ components:
         Deleted in cascade whenever its content/list/diary target is deleted, whenever
         its author's account is deleted (no "[deleted user]" placeholder — the comment
         itself is gone, along with the entire reply subtree below it, even replies from
-        other users), or whenever its parent comment is deleted. A list locked as a
-        "list of lists" never accepts comments — only a regular list (including a child
-        list nested inside one) can.
+        other users), or whenever its parent comment is deleted.
       properties:
         id: { type: string, format: uuid }
         user: { $ref: "#/components/schemas/PublicUserDTO" }
@@ -5106,7 +5190,7 @@ components:
                 aninhadas em si aqui — para isso, use GET /lists/{listId}, que devolve os itens completos.
             likesCount: { type: integer, description: "Contador desnormalizado de curtidas (Like com lista_id apontando pra esta lista), mantido em conjunto com o insert/delete de Like — não é uma COUNT ao vivo por requisição." }
             likedByMe: { type: boolean, description: "Se o usuário autenticado que fez a requisição curtiu esta lista. Resolvido em lote (uma query indexada por user_id + IN dos ids da página) em GET /users/{userId}/lists, e por uma checagem individual (mesma query, um único id) nas demais respostas." }
-            itemsCount: { type: integer, description: "Quantidade total de itens da lista (content + lista aninhada somados). Em UserListDetailed é só items.length; em GET /users/{userId}/lists é uma COUNT em lote (mesmo padrão de nestedListsCount/watchedPercentage)." }
+            itemsCount: { type: integer, description: "Quantidade total de itens da lista (content + lista aninhada somados). Em UserListDetailed, é a contagem da lista completa e não apenas items.length, que contém somente a página atual; em GET /users/{userId}/lists é uma COUNT em lote (mesmo padrão de nestedListsCount/watchedPercentage)." }
             commentsCount: { type: integer, description: "Quantidade de comentários (Comment com list_id apontando pra esta lista). Não é desnormalizado como likesCount — é uma COUNT calculada na mesma leva de queries que os outros contadores desta resposta." }
             totalRuntimeMinutes: { type: integer, description: "Soma de runtimeMinutes dos itens MOVIE/EPISODE e exclusivamente de totalRuntimeMinutes persistido dos itens SERIES — a média runtimeMinutes da série nunca é usada como total. Itens de lista aninhada ficam de fora da soma; Content sem o runtime aplicável contribui 0. A leitura usa somente os valores locais persistidos e não chama o TMDB." }
             containsContent:
@@ -5186,7 +5270,10 @@ components:
             updatedAt: { type: string, format: date-time }
             likesCount: { type: integer }
             likedByMe: { type: boolean }
-            itemsCount: { type: integer }
+            itemsCount:
+              type: integer
+              format: int64
+              description: Quantidade total de itens da lista completa, sem aplicar os filtros type/genre e sem ser reduzida à página atual.
             commentsCount: { type: integer }
             totalRuntimeMinutes: { type: integer, description: "Soma de runtimeMinutes dos itens MOVIE/EPISODE e exclusivamente de totalRuntimeMinutes persistido dos itens SERIES; itens de lista aninhada ficam de fora. A leitura usa somente valores locais persistidos." }
             itemScope:
@@ -5198,7 +5285,36 @@ components:
               nullable: true
             items:
               type: array
+              description: >
+                Em GET /lists/{listId}, itens da página atual depois da aplicação dos filtros
+                type/genre e da ordenação. Em POST /users/me/lists/bulk, é o conjunto completo de
+                itens criados, na ordem enviada.
               items: { $ref: "#/components/schemas/UserListItem" }
+            itemsPage:
+              type: integer
+              description: Número da página retornada, com semântica 1-based.
+            itemsSize:
+              type: integer
+              description: >
+                Em GET /lists/{listId}, tamanho efetivo da página, após a aplicação do limite do
+                escopo. Em POST /users/me/lists/bulk, é igual à quantidade de itens criados.
+            itemsTotalElements:
+              type: integer
+              format: int64
+              description: >
+                Em GET /lists/{listId}, quantidade de itens da coleção filtrada, antes do recorte
+                da página. Em POST /users/me/lists/bulk, é igual à quantidade de itens criados.
+            itemsTotalPages:
+              type: integer
+              description: >
+                Em GET /lists/{listId}, quantidade total de páginas da coleção filtrada; 0 quando
+                não há itens filtrados. Em POST /users/me/lists/bulk, é 0 quando o conjunto criado
+                está vazio e 1 caso contrário.
+            itemsHasNext:
+              type: boolean
+              description: >
+                Em GET /lists/{listId}, indica se existe outra página para a coleção filtrada. Em
+                POST /users/me/lists/bulk, é sempre false.
 
     UserListProgress:
       type: object
@@ -5841,6 +5957,20 @@ components:
           nullable: true
           description: URL completa da imagem do poster no TMDB, usando o tamanho w500; null quando o TMDB não fornece poster_path.
         year: { type: integer, nullable: true }
+
+    TrendingResponse:
+      type: object
+      required: [movies, series]
+      description: >
+        Agregado de filmes e series em alta. Cada array preserva a ordem do TMDB
+        e pode ter menos itens que o tamanho solicitado.
+      properties:
+        movies:
+          type: array
+          items: { $ref: "#/components/schemas/SearchContentDTO" }
+        series:
+          type: array
+          items: { $ref: "#/components/schemas/SearchContentDTO" }
 
     SearchPersonDTO:
       type: object
