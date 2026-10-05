@@ -572,19 +572,18 @@ class LikeControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[likeList] Should Return BadRequest And Not Persist - When The List Is A List Of Lists")
-    void shouldReturnBadRequestAndNotPersistWhenTheListIsAListOfLists() throws Exception {
-        RegisteredUser user = registerUser("likelistlocked");
+    @DisplayName("[likeList] Should Return NoContent And Persist The Like - When The List Is A List Of Lists")
+    void shouldReturnNoContentAndPersistTheLikeWhenTheListIsAListOfLists() throws Exception {
+        RegisteredUser user = registerUser("likelistlol");
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "List of lists", UserListVisibility.PUBLIC);
         UserList childList = persistList(entity, "Child list", UserListVisibility.PUBLIC);
         persistChildListItem(list, childList);
 
         mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/like"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("This list is a list of lists and cannot receive likes"));
+                .andExpect(status().isNoContent());
 
-        assertThat(likeRepository.findAll()).isEmpty();
+        assertThat(likeRepository.existsByUserIdAndListId(user.id(), list.getId())).isTrue();
     }
 
     @Test

@@ -862,17 +862,18 @@ class LikeServiceImplTest {
     }
 
     @Test
-    @DisplayName("[likeList] Should Throw BadRequestException - When The List Is A List Of Lists")
-    void shouldThrowBadRequestExceptionWhenTheListIsAListOfLists() {
+    @DisplayName("[likeList] Should Persist Like - When The List Is A List Of Lists")
+    void shouldPersistLikeWhenTheListIsAListOfLists() {
         when(likeRepository.existsByUserIdAndListId(marinaId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(true);
+        when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
+        when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
 
-        assertThatThrownBy(() -> likeService.likeList(marinaId, listId))
-                .isInstanceOf(BadRequestException.class)
-                .hasMessage("This list is a list of lists and cannot receive likes");
+        likeService.likeList(marinaId, listId);
 
-        verify(likeRepository, never()).saveAndFlush(any());
+        verify(likeRepository).saveAndFlush(any(Like.class));
+        verify(userListRepository).incrementLikesCount(listId);
     }
 
     @Test

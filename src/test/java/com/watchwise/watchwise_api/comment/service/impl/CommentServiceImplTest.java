@@ -820,17 +820,19 @@ class CommentServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createCommentOnList] Should Throw BadRequestException - When List Is Locked As A List Of Lists")
-    void shouldThrowBadRequestExceptionWhenListIsLockedAsAListOfLists() {
+    @DisplayName("[createCommentOnList] Should Save Comment - When List Is A List Of Lists")
+    void shouldSaveCommentWhenListIsAListOfLists() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(true);
+        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
+        when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
 
-        assertThatThrownBy(() -> commentService.createCommentOnList(
-                lucasId, listId, new CommentCreationDTO("Nice picks", null, null)))
-                .isInstanceOf(BadRequestException.class)
-                .hasMessage("This list is a list of lists and cannot receive comments");
+        CommentResponseDTO result = commentService.createCommentOnList(
+                lucasId, listId, new CommentCreationDTO("Nice picks", null, null));
 
-        verify(commentRepository, never()).save(any());
+        assertThat(result).isEqualTo(responseDto);
+        verify(commentRepository).save(any(Comment.class));
     }
 
     @Test

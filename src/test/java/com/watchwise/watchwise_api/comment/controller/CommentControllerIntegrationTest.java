@@ -450,6 +450,23 @@ class CommentControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getCommentsForList] Should Return Comments - When List Is A List Of Lists")
+    void shouldReturnCommentsWhenListIsAListOfLists() throws Exception {
+        RegisteredUser owner = registerUser("getlistcommentslolowner");
+        RegisteredUser viewer = registerUser("getlistcommentslolviewer");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "List of lists", UserListVisibility.PUBLIC);
+        UserList childList = persistList(ownerEntity, "Child list", UserListVisibility.PUBLIC);
+        persistChildListItem(list, childList);
+        persistListComment(ownerEntity, list, "Nice nested picks");
+
+        mockMvc.perform(getRequest(viewer, "/lists/" + list.getId() + "/comments"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].text").value("Nice nested picks"))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
     @DisplayName("[getCommentsForList] Should Return NotFound - When List Does Not Exist")
     void shouldReturnNotFoundWhenListDoesNotExistForListing() throws Exception {
         RegisteredUser user = registerUser("getlistcommentsnf");
@@ -526,19 +543,22 @@ class CommentControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[createCommentOnList] Should Return BadRequest And Not Persist - When List Is Locked As A List Of Lists")
-    void shouldReturnBadRequestAndNotPersistWhenListIsLockedAsAListOfLists() throws Exception {
-        RegisteredUser user = registerUser("createlistcommentlocked");
+    @DisplayName("[createCommentOnList] Should Return Created And Persist The Comment - When List Is A List Of Lists")
+    void shouldReturnCreatedAndPersistTheCommentWhenListIsAListOfLists() throws Exception {
+        RegisteredUser user = registerUser("createlistcommentlol");
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "List of lists", UserListVisibility.PUBLIC);
         UserList childList = persistList(entity, "Child list", UserListVisibility.PUBLIC);
         persistChildListItem(list, childList);
 
         mockMvc.perform(postRequest(user, "/lists/" + list.getId() + "/comments", commentBody("Nice picks")))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("This list is a list of lists and cannot receive comments"));
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.text").value("Nice picks"))
+                .andExpect(jsonPath("$.listId").value(list.getId().toString()))
+                .andExpect(jsonPath("$.contentId").doesNotExist());
 
-        assertThat(commentRepository.findAll()).isEmpty();
+        assertThat(commentRepository.findByListIdOrderByCreatedAtAsc(list.getId(), PageRequest.of(0, 10))
+                .getContent()).hasSize(1);
     }
 
     @Test
