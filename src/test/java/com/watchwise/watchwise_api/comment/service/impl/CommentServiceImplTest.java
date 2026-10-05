@@ -812,8 +812,8 @@ class CommentServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createCommentOnList] Should Save Comment - When List Is A List Of Lists")
-    void shouldSaveCommentWhenListIsAListOfLists() {
+    @DisplayName("[createCommentOnList] Should Save Comment - When List Type Is Irrelevant")
+    void shouldSaveCommentWhenListTypeIsIrrelevant() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));

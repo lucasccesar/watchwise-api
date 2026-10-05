@@ -853,8 +853,8 @@ class LikeServiceImplTest {
     }
 
     @Test
-    @DisplayName("[likeList] Should Persist Like - When The List Is A List Of Lists")
-    void shouldPersistLikeWhenTheListIsAListOfLists() {
+    @DisplayName("[likeList] Should Persist Like - When List Type Is Irrelevant")
+    void shouldPersistLikeWhenListTypeIsIrrelevant() {
         when(likeRepository.existsByUserIdAndListId(marinaId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
