@@ -619,7 +619,7 @@ class ContentControllerIntegrationTest {
         String body = """
                 {
                     "username": "%s",
-                    "name": "%s","username": "%s",
+                    "name": "%s",
                     "email": "%s",
                     "password": "Password123"
                 }

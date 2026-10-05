@@ -107,6 +107,7 @@ class SearchRepositorySliceTest {
         LocalDateTime now = LocalDateTime.now();
         return User.builder()
                 .username(username)
+                .name(username)
                 .email(email)
                 .password("hashed_password")
                 .profilePicture("https://example.com/photo.png")

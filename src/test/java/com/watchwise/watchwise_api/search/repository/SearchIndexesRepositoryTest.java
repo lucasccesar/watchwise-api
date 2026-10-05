@@ -60,10 +60,10 @@ class SearchIndexesRepositoryTest {
         jdbcTemplate.update(
                 """
                 INSERT INTO users (
-                    id, username, email, password, profile_picture,
+                    id, username, name, email, password, profile_picture,
                     is_profile_public, is_email_verified, preferred_language, preferred_region
                 )
-                VALUES (?, 'search-index-user', 'search-index-user@test.local', 'password',
+                VALUES (?, 'search-index-user', 'search-index-user', 'search-index-user@test.local', 'password',
                         'https://default-image.png', TRUE, TRUE, 'en-US', 'US')
                 """,
                 userId);
@@ -81,11 +81,12 @@ class SearchIndexesRepositoryTest {
         jdbcTemplate.update(
                 """
                 INSERT INTO users (
-                    id, username, email, password, profile_picture,
+                    id, username, name, email, password, profile_picture,
                     is_profile_public, is_email_verified, preferred_language, preferred_region
                 )
                 SELECT
                     ('00000000-0000-0000-0001-' || LPAD(i::text, 12, '0'))::uuid,
+                    CASE WHEN i = 1 THEN 'prefix-target' ELSE 'account' || i END,
                     CASE WHEN i = 1 THEN 'prefix-target' ELSE 'account' || i END,
                     'search-index-' || i || '@test.local',
                     'password', 'https://default-image.png', TRUE, TRUE, 'en-US', 'US'

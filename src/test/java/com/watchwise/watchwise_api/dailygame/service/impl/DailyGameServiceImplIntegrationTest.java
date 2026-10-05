@@ -148,6 +148,7 @@ class DailyGameServiceImplIntegrationTest {
         LocalDateTime now = LocalDateTime.now(clock);
         return User.builder()
                 .username("daily-game-race-user")
+                .name("daily-game-race-user")
                 .email("daily-game-race@example.com")
                 .password("encoded-password")
                 .createdAt(now)

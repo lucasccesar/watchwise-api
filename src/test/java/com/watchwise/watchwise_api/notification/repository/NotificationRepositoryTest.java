@@ -70,7 +70,7 @@ class NotificationRepositoryTest {
         entityManager.flush();
 
         lucas = userRepository.saveAndFlush(User.builder()
-                .username("lucas").email("lucas@email.com").password("hashed")
+                .username("lucas").name("lucas").email("lucas@email.com").password("hashed")
                 .profilePicture("https://example.com/p.png").isProfilePublic(true)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
         movie = contentRepository.saveAndFlush(Content.builder()

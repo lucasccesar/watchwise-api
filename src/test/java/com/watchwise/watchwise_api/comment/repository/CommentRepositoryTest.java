@@ -825,6 +825,7 @@ class CommentRepositoryTest {
     private User buildUser(String username, String email) {
         return User.builder()
                 .username(username)
+                .name(username)
                 .email(email)
                 .password("hashed_password")
                 .profilePicture("https://example.com/photo.png")

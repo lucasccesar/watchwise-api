@@ -202,6 +202,7 @@ class UserContentPosterRepositoryTest {
         LocalDateTime now = LocalDateTime.now();
         return User.builder()
                 .username(username)
+                .name(username)
                 .email(email)
                 .password("password")
                 .createdAt(now)

@@ -101,7 +101,7 @@ public abstract class PicksDomainIntegrationSupport {
     }
 
     protected User user(String name, UserRole role) {
-        return users.saveAndFlush(User.builder().username(name).email(name + "@example.com")
+        return users.saveAndFlush(User.builder().username(name).name(name).email(name + "@example.com")
                 .password("hashed-password").role(role).createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now()).build());
     }

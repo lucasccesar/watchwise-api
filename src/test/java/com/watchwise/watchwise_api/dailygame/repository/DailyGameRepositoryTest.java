@@ -740,6 +740,7 @@ class DailyGameRepositoryTest {
     private User buildUser(String username) {
         return User.builder()
                 .username(username)
+                .name(username)
                 .email(username + "@email.com")
                 .password("hashed_password")
                 .profilePicture("https://example.com/photo.png")

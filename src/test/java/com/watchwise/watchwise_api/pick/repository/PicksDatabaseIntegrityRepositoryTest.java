@@ -428,9 +428,9 @@ class PicksDatabaseIntegrityRepositoryTest {
         UUID id = UUID.randomUUID();
         LocalDateTime now = LocalDateTime.now();
         jdbcTemplate.update("""
-                INSERT INTO users (id, role, username, email, password, profile_picture, is_profile_public, is_email_verified, created_at, updated_at, preferred_language, preferred_region)
-                VALUES (?, 'USER', ?, ?, 'hash', 'https://example.com/avatar.png', true, true, ?, ?, 'en-US', 'US')
-                """, id, "user_" + id, id + "@example.com", now, now);
+                INSERT INTO users (id, role, username, name, email, password, profile_picture, is_profile_public, is_email_verified, created_at, updated_at, preferred_language, preferred_region)
+                VALUES (?, 'USER', ?, ?, ?, 'hash', 'https://example.com/avatar.png', true, true, ?, ?, 'en-US', 'US')
+                """, id, "user_" + id, "user_" + id, id + "@example.com", now, now);
         return id;
     }
 

@@ -156,7 +156,7 @@ class UserListControllerIntegrationTest {
         String body = """
                 {
                     "username": "%s",
-                    "name": "%s","username": "%s",
+                    "name": "%s",
                     "email": "%s@email.com",
                     "password": "Password123"
                 }

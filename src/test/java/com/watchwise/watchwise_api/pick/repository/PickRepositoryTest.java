@@ -35,7 +35,7 @@ class PickRepositoryTest {
     @Autowired PickRepository repository; @Autowired PicksTemplateRepository templateRepository; @Autowired UserRepository userRepository; @Autowired FollowerRepository followerRepository;
     @PersistenceContext EntityManager entityManager;
     @Test void acceptsTwoPicksForSameUserAndTemplate() {
-        LocalDateTime now = LocalDateTime.now(); User user = userRepository.saveAndFlush(User.builder().username("lucas").email("lucas@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build());
+        LocalDateTime now = LocalDateTime.now(); User user = userRepository.saveAndFlush(User.builder().username("lucas").name("lucas").email("lucas@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build());
         PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
         repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PUBLIC).createdAt(now).updatedAt(now).build());
         Pick second = repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PRIVATE).createdAt(now).updatedAt(now).build());
@@ -75,7 +75,7 @@ class PickRepositoryTest {
         assertThat(candidates).extracting(Pick::getId)
                 .containsExactly(newerPublic.getId(), followersPick.getId(), olderPublic.getId());
     }
-    private User user(String value, LocalDateTime now) { return userRepository.save(User.builder().username(value).email(value + "@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build()); }
+    private User user(String value, LocalDateTime now) { return userRepository.save(User.builder().username(value).name(value).email(value + "@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build()); }
     private Pick save(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime now) {
         return save(user, template, visibility, now, 0);
     }

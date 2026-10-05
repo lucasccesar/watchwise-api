@@ -163,9 +163,9 @@ class UserRepositoryTest {
     void shouldReadUserRoleWhenSqlInsertOmitsRole() {
         UUID userId = UUID.randomUUID();
         jdbcTemplate.update("""
-                INSERT INTO users (id, username, email, password, profile_picture)
-                VALUES (?, ?, ?, ?, ?)
-                """, userId, "migrated-user", "migrated-user@email.com", "hashed_password",
+                INSERT INTO users (id, username, name, email, password, profile_picture)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, userId, "migrated-user", "migrated-user", "migrated-user@email.com", "hashed_password",
                 "https://example.com/photo.png");
 
         User result = userRepository.findById(userId).orElseThrow();
@@ -221,6 +221,7 @@ class UserRepositoryTest {
     private User buildUser(String username, String email, boolean isProfilePublic) {
         return User.builder()
                 .username(username)
+                .name(username)
                 .email(email)
                 .password("hashed_password")
                 .profilePicture("https://example.com/photo.png")

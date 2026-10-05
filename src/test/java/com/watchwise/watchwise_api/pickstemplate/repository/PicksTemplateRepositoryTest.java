@@ -240,9 +240,10 @@ class PicksTemplateRepositoryTest {
     }
 
     private User saveUser(String username, LocalDateTime now) {
-        return userRepository.saveAndFlush(User.builder()
-                .username(username)
-                .email(username + "@example.com")
+            return userRepository.saveAndFlush(User.builder()
+                    .username(username)
+                    .name(username)
+                    .email(username + "@example.com")
                 .password("hash")
                 .profilePicture("https://example.com/profile.png")
                 .createdAt(now)

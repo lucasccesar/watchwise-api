@@ -28,7 +28,7 @@ class PickSelectionRepositoryTest {
     @DynamicPropertySource static void properties(DynamicPropertyRegistry r) { r.add("spring.datasource.url", postgres::getJdbcUrl); r.add("spring.datasource.username", postgres::getUsername); r.add("spring.datasource.password", postgres::getPassword); }
     @Autowired PickSelectionRepository repository; @Autowired PickRepository pickRepository; @Autowired PicksTemplateRepository templateRepository; @Autowired PicksTemplateCategoryRepository categoryRepository; @Autowired UserRepository userRepository; @Autowired ContentRepository contentRepository;
     @Test void rejectsSecondSelectionForSamePickAndCategory() {
-        LocalDateTime now = LocalDateTime.now(); User user = userRepository.saveAndFlush(User.builder().username("ana").email("ana@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build());
+        LocalDateTime now = LocalDateTime.now(); User user = userRepository.saveAndFlush(User.builder().username("ana").name("ana").email("ana@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build());
         PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
         PicksTemplateCategory category = categoryRepository.saveAndFlush(PicksTemplateCategory.builder().picksTemplate(template).name("Winner").group(PickCategoryGroup.PRIMARY).displayOrder(1).allowedType(PickAllowedType.MOVIE).optionMode(PickCategoryOptionMode.OPEN).createdAt(now).updatedAt(now).build());
         Pick pick = pickRepository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PUBLIC).createdAt(now).updatedAt(now).build());
@@ -40,7 +40,7 @@ class PickSelectionRepositoryTest {
     @Transactional
     void batchLoadsCountsChecksCategoryAndTargetUsageAndLocksPickCategoryRow() {
         LocalDateTime now = LocalDateTime.now();
-        User user = userRepository.saveAndFlush(User.builder().username("batch").email("batch@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build());
+        User user = userRepository.saveAndFlush(User.builder().username("batch").name("batch").email("batch@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build());
         PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Batch").createdAt(now).updatedAt(now).build());
         PicksTemplateCategory category = category(template, "Actor", 1, now);
         PicksTemplateCategory otherCategory = category(template, "Director", 2, now);

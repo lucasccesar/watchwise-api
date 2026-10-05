@@ -168,8 +168,8 @@ class UserContentPosterMigrationRepositoryTest {
 
     private UUID insertUserAndContent(JdbcTemplate jdbcTemplate, UUID userId, String tmdbId, String suffix) {
         jdbcTemplate.update(
-                "INSERT INTO users (id, username, email, password, profile_picture) VALUES (?, ?, ?, ?, ?)",
-                userId, "migration-" + suffix, "migration-" + suffix + "@email.com", "password", "");
+                "INSERT INTO users (id, username, name, email, password, profile_picture) VALUES (?, ?, ?, ?, ?, ?)",
+                userId, "migration-" + suffix, "migration-" + suffix, "migration-" + suffix + "@email.com", "password", "");
         return insertContent(jdbcTemplate, tmdbId);
     }
 

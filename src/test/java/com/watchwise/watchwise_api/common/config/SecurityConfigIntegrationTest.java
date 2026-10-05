@@ -91,6 +91,7 @@ class SecurityConfigIntegrationTest {
         String body = """
                 {
                     "username": "securityconfigroutinguser",
+                    "name": "securityconfigroutinguser",
                     "email": "securityconfigroutinguser@email.com",
                     "password": "Password123",
                     "isProfilePublic": true
