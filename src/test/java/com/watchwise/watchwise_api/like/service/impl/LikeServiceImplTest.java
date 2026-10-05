@@ -2,7 +2,6 @@ package com.watchwise.watchwise_api.like.service.impl;
 
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
-import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -28,7 +27,6 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
-import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -86,9 +84,6 @@ class LikeServiceImplTest {
 
     @Mock
     private UserListRepository userListRepository;
-
-    @Mock
-    private UserListItemRepository userListItemRepository;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -743,7 +738,6 @@ class LikeServiceImplTest {
     void shouldSaveNewLikeWhenNotAlreadyLikedAndListIsPublic() {
         when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
 
@@ -765,7 +759,6 @@ class LikeServiceImplTest {
     void shouldAttemptSaveInANewTransactionWhenNotAlreadyLikedList() {
         when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
 
@@ -805,7 +798,6 @@ class LikeServiceImplTest {
         scifi.setVisibility(UserListVisibility.PRIVATE);
         when(likeRepository.existsByUserIdAndListId(marinaId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
 
@@ -822,7 +814,6 @@ class LikeServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
 
@@ -866,7 +857,6 @@ class LikeServiceImplTest {
     void shouldPersistLikeWhenTheListIsAListOfLists() {
         when(likeRepository.existsByUserIdAndListId(marinaId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(true);
         when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
 
@@ -883,7 +873,6 @@ class LikeServiceImplTest {
                 .thenReturn(false)
                 .thenReturn(true);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
         when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));
@@ -897,7 +886,6 @@ class LikeServiceImplTest {
     void shouldRethrowDataIntegrityViolationExceptionWhenRowStillDoesNotExistAfterSaveFailsForList() {
         when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
         DataIntegrityViolationException exception = new DataIntegrityViolationException("unexpected db error");
@@ -913,7 +901,6 @@ class LikeServiceImplTest {
                 .thenReturn(false)
                 .thenReturn(true);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.getReferenceById(listId)).thenReturn(scifi);
         when(likeRepository.saveAndFlush(any(Like.class))).thenThrow(new DataIntegrityViolationException("duplicate"));

@@ -31,7 +31,6 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
-import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -74,9 +73,6 @@ class CommentServiceImplTest {
 
     @Mock
     private UserListRepository userListRepository;
-
-    @Mock
-    private UserListItemRepository userListItemRepository;
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
@@ -500,7 +496,6 @@ class CommentServiceImplTest {
         when(commentRepository.findByListIdOrderByCreatedAtAsc(eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
 
         assertThat(commentService.getCommentsForList(lucasId, listId, 1, 10).getContent()).isEmpty();
-        verifyNoInteractions(userListItemRepository);
     }
 
     @Test
@@ -722,7 +717,6 @@ class CommentServiceImplTest {
     @DisplayName("[createCommentOnList] Should Save Comment Targeting List - When List Is Public")
     void shouldSaveCommentTargetingListWhenListIsPublic() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
@@ -760,7 +754,6 @@ class CommentServiceImplTest {
     void shouldSaveCommentWhenListIsPrivateAndCommenterIsTheOwner() {
         scifi.setVisibility(UserListVisibility.PRIVATE);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
@@ -778,7 +771,6 @@ class CommentServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
@@ -823,7 +815,6 @@ class CommentServiceImplTest {
     @DisplayName("[createCommentOnList] Should Save Comment - When List Is A List Of Lists")
     void shouldSaveCommentWhenListIsAListOfLists() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(true);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
@@ -840,7 +831,6 @@ class CommentServiceImplTest {
     void shouldSaveReplyWhenParentCommentTargetsTheSameList() {
         Comment parent = buildListComment(scifi);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(commentRepository.findById(parent.getId())).thenReturn(Optional.of(parent));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -857,7 +847,6 @@ class CommentServiceImplTest {
     void shouldThrowNotFoundExceptionWhenParentCommentDoesNotExistOnList() {
         UUID missingParentId = UUID.randomUUID();
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(commentRepository.findById(missingParentId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> commentService.createCommentOnList(
@@ -881,7 +870,6 @@ class CommentServiceImplTest {
                 .build();
         Comment parentOnOtherList = buildListComment(horror);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)).thenReturn(false);
         when(commentRepository.findById(parentOnOtherList.getId())).thenReturn(Optional.of(parentOnOtherList));
 
         assertThatThrownBy(() -> commentService.createCommentOnList(

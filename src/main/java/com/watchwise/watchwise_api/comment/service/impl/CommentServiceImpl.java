@@ -29,7 +29,6 @@ import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateReposit
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
-import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -50,7 +49,6 @@ public class CommentServiceImpl implements CommentService {
     private final UserRepository userRepository;
     private final ContentRepository contentRepository;
     private final UserListRepository userListRepository;
-    private final UserListItemRepository userListItemRepository;
     private final DiaryEntryRepository diaryEntryRepository;
     private final DroppedEntryRepository droppedEntryRepository;
     private final PickRepository pickRepository;
@@ -161,7 +159,6 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
         assertListIsVisibleTo(userId, list);
-        assertListAcceptsComments(listId);
 
         Comment parentComment = resolveParentCommentOnList(commentCreationDTO.parentCommentId(), listId);
 
@@ -380,12 +377,6 @@ public class CommentServiceImpl implements CommentService {
         }
 
         throw new ForbiddenException("This list is private");
-    }
-
-    private void assertListAcceptsComments(UUID listId) {
-        if (userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)) {
-            throw new BadRequestException("This list is a list of lists and cannot receive comments");
-        }
     }
 
     private void assertDiaryEntryIsVisibleTo(UUID viewerId, DiaryEntry diaryEntry) {

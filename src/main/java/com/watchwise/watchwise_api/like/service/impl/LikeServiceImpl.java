@@ -2,7 +2,6 @@ package com.watchwise.watchwise_api.like.service.impl;
 
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
-import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
@@ -24,7 +23,6 @@ import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateReposit
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
-import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -46,7 +44,6 @@ public class LikeServiceImpl implements LikeService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final DroppedEntryRepository droppedEntryRepository;
     private final UserListRepository userListRepository;
-    private final UserListItemRepository userListItemRepository;
     private final FollowerRepository followerRepository;
     private final PickRepository pickRepository;
     private final PicksTemplateRepository picksTemplateRepository;
@@ -180,7 +177,6 @@ public class LikeServiceImpl implements LikeService {
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
         assertListIsVisibleTo(userId, list);
-        assertListAcceptsLikes(listId);
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
@@ -344,12 +340,6 @@ public class LikeServiceImpl implements LikeService {
             return Set.of();
         }
         return likeRepository.findLikedPicksTemplateIds(userId, templateIds);
-    }
-
-    private void assertListAcceptsLikes(UUID listId) {
-        if (userListItemRepository.existsByUserListIdAndChildListIdIsNotNull(listId)) {
-            throw new BadRequestException("This list is a list of lists and cannot receive likes");
-        }
     }
 
     private void assertCommentIsVisibleTo(UUID viewerId, Comment comment) {
