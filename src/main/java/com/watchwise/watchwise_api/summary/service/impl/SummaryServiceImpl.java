@@ -39,6 +39,7 @@ import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeRecentlyWatchedDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSocialActivityDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeViewerDTO;
+import com.watchwise.watchwise_api.summary.dto.HomeContentReferenceDTO;
 import com.watchwise.watchwise_api.summary.dto.LongestWatchedItemDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthCountDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
@@ -210,7 +211,10 @@ public class SummaryServiceImpl implements SummaryService {
                         companion -> companion.getDiaryEntry().getId(),
                         Collectors.mapping(companion -> companion.getUser().getProfilePicture(), Collectors.toList())));
         return entries.stream()
-                .map(entry -> new HomeRecentlyWatchedDTO(entry.getId(), contentMapper.contentToContentRefDto(entry.getContent()),
+                .map(entry -> new HomeRecentlyWatchedDTO(entry.getId(), new HomeContentReferenceDTO(
+                                entry.getContent().getId(), entry.getContent().getTmdbId(), entry.getContent().getType(),
+                                entry.getContent().getSeriesTmdbId(), entry.getContent().getSeasonNumber(),
+                                entry.getContent().getEpisodeNumber(), entry.getContent().getRuntimeMinutes()),
                         entry.getScore(), entry.getWatchedDate(), customPosters.get(entry.getContent().getId()),
                         companionPictures.getOrDefault(entry.getId(), List.of())))
                 .toList();
