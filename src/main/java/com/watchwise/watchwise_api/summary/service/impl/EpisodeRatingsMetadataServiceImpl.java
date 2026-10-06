@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDisplayDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadata;
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadataService;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,6 +17,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -72,12 +74,22 @@ public class EpisodeRatingsMetadataServiceImpl implements EpisodeRatingsMetadata
 
         if (lookup instanceof TmdbLookupResult.Found<TmdbTvDisplayDetails> found) {
             TmdbTvDisplayDetails details = found.value();
+            if (details.seasons() == null) {
+                throw new TmdbUnavailableException("TMDB is currently unavailable");
+            }
             return new EpisodeRatingsMetadata(
                     normalizedSeriesTmdbId,
                     details.name(),
                     releaseYearOf(details.firstAirDate()),
                     TmdbImageUrlBuilder.posterUrl(details.posterPath()),
-                    TmdbImageUrlBuilder.backdropUrl(details.backdropPath()));
+                    TmdbImageUrlBuilder.backdropUrl(details.backdropPath()),
+                    details.seasons().stream()
+                            .filter(Objects::nonNull)
+                            .map(TmdbSeasonSummary::seasonNumber)
+                            .filter(number -> number != null && number > 0)
+                            .distinct()
+                            .sorted()
+                            .toList());
         }
         if (lookup instanceof TmdbLookupResult.NotFound<TmdbTvDisplayDetails>) {
             throw new NotFoundException("Series not found in TMDB");

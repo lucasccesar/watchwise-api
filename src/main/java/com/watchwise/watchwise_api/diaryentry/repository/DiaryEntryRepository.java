@@ -1119,6 +1119,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                   AND c.type = 'EPISODE'
                   AND c.series_tmdb_id = :seriesTmdbId
                   AND c.season_number > 0
+                  AND d.score IS NOT NULL
             )
             SELECT season_number AS seasonNumber,
                    episode_number AS episodeNumber,

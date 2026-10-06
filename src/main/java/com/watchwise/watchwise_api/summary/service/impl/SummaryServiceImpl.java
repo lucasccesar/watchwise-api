@@ -117,6 +117,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final HomeNextEpisodeAssembler homeNextEpisodeAssembler;
     private final ProfileSummaryReader profileSummaryReader;
     private final EpisodeRatingsMetadataService episodeRatingsMetadataService;
+    private final EpisodeRatingsReleasedEpisodes episodeRatingsReleasedEpisodes;
     private final PageRequestFactory pageRequestFactory;
 
     @Override
@@ -461,24 +462,18 @@ public class SummaryServiceImpl implements SummaryService {
 
         String language = resolveViewerPreferredLanguage(viewerId, userId, target);
         EpisodeRatingsMetadata metadata = episodeRatingsMetadataService.resolve(seriesTmdbId, language);
+        LocalDate today = LocalDate.now();
         SeriesProgressMetadataRefreshService.Snapshot snapshot = seriesProgressMetadataRefreshService
-                .getSnapshotsForRead(List.of(seriesTmdbId), LocalDate.now())
+                .getSnapshotsForRead(List.of(seriesTmdbId), today)
                 .get(seriesTmdbId);
         if (snapshot == null || snapshot.series() == null) {
             throw new TmdbUnavailableException("TMDB is currently unavailable");
         }
 
         Set<EpisodeCoordinate> releasedCoordinates = new LinkedHashSet<>();
-        for (SeriesProgressMetadataRefreshService.SeasonSnapshot season : snapshot.seasons()) {
-            if (season.seasonNumber() == null || season.seasonNumber() <= 0
-                    || season.regularReleasedEpisodeCount() == null
-                    || season.regularReleasedEpisodeCount() <= 0) {
-                continue;
-            }
-            for (int episodeNumber = 1; episodeNumber <= season.regularReleasedEpisodeCount(); episodeNumber++) {
-                releasedCoordinates.add(new EpisodeCoordinate(season.seasonNumber(), episodeNumber));
-            }
-        }
+        episodeRatingsReleasedEpisodes.load(seriesTmdbId, metadata.regularSeasonNumbers(), today)
+                .forEach((seasonNumber, episodeNumbers) -> episodeNumbers.forEach(episodeNumber ->
+                        releasedCoordinates.add(new EpisodeCoordinate(seasonNumber, episodeNumber))));
 
         Map<EpisodeCoordinate, Integer> personalScores = new HashMap<>();
         for (DiaryEntryRepository.LatestUserEpisodeScore score : diaryEntryRepository

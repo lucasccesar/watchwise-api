@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadata;
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadataService;
+import com.watchwise.watchwise_api.summary.service.impl.EpisodeRatingsReleasedEpisodes;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -96,6 +97,9 @@ class SummaryControllerIntegrationTest {
 
     @MockitoBean
     private EpisodeRatingsMetadataService episodeRatingsMetadataService;
+
+    @MockitoBean
+    private EpisodeRatingsReleasedEpisodes episodeRatingsReleasedEpisodes;
 
     @MockitoBean
     private UserContentPosterService userContentPosterService;
@@ -196,7 +200,7 @@ class SummaryControllerIntegrationTest {
                 .build());
     }
 
-    private void persistRatedEntry(User user, Content content, int score, int watchNumber) {
+    private void persistRatedEntry(User user, Content content, Integer score, int watchNumber) {
         LocalDateTime now = LocalDateTime.now();
         diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
@@ -216,7 +220,9 @@ class SummaryControllerIntegrationTest {
     private void stubUsableEpisodeRatingsMetadata(UUID targetUserId) {
         when(episodeRatingsMetadataService.resolve(eq("1399"), anyString()))
                 .thenReturn(new EpisodeRatingsMetadata(
-                        "1399", "Breaking Bad", 2008, "/poster.jpg", "/backdrop.jpg"));
+                        "1399", "Breaking Bad", 2008, "/poster.jpg", "/backdrop.jpg", List.of(1)));
+        when(episodeRatingsReleasedEpisodes.load(eq("1399"), eq(List.of(1)), any(LocalDate.class)))
+                .thenReturn(Map.of(1, List.of(1, 2, 3, 4, 5)));
         LocalDateTime refreshedAt = LocalDateTime.now();
         SeriesProgressMetadataRefreshService.Snapshot snapshot = new SeriesProgressMetadataRefreshService.Snapshot(
                 new SeriesProgressMetadataRefreshService.SeriesSnapshot(
@@ -274,6 +280,22 @@ class SummaryControllerIntegrationTest {
                 .andExpect(jsonPath("$.episodes[2].ratingCount").value(1))
                 .andExpect(jsonPath("$.overallAverageScore").value(6.0))
                 .andExpect(jsonPath("$.overallRatingCount").value(3));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Keep The Latest Existing Score When A Later Rewatch Has No Score")
+    void shouldRetainLatestRatedScoreWhenLatestRewatchHasNoScore() throws Exception {
+        RegisteredUser target = registerUser("episodegridmissingrewatchscore", false);
+        User targetEntity = userRepository.findById(target.id()).orElseThrow();
+        Content episode1 = persistEpisode("1399", 1, 1, 45);
+        persistRatedEntry(targetEntity, episode1, 8, 1);
+        persistRatedEntry(targetEntity, episode1, null, 2);
+        stubUsableEpisodeRatingsMetadata(target.id());
+
+        mockMvc.perform(getEpisodeRatingsGridRequest(target, target.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.episodes[0].episodeNumber").value(1))
+                .andExpect(jsonPath("$.episodes[0].score").value(8));
     }
 
     @Test

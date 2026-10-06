@@ -9,6 +9,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
@@ -28,11 +30,12 @@ class TmdbClientDisplayDetailsTest {
     }
 
     @Test
-    void shouldFetchAndCacheOnlyLocalizedTvDisplayFields() {
+    void shouldFetchAndCacheLocalizedTvDisplayFieldsAndSeasons() {
         mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396?language=pt-BR"))
                 .andRespond(withSuccess("""
                         {"id":"1396","name":"Breaking Bad","first_air_date":"2008-01-20",
-                         "poster_path":"/poster.jpg","backdrop_path":"/backdrop.jpg"}
+                         "poster_path":"/poster.jpg","backdrop_path":"/backdrop.jpg",
+                         "seasons":[{"season_number":0},{"season_number":1},{"season_number":3}]}
                         """, MediaType.APPLICATION_JSON));
 
         var remote = tmdbClient.getTvDisplayDetails("1396", "pt-BR");
@@ -41,7 +44,10 @@ class TmdbClientDisplayDetailsTest {
         assertThat(remote).isInstanceOfSatisfying(TmdbLookupResult.Found.class, found -> {
             assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE);
             assertThat(found.value()).isEqualTo(
-                    new TmdbTvDisplayDetails("1396", "Breaking Bad", "2008-01-20", "/poster.jpg", "/backdrop.jpg"));
+                    new TmdbTvDisplayDetails("1396", "Breaking Bad", "2008-01-20", "/poster.jpg", "/backdrop.jpg",
+                            List.of(new TmdbSeasonSummary(0, null, null, null, null, null),
+                                    new TmdbSeasonSummary(1, null, null, null, null, null),
+                                    new TmdbSeasonSummary(3, null, null, null, null, null))));
         });
         assertThat(cached).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));

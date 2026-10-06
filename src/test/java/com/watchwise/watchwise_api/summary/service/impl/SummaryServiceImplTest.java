@@ -130,6 +130,9 @@ class SummaryServiceImplTest {
     @Mock
     private EpisodeRatingsMetadataService episodeRatingsMetadataService;
 
+    @Mock
+    private EpisodeRatingsReleasedEpisodes episodeRatingsReleasedEpisodes;
+
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
@@ -932,7 +935,9 @@ class SummaryServiceImplTest {
         when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
                 .thenReturn(Map.of("1399", seriesProgressSnapshotWithSeason("1399", 1, 5)));
         when(episodeRatingsMetadataService.resolve("1399", viewer.getPreferredLanguage()))
-                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, "/poster.jpg", "/backdrop.jpg"));
+                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, "/poster.jpg", "/backdrop.jpg", List.of(1)));
+        when(episodeRatingsReleasedEpisodes.load(eq("1399"), eq(List.of(1)), any(LocalDate.class)))
+                .thenReturn(Map.of(1, List.of(1, 2, 3, 4, 5)));
         when(diaryEntryRepository.findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucasId, "1399"))
                 .thenReturn(List.of(
                         latestUserEpisodeScore(1, 1, 9),
@@ -970,13 +975,37 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Preserve Gaps In Released Episode Numbers")
+    void shouldUseOnlyAiredEpisodeCoordinatesWhenSeasonHasNumberingGaps() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
+                .thenReturn(Map.of("1399", seriesProgressSnapshotWithSeason("1399", 1, 2)));
+        when(episodeRatingsMetadataService.resolve("1399", lucas.getPreferredLanguage()))
+                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, null, null, List.of(1)));
+        when(episodeRatingsReleasedEpisodes.load(eq("1399"), eq(List.of(1)), any(LocalDate.class)))
+                .thenReturn(Map.of(1, List.of(1, 3)));
+        when(diaryEntryRepository.findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucasId, "1399"))
+                .thenReturn(List.of());
+        when(diaryEntryRepository.findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId("1399"))
+                .thenReturn(List.of());
+
+        EpisodeRatingsGridResponseDTO result = summaryService.getEpisodeRatingsGrid(lucasId, lucasId, "1399");
+
+        assertThat(result.episodes()).containsExactly(
+                new EpisodeScoreDTO(1, 1, null, null, 0L),
+                new EpisodeScoreDTO(1, 3, null, null, 0L));
+    }
+
+    @Test
     @DisplayName("[getEpisodeRatingsGrid] Should Use The Latest Personal Rewatch Score")
     void shouldUseTheLatestPersonalRewatchScoreForEpisodeRatingsGrid() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
                 .thenReturn(Map.of("1399", seriesProgressSnapshotWithSeason("1399", 1, 1)));
         when(episodeRatingsMetadataService.resolve("1399", lucas.getPreferredLanguage()))
-                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, null, null));
+                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, null, null, List.of(1)));
+        when(episodeRatingsReleasedEpisodes.load(eq("1399"), eq(List.of(1)), any(LocalDate.class)))
+                .thenReturn(Map.of(1, List.of(1)));
         when(diaryEntryRepository.findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucasId, "1399"))
                 .thenReturn(List.of(latestUserEpisodeScore(1, 1, 9)));
         when(diaryEntryRepository.findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId("1399"))

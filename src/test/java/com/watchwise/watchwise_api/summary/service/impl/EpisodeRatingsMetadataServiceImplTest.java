@@ -96,15 +96,28 @@ class EpisodeRatingsMetadataServiceImplTest {
     void shouldMapLocalizedDisplayDetailsAndBuildImageUrls() {
         when(tmdbClient.getTvDisplayDetails("1396", "pt-BR"))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvDisplayDetails(
-                        "1396", "Breaking Bad", "2008-01-20", "/poster.jpg", "/backdrop.jpg")));
+                        "1396", "Breaking Bad", "2008-01-20", "/poster.jpg", "/backdrop.jpg",
+                        List.of(new com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary(0, null, null, null, null, null),
+                                new com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary(1, null, null, null, null, null),
+                                new com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary(3, null, null, null, null, null)))));
 
         var metadata = service.resolve(" 1396 ", "pt-BR");
 
         assertThat(metadata).isEqualTo(new EpisodeRatingsMetadata(
                 "1396", "Breaking Bad", 2008,
                 "https://image.tmdb.org/t/p/w500/poster.jpg",
-                "https://image.tmdb.org/t/p/w1280/backdrop.jpg"));
+                "https://image.tmdb.org/t/p/w1280/backdrop.jpg", List.of(1, 3)));
         verify(tmdbClient).getTvDisplayDetails("1396", "pt-BR");
+    }
+
+    @Test
+    void shouldFailWhenDisplayDetailsOmitSeasonList() {
+        when(tmdbClient.getTvDisplayDetails("1396", "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvDisplayDetails(
+                        "1396", "Breaking Bad", "2008-01-20", null, null, null)));
+
+        assertThatThrownBy(() -> service.resolve("1396", "pt-BR"))
+                .isInstanceOf(TmdbUnavailableException.class);
     }
 
     @Test
