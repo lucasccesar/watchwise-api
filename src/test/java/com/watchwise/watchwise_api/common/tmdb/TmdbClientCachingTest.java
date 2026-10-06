@@ -84,6 +84,7 @@ class TmdbClientCachingTest {
         TmdbClient tmdbClient(RestClient tmdbRestClient,
                 Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache,
+                Cache<String, TmdbLookupResult<TmdbTvDisplayDetails>> tmdbTvDisplayDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbEpisodeFullDetails>> tmdbEpisodeFullDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbEpisodeImages>> tmdbEpisodeImagesCache,
@@ -101,6 +102,7 @@ class TmdbClientCachingTest {
                 Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>>> tmdbTrendingMovieCache,
                 Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
+                    tmdbTvDisplayDetailsCache,
                     tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
                     tmdbEpisodeImagesCache,
                     tmdbMovieReleaseDatesCache, tmdbCalendarSeasonDetailsCache,
@@ -121,6 +123,9 @@ class TmdbClientCachingTest {
 
     @Autowired
     private Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
+
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbTvDisplayDetails>> tmdbTvDisplayDetailsCache;
 
     @Autowired
     private Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
@@ -175,6 +180,7 @@ class TmdbClientCachingTest {
         mockServer.reset();
         tmdbMovieFullDetailsCache.invalidateAll();
         tmdbTvFullDetailsCache.invalidateAll();
+        tmdbTvDisplayDetailsCache.invalidateAll();
         tmdbSeasonFullDetailsCache.invalidateAll();
         tmdbEpisodeFullDetailsCache.invalidateAll();
         tmdbEpisodeImagesCache.invalidateAll();

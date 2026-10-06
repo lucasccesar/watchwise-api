@@ -32,6 +32,12 @@ public class TmdbCacheConfig {
     }
 
     @Bean
+    public Cache<String, TmdbLookupResult<TmdbTvDisplayDetails>> tmdbTvDisplayDetailsCache(
+            @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours) {
+        return newCache(ttlHours);
+    }
+
+    @Bean
     public Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache(
             @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours) {
         return newCache(ttlHours);

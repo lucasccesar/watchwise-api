@@ -34,6 +34,7 @@ class TmdbClientTest {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.themoviedb.org/3");
         mockServer = MockRestServiceServer.bindTo(builder).build();
         tmdbClient = new TmdbClient(builder.build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
