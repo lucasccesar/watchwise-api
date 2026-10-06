@@ -43,6 +43,7 @@ import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -50,6 +51,7 @@ import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressPresentationEnricher;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -111,6 +113,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final SeriesProgressReadRepository seriesProgressReadRepository;
     private final SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
     private final SeriesProgressAssembler seriesProgressAssembler;
+    private final SeriesProgressPresentationEnricher seriesProgressPresentationEnricher;
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -246,12 +249,42 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 loadWatchedProgress(userId, pageSeriesIds);
         Map<String, String> customPosterBySeries = loadSeriesPosters(userId, pageSeriesIds);
 
-        List<SeriesInProgressResponseDTO> content = page.getContent().stream()
-                .map(row -> toDetailedSeriesResponse(
+        Map<String, SeriesInProgressResponseDTO> baseResponses = new LinkedHashMap<>();
+        page.getContent().forEach(row -> baseResponses.put(
+                row.getSeriesTmdbId(),
+                toDetailedSeriesResponse(
                         row,
                         snapshots.get(row.getSeriesTmdbId()),
                         watchedProgress.getOrDefault(row.getSeriesTmdbId(), Map.of()),
-                        customPosterBySeries.get(row.getSeriesTmdbId())))
+                        customPosterBySeries.get(row.getSeriesTmdbId()))));
+
+        Set<WatchedEpisodeCoordinate> watchedCoordinates = pageSeriesIds.isEmpty()
+                ? Set.of()
+                : Optional.ofNullable(diaryEntryRepository.findWatchedEpisodeCoordinates(userId, pageSeriesIds))
+                        .orElseGet(Set::of);
+        Map<String, List<SeasonProgressDTO>> seasonProgressBySeries = baseResponses.values().stream()
+                .collect(Collectors.toMap(
+                        SeriesInProgressResponseDTO::seriesTmdbId,
+                        SeriesInProgressResponseDTO::seasonProgress,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
+        Map<String, SeriesProgressPresentationEnricher.Enrichment> presentation = pageSeriesIds.isEmpty()
+                ? Map.of()
+                : Optional.ofNullable(seriesProgressPresentationEnricher.enrich(
+                                target, page.getContent(), seasonProgressBySeries,
+                                watchedCoordinates, customPosterBySeries))
+                        .orElseGet(Map::of);
+
+        List<SeriesInProgressResponseDTO> content = page.getContent().stream()
+                .map(row -> {
+                    SeriesInProgressResponseDTO base = baseResponses.get(row.getSeriesTmdbId());
+                    SeriesProgressPresentationEnricher.Enrichment enrichment = presentation.get(row.getSeriesTmdbId());
+                    return enrichment == null
+                            ? base
+                            : base.withPresentation(
+                                    enrichment.seriesTitle(), enrichment.seriesPosterPath(),
+                                    enrichment.lastWatchedEpisodeTitle(), enrichment.nextEpisode());
+                })
                 .toList();
         SeriesInProgressAggregateDTO aggregate = calculateAggregate(userId, allRows, snapshots);
 

@@ -46,6 +46,8 @@ import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepositor
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressPresentationEnricher;
+import com.watchwise.watchwise_api.seriesprogress.dto.ProgressEpisodeDTO;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -165,6 +167,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
+
+    @Mock
+    private SeriesProgressPresentationEnricher seriesProgressPresentationEnricher;
 
     @Spy
     private SeriesProgressAssembler seriesProgressAssembler = new SeriesProgressAssembler();
@@ -793,6 +798,54 @@ class DiaryEntryServiceImplTest {
         verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
                 eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
                 eq(Sort.Direction.ASC), any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("[getSeriesInProgress] Should Merge Presentation Enrichment Without Changing Numeric Progress")
+    void shouldMergePresentationEnrichmentWithoutChangingNumericProgressForSeriesInProgress() {
+        String seriesTmdbId = "1399";
+        SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
+                seriesTmdbId, 14L, 900L, 5, 14, LocalDate.of(2026, 9, 21),
+                5, 14, 16, 900, LocalDate.of(2026, 9, 22), 2L, 112L);
+
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressReadRepository.findCandidatesByUserId(
+                eq(lucasId), eq(SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED),
+                eq(Sort.Direction.DESC), any(Pageable.class)))
+                .thenAnswer(invocation -> candidatesPage(invocation.getArgument(3), List.of(candidate), false));
+        when(seriesProgressReadRepository.findGlobalTotalsByUserId(lucasId))
+                .thenReturn(seriesProgressTotals(14L, 900L));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(
+                eq(lucasId), eq(List.of(seriesTmdbId))))
+                .thenReturn(List.of(seasonProgress(seriesTmdbId, 5, 14L, 900L)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of(seriesTmdbId)), any()))
+                .thenReturn(Map.of(seriesTmdbId, new SeriesProgressMetadataRefreshService.Snapshot(
+                        new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                                seriesTmdbId, 16, 1012, 16, LocalDate.of(2026, 9, 22),
+                                LocalDateTime.now(), LocalDateTime.now()),
+                        List.of(new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                seriesTmdbId, 5, 16, 1012, 16,
+                                LocalDate.of(2026, 9, 22), LocalDateTime.now())))));
+        when(seriesProgressPresentationEnricher.enrich(
+                any(), any(), any(), any(), any()))
+                .thenReturn(Map.of(seriesTmdbId, new SeriesProgressPresentationEnricher.Enrichment(
+                        "Breaking Bad", "/poster.jpg", "Ozymandias",
+                        new ProgressEpisodeDTO(5, 15, "Granite State", LocalDate.of(2013, 9, 22),
+                                55, "/still.jpg", true))));
+
+        SeriesInProgressResponseDTO result = diaryEntryService.getSeriesInProgress(
+                lucasId, lucasId, 1, 10,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC)
+                .content().getFirst();
+
+        assertThat(result.seriesTitle()).isEqualTo("Breaking Bad");
+        assertThat(result.seriesPosterPath()).isEqualTo("/poster.jpg");
+        assertThat(result.lastWatchedEpisodeTitle()).isEqualTo("Ozymandias");
+        assertThat(result.nextEpisode().episodeNumber()).isEqualTo(15);
+        assertThat(result.watchedEpisodeCount()).isEqualTo(14L);
+        assertThat(result.totalEpisodeCount()).isEqualTo(16);
+        assertThat(result.remainingEpisodeCount()).isEqualTo(2L);
+        assertThat(result.remainingRuntimeMinutes()).isEqualTo(112L);
     }
 
     @Test
