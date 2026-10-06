@@ -408,7 +408,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return new SeriesInProgressResponseDTO(
                 row.getSeriesTmdbId(), row.getMaxSeasonNumber(), row.getMaxEpisodeNumber(), row.getLastWatchedDate(),
                 row.getWatchedEpisodeCount(), totalEpisodeCount, watchedPercentage, progress.seasonProgress(),
-                null, null, null, totalEpisodeCount, null, null, null, null, customPosterUrl);
+                null, null, null, totalEpisodeCount, null, null, null, null, customPosterUrl,
+                null, null, null, null);
     }
 
     private SeriesProgressDetails calculateSeriesProgress(

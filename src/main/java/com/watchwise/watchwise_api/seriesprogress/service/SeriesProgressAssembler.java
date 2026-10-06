@@ -67,7 +67,11 @@ public class SeriesProgressAssembler {
                 series != null ? series.lastReleasedEpisodeDate() : row.getLastReleasedEpisodeDate(),
                 remainingEpisodeCount,
                 remainingRuntimeMinutes,
-                customPosterUrl);
+                customPosterUrl,
+                null,
+                null,
+                null,
+                null);
     }
 
     public SeasonProgressDTO toSeasonProgress(
