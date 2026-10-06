@@ -23,7 +23,8 @@ public record PublicUserProfileDTO(
         List<GenreCountDTO> genreCountsSeries,
         String banner,
         long followersCount,
-        long followingCount
+        long followingCount,
+        ViewerProfileRelation viewerRelation
 ) {
     public PublicUserProfileDTO(UUID id, String username, String description, String profilePicture,
             Boolean isProfilePublic, LocalDateTime createdAt, long totalMinutesWatchedMovies,
@@ -33,6 +34,7 @@ public record PublicUserProfileDTO(
         this(id, username, username, description, profilePicture, isProfilePublic, createdAt,
                 totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, minutesWatchedMoviesLast30Days,
                 minutesWatchedEpisodesLast30Days, totalTheaterVisits, genreCountsMovies, genreCountsSeries,
-                banner, followersCount, followingCount);
+                banner, followersCount, followingCount, ViewerProfileRelation.NOT_FOLLOWING);
     }
+
 }

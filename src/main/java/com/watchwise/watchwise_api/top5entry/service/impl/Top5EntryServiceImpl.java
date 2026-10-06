@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
@@ -44,6 +45,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     private final UserContentPosterService userContentPosterService;
     private final FollowerRepository followerRepository;
     private final Top5EntryMapper top5EntryMapper;
+    private final DiaryEntryRepository diaryEntryRepository;
 
     static final int MAX_ENTRIES = 5;
 
@@ -58,9 +60,11 @@ public class Top5EntryServiceImpl implements Top5EntryService {
 
         List<Top5Entry> entries = top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(userId, type);
         Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, entries);
+        Map<UUID, Integer> scoreByContentId = loadLatestScores(userId, type, entries);
 
         return entries.stream()
-                .map(entry -> enrichTop5EntryResponse(entry, customPosterByContentId.get(entry.getContent().getId())))
+                .map(entry -> enrichTop5EntryResponse(entry, customPosterByContentId.get(entry.getContent().getId()),
+                        scoreByContentId.get(entry.getContent().getId())))
                 .toList();
     }
 
@@ -157,7 +161,30 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     }
 
     private Top5EntryResponseDTO enrichTop5EntryResponse(Top5Entry entry, String customPosterUrl) {
-        return top5EntryMapper.top5EntryToResponseDto(entry).withCustomPosterUrl(customPosterUrl);
+        return enrichTop5EntryResponse(entry, customPosterUrl, null);
+    }
+
+    private Top5EntryResponseDTO enrichTop5EntryResponse(Top5Entry entry, String customPosterUrl, Integer score) {
+        return top5EntryMapper.top5EntryToResponseDto(entry)
+                .withCustomPosterUrl(customPosterUrl)
+                .withScore(score);
+    }
+
+    private Map<UUID, Integer> loadLatestScores(UUID userId, ContentType type, List<Top5Entry> entries) {
+        List<UUID> contentIds = entries.stream()
+                .map(Top5Entry::getContent)
+                .filter(java.util.Objects::nonNull)
+                .map(Content::getId)
+                .distinct()
+                .toList();
+        if (contentIds.isEmpty()) {
+            return Map.of();
+        }
+        return diaryEntryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
+                        userId, contentIds, type.name()).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        DiaryEntryRepository.LatestContentScore::getContentId,
+                        DiaryEntryRepository.LatestContentScore::getScore));
     }
 
     private Map<UUID, String> loadPostersForOwner(UUID ownerId, List<Top5Entry> entries) {

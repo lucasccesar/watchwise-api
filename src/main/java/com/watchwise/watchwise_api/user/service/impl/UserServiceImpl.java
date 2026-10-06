@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -261,10 +262,27 @@ public class UserServiceImpl implements UserService {
         userVisibilityService.assertCanView(viewerId, targetUserId);
 
         ProfileStats stats = computeProfileStats(targetUserId);
-        return userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatchedMovies(),
+        PublicUserProfileDTO profile = userMapper.userToPublicUserProfileDto(foundUser, stats.totalMinutesWatchedMovies(),
                 stats.totalMinutesWatchedEpisodes(), stats.minutesWatchedMoviesLast30Days(),
                 stats.minutesWatchedEpisodesLast30Days(), stats.totalTheaterVisits(), stats.genreCountsMovies(),
                 stats.genreCountsSeries(), stats.followersCount(), stats.followingCount());
+        return new PublicUserProfileDTO(profile.id(), profile.username(), profile.name(), profile.description(),
+                profile.profilePicture(), profile.isProfilePublic(), profile.createdAt(),
+                profile.totalMinutesWatchedMovies(), profile.totalMinutesWatchedEpisodes(),
+                profile.minutesWatchedMoviesLast30Days(), profile.minutesWatchedEpisodesLast30Days(),
+                profile.totalTheaterVisits(), profile.genreCountsMovies(), profile.genreCountsSeries(),
+                profile.banner(), profile.followersCount(), profile.followingCount(),
+                resolveViewerProfileRelation(viewerId, targetUserId));
+    }
+
+    private ViewerProfileRelation resolveViewerProfileRelation(UUID viewerId, UUID targetUserId) {
+        if (viewerId.equals(targetUserId)) {
+            return ViewerProfileRelation.SELF;
+        }
+        return followerRepository.findByFollowerIdAndFollowedId(viewerId, targetUserId)
+                .filter(follower -> follower.getStatus() == FollowStatus.ACCEPTED)
+                .map(follower -> ViewerProfileRelation.FOLLOWING)
+                .orElse(ViewerProfileRelation.NOT_FOLLOWING);
     }
 
     private void validateName(String trimmedName) {

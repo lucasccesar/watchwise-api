@@ -30,6 +30,7 @@ import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeRecentlyWatchedDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
@@ -72,6 +73,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -151,6 +153,21 @@ class SummaryServiceImplTest {
                 .thenReturn(Page.empty());
         lenient().when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(any(), any(), any()))
                 .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.findRecentReviewsByUserIdAndContentTypes(any(), any(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countDistinctMoviesByGenreAndUserId(any())).thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countDistinctEpisodesByGenreAndUserId(any())).thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countLatestScoresByUserIdAndContentType(any(), anyString()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countDiaryEntriesGroupByContentType(any(), anyString(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(any(), any(), anyString()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.findLongestMovieContentByUserId(any(), any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbId(any(), any()))
+                .thenReturn(List.of());
+        lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
         lenient().when(diaryEntryRepository.findSeriesInProgressByUserId(any(), any(PageRequest.class)))
                 .thenReturn(Page.empty());
         lenient().when(diaryEntryService.getSeriesInProgress(any(), any(), any(), any()))
@@ -264,7 +281,7 @@ class SummaryServiceImplTest {
     @DisplayName("[getSummary] Should Use The Movie Genre Query - When Type Is MOVIE")
     void shouldUseTheMovieGenreQueryWhenTypeIsMovie() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(lucasId))
+        when(diaryEntryRepository.countDistinctMoviesByGenreAndUserId(lucasId))
                 .thenReturn(List.of(genreCount("Drama", 3L)));
 
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
@@ -276,7 +293,7 @@ class SummaryServiceImplTest {
     @DisplayName("[getSummary] Should Use The Series Genre Query - When Type Is SERIES")
     void shouldUseTheSeriesGenreQueryWhenTypeIsSeries() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(lucasId))
+        when(diaryEntryRepository.countDistinctEpisodesByGenreAndUserId(lucasId))
                 .thenReturn(List.of(genreCount("Sci-Fi", 2L)));
 
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
@@ -288,7 +305,7 @@ class SummaryServiceImplTest {
     @DisplayName("[getSummary] Should Return RatingsDistribution From Score Counts")
     void shouldReturnRatingsDistributionFromScoreCounts() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.countByUserIdAndContentTypeGroupByScore(lucasId, ContentType.MOVIE))
+        when(diaryEntryRepository.countLatestScoresByUserIdAndContentType(lucasId, ContentType.MOVIE.name()))
                 .thenReturn(List.of(scoreCount(8, 5L)));
 
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
@@ -304,7 +321,8 @@ class SummaryServiceImplTest {
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
 
         assertThat(result.recentEpisodes()).isEmpty();
-        verify(diaryEntryService, never()).getDiaryEntries(any(), any(), any(), any(), any(), eq(ContentType.EPISODE), any(), any(), any());
+        verify(diaryEntryRepository, never()).findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                any(), eq(ContentType.EPISODE), any());
     }
 
     @Test
@@ -314,7 +332,8 @@ class SummaryServiceImplTest {
 
         summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
 
-        verify(diaryEntryService).getDiaryEntries(lucasId, lucasId, null, 1, 4, ContentType.EPISODE, null, null, null);
+        verify(diaryEntryRepository).findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                lucasId, ContentType.EPISODE, PageRequest.of(0, 4));
     }
 
     @Test
@@ -324,7 +343,8 @@ class SummaryServiceImplTest {
 
         summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
 
-        verify(diaryEntryService).getDiaryEntries(lucasId, lucasId, null, 1, 5, ContentType.MOVIE, null, null, true);
+        verify(diaryEntryRepository).findRecentReviewsByUserIdAndContentTypes(
+                lucasId, List.of(ContentType.MOVIE), PageRequest.of(0, 5));
     }
 
     @Test
@@ -381,13 +401,17 @@ class SummaryServiceImplTest {
     @DisplayName("[getSummary] Should Return Recent Episodes And Reviews Mapped From The Diary Service - When Available")
     void shouldReturnRecentEpisodesAndReviewsMappedFromTheDiaryServiceWhenAvailable() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        DiaryEntryResponseDTO episodeDto = buildDiaryEntryResponseDto();
-        when(diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 4, ContentType.EPISODE, null, null, null))
-                .thenReturn(new PageImpl<>(List.of(episodeDto)));
+        DiaryEntry episode = buildDiaryEntry(buildContent("1399", ContentType.EPISODE), LocalDateTime.now());
+        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                lucasId, ContentType.EPISODE, PageRequest.of(0, 4))).thenReturn(List.of(episode));
+        when(contentMapper.contentToContentRefDto(episode.getContent()))
+                .thenReturn(new ContentRefDTO(episode.getContent().getId(), null, ContentType.EPISODE,
+                        "1399", 1, 1, null, null, episode.getCreatedAt(), episode.getUpdatedAt()));
 
         SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
 
-        assertThat(result.recentEpisodes()).containsExactly(episodeDto);
+        assertThat(result.recentEpisodes()).extracting(ProfileDiaryPreviewDTO::id)
+                .containsExactly(episode.getId());
     }
 
     // ---------- getHomeSummary ----------

@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
@@ -63,6 +64,9 @@ class Top5EntryServiceImplTest {
     private UserContentPosterService userContentPosterService;
 
     @Mock
+    private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
     private FollowerRepository followerRepository;
 
     @Mock
@@ -102,6 +106,9 @@ class Top5EntryServiceImplTest {
         fightClub = buildContent("550", ContentType.MOVIE);
         pulpFiction = buildContent("680", ContentType.MOVIE);
         breakingBad = buildContent("1396", ContentType.SERIES);
+
+        lenient().when(diaryEntryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(any(), any(), anyString()))
+                .thenReturn(List.of());
     }
 
     // ---------- getTop5 ----------
@@ -122,6 +129,35 @@ class Top5EntryServiceImplTest {
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
 
         assertThat(result).containsExactly(dto1, dto2);
+    }
+
+    @Test
+    @DisplayName("[getTop5] Should Include Latest Personal Score - When Diary Score Exists")
+    void shouldIncludeLatestPersonalScoreWhenDiaryScoreExists() {
+        Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        Top5EntryResponseDTO mapped = buildResponseDto(entry);
+        DiaryEntryRepository.LatestContentScore score = new DiaryEntryRepository.LatestContentScore() {
+            @Override
+            public UUID getContentId() {
+                return fightClub.getId();
+            }
+
+            @Override
+            public Integer getScore() {
+                return 9;
+            }
+        };
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of(entry));
+        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(mapped);
+        when(diaryEntryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
+                lucasId, List.of(fightClub.getId()), ContentType.MOVIE.name()))
+                .thenReturn(List.of(score));
+
+        List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
+
+        assertThat(result).singleElement().extracting(Top5EntryResponseDTO::score).isEqualTo(9);
     }
 
     @Test

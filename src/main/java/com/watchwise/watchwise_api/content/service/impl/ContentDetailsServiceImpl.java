@@ -230,7 +230,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 externalIds == null ? null : externalIds.facebookId(),
                 externalIds == null ? null : externalIds.instagramId(),
                 externalIds == null ? null : externalIds.twitterId(),
-                customPosterUrl);
+                customPosterUrl,
+                null,
+                null);
     }
 
     private ContentDetailsDTO buildSeriesDetails(
@@ -288,7 +290,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 externalIds == null ? null : externalIds.facebookId(),
                 externalIds == null ? null : externalIds.instagramId(),
                 externalIds == null ? null : externalIds.twitterId(),
-                customPosterUrl);
+                customPosterUrl,
+                null,
+                null);
     }
 
     private ContentDetailsDTO buildSeasonDetails(
@@ -332,7 +336,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 null,
                 null,
-                customPosterUrl);
+                customPosterUrl,
+                resolveTvTitle(series, region),
+                releaseYearOf(series.firstAirDate()));
     }
 
     private ContentDetailsDTO buildEpisodeDetails(
@@ -374,7 +380,9 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
                 null,
                 null,
                 null,
-                customPosterUrl);
+                customPosterUrl,
+                resolveTvTitle(series, region),
+                releaseYearOf(series.firstAirDate()));
     }
 
     private String resolveMovieTitle(TmdbMovieFullDetails details, String region) {
@@ -896,6 +904,11 @@ public class ContentDetailsServiceImpl implements ContentDetailsService {
         } catch (DateTimeParseException e) {
             return null;
         }
+    }
+
+    private Integer releaseYearOf(String value) {
+        LocalDate date = parseDate(value);
+        return date == null ? null : date.getYear();
     }
 
     private TmdbUnavailableException tmdbUnavailable() {

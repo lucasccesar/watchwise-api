@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
@@ -43,9 +45,16 @@ import com.watchwise.watchwise_api.summary.dto.HomeContentReferenceDTO;
 import com.watchwise.watchwise_api.summary.dto.LongestWatchedItemDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthCountDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileDiaryPreviewDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileHighlightsDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileHighlightContentDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileLongestWatchDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileRewatchHighlightDTO;
+import com.watchwise.watchwise_api.summary.dto.ProfileRewatchKind;
 import com.watchwise.watchwise_api.summary.dto.RatingCountDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityItemDTO;
 import com.watchwise.watchwise_api.summary.dto.RecentActivityStatus;
+import com.watchwise.watchwise_api.summary.dto.RatingsSummaryDTO;
 import com.watchwise.watchwise_api.summary.dto.SeriesWatchTimeDTO;
 import com.watchwise.watchwise_api.summary.dto.SeriesInProgressPreviewDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
@@ -57,6 +66,7 @@ import com.watchwise.watchwise_api.summary.service.SummaryService;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import io.micrometer.common.util.StringUtils;
@@ -115,6 +125,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final NotificationRepository notificationRepository;
     private final FeedService feedService;
     private final HomeNextEpisodeAssembler homeNextEpisodeAssembler;
+    private final TmdbClient tmdbClient;
 
     @Override
     public SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type) {
@@ -132,15 +143,22 @@ public class SummaryServiceImpl implements SummaryService {
         WatchTimeDTO watchTime = computeWatchTime(userId, watchedContentType);
         List<GenreCountDTO> genreCounts = computeGenreCounts(userId, type);
         List<RatingCountDTO> ratingsDistribution = computeRatingsDistribution(userId, watchedContentType);
-        List<DiaryEntryResponseDTO> recentEpisodes = type == ContentType.SERIES
-                ? diaryEntryService.getDiaryEntries(viewerId, userId, null, 1, RECENT_EPISODES_LIMIT,
-                        ContentType.EPISODE, null, null, null).getContent()
+        RatingsSummaryDTO ratingsSummary = buildRatingsSummary(ratingsDistribution);
+        List<DiaryEntry> recentEpisodesEntries = type == ContentType.SERIES
+                ? diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
+                        userId, ContentType.EPISODE, PageRequest.of(0, RECENT_EPISODES_LIMIT))
                 : List.of();
-        List<DiaryEntryResponseDTO> recentReviews = diaryEntryService.getDiaryEntries(
-                viewerId, userId, null, 1, RECENT_REVIEWS_LIMIT, watchedContentType, null, null, true).getContent();
+        List<ContentType> reviewTypes = type == ContentType.MOVIE
+                ? List.of(ContentType.MOVIE)
+                : List.of(ContentType.SERIES, ContentType.SEASON, ContentType.EPISODE);
+        List<DiaryEntry> recentReviewEntries = diaryEntryRepository.findRecentReviewsByUserIdAndContentTypes(
+                userId, reviewTypes, PageRequest.of(0, RECENT_REVIEWS_LIMIT));
+        List<ProfileDiaryPreviewDTO> recentEpisodes = toProfileDiaryPreviews(userId, recentEpisodesEntries);
+        List<ProfileDiaryPreviewDTO> recentReviews = toProfileDiaryPreviews(userId, recentReviewEntries);
         List<RecentActivityItemDTO> recentActivity = computeRecentActivity(userId, type);
 
-        return new SummaryResponseDTO(watchTime, genreCounts, ratingsDistribution, recentEpisodes, recentReviews, recentActivity);
+        return new SummaryResponseDTO(watchTime, computeProfileHighlights(userId, type), genreCounts,
+                ratingsSummary, ratingsDistribution, recentEpisodes, recentReviews, recentActivity);
     }
 
     @Override
@@ -661,33 +679,193 @@ public class SummaryServiceImpl implements SummaryService {
         LocalDate windowStart = windowEnd.minusDays(WATCH_TIME_WINDOW_DAYS);
         long minutesWatchedLast30Days = diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
                 userId, watchedContentType, windowStart, windowEnd);
+        long totalWatchedCount = diaryEntryRepository.countByUserIdAndContentType(userId, watchedContentType);
+        long watchedCountLast30Days = diaryEntryRepository.countByUserIdAndContentTypeAndWatchedDateBetween(
+                userId, watchedContentType, windowStart, windowEnd);
 
-        return new WatchTimeDTO(totalMinutesWatched, minutesWatchedLast30Days);
+        return new WatchTimeDTO(totalMinutesWatched, minutesWatchedLast30Days,
+                totalWatchedCount, watchedCountLast30Days);
     }
 
     private List<GenreCountDTO> computeGenreCounts(UUID userId, ContentType type) {
-        List<DiaryEntryRepository.GenreCount> rows = type == ContentType.MOVIE
-                ? diaryEntryRepository.countEntriesByGenreAndUserIdForMovies(userId)
-                : diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(userId);
+        List<DiaryEntryRepository.GenreCount> rows = java.util.Optional.ofNullable(type == ContentType.MOVIE
+                ? diaryEntryRepository.countDistinctMoviesByGenreAndUserId(userId)
+                : diaryEntryRepository.countDistinctEpisodesByGenreAndUserId(userId)).orElse(List.of());
 
         return rows.stream().map(row -> new GenreCountDTO(row.getGenre(), row.getCount())).toList();
     }
 
     private List<RatingCountDTO> computeRatingsDistribution(UUID userId, ContentType watchedContentType) {
-        return diaryEntryRepository.countByUserIdAndContentTypeGroupByScore(userId, watchedContentType).stream()
+        List<DiaryEntryRepository.ScoreCount> rows = java.util.Optional.ofNullable(diaryEntryRepository
+                .countLatestScoresByUserIdAndContentType(userId, watchedContentType.name())).orElse(List.of());
+        return rows.stream()
                 .map(row -> new RatingCountDTO(row.getScore(), row.getCount()))
                 .toList();
+    }
+
+    private RatingsSummaryDTO buildRatingsSummary(List<RatingCountDTO> distribution) {
+        long totalRatings = distribution.stream().mapToLong(RatingCountDTO::count).sum();
+        if (totalRatings == 0) {
+            return new RatingsSummaryDTO(0L, null);
+        }
+        double average = distribution.stream()
+                .mapToDouble(row -> row.score() * (double) row.count())
+                .sum() / totalRatings;
+        return new RatingsSummaryDTO(totalRatings, average);
+    }
+
+    private List<ProfileDiaryPreviewDTO> toProfileDiaryPreviews(UUID ownerId, List<DiaryEntry> entries) {
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, String> customPosters = loadPostersForOwner(ownerId, entries);
+        Map<UUID, List<UserPreviewDTO>> companions = loadCompanions(entries);
+        return entries.stream()
+                .map(entry -> new ProfileDiaryPreviewDTO(
+                        entry.getId(),
+                        contentMapper.contentToContentRefDto(entry.getContent()),
+                        entry.getScore(),
+                        entry.getWatchedDate(),
+                        entry.getWatchNumber(),
+                        customPosters.get(entry.getContent().getId()),
+                        companions.getOrDefault(entry.getId(), List.of())))
+                .toList();
+    }
+
+    private List<ProfileDiaryPreviewDTO> toProfileDiaryPreviews(List<DiaryEntryResponseDTO> entries) {
+        return entries.stream()
+                .map(entry -> new ProfileDiaryPreviewDTO(entry.id(), entry.content(), entry.score(), entry.watchedDate(),
+                        entry.watchNumber(), entry.customPosterUrl(), entry.watchedWith()))
+                .toList();
+    }
+
+    private Map<UUID, List<UserPreviewDTO>> loadCompanions(List<DiaryEntry> entries) {
+        List<UUID> diaryEntryIds = entries.stream().map(DiaryEntry::getId).toList();
+        return watchCompanionRepository.findByDiaryEntryIdIn(diaryEntryIds).stream()
+                .collect(Collectors.groupingBy(
+                        companion -> companion.getDiaryEntry().getId(),
+                        Collectors.mapping(companion -> userMapper.userToUserPreviewDto(companion.getUser()), Collectors.toList())));
+    }
+
+    private ProfileHighlightsDTO computeProfileHighlights(UUID userId, ContentType type) {
+        ContentType highlightType = type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.SERIES;
+        List<DiaryEntryRepository.ContentWatchCount> rewatchRows = java.util.Optional.ofNullable(diaryEntryRepository
+                .countDiaryEntriesGroupByContentType(userId, highlightType.name(), PageRequest.of(0, 1)))
+                .orElse(List.of());
+
+        ProfileRewatchHighlightDTO rewatch = rewatchRows.isEmpty()
+                ? null
+                : new ProfileRewatchHighlightDTO(
+                        type == ContentType.MOVIE
+                                ? ProfileRewatchKind.MOST_REWATCHED
+                                : ProfileRewatchKind.MOST_COMPLETE_REWATCHES,
+                        resolveHighlightContent(userId, rewatchRows.get(0).getContentId()),
+                        rewatchRows.get(0).getCount());
+
+        ProfileLongestWatchDTO longestWatch = null;
+        if (type == ContentType.MOVIE) {
+            List<Content> movies = java.util.Optional.ofNullable(
+                    diaryEntryRepository.findLongestMovieContentByUserId(userId, PageRequest.of(0, 1)))
+                    .orElse(List.of());
+            if (!movies.isEmpty()) {
+                Content movie = movies.get(0);
+                longestWatch = new ProfileLongestWatchDTO(
+                        resolveHighlightContent(userId, movie),
+                        movie.getRuntimeMinutes() == null ? 0L : movie.getRuntimeMinutes(),
+                        null);
+            }
+        } else {
+            List<DiaryEntryRepository.SeriesRuntime> series = java.util.Optional.ofNullable(diaryEntryRepository
+                    .sumRuntimeMinutesByUserIdGroupBySeriesTmdbId(userId, PageRequest.of(0, 1)))
+                    .orElse(List.of());
+            if (!series.isEmpty()) {
+                DiaryEntryRepository.SeriesRuntime row = series.get(0);
+                Map<String, String> posters = userContentPosterService.findSeriesPosters(
+                        userId, List.of(row.getSeriesTmdbId()));
+                com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails details = null;
+                try {
+                    details = tmdbClient.getTvFullDetails(row.getSeriesTmdbId(),
+                            TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional().orElse(null);
+                } catch (TmdbUnavailableException ignored) {
+                    // A missing highlight must not make the whole Profile summary fail.
+                }
+                if (details == null) {
+                    return new ProfileHighlightsDTO(rewatch, null);
+                }
+                longestWatch = new ProfileLongestWatchDTO(
+                        new ProfileHighlightContentDTO(ContentType.SERIES, null, null, row.getSeriesTmdbId(),
+                                details.name(), releaseYearOf(details.firstAirDate()),
+                                TmdbImageUrlBuilder.posterUrl(details.posterPath()),
+                                posters == null ? null : posters.get(row.getSeriesTmdbId())),
+                        row.getTotalMinutes(), null);
+            }
+        }
+        return new ProfileHighlightsDTO(rewatch, longestWatch);
+    }
+
+    private ProfileHighlightContentDTO resolveHighlightContent(UUID ownerId, UUID contentId) {
+        Content content = contentRepository.findById(contentId).orElse(null);
+        return content == null ? null : resolveHighlightContent(ownerId, content);
+    }
+
+    private ProfileHighlightContentDTO resolveHighlightContent(UUID ownerId, Content content) {
+        Map<UUID, String> posters = userContentPosterService.findByUserAndContentIds(ownerId, List.of(content.getId()));
+        String customPosterUrl = posters == null ? null : posters.get(content.getId());
+        String title = null;
+        Integer releaseYear = content.getReleaseYear();
+        String posterPath = null;
+        if (content.getType() == ContentType.MOVIE) {
+            try {
+                var details = tmdbClient.getMovieFullDetails(content.getTmdbId(),
+                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE).toOptional().orElse(null);
+                if (details != null) {
+                    title = details.title();
+                    releaseYear = releaseYearOf(details.releaseDate());
+                    posterPath = TmdbImageUrlBuilder.posterUrl(details.posterPath());
+                }
+            } catch (TmdbUnavailableException ignored) {
+                // The reference remains useful even when the optional visual metadata is unavailable.
+            }
+        }
+        return new ProfileHighlightContentDTO(content.getType(), content.getId(), content.getTmdbId(),
+                content.getSeriesTmdbId(), title, releaseYear, posterPath, customPosterUrl);
+    }
+
+    private Integer releaseYearOf(String date) {
+        if (date == null || date.isBlank() || date.length() < 4) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(date.substring(0, 4));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private List<RecentActivityItemDTO> computeRecentActivity(UUID userId, ContentType type) {
         PageRequest topSix = PageRequest.of(0, RECENT_ACTIVITY_LIMIT);
 
-        Stream<RecentActivityItemDTO> completed = diaryEntryRepository
-                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, type, topSix).stream()
-                .map(this::toCompletedActivityItem);
-        Stream<RecentActivityItemDTO> dropped = droppedEntryRepository
-                .findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, topSix).stream()
-                .map(this::toDroppedActivityItem);
+        List<DiaryEntry> completedEntries = diaryEntryRepository
+                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, type, topSix);
+        List<DroppedEntry> droppedEntries = droppedEntryRepository
+                .findByUserIdAndTypeOrderByCreatedAtDesc(userId, type, topSix).getContent();
+        List<UUID> contentIds = Stream.concat(
+                        completedEntries.stream().map(DiaryEntry::getContent),
+                        droppedEntries.stream().map(DroppedEntry::getContent))
+                .map(Content::getId)
+                .distinct()
+                .toList();
+        Map<UUID, Long> timesWatched = contentIds.isEmpty()
+                ? Map.of()
+                : java.util.Optional.ofNullable(diaryEntryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                                userId, contentIds, type.name())).orElse(List.of()).stream()
+                        .collect(Collectors.toMap(DiaryEntryRepository.ContentWatchCount::getContentId,
+                                DiaryEntryRepository.ContentWatchCount::getCount));
+
+        Stream<RecentActivityItemDTO> completed = completedEntries.stream()
+                .map(entry -> toCompletedActivityItem(entry, timesWatched.getOrDefault(entry.getContent().getId(), 0L)));
+        Stream<RecentActivityItemDTO> dropped = droppedEntries.stream()
+                .map(entry -> toDroppedActivityItem(entry, timesWatched.getOrDefault(entry.getContent().getId(), 0L)));
 
         return Stream.concat(completed, dropped)
                 .sorted(Comparator.comparing(RecentActivityItemDTO::activityDate).reversed())
@@ -695,18 +873,22 @@ public class SummaryServiceImpl implements SummaryService {
                 .toList();
     }
 
-    private RecentActivityItemDTO toCompletedActivityItem(DiaryEntry entry) {
+    private RecentActivityItemDTO toCompletedActivityItem(DiaryEntry entry, long timesWatched) {
         return new RecentActivityItemDTO(
                 contentMapper.contentToContentRefDto(entry.getContent()),
                 RecentActivityStatus.COMPLETED,
+                entry.getScore(),
+                timesWatched,
                 entry.getComment(),
                 entry.getCreatedAt());
     }
 
-    private RecentActivityItemDTO toDroppedActivityItem(DroppedEntry entry) {
+    private RecentActivityItemDTO toDroppedActivityItem(DroppedEntry entry, long timesWatched) {
         return new RecentActivityItemDTO(
                 contentMapper.contentToContentRefDto(entry.getContent()),
                 RecentActivityStatus.DROPPED,
+                null,
+                timesWatched,
                 entry.getComment(),
                 entry.getCreatedAt());
     }

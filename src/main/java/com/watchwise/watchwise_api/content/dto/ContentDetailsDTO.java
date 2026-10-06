@@ -37,7 +37,9 @@ public record ContentDetailsDTO(
         @JsonProperty("facebook_id") String facebookId,
         @JsonProperty("instagram_id") String instagramId,
         @JsonProperty("twitter_id") String twitterId,
-        String customPosterUrl) {
+        String customPosterUrl,
+        String parentTitle,
+        Integer parentReleaseYear) {
 
     public ContentDetailsDTO(
             UUID contentId,
@@ -72,7 +74,7 @@ public record ContentDetailsDTO(
         this(contentId, type, title, overview, posterPath, backdropPath, releaseDate, runtimeMinutes,
                 totalRuntimeMinutes, numberOfSeasons, numberOfEpisodes, genres, countries, cast, guestStars,
                 creators, watchProviders, seasons, episodes, recentEpisodes, budget, revenue,
-                productionCompanies, crew, videos, imdbId, facebookId, instagramId, twitterId, null);
+                productionCompanies, crew, videos, imdbId, facebookId, instagramId, twitterId, null, null, null);
     }
 
     public ContentDetailsDTO(
@@ -104,6 +106,6 @@ public record ContentDetailsDTO(
         this(contentId, type, title, overview, posterPath, backdropPath, releaseDate, runtimeMinutes,
                 totalRuntimeMinutes, numberOfSeasons, numberOfEpisodes, genres, countries, cast, guestStars,
                 creators, watchProviders, seasons, episodes, recentEpisodes, budget, revenue,
-                productionCompanies, crew, videos, null, null, null, null, null);
+                productionCompanies, crew, videos, null, null, null, null, null, null, null);
     }
 }

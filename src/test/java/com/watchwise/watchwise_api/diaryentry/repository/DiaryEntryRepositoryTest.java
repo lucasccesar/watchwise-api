@@ -794,6 +794,34 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[profile aggregates] Should Count Distinct Movies And Episodes Without Rewatch Inflation")
+    void shouldCountDistinctMoviesAndEpisodesWithoutRewatchInflation() {
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, null, List.of("Drama")));
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+        Content episodeOne = contentRepository.save(buildEpisode("1399", 1, 1, 45));
+        Content episodeTwo = contentRepository.save(buildEpisode("1399", 1, 2, 50));
+
+        DiaryEntry movieFirst = buildEntry(lucas, movie, 1);
+        movieFirst.setScore(5);
+        DiaryEntry movieRewatch = buildEntry(lucas, movie, 2);
+        movieRewatch.setScore(9);
+        diaryEntryRepository.save(movieFirst);
+        diaryEntryRepository.save(movieRewatch);
+        diaryEntryRepository.save(buildEntry(lucas, episodeOne));
+        diaryEntryRepository.save(buildEntry(lucas, episodeOne, 2));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episodeTwo));
+        entityManager.clear();
+
+        assertThat(diaryEntryRepository.countDistinctMoviesByGenreAndUserId(lucas.getId()).getFirst().getCount())
+                .isEqualTo(1L);
+        assertThat(diaryEntryRepository.countDistinctEpisodesByGenreAndUserId(lucas.getId()).getFirst().getCount())
+                .isEqualTo(2L);
+        assertThat(diaryEntryRepository.countLatestScoresByUserIdAndContentType(lucas.getId(), "MOVIE"))
+                .extracting(DiaryEntryRepository.ScoreCount::getScore, DiaryEntryRepository.ScoreCount::getCount)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(9, 1L));
+    }
+
+    @Test
     @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Omit Content - When Genres And Series Are Both Missing")
     void shouldOmitContentWhenGenresAndSeriesAreBothMissing() {
         Content episodeWithoutSeriesContent = contentRepository.save(buildEpisode("9999", 1, 1, 40));

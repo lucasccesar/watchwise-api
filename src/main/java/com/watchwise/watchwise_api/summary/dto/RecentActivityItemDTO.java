@@ -7,6 +7,13 @@ import java.time.LocalDateTime;
 public record RecentActivityItemDTO(
         ContentRefDTO content,
         RecentActivityStatus status,
+        Integer score,
+        Long timesWatched,
         String comment,
         LocalDateTime activityDate) {
+
+    public RecentActivityItemDTO(ContentRefDTO content, RecentActivityStatus status,
+            String comment, LocalDateTime activityDate) {
+        this(content, status, null, null, comment, activityDate);
+    }
 }

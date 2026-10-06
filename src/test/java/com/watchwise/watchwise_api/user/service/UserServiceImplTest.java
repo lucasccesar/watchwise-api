@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
+import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.LoginUserDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
@@ -20,6 +21,7 @@ import com.watchwise.watchwise_api.user.dto.PostUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
+import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -359,7 +361,7 @@ class UserServiceImplTest {
 
         PublicUserProfileDTO result = userService.getUserById(id, id);
 
-        assertThat(result).isEqualTo(publicUserDTO);
+        assertThat(result.viewerRelation()).isEqualTo(ViewerProfileRelation.SELF);
     }
 
     @Test
@@ -376,6 +378,26 @@ class UserServiceImplTest {
 
         assertThat(result).isEqualTo(publicUserDTO);
         verify(userVisibilityService).assertCanView(viewerId, id);
+    }
+
+    @Test
+    @DisplayName("[getUserById] Should Return Following Relation - When Viewer Follows Target")
+    void shouldReturnFollowingRelationWhenViewerFollowsTarget() {
+        UUID viewerId = UUID.randomUUID();
+        UUID targetId = savedUser.getId();
+        Follower relation = mock(Follower.class);
+
+        when(userRepository.findById(targetId)).thenReturn(Optional.of(savedUser));
+        doNothing().when(userVisibilityService).assertCanView(viewerId, targetId);
+        when(followerRepository.findByFollowerIdAndFollowedId(viewerId, targetId))
+                .thenReturn(Optional.of(relation));
+        when(relation.getStatus()).thenReturn(FollowStatus.ACCEPTED);
+        when(userMapper.userToPublicUserProfileDto(savedUser, 0L, 0L, 0L, 0L, 0L, List.of(), List.of(), 0L, 0L))
+                .thenReturn(publicUserDTO);
+
+        PublicUserProfileDTO result = userService.getUserById(viewerId, targetId);
+
+        assertThat(result.viewerRelation()).isEqualTo(ViewerProfileRelation.FOLLOWING);
     }
 
     @Test
