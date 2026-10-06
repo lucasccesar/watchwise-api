@@ -91,6 +91,9 @@ class SummaryServiceImplTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Mock
+    private DiaryEntryRepository.HomeWatchAggregate homeWatchAggregate;
+
+    @Mock
     private DiaryEntryService diaryEntryService;
 
     @Mock
@@ -161,6 +164,12 @@ class SummaryServiceImplTest {
         lenient().when(diaryEntryRepository.countEpisodeEntriesByGenreAndUserIdForSeriesAndWatchedDateBetween(any(), any(), any()))
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.countDistinctMoviesByUserId(any())).thenReturn(0L);
+        lenient().when(diaryEntryRepository.findHomeWatchAggregate(any())).thenReturn(homeWatchAggregate);
+        lenient().when(homeWatchAggregate.getTotalMinutesWatchedMovies()).thenReturn(0L);
+        lenient().when(homeWatchAggregate.getTotalMinutesWatchedEpisodes()).thenReturn(0L);
+        lenient().when(homeWatchAggregate.getTotalMoviesWatched()).thenReturn(0L);
+        lenient().when(homeWatchAggregate.getTotalDistinctMoviesWatched()).thenReturn(0L);
+        lenient().when(homeWatchAggregate.getTotalEpisodesWatched()).thenReturn(0L);
         lenient().when(notificationRepository.existsByUserIdAndIsReadFalse(any())).thenReturn(false);
         lenient().when(feedService.getFeed(any(), any(), any()))
                 .thenReturn(new CursorPageResponseDTO<>(List.of(), 3, null, false));
@@ -412,11 +421,11 @@ class SummaryServiceImplTest {
     @DisplayName("[getHomeSummary] Should Return Totals, Next Episodes, Rolling 30-Day Stats And Genre Counts From The Repository")
     void shouldReturnTotalsNextEpisodesRollingStatsAndGenreCountsForHomeSummary() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(6000L);
-        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(3000L);
-        when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(42L);
-        when(diaryEntryRepository.countDistinctMoviesByUserId(lucasId)).thenReturn(40L);
-        when(diaryEntryRepository.countByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(128L);
+        when(homeWatchAggregate.getTotalMinutesWatchedMovies()).thenReturn(6000L);
+        when(homeWatchAggregate.getTotalMinutesWatchedEpisodes()).thenReturn(3000L);
+        when(homeWatchAggregate.getTotalMoviesWatched()).thenReturn(42L);
+        when(homeWatchAggregate.getTotalDistinctMoviesWatched()).thenReturn(40L);
+        when(homeWatchAggregate.getTotalEpisodesWatched()).thenReturn(128L);
         SeriesInProgressResponseDTO row = new SeriesInProgressResponseDTO(
                 "1399", 8, 6, LocalDate.of(2024, 5, 1), 3L, 12, 25.0);
         when(diaryEntryService.getSeriesInProgress(eq(lucasId), eq(lucasId), any(), any()))
@@ -460,10 +469,8 @@ class SummaryServiceImplTest {
         DiaryEntry oldestEpisode = buildDiaryEntry(episodeContent, now.minusDays(2));
         DiaryEntry newestEpisode = buildDiaryEntry(episodeContent, now);
 
-        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), any()))
-                .thenReturn(List.of(oldestMovie, newestMovie));
-        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.EPISODE), any()))
-                .thenReturn(List.of(oldestEpisode, newestEpisode));
+        when(diaryEntryRepository.findRecentHomeEntries(eq(lucasId), any(), any()))
+                .thenReturn(List.of(newestEpisode, newestMovie, oldestEpisode, oldestMovie));
         HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
 
         assertThat(result.recentlyWatched()).extracting(HomeRecentlyWatchedDTO::id)
@@ -479,10 +486,8 @@ class SummaryServiceImplTest {
         LocalDateTime now = LocalDateTime.now();
         DiaryEntry movieEntry = buildDiaryEntry(movieContent, now.minusHours(1));
         DiaryEntry episodeEntry = buildDiaryEntry(episodeContent, now);
-        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
-                eq(lucasId), eq(ContentType.MOVIE), any())).thenReturn(List.of(movieEntry));
-        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
-                eq(lucasId), eq(ContentType.EPISODE), any())).thenReturn(List.of(episodeEntry));
+        when(diaryEntryRepository.findRecentHomeEntries(eq(lucasId), any(), any()))
+                .thenReturn(List.of(episodeEntry, movieEntry));
         when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any()))
                 .thenReturn(Map.of(
                         movieContent.getId(), "https://image.tmdb.org/t/p/w342/lucas-movie.png",

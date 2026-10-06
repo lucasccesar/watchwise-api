@@ -13,24 +13,39 @@ import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SeriesInProgressPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 @Component
-@RequiredArgsConstructor
 public class HomeNextEpisodeAssembler {
 
     private final TmdbClient tmdbClient;
     private final ContentRepository contentRepository;
     private final ContentStatsService contentStatsService;
+    private final ExecutorService executor;
+
+    public HomeNextEpisodeAssembler(
+            TmdbClient tmdbClient,
+            ContentRepository contentRepository,
+            ContentStatsService contentStatsService,
+            @Qualifier("homeNextEpisodeExecutor") ExecutorService executor) {
+        this.tmdbClient = tmdbClient;
+        this.contentRepository = contentRepository;
+        this.contentStatsService = contentStatsService;
+        this.executor = executor;
+    }
 
     public List<SeriesInProgressPreviewDTO> assemble(User user, List<SeriesInProgressResponseDTO> progress) {
         return progress.stream()
-                .map(item -> assembleOne(user, item))
-                .flatMap(java.util.Optional::stream)
+                .map(item -> CompletableFuture.supplyAsync(() -> assembleOne(user, item), executor))
+                .map(CompletableFuture::join)
+                .flatMap(Optional::stream)
                 .toList();
     }
 

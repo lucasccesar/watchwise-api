@@ -87,6 +87,7 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int WATCH_TIME_WINDOW_DAYS = 30;
     private static final int HOME_NEXT_EPISODES_LIMIT = 4;
     private static final int HOME_RECENTLY_WATCHED_LIMIT = 4;
+    private static final Set<ContentType> HOME_WATCHED_CONTENT_TYPES = Set.of(ContentType.MOVIE, ContentType.EPISODE);
     private static final int MONTH_TOP_LIMIT = 6;
     private static final int YEAR_TOP_LIMIT = 10;
     private static final int ALL_TIME_TOP_LIMIT = 10;
@@ -148,13 +149,12 @@ public class SummaryServiceImpl implements SummaryService {
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanViewSummary(viewerId, userId, target);
 
-        long totalMinutesWatchedMovies = diaryEntryRepository
-                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.MOVIE);
-        long totalMinutesWatchedEpisodes = diaryEntryRepository
-                .sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.EPISODE);
-        long totalMoviesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.MOVIE);
-        long totalDistinctMoviesWatched = diaryEntryRepository.countDistinctMoviesByUserId(userId);
-        long totalEpisodesWatched = diaryEntryRepository.countByUserIdAndContentType(userId, ContentType.EPISODE);
+        DiaryEntryRepository.HomeWatchAggregate aggregate = diaryEntryRepository.findHomeWatchAggregate(userId);
+        long totalMinutesWatchedMovies = aggregate.getTotalMinutesWatchedMovies();
+        long totalMinutesWatchedEpisodes = aggregate.getTotalMinutesWatchedEpisodes();
+        long totalMoviesWatched = aggregate.getTotalMoviesWatched();
+        long totalDistinctMoviesWatched = aggregate.getTotalDistinctMoviesWatched();
+        long totalEpisodesWatched = aggregate.getTotalEpisodesWatched();
 
         List<SeriesInProgressResponseDTO> progress;
         try {
@@ -196,14 +196,8 @@ public class SummaryServiceImpl implements SummaryService {
 
     private List<HomeRecentlyWatchedDTO> computeHomeRecentlyWatched(UUID userId) {
         PageRequest topN = PageRequest.of(0, HOME_RECENTLY_WATCHED_LIMIT);
-        Stream<DiaryEntry> movies = diaryEntryRepository
-                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, ContentType.MOVIE, topN).stream();
-        Stream<DiaryEntry> episodes = diaryEntryRepository
-                .findTopByUserIdAndContentTypeOrderByCreatedAtDesc(userId, ContentType.EPISODE, topN).stream();
-        List<DiaryEntry> entries = Stream.concat(movies, episodes)
-                .sorted(Comparator.comparing(DiaryEntry::getCreatedAt).reversed())
-                .limit(HOME_RECENTLY_WATCHED_LIMIT)
-                .toList();
+        List<DiaryEntry> entries = diaryEntryRepository
+                .findRecentHomeEntries(userId, HOME_WATCHED_CONTENT_TYPES, topN);
         Map<UUID, String> customPosters = loadPostersForOwner(userId, entries);
         Map<UUID, List<String>> companionPictures = watchCompanionRepository
                 .findByDiaryEntryIdIn(entries.stream().map(DiaryEntry::getId).toList()).stream()

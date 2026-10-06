@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -20,9 +21,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
 
@@ -38,8 +41,19 @@ class HomeNextEpisodeAssemblerTest {
     @Mock
     private ContentStatsService contentStatsService;
 
+    @Mock
+    private ExecutorService executor;
+
     @InjectMocks
     private HomeNextEpisodeAssembler assembler;
+
+    @BeforeEach
+    void configureDirectExecutor() {
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(executor).execute(any(Runnable.class));
+    }
 
     @Test
     @DisplayName("[assemble] Should Return Next Episode Metadata And Progress - When Next Episode Exists")

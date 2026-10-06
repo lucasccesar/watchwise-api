@@ -17,6 +17,7 @@ public class TmdbCacheConfig {
     private static final int CALENDAR_SCHEDULE_REFRESH_THREAD_POOL_SIZE = 4;
     private static final int CONTENT_RELEASE_DATE_SNAPSHOT_REFRESH_THREAD_POOL_SIZE = 4;
     private static final int CONTENT_RELEASE_DATE_SNAPSHOT_RESOLUTION_THREAD_POOL_SIZE = 4;
+    private static final int HOME_NEXT_EPISODE_THREAD_POOL_SIZE = 4;
 
     @Bean
     public Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache(
@@ -182,5 +183,10 @@ public class TmdbCacheConfig {
     @Bean(destroyMethod = "shutdown")
     public ExecutorService contentReleaseDateSnapshotResolutionExecutor() {
         return Executors.newFixedThreadPool(CONTENT_RELEASE_DATE_SNAPSHOT_RESOLUTION_THREAD_POOL_SIZE);
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public ExecutorService homeNextEpisodeExecutor() {
+        return Executors.newFixedThreadPool(HOME_NEXT_EPISODE_THREAD_POOL_SIZE);
     }
 }

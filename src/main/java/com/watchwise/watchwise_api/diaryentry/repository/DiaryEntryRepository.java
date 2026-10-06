@@ -513,6 +513,29 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
         }
     }
 
+    interface HomeWatchAggregate {
+        Long getTotalMinutesWatchedMovies();
+        Long getTotalMinutesWatchedEpisodes();
+        Long getTotalMoviesWatched();
+        Long getTotalDistinctMoviesWatched();
+        Long getTotalEpisodesWatched();
+    }
+
+    @Query(value = """
+            SELECT
+                COALESCE(SUM(CASE WHEN c.type = 'MOVIE' THEN COALESCE(c.runtime_minutes, 0) ELSE 0 END), 0)
+                    AS "totalMinutesWatchedMovies",
+                COALESCE(SUM(CASE WHEN c.type = 'EPISODE' THEN COALESCE(c.runtime_minutes, 0) ELSE 0 END), 0)
+                    AS "totalMinutesWatchedEpisodes",
+                COUNT(CASE WHEN c.type = 'MOVIE' THEN 1 END) AS "totalMoviesWatched",
+                COUNT(DISTINCT CASE WHEN c.type = 'MOVIE' THEN c.tmdb_id END) AS "totalDistinctMoviesWatched",
+                COUNT(CASE WHEN c.type = 'EPISODE' THEN 1 END) AS "totalEpisodesWatched"
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+            """, nativeQuery = true)
+    HomeWatchAggregate findHomeWatchAggregate(@Param("userId") UUID userId);
+
     @Query("""
             SELECT COALESCE(SUM(d.content.runtimeMinutes), 0) FROM DiaryEntry d
             WHERE d.user.id = :userId
@@ -566,6 +589,17 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             """)
     List<DiaryEntry> findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
             @Param("userId") UUID userId, @Param("contentType") ContentType contentType, Pageable pageable);
+
+    @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND d.content.type IN :contentTypes
+            ORDER BY d.createdAt DESC, d.id DESC
+            """)
+    List<DiaryEntry> findRecentHomeEntries(
+            @Param("userId") UUID userId,
+            @Param("contentTypes") Collection<ContentType> contentTypes,
+            Pageable pageable);
 
     // --- Month/Year in Review + All Time Stats aggregations ---
 
