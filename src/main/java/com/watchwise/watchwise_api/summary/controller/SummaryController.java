@@ -80,8 +80,12 @@ public class SummaryController {
     }
 
     @GetMapping("/users/{userId}/episode-ratings-map")
-    public ResponseEntity<EpisodeRatingsMapResponseDTO> getEpisodeRatingsMap(@PathVariable UUID userId) {
-        EpisodeRatingsMapResponseDTO response = summaryService.getEpisodeRatingsMap(getCurrentUserId(), userId);
+    public ResponseEntity<EpisodeRatingsMapResponseDTO> getEpisodeRatingsMap(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        EpisodeRatingsMapResponseDTO response = summaryService.getEpisodeRatingsMap(getCurrentUserId(), userId, page, size);
         return ResponseEntity.ok(response);
     }
 

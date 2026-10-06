@@ -188,13 +188,28 @@ class SummaryControllerTest {
     void shouldReturnOkWithTheServiceResultWhenGetEpisodeRatingsMapIsCalled() {
         UUID targetUserId = UUID.randomUUID();
         EpisodeRatingsMapResponseDTO dto = new EpisodeRatingsMapResponseDTO(List.of());
-        when(summaryService.getEpisodeRatingsMap(currentUserId, targetUserId)).thenReturn(dto);
+        when(summaryService.getEpisodeRatingsMap(currentUserId, targetUserId, null, null)).thenReturn(dto);
 
-        ResponseEntity<EpisodeRatingsMapResponseDTO> result = summaryController.getEpisodeRatingsMap(targetUserId);
+        ResponseEntity<EpisodeRatingsMapResponseDTO> result = summaryController.getEpisodeRatingsMap(targetUserId, null, null);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
-        verify(summaryService).getEpisodeRatingsMap(currentUserId, targetUserId);
+        verify(summaryService).getEpisodeRatingsMap(currentUserId, targetUserId, null, null);
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Pass Requested Page And Size To The Service")
+    void shouldPassRequestedPageAndSizeToTheServiceForEpisodeRatingsMap() {
+        UUID targetUserId = UUID.randomUUID();
+        EpisodeRatingsMapResponseDTO dto = new EpisodeRatingsMapResponseDTO(List.of());
+        when(summaryService.getEpisodeRatingsMap(currentUserId, targetUserId, 2, 25)).thenReturn(dto);
+
+        ResponseEntity<EpisodeRatingsMapResponseDTO> result =
+                summaryController.getEpisodeRatingsMap(targetUserId, 2, 25);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+        verify(summaryService).getEpisodeRatingsMap(currentUserId, targetUserId, 2, 25);
     }
 
     private SummaryResponseDTO buildSummaryResponseDto() {

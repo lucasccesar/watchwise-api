@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -39,6 +40,8 @@ import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
+import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadata;
+import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadataService;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
@@ -52,6 +55,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -121,6 +125,12 @@ class SummaryServiceImplTest {
 
     @Mock
     private SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
+
+    @Mock
+    private EpisodeRatingsMetadataService episodeRatingsMetadataService;
+
+    @Spy
+    private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
     @Mock
     private UserContentPosterService userContentPosterService;
@@ -953,10 +963,14 @@ class SummaryServiceImplTest {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId)).thenReturn(List.of());
 
-        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId);
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId, null, null);
 
         assertThat(result.series()).isEmpty();
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.size()).isEqualTo(12);
+        assertThat(result.totalElements()).isZero();
         verifyNoInteractions(seriesProgressMetadataRefreshService);
+        verifyNoInteractions(episodeRatingsMetadataService);
     }
 
     @Test
@@ -968,11 +982,130 @@ class SummaryServiceImplTest {
         when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
                 .thenReturn(Map.of("1399", seriesProgressSnapshot("1399", 10)));
 
-        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId);
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId, null, null);
 
         assertThat(result.series())
                 .extracting("seriesTmdbId", "watchedEpisodeCount", "totalEpisodeCount")
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("1399", 7L, 10));
+        assertThat(result.totalElements()).isEqualTo(1L);
+        assertThat(result.totalWatchedEpisodeCount()).isEqualTo(7L);
+        assertThat(result.totalEpisodeCount()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Return Only The Requested Page And Resolve Metadata For It")
+    void shouldReturnOnlyRequestedPageAndResolveMetadataForIt() {
+        User viewer = buildUser(marinaId, true);
+        viewer.setPreferredLanguage("pt-BR");
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(userRepository.findById(marinaId)).thenReturn(Optional.of(viewer));
+        when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId)).thenReturn(List.of(
+                seriesEpisodeCount("a", 10L), seriesEpisodeCount("b", 8L), seriesEpisodeCount("c", 5L),
+                seriesEpisodeCount("d", 4L), seriesEpisodeCount("e", 1L)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(
+                eq(List.of("a", "b", "c", "d", "e")), any(LocalDate.class)))
+                .thenReturn(Map.of(
+                        "a", seriesProgressSnapshot("a", 10), "b", seriesProgressSnapshot("b", 10),
+                        "c", seriesProgressSnapshot("c", 10), "d", seriesProgressSnapshot("d", 10),
+                        "e", seriesProgressSnapshot("e", 10)));
+        when(episodeRatingsMetadataService.resolve(List.of("c", "d"), "pt-BR"))
+                .thenReturn(Map.of("c", new EpisodeRatingsMetadata("c", "Série C", 2024, "/c.jpg", null)));
+        when(userContentPosterService.findSeriesPosters(lucasId, List.of("c", "d")))
+                .thenReturn(Map.of("c", "custom-c.jpg"));
+
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(marinaId, lucasId, 2, 2);
+
+        assertThat(result.series()).extracting(EpisodeRatingsMapItemDTO::seriesTmdbId).containsExactly("c", "d");
+        assertThat(result.series().getFirst())
+                .extracting(EpisodeRatingsMapItemDTO::title, EpisodeRatingsMapItemDTO::releaseYear,
+                        EpisodeRatingsMapItemDTO::posterPath, EpisodeRatingsMapItemDTO::customPosterUrl)
+                .containsExactly("Série C", 2024, "/c.jpg", "custom-c.jpg");
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.size()).isEqualTo(2);
+        assertThat(result.totalElements()).isEqualTo(5L);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThat(result.hasNext()).isTrue();
+        assertThat(result.totalWatchedEpisodeCount()).isEqualTo(28L);
+        assertThat(result.totalEpisodeCount()).isEqualTo(50);
+        verify(episodeRatingsMetadataService).resolve(List.of("c", "d"), "pt-BR");
+        verify(userContentPosterService).findSeriesPosters(lucasId, List.of("c", "d"));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Return Null Global Total When Any Series Total Is Unknown")
+    void shouldReturnNullGlobalTotalWhenAnySeriesTotalIsUnknownForEpisodeRatingsMap() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId))
+                .thenReturn(List.of(seriesEpisodeCount("known", 7L), seriesEpisodeCount("unknown", 2L)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(
+                eq(List.of("known", "unknown")), any(LocalDate.class)))
+                .thenReturn(Map.of("known", seriesProgressSnapshot("known", 10)));
+
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId, null, null);
+
+        assertThat(result.totalEpisodeCount()).isNull();
+        assertThat(result.series()).extracting(EpisodeRatingsMapItemDTO::totalEpisodeCount)
+                .containsExactly(10, null);
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Keep Global Totals When Unknown Series Is Off Page")
+    void shouldKeepGlobalTotalsWhenUnknownSeriesIsOffPage() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId)).thenReturn(List.of(
+                seriesEpisodeCount("first", 8L), seriesEpisodeCount("second", 3L),
+                seriesEpisodeCount("unknown", 2L)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(
+                eq(List.of("first", "second", "unknown")), any(LocalDate.class)))
+                .thenReturn(Map.of("first", seriesProgressSnapshot("first", 10),
+                        "second", seriesProgressSnapshot("second", 10)));
+
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId, 1, 1);
+
+        assertThat(result.series()).extracting(EpisodeRatingsMapItemDTO::seriesTmdbId)
+                .containsExactly("first");
+        assertThat(result.totalElements()).isEqualTo(3);
+        assertThat(result.totalWatchedEpisodeCount()).isEqualTo(13);
+        assertThat(result.totalEpisodeCount()).isNull();
+        verify(episodeRatingsMetadataService).resolve(List.of("first"), lucas.getPreferredLanguage());
+        verify(userContentPosterService).findSeriesPosters(lucasId, List.of("first"));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Sort By Ratio Then Watched Count Then Series Id")
+    void shouldSortByRatioThenWatchedCountThenSeriesIdForEpisodeRatingsMap() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucasId)).thenReturn(List.of(
+                seriesEpisodeCount("ratio", 4L), seriesEpisodeCount("count", 8L),
+                seriesEpisodeCount("tie-b", 4L), seriesEpisodeCount("tie-a", 4L),
+                seriesEpisodeCount("unknown", 100L)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(
+                eq(List.of("ratio", "count", "tie-b", "tie-a", "unknown")), any(LocalDate.class)))
+                .thenReturn(Map.of(
+                        "ratio", seriesProgressSnapshot("ratio", 5),
+                        "count", seriesProgressSnapshot("count", 20),
+                        "tie-b", seriesProgressSnapshot("tie-b", 10),
+                        "tie-a", seriesProgressSnapshot("tie-a", 10)));
+
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(lucasId, lucasId, 1, 12);
+
+        assertThat(result.series()).extracting(EpisodeRatingsMapItemDTO::seriesTmdbId)
+                .containsExactly("ratio", "count", "tie-a", "tie-b", "unknown");
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsMap] Should Reject Invalid Page And Size Values")
+    void shouldRejectInvalidPageAndSizeValuesForEpisodeRatingsMap() {
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsMap(lucasId, lucasId, 0, 12))
+                .isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsMap(lucasId, lucasId, -1, 12))
+                .isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsMap(lucasId, lucasId, 1, 0))
+                .isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsMap(lucasId, lucasId, 1, 101))
+                .isInstanceOf(BadRequestException.class);
+
+        verifyNoInteractions(userRepository, diaryEntryRepository, seriesProgressMetadataRefreshService);
     }
 
     @Test
@@ -991,8 +1124,9 @@ class SummaryServiceImplTest {
                         "94605", seriesProgressSnapshot("94605", 4)));
         when(userContentPosterService.findSeriesPosters(lucasId, List.of("1399", "94605")))
                 .thenReturn(Map.of("1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
+        when(userRepository.findById(marinaId)).thenReturn(Optional.of(buildUser(marinaId, true)));
 
-        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(marinaId, lucasId);
+        EpisodeRatingsMapResponseDTO result = summaryService.getEpisodeRatingsMap(marinaId, lucasId, null, null);
 
         assertThat(result.series())
                 .extracting(EpisodeRatingsMapItemDTO::seriesTmdbId,
@@ -1012,7 +1146,7 @@ class SummaryServiceImplTest {
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
 
-        assertThatThrownBy(() -> summaryService.getEpisodeRatingsMap(marinaId, lucasId))
+        assertThatThrownBy(() -> summaryService.getEpisodeRatingsMap(marinaId, lucasId, null, null))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
