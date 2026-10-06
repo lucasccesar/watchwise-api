@@ -28,6 +28,7 @@ import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapItemDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.EpisodeScoreDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeRecentlyWatchedDTO;
 import com.watchwise.watchwise_api.summary.dto.MonthInReviewResponseDTO;
@@ -892,6 +893,12 @@ class SummaryServiceImplTest {
         assertThatThrownBy(() -> summaryService.getEpisodeRatingsGrid(marinaId, lucasId, "1399"))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
+
+        verifyNoInteractions(
+                diaryEntryRepository,
+                seriesProgressMetadataRefreshService,
+                episodeRatingsMetadataService,
+                userContentPosterService);
     }
 
     @Test
@@ -917,44 +924,67 @@ class SummaryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getEpisodeRatingsGrid] Should Use The Highest WatchNumber Score - When An Episode Was Rewatched")
-    void shouldUseTheHighestWatchNumberScoreWhenAnEpisodeWasRewatched() {
+    @DisplayName("[getEpisodeRatingsGrid] Should Build The Released Grid With Personal Scores And Public Aggregates")
+    void shouldBuildReleasedEpisodeGridWithPersonalScoresAndPublicAggregates() {
+        User viewer = buildUser(marinaId, true);
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        Content episode = Content.builder()
-                .id(UUID.randomUUID())
-                .type(ContentType.EPISODE)
-                .seriesTmdbId("1399")
-                .seasonNumber(1)
-                .episodeNumber(1)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .build();
-        DiaryEntry firstWatch = DiaryEntry.builder().id(UUID.randomUUID()).content(episode).score(6).watchNumber(1)
-                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
-        DiaryEntry rewatch = DiaryEntry.builder().id(UUID.randomUUID()).content(episode).score(9).watchNumber(2)
-                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
-        when(diaryEntryRepository.findEpisodeEntriesBySeriesForUser(lucasId, "1399")).thenReturn(List.of(firstWatch, rewatch));
-
-        EpisodeRatingsGridResponseDTO result = summaryService.getEpisodeRatingsGrid(lucasId, lucasId, "1399");
-
-        assertThat(result.episodes()).hasSize(1);
-        assertThat(result.episodes().getFirst().score()).isEqualTo(9);
-    }
-
-    @Test
-    @DisplayName("[getEpisodeRatingsGrid] Should Expose The Owner's Series Poster")
-    void shouldExposeOwnersSeriesPosterForEpisodeRatingsGrid() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findEpisodeEntriesBySeriesForUser(lucasId, "1399"))
-                .thenReturn(List.of());
+        when(userRepository.findById(marinaId)).thenReturn(Optional.of(viewer));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
+                .thenReturn(Map.of("1399", seriesProgressSnapshotWithSeason("1399", 1, 5)));
+        when(episodeRatingsMetadataService.resolve("1399", viewer.getPreferredLanguage()))
+                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, "/poster.jpg", "/backdrop.jpg"));
+        when(diaryEntryRepository.findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucasId, "1399"))
+                .thenReturn(List.of(
+                        latestUserEpisodeScore(1, 1, 9),
+                        latestUserEpisodeScore(1, 3, 6),
+                        latestUserEpisodeScore(1, 6, 10),
+                        latestUserEpisodeScore(0, 1, 10)));
+        when(diaryEntryRepository.findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId("1399"))
+                .thenReturn(List.of(
+                        latestPublicEpisodeRatingAggregate("1399", 1, 1, 14L, 2L),
+                        latestPublicEpisodeRatingAggregate("1399", 1, 3, 4L, 1L),
+                        latestPublicEpisodeRatingAggregate("1399", 1, 6, 90L, 9L),
+                        latestPublicEpisodeRatingAggregate("1399", 0, 1, 99L, 9L)));
         when(userContentPosterService.findSeriesPosters(lucasId, List.of("1399")))
                 .thenReturn(Map.of("1399", "https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg"));
 
+        EpisodeRatingsGridResponseDTO result = summaryService.getEpisodeRatingsGrid(marinaId, lucasId, " 1399 ");
+
+        assertThat(result.episodes()).containsExactly(
+                new EpisodeScoreDTO(1, 1, 9, 7.0, 2L),
+                new EpisodeScoreDTO(1, 2, null, null, 0L),
+                new EpisodeScoreDTO(1, 3, 6, 4.0, 1L),
+                new EpisodeScoreDTO(1, 4, null, null, 0L),
+                new EpisodeScoreDTO(1, 5, null, null, 0L));
+        assertThat(result.overallAverageScore()).isEqualTo(6.0);
+        assertThat(result.overallRatingCount()).isEqualTo(3L);
+        assertThat(result.title()).isEqualTo("Breaking Bad");
+        assertThat(result.releaseYear()).isEqualTo(2008);
+        assertThat(result.posterPath()).isEqualTo("/poster.jpg");
+        assertThat(result.backdropPath()).isEqualTo("/backdrop.jpg");
+        assertThat(result.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
+        verify(diaryEntryRepository).findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucasId, "1399");
+        verify(diaryEntryRepository).findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId("1399");
+        verify(diaryEntryRepository, never()).findEpisodeEntriesBySeriesForUser(lucasId, "1399");
+        verify(userContentPosterService).findSeriesPosters(lucasId, List.of("1399"));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Use The Latest Personal Rewatch Score")
+    void shouldUseTheLatestPersonalRewatchScoreForEpisodeRatingsGrid() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
+                .thenReturn(Map.of("1399", seriesProgressSnapshotWithSeason("1399", 1, 1)));
+        when(episodeRatingsMetadataService.resolve("1399", lucas.getPreferredLanguage()))
+                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, null, null));
+        when(diaryEntryRepository.findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(lucasId, "1399"))
+                .thenReturn(List.of(latestUserEpisodeScore(1, 1, 9)));
+        when(diaryEntryRepository.findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId("1399"))
+                .thenReturn(List.of());
+
         EpisodeRatingsGridResponseDTO result = summaryService.getEpisodeRatingsGrid(lucasId, lucasId, "1399");
 
-        assertThat(result.customPosterUrl())
-                .isEqualTo("https://image.tmdb.org/t/p/w342/lucas-series-poster.jpg");
-        verify(userContentPosterService).findSeriesPosters(lucasId, List.of("1399"));
+        assertThat(result.episodes()).containsExactly(new EpisodeScoreDTO(1, 1, 9, null, 0L));
     }
 
     @Test
@@ -1172,6 +1202,74 @@ class SummaryServiceImplTest {
                 new SeriesProgressMetadataRefreshService.SeriesSnapshot(
                         seriesTmdbId, totalEpisodeCount, null, 0, null, LocalDateTime.now(), null),
                 List.of());
+    }
+
+    private SeriesProgressMetadataRefreshService.Snapshot seriesProgressSnapshotWithSeason(
+            String seriesTmdbId,
+            int seasonNumber,
+            int releasedEpisodeCount) {
+        LocalDateTime refreshedAt = LocalDateTime.now();
+        return new SeriesProgressMetadataRefreshService.Snapshot(
+                new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                        seriesTmdbId, releasedEpisodeCount, null, 0, null, refreshedAt, null),
+                List.of(new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                        seriesTmdbId, seasonNumber, releasedEpisodeCount, null, 0, null, refreshedAt)));
+    }
+
+    private DiaryEntryRepository.LatestUserEpisodeScore latestUserEpisodeScore(
+            int seasonNumber,
+            int episodeNumber,
+            Integer score) {
+        return new DiaryEntryRepository.LatestUserEpisodeScore() {
+            @Override
+            public Integer getSeasonNumber() {
+                return seasonNumber;
+            }
+
+            @Override
+            public Integer getEpisodeNumber() {
+                return episodeNumber;
+            }
+
+            @Override
+            public Integer getScore() {
+                return score;
+            }
+        };
+    }
+
+    private DiaryEntryRepository.LatestPublicEpisodeRatingAggregate latestPublicEpisodeRatingAggregate(
+            String seriesTmdbId,
+            int seasonNumber,
+            int episodeNumber,
+            long scoreSum,
+            long scoreCount) {
+        return new DiaryEntryRepository.LatestPublicEpisodeRatingAggregate() {
+            @Override
+            public String getSeriesTmdbId() {
+                return seriesTmdbId;
+            }
+
+            @Override
+            public Integer getSeasonNumber() {
+                return seasonNumber;
+            }
+
+            @Override
+            public Integer getEpisodeNumber() {
+                return episodeNumber;
+            }
+
+            @Override
+            public Long getScoreSum() {
+                return scoreSum;
+            }
+
+            @Override
+            public Long getScoreCount() {
+                return scoreCount;
+            }
+        };
     }
 
     private DiaryEntryRepository.SeriesRuntime seriesRuntime(String seriesTmdbId, long totalMinutes) {

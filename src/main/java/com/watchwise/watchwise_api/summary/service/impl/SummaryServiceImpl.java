@@ -69,7 +69,9 @@ import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -457,25 +459,91 @@ public class SummaryServiceImpl implements SummaryService {
             throw new BadRequestException("seriesTmdbId must be provided");
         }
 
-        List<DiaryEntry> entries = diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId);
+        String language = resolveViewerPreferredLanguage(viewerId, userId, target);
+        EpisodeRatingsMetadata metadata = episodeRatingsMetadataService.resolve(seriesTmdbId, language);
+        SeriesProgressMetadataRefreshService.Snapshot snapshot = seriesProgressMetadataRefreshService
+                .getSnapshotsForRead(List.of(seriesTmdbId), LocalDate.now())
+                .get(seriesTmdbId);
+        if (snapshot == null || snapshot.series() == null) {
+            throw new TmdbUnavailableException("TMDB is currently unavailable");
+        }
 
-        Map<List<Integer>, DiaryEntry> latestPerEpisode = new LinkedHashMap<>();
-        for (DiaryEntry entry : entries) {
-            List<Integer> key = List.of(entry.getContent().getSeasonNumber(), entry.getContent().getEpisodeNumber());
-            DiaryEntry current = latestPerEpisode.get(key);
-            if (current == null || entry.getWatchNumber() > current.getWatchNumber()) {
-                latestPerEpisode.put(key, entry);
+        Set<EpisodeCoordinate> releasedCoordinates = new LinkedHashSet<>();
+        for (SeriesProgressMetadataRefreshService.SeasonSnapshot season : snapshot.seasons()) {
+            if (season.seasonNumber() == null || season.seasonNumber() <= 0
+                    || season.regularReleasedEpisodeCount() == null
+                    || season.regularReleasedEpisodeCount() <= 0) {
+                continue;
+            }
+            for (int episodeNumber = 1; episodeNumber <= season.regularReleasedEpisodeCount(); episodeNumber++) {
+                releasedCoordinates.add(new EpisodeCoordinate(season.seasonNumber(), episodeNumber));
             }
         }
 
-        List<EpisodeScoreDTO> episodes = latestPerEpisode.values().stream()
-                .sorted(Comparator.comparing((DiaryEntry d) -> d.getContent().getSeasonNumber())
-                        .thenComparing(d -> d.getContent().getEpisodeNumber()))
-                .map(d -> new EpisodeScoreDTO(d.getContent().getSeasonNumber(), d.getContent().getEpisodeNumber(), d.getScore()))
+        Map<EpisodeCoordinate, Integer> personalScores = new HashMap<>();
+        for (DiaryEntryRepository.LatestUserEpisodeScore score : diaryEntryRepository
+                .findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(userId, seriesTmdbId)) {
+            if (score.getSeasonNumber() == null || score.getEpisodeNumber() == null) {
+                continue;
+            }
+            EpisodeCoordinate coordinate = new EpisodeCoordinate(score.getSeasonNumber(), score.getEpisodeNumber());
+            if (releasedCoordinates.contains(coordinate)) {
+                personalScores.put(coordinate, score.getScore());
+            }
+        }
+
+        Map<EpisodeCoordinate, EpisodeRatingAggregate> publicRatings = new HashMap<>();
+        long overallScoreSum = 0L;
+        long overallRatingCount = 0L;
+        for (DiaryEntryRepository.LatestPublicEpisodeRatingAggregate rating : diaryEntryRepository
+                .findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId(seriesTmdbId)) {
+            if (!seriesTmdbId.equals(rating.getSeriesTmdbId())
+                    || rating.getSeasonNumber() == null
+                    || rating.getEpisodeNumber() == null
+                    || rating.getScoreSum() == null
+                    || rating.getScoreCount() == null
+                    || rating.getScoreCount() <= 0L) {
+                continue;
+            }
+            EpisodeCoordinate coordinate = new EpisodeCoordinate(rating.getSeasonNumber(), rating.getEpisodeNumber());
+            if (releasedCoordinates.contains(coordinate)) {
+                publicRatings.put(coordinate, new EpisodeRatingAggregate(rating.getScoreSum(), rating.getScoreCount()));
+                overallScoreSum += rating.getScoreSum();
+                overallRatingCount += rating.getScoreCount();
+            }
+        }
+
+        List<EpisodeScoreDTO> episodes = releasedCoordinates.stream()
+                .sorted(Comparator.comparingInt(EpisodeCoordinate::seasonNumber)
+                        .thenComparingInt(EpisodeCoordinate::episodeNumber))
+                .map(coordinate -> {
+                    EpisodeRatingAggregate rating = publicRatings.get(coordinate);
+                    Double averageScore = rating == null
+                            ? null
+                            : (double) rating.scoreSum() / rating.ratingCount();
+                    return new EpisodeScoreDTO(
+                            coordinate.seasonNumber(),
+                            coordinate.episodeNumber(),
+                            personalScores.get(coordinate),
+                            averageScore,
+                            rating == null ? 0L : rating.ratingCount());
+                })
                 .toList();
 
         Map<String, String> customPosterBySeries = loadSeriesPosters(userId, List.of(seriesTmdbId));
-        return new EpisodeRatingsGridResponseDTO(seriesTmdbId, episodes, customPosterBySeries.get(seriesTmdbId));
+        Double overallAverageScore = overallRatingCount == 0L
+                ? null
+                : (double) overallScoreSum / overallRatingCount;
+        return new EpisodeRatingsGridResponseDTO(
+                seriesTmdbId,
+                episodes,
+                customPosterBySeries.get(seriesTmdbId),
+                metadata.title(),
+                metadata.releaseYear(),
+                metadata.posterPath(),
+                metadata.backdropPath(),
+                overallAverageScore,
+                overallRatingCount);
     }
 
     @Override
@@ -593,6 +661,12 @@ public class SummaryServiceImpl implements SummaryService {
             }
             return (double) watchedEpisodeCount / totalEpisodeCount;
         }
+    }
+
+    private record EpisodeCoordinate(int seasonNumber, int episodeNumber) {
+    }
+
+    private record EpisodeRatingAggregate(long scoreSum, long ratingCount) {
     }
 
     private Map<String, String> loadSeriesPosters(UUID userId, List<String> seriesTmdbIds) {

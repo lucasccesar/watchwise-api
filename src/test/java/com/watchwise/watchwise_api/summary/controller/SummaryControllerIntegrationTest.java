@@ -1,17 +1,22 @@
 package com.watchwise.watchwise_api.summary.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
+import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadata;
+import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadataService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -24,6 +29,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -33,9 +39,16 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -77,6 +90,15 @@ class SummaryControllerIntegrationTest {
 
     @Autowired
     private RequestThrottler requestThrottler;
+
+    @MockitoBean
+    private SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
+
+    @MockitoBean
+    private EpisodeRatingsMetadataService episodeRatingsMetadataService;
+
+    @MockitoBean
+    private UserContentPosterService userContentPosterService;
 
     @BeforeEach
     void setUp() {
@@ -172,6 +194,131 @@ class SummaryControllerIntegrationTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
+    }
+
+    private void persistRatedEntry(User user, Content content, int score, int watchNumber) {
+        LocalDateTime now = LocalDateTime.now();
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(user)
+                .content(content)
+                .watchedDate(LocalDate.now())
+                .score(score)
+                .watchNumber(watchNumber)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private MockHttpServletRequestBuilder getEpisodeRatingsGridRequest(RegisteredUser viewer, UUID targetUserId) {
+        return get("/users/" + targetUserId + "/series/1399/episode-ratings").cookie(viewer.accessToken());
+    }
+
+    private void stubUsableEpisodeRatingsMetadata(UUID targetUserId) {
+        when(episodeRatingsMetadataService.resolve(eq("1399"), anyString()))
+                .thenReturn(new EpisodeRatingsMetadata(
+                        "1399", "Breaking Bad", 2008, "/poster.jpg", "/backdrop.jpg"));
+        LocalDateTime refreshedAt = LocalDateTime.now();
+        SeriesProgressMetadataRefreshService.Snapshot snapshot = new SeriesProgressMetadataRefreshService.Snapshot(
+                new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                        "1399", 5, null, 0, LocalDate.now(), refreshedAt, null),
+                List.of(new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                        "1399", 1, 5, null, 0, LocalDate.now(), refreshedAt)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
+                .thenReturn(Map.of("1399", snapshot));
+        when(userContentPosterService.findSeriesPosters(targetUserId, List.of("1399")))
+                .thenReturn(Map.of("1399", "/custom-target-poster.jpg"));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Return Metadata, Personal Scores And Public Aggregates")
+    void shouldReturnEpisodeRatingsGridWithPersonalAndPublicData() throws Exception {
+        RegisteredUser target = registerUser("episodegridtarget", false);
+        RegisteredUser publicRaterOne = registerUser("episodegridpublicone");
+        RegisteredUser publicRaterTwo = registerUser("episodegridpublictwo");
+        RegisteredUser privateRater = registerUser("episodegridprivate", false);
+        User targetEntity = userRepository.findById(target.id()).orElseThrow();
+        User publicOneEntity = userRepository.findById(publicRaterOne.id()).orElseThrow();
+        User publicTwoEntity = userRepository.findById(publicRaterTwo.id()).orElseThrow();
+        User privateEntity = userRepository.findById(privateRater.id()).orElseThrow();
+        Content episode1 = persistEpisode("1399", 1, 1, 45);
+        Content episode3 = persistEpisode("1399", 1, 3, 45);
+        persistRatedEntry(targetEntity, episode1, 6, 1);
+        persistRatedEntry(targetEntity, episode1, 9, 2);
+        persistRatedEntry(targetEntity, episode3, 6, 1);
+        persistRatedEntry(publicOneEntity, episode1, 2, 1);
+        persistRatedEntry(publicOneEntity, episode1, 8, 2);
+        persistRatedEntry(publicOneEntity, episode3, 4, 1);
+        persistRatedEntry(publicTwoEntity, episode1, 6, 1);
+        persistRatedEntry(privateEntity, episode1, 10, 1);
+        stubUsableEpisodeRatingsMetadata(target.id());
+
+        mockMvc.perform(getEpisodeRatingsGridRequest(target, target.id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.title").value("Breaking Bad"))
+                .andExpect(jsonPath("$.releaseYear").value(2008))
+                .andExpect(jsonPath("$.posterPath").value("/poster.jpg"))
+                .andExpect(jsonPath("$.backdropPath").value("/backdrop.jpg"))
+                .andExpect(jsonPath("$.customPosterUrl").value("/custom-target-poster.jpg"))
+                .andExpect(jsonPath("$.episodes.length()").value(5))
+                .andExpect(jsonPath("$.episodes[0].seasonNumber").value(1))
+                .andExpect(jsonPath("$.episodes[0].episodeNumber").value(1))
+                .andExpect(jsonPath("$.episodes[0].score").value(9))
+                .andExpect(jsonPath("$.episodes[0].averageScore").value(7.0))
+                .andExpect(jsonPath("$.episodes[0].ratingCount").value(2))
+                .andExpect(jsonPath("$.episodes[1].score").value(nullValue()))
+                .andExpect(jsonPath("$.episodes[1].averageScore").value(nullValue()))
+                .andExpect(jsonPath("$.episodes[1].ratingCount").value(0))
+                .andExpect(jsonPath("$.episodes[2].score").value(6))
+                .andExpect(jsonPath("$.episodes[2].averageScore").value(4.0))
+                .andExpect(jsonPath("$.episodes[2].ratingCount").value(1))
+                .andExpect(jsonPath("$.overallAverageScore").value(6.0))
+                .andExpect(jsonPath("$.overallRatingCount").value(3));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Return Forbidden For An Inaccessible Private Profile")
+    void shouldReturnForbiddenForPrivateEpisodeRatingsGrid() throws Exception {
+        RegisteredUser viewer = registerUser("episodegridforbiddenviewer");
+        RegisteredUser target = registerUser("episodegridforbiddentarget", false);
+
+        mockMvc.perform(getEpisodeRatingsGridRequest(viewer, target.id()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Return NotFound For An Unknown User")
+    void shouldReturnNotFoundForEpisodeRatingsGridWhenUserDoesNotExist() throws Exception {
+        RegisteredUser viewer = registerUser("episodegridnotfoundviewer");
+
+        mockMvc.perform(getEpisodeRatingsGridRequest(viewer, UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("User not found"));
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Return BadGateway When Series Metadata Cannot Be Hydrated")
+    void shouldReturnBadGatewayWhenEpisodeRatingsMetadataIsUnavailable() throws Exception {
+        RegisteredUser target = registerUser("episodegridmetadatadown");
+        when(episodeRatingsMetadataService.resolve(eq("1399"), anyString()))
+                .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
+
+        mockMvc.perform(getEpisodeRatingsGridRequest(target, target.id()))
+                .andExpect(status().isBadGateway());
+    }
+
+    @Test
+    @DisplayName("[getEpisodeRatingsGrid] Should Return BadGateway When An Uncached Progress Snapshot Cannot Be Hydrated")
+    void shouldReturnBadGatewayWhenEpisodeRatingsSnapshotIsUnavailable() throws Exception {
+        RegisteredUser target = registerUser("episodegridsnapshotdown");
+        when(episodeRatingsMetadataService.resolve(eq("1399"), anyString()))
+                .thenReturn(new EpisodeRatingsMetadata("1399", "Breaking Bad", 2008, null, null));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any(LocalDate.class)))
+                .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
+
+        mockMvc.perform(getEpisodeRatingsGridRequest(target, target.id()))
+                .andExpect(status().isBadGateway());
     }
 
     @Test
