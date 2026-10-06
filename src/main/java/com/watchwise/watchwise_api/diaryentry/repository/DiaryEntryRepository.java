@@ -1057,6 +1057,86 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
         Long getScoreCount();
     }
 
+    @Query(value = """
+            WITH ranked AS (
+                SELECT c.series_tmdb_id,
+                       c.season_number,
+                       c.episode_number,
+                       d.score,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY d.user_id,
+                                        c.series_tmdb_id,
+                                        c.season_number,
+                                        c.episode_number
+                           ORDER BY d.watch_number DESC,
+                                    d.created_at DESC,
+                                    d.id DESC
+                       ) AS row_number
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                JOIN users u ON u.id = d.user_id
+                WHERE c.type = 'EPISODE'
+                  AND c.season_number > 0
+                  AND d.score IS NOT NULL
+                  AND u.is_profile_public = true
+                  AND c.series_tmdb_id = :seriesTmdbId
+            )
+            SELECT series_tmdb_id AS seriesTmdbId,
+                   season_number AS seasonNumber,
+                   episode_number AS episodeNumber,
+                   SUM(score) AS scoreSum,
+                   COUNT(score) AS scoreCount
+            FROM ranked
+            WHERE row_number = 1
+            GROUP BY series_tmdb_id, season_number, episode_number
+            ORDER BY season_number, episode_number
+            """, nativeQuery = true)
+    List<LatestPublicEpisodeRatingAggregate> findLatestPublicEpisodeRatingAggregatesBySeriesTmdbId(
+            @Param("seriesTmdbId") String seriesTmdbId);
+
+    interface LatestPublicEpisodeRatingAggregate {
+        String getSeriesTmdbId();
+        Integer getSeasonNumber();
+        Integer getEpisodeNumber();
+        Long getScoreSum();
+        Long getScoreCount();
+    }
+
+    @Query(value = """
+            WITH ranked AS (
+                SELECT c.season_number,
+                       c.episode_number,
+                       d.score,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY c.season_number, c.episode_number
+                           ORDER BY d.watch_number DESC,
+                                    d.created_at DESC,
+                                    d.id DESC
+                       ) AS row_number
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type = 'EPISODE'
+                  AND c.series_tmdb_id = :seriesTmdbId
+                  AND c.season_number > 0
+            )
+            SELECT season_number AS seasonNumber,
+                   episode_number AS episodeNumber,
+                   score
+            FROM ranked
+            WHERE row_number = 1
+            ORDER BY season_number, episode_number
+            """, nativeQuery = true)
+    List<LatestUserEpisodeScore> findLatestUserEpisodeScoresByUserIdAndSeriesTmdbId(
+            @Param("userId") UUID userId,
+            @Param("seriesTmdbId") String seriesTmdbId);
+
+    interface LatestUserEpisodeScore {
+        Integer getSeasonNumber();
+        Integer getEpisodeNumber();
+        Integer getScore();
+    }
+
     // --- Delete all diary entries for a series, every watchNumber (DELETE /diary/series/{seriesTmdbId}) ---
     // Episode side reuses findEpisodeEntriesBySeriesForUser above (same filter, already unscoped by watchNumber).
 
