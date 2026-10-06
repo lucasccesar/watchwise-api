@@ -9,7 +9,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvDisplayDetails;
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadata;
 import com.watchwise.watchwise_api.summary.service.EpisodeRatingsMetadataService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
@@ -17,12 +17,21 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
 
 @Service
-@RequiredArgsConstructor
 public class EpisodeRatingsMetadataServiceImpl implements EpisodeRatingsMetadataService {
 
     private final TmdbClient tmdbClient;
+    private final ExecutorService episodeRatingsMetadataExecutor;
+
+    public EpisodeRatingsMetadataServiceImpl(TmdbClient tmdbClient,
+            @Qualifier("episodeRatingsMetadataExecutor") ExecutorService episodeRatingsMetadataExecutor) {
+        this.tmdbClient = tmdbClient;
+        this.episodeRatingsMetadataExecutor = episodeRatingsMetadataExecutor;
+    }
 
     @Override
     public Map<String, EpisodeRatingsMetadata> resolve(Collection<String> seriesTmdbIds, String language) {
@@ -35,9 +44,22 @@ public class EpisodeRatingsMetadataServiceImpl implements EpisodeRatingsMetadata
             normalizedIds.add(normalizeSeriesTmdbId(seriesTmdbId));
         }
 
-        Map<String, EpisodeRatingsMetadata> metadataBySeriesId = new LinkedHashMap<>();
+        Map<String, CompletableFuture<EpisodeRatingsMetadata>> futures = new LinkedHashMap<>();
         for (String seriesTmdbId : normalizedIds) {
-            metadataBySeriesId.put(seriesTmdbId, resolve(seriesTmdbId, language));
+            futures.put(seriesTmdbId, CompletableFuture.supplyAsync(
+                    () -> resolve(seriesTmdbId, language), episodeRatingsMetadataExecutor));
+        }
+
+        Map<String, EpisodeRatingsMetadata> metadataBySeriesId = new LinkedHashMap<>();
+        for (Map.Entry<String, CompletableFuture<EpisodeRatingsMetadata>> entry : futures.entrySet()) {
+            try {
+                metadataBySeriesId.put(entry.getKey(), entry.getValue().join());
+            } catch (CompletionException exception) {
+                if (exception.getCause() instanceof RuntimeException cause) {
+                    throw cause;
+                }
+                throw exception;
+            }
         }
         return metadataBySeriesId;
     }
