@@ -7,18 +7,16 @@ target/
 /.agents/
 /.claude/
 /.codex/
-/.superpowers/*
+/.superpowers/
 /.worktrees/
+/docs/
 /CLAUDE.md
-/docs/archive/
+/AGENTS.md
+/.m2/
+/.obsidian/
+/.testcontainers.properties
 graphify-out/
 # .superpowers/
-!AGENTS.md
-!/.superpowers/sdd/
-/.superpowers/sdd/*
-!/.superpowers/sdd/2026-10-02-trending/
-/.superpowers/sdd/2026-10-02-trending/*
-!/.superpowers/sdd/2026-10-02-trending/progress.md
 !**/src/main/**/target/
 !**/src/test/**/target/
 
