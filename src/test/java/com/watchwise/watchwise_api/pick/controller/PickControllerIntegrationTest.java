@@ -256,7 +256,7 @@ class PickControllerIntegrationTest {
         MvcResult result = mockMvc.perform(post("/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"username":"%s","email":"%s@email.com","password":"Password123"}
+                                {"username":"%s","name":"%s","email":"%s@email.com","password":"Password123"}
                                 """.formatted(username, username, username)))
                 .andExpect(status().isCreated())
                 .andReturn();
