@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
@@ -54,6 +55,9 @@ class DiaryEntryRepositoryTest {
 
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private ProfileSummaryQueryRepository profileSummaryQueryRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -812,12 +816,13 @@ class DiaryEntryRepositoryTest {
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, episodeTwo));
         entityManager.clear();
 
-        assertThat(diaryEntryRepository.countDistinctMoviesByGenreAndUserId(lucas.getId()).getFirst().getCount())
+        assertThat(profileSummaryQueryRepository.countDistinctMoviesByGenre(lucas.getId()).getFirst().getCount())
                 .isEqualTo(1L);
-        assertThat(diaryEntryRepository.countDistinctEpisodesByGenreAndUserId(lucas.getId()).getFirst().getCount())
+        assertThat(profileSummaryQueryRepository.countDistinctEpisodesByGenre(lucas.getId()).getFirst().getCount())
                 .isEqualTo(2L);
-        assertThat(diaryEntryRepository.countLatestScoresByUserIdAndContentType(lucas.getId(), "MOVIE"))
-                .extracting(DiaryEntryRepository.ScoreCount::getScore, DiaryEntryRepository.ScoreCount::getCount)
+        assertThat(profileSummaryQueryRepository.countLatestScoresByUserIdAndContentType(lucas.getId(), "MOVIE"))
+                .extracting(ProfileSummaryQueryRepository.ScoreCount::getScore,
+                        ProfileSummaryQueryRepository.ScoreCount::getCount)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(9, 1L));
     }
 

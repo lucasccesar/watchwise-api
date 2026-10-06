@@ -11,7 +11,6 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
-import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
@@ -21,6 +20,7 @@ import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
+import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -45,7 +45,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     private final UserContentPosterService userContentPosterService;
     private final FollowerRepository followerRepository;
     private final Top5EntryMapper top5EntryMapper;
-    private final DiaryEntryRepository diaryEntryRepository;
+    private final ProfileSummaryQueryRepository profileSummaryQueryRepository;
 
     static final int MAX_ENTRIES = 5;
 
@@ -180,11 +180,12 @@ public class Top5EntryServiceImpl implements Top5EntryService {
         if (contentIds.isEmpty()) {
             return Map.of();
         }
-        return diaryEntryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
+        return profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
                         userId, contentIds, type.name()).stream()
+                .filter(score -> score.getScore() != null)
                 .collect(java.util.stream.Collectors.toMap(
-                        DiaryEntryRepository.LatestContentScore::getContentId,
-                        DiaryEntryRepository.LatestContentScore::getScore));
+                         ProfileSummaryQueryRepository.LatestContentScore::getContentId,
+                         ProfileSummaryQueryRepository.LatestContentScore::getScore));
     }
 
     private Map<UUID, String> loadPostersForOwner(UUID ownerId, List<Top5Entry> entries) {

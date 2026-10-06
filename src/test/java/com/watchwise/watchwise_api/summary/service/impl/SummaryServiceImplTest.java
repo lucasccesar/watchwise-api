@@ -134,6 +134,9 @@ class SummaryServiceImplTest {
     @Mock
     private HomeNextEpisodeAssembler homeNextEpisodeAssembler;
 
+    @Mock
+    private com.watchwise.watchwise_api.summary.service.ProfileSummaryReader profileSummaryReader;
+
     @InjectMocks
     private SummaryServiceImpl summaryService;
 
@@ -152,20 +155,6 @@ class SummaryServiceImplTest {
         lenient().when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(any(), any(), any()))
                 .thenReturn(Page.empty());
         lenient().when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(any(), any(), any()))
-                .thenReturn(List.of());
-        lenient().when(diaryEntryRepository.findRecentReviewsByUserIdAndContentTypes(any(), any(), any()))
-                .thenReturn(List.of());
-        lenient().when(diaryEntryRepository.countDistinctMoviesByGenreAndUserId(any())).thenReturn(List.of());
-        lenient().when(diaryEntryRepository.countDistinctEpisodesByGenreAndUserId(any())).thenReturn(List.of());
-        lenient().when(diaryEntryRepository.countLatestScoresByUserIdAndContentType(any(), anyString()))
-                .thenReturn(List.of());
-        lenient().when(diaryEntryRepository.countDiaryEntriesGroupByContentType(any(), anyString(), any()))
-                .thenReturn(List.of());
-        lenient().when(diaryEntryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(any(), any(), anyString()))
-                .thenReturn(List.of());
-        lenient().when(diaryEntryRepository.findLongestMovieContentByUserId(any(), any()))
-                .thenReturn(List.of());
-        lenient().when(diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbId(any(), any()))
                 .thenReturn(List.of());
         lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
         lenient().when(diaryEntryRepository.findSeriesInProgressByUserId(any(), any(PageRequest.class)))
@@ -202,216 +191,14 @@ class SummaryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getSummary] Should Throw NotFoundException - When User Does Not Exist")
-    void shouldThrowNotFoundExceptionWhenUserDoesNotExist() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.empty());
+    @DisplayName("[getSummary] Should Delegate To The Profile Reader")
+    void shouldDelegateToTheProfileReader() {
+        SummaryResponseDTO expected = new SummaryResponseDTO(null, null, List.of(), null, List.of(),
+                List.of(), List.of(), List.of());
+        when(profileSummaryReader.read(lucasId, lucasId, ContentType.MOVIE)).thenReturn(expected);
 
-        assertThatThrownBy(() -> summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessage("User not found");
-
-        verifyNoInteractions(diaryEntryRepository);
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Throw ForbiddenException - When Target Profile Is Private And Viewer Is Not An Accepted Follower")
-    void shouldThrowForbiddenExceptionWhenTargetProfileIsPrivateAndViewerIsNotAnAcceptedFollower() {
-        lucas.setIsProfilePublic(false);
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(marinaId, lucasId, FollowStatus.ACCEPTED))
-                .thenReturn(false);
-
-        assertThatThrownBy(() -> summaryService.getSummary(marinaId, lucasId, ContentType.MOVIE))
-                .isInstanceOf(ForbiddenException.class)
-                .hasMessage("This user profile is private");
-
-        verifyNoInteractions(diaryEntryRepository);
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Throw BadRequestException - When Type Is Null")
-    void shouldThrowBadRequestExceptionWhenTypeIsNull() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-
-        assertThatThrownBy(() -> summaryService.getSummary(lucasId, lucasId, null))
-                .isInstanceOf(BadRequestException.class)
-                .hasMessage("type must be one of: MOVIE, SERIES");
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Throw BadRequestException - When Type Is Not MOVIE Or SERIES")
-    void shouldThrowBadRequestExceptionWhenTypeIsNotMovieOrSeries() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-
-        assertThatThrownBy(() -> summaryService.getSummary(lucasId, lucasId, ContentType.EPISODE))
-                .isInstanceOf(BadRequestException.class)
-                .hasMessage("type must be one of: MOVIE, SERIES");
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Compute WatchTime From MOVIE Content Type - When Type Is MOVIE")
-    void shouldComputeWatchTimeFromMovieContentTypeWhenTypeIsMovie() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.MOVIE)).thenReturn(500L);
-        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
-                eq(lucasId), eq(ContentType.MOVIE), any(), any())).thenReturn(120L);
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
-
-        assertThat(result.watchTime().totalMinutesWatched()).isEqualTo(500L);
-        assertThat(result.watchTime().minutesWatchedLast30Days()).isEqualTo(120L);
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Compute WatchTime From EPISODE Content Type - When Type Is SERIES")
-    void shouldComputeWatchTimeFromEpisodeContentTypeWhenTypeIsSeries() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.EPISODE)).thenReturn(900L);
-        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
-                eq(lucasId), eq(ContentType.EPISODE), any(), any())).thenReturn(45L);
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
-
-        assertThat(result.watchTime().totalMinutesWatched()).isEqualTo(900L);
-        assertThat(result.watchTime().minutesWatchedLast30Days()).isEqualTo(45L);
-        verify(diaryEntryRepository, never()).sumRuntimeMinutesByUserIdAndContentType(lucasId, ContentType.MOVIE);
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Use The Movie Genre Query - When Type Is MOVIE")
-    void shouldUseTheMovieGenreQueryWhenTypeIsMovie() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.countDistinctMoviesByGenreAndUserId(lucasId))
-                .thenReturn(List.of(genreCount("Drama", 3L)));
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
-
-        assertThat(result.genreCounts()).containsExactly(new GenreCountDTO("Drama", 3L));
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Use The Series Genre Query - When Type Is SERIES")
-    void shouldUseTheSeriesGenreQueryWhenTypeIsSeries() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.countDistinctEpisodesByGenreAndUserId(lucasId))
-                .thenReturn(List.of(genreCount("Sci-Fi", 2L)));
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
-
-        assertThat(result.genreCounts()).containsExactly(new GenreCountDTO("Sci-Fi", 2L));
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Return RatingsDistribution From Score Counts")
-    void shouldReturnRatingsDistributionFromScoreCounts() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.countLatestScoresByUserIdAndContentType(lucasId, ContentType.MOVIE.name()))
-                .thenReturn(List.of(scoreCount(8, 5L)));
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
-
-        assertThat(result.ratingsDistribution()).containsExactly(new RatingCountDTO(8, 5L));
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Not Query RecentEpisodes - When Type Is MOVIE")
-    void shouldNotQueryRecentEpisodesWhenTypeIsMovie() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
-
-        assertThat(result.recentEpisodes()).isEmpty();
-        verify(diaryEntryRepository, never()).findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
-                any(), eq(ContentType.EPISODE), any());
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Query RecentEpisodes With Type EPISODE And Size Four - When Type Is SERIES")
-    void shouldQueryRecentEpisodesWithTypeEpisodeAndSizeFourWhenTypeIsSeries() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-
-        summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
-
-        verify(diaryEntryRepository).findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
-                lucasId, ContentType.EPISODE, PageRequest.of(0, 4));
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Query RecentReviews With HasReview True And Size Five")
-    void shouldQueryRecentReviewsWithHasReviewTrueAndSizeFive() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-
-        summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
-
-        verify(diaryEntryRepository).findRecentReviewsByUserIdAndContentTypes(
-                lucasId, List.of(ContentType.MOVIE), PageRequest.of(0, 5));
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Merge Completed And Dropped Entries Sorted By Date Descending - When Both Exist")
-    void shouldMergeCompletedAndDroppedEntriesSortedByDateDescendingWhenBothExist() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        Content movieContent = buildContent("550", ContentType.MOVIE);
-        Content droppedContent = buildContent("680", ContentType.MOVIE);
-        DiaryEntry completedEntry = buildDiaryEntry(movieContent, LocalDateTime.now().minusDays(1));
-        DroppedEntry droppedEntry = buildDroppedEntry(droppedContent, LocalDateTime.now());
-        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), any()))
-                .thenReturn(List.of(completedEntry));
-        when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), any()))
-                .thenReturn(new PageImpl<>(List.of(droppedEntry)));
-        when(contentMapper.contentToContentRefDto(movieContent))
-                .thenReturn(new ContentRefDTO(movieContent.getId(), "550", ContentType.MOVIE, null, null, null, null, null, null, null));
-        when(contentMapper.contentToContentRefDto(droppedContent))
-                .thenReturn(new ContentRefDTO(droppedContent.getId(), "680", ContentType.MOVIE, null, null, null, null, null, null, null));
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
-
-        assertThat(result.recentActivity()).extracting(RecentActivityItemDTO::status)
-                .containsExactly(RecentActivityStatus.DROPPED, RecentActivityStatus.COMPLETED);
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Limit RecentActivity To Six Items - When More Than Six Exist")
-    void shouldLimitRecentActivityToSixItemsWhenMoreThanSixExist() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        List<DiaryEntry> completedEntries = List.of(
-                buildDiaryEntry(buildContent("1", ContentType.MOVIE), LocalDateTime.now().minusDays(1)),
-                buildDiaryEntry(buildContent("2", ContentType.MOVIE), LocalDateTime.now().minusDays(2)),
-                buildDiaryEntry(buildContent("3", ContentType.MOVIE), LocalDateTime.now().minusDays(3)),
-                buildDiaryEntry(buildContent("4", ContentType.MOVIE), LocalDateTime.now().minusDays(4)));
-        List<DroppedEntry> droppedEntries = List.of(
-                buildDroppedEntry(buildContent("5", ContentType.MOVIE), LocalDateTime.now().minusDays(5)),
-                buildDroppedEntry(buildContent("6", ContentType.MOVIE), LocalDateTime.now().minusDays(6)),
-                buildDroppedEntry(buildContent("7", ContentType.MOVIE), LocalDateTime.now().minusDays(7)));
-        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), any()))
-                .thenReturn(completedEntries);
-        when(droppedEntryRepository.findByUserIdAndTypeOrderByCreatedAtDesc(eq(lucasId), eq(ContentType.MOVIE), any()))
-                .thenReturn(new PageImpl<>(droppedEntries));
-        when(contentMapper.contentToContentRefDto(any())).thenAnswer(invocation -> {
-            Content content = invocation.getArgument(0);
-            return new ContentRefDTO(content.getId(), content.getTmdbId(), ContentType.MOVIE, null, null, null, null, null, null, null);
-        });
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE);
-
-        assertThat(result.recentActivity()).hasSize(6);
-    }
-
-    @Test
-    @DisplayName("[getSummary] Should Return Recent Episodes And Reviews Mapped From The Diary Service - When Available")
-    void shouldReturnRecentEpisodesAndReviewsMappedFromTheDiaryServiceWhenAvailable() {
-        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        DiaryEntry episode = buildDiaryEntry(buildContent("1399", ContentType.EPISODE), LocalDateTime.now());
-        when(diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
-                lucasId, ContentType.EPISODE, PageRequest.of(0, 4))).thenReturn(List.of(episode));
-        when(contentMapper.contentToContentRefDto(episode.getContent()))
-                .thenReturn(new ContentRefDTO(episode.getContent().getId(), null, ContentType.EPISODE,
-                        "1399", 1, 1, null, null, episode.getCreatedAt(), episode.getUpdatedAt()));
-
-        SummaryResponseDTO result = summaryService.getSummary(lucasId, lucasId, ContentType.SERIES);
-
-        assertThat(result.recentEpisodes()).extracting(ProfileDiaryPreviewDTO::id)
-                .containsExactly(episode.getId());
+        assertThat(summaryService.getSummary(lucasId, lucasId, ContentType.MOVIE)).isSameAs(expected);
+        verify(profileSummaryReader).read(lucasId, lucasId, ContentType.MOVIE);
     }
 
     // ---------- getHomeSummary ----------

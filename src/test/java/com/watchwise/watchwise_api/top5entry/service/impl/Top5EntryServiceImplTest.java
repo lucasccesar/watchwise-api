@@ -11,7 +11,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
-import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryCreationDTO;
@@ -64,7 +64,7 @@ class Top5EntryServiceImplTest {
     private UserContentPosterService userContentPosterService;
 
     @Mock
-    private DiaryEntryRepository diaryEntryRepository;
+    private ProfileSummaryQueryRepository profileSummaryQueryRepository;
 
     @Mock
     private FollowerRepository followerRepository;
@@ -107,7 +107,7 @@ class Top5EntryServiceImplTest {
         pulpFiction = buildContent("680", ContentType.MOVIE);
         breakingBad = buildContent("1396", ContentType.SERIES);
 
-        lenient().when(diaryEntryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(any(), any(), anyString()))
+        lenient().when(profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(any(), any(), anyString()))
                 .thenReturn(List.of());
     }
 
@@ -136,7 +136,7 @@ class Top5EntryServiceImplTest {
     void shouldIncludeLatestPersonalScoreWhenDiaryScoreExists() {
         Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
         Top5EntryResponseDTO mapped = buildResponseDto(entry);
-        DiaryEntryRepository.LatestContentScore score = new DiaryEntryRepository.LatestContentScore() {
+        ProfileSummaryQueryRepository.LatestContentScore score = new ProfileSummaryQueryRepository.LatestContentScore() {
             @Override
             public UUID getContentId() {
                 return fightClub.getId();
@@ -151,13 +151,42 @@ class Top5EntryServiceImplTest {
         when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
                 .thenReturn(List.of(entry));
         when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(mapped);
-        when(diaryEntryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
+        when(profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
                 lucasId, List.of(fightClub.getId()), ContentType.MOVIE.name()))
                 .thenReturn(List.of(score));
 
         List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
 
         assertThat(result).singleElement().extracting(Top5EntryResponseDTO::score).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("[getTop5] Should Keep Score Null - When Latest Diary Pass Has No Score")
+    void shouldKeepScoreNullWhenLatestDiaryPassHasNoScore() {
+        Top5Entry entry = buildEntry(lucas, fightClub, ContentType.MOVIE, 1);
+        Top5EntryResponseDTO mapped = buildResponseDto(entry);
+        ProfileSummaryQueryRepository.LatestContentScore score = new ProfileSummaryQueryRepository.LatestContentScore() {
+            @Override
+            public UUID getContentId() {
+                return fightClub.getId();
+            }
+
+            @Override
+            public Integer getScore() {
+                return null;
+            }
+        };
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(lucasId, ContentType.MOVIE))
+                .thenReturn(List.of(entry));
+        when(top5EntryMapper.top5EntryToResponseDto(entry)).thenReturn(mapped);
+        when(profileSummaryQueryRepository.findLatestScoresByUserIdAndContentIdsAndContentType(
+                lucasId, List.of(fightClub.getId()), ContentType.MOVIE.name()))
+                .thenReturn(List.of(score));
+
+        List<Top5EntryResponseDTO> result = top5EntryService.getTop5(lucasId, lucasId, ContentType.MOVIE);
+
+        assertThat(result).singleElement().extracting(Top5EntryResponseDTO::score).isNull();
     }
 
     @Test
