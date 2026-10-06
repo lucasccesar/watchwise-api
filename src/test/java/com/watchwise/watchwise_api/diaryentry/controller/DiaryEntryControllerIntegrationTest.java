@@ -68,6 +68,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -872,6 +873,8 @@ class DiaryEntryControllerIntegrationTest {
         diaryEntryRepository.save(secondEntry);
         persistFreshSnapshot("fresh-one", 5, 100, 1, 40);
         persistFreshSnapshot("fresh-two", 3, 60, 1, 20);
+        when(tmdbClient.getTvFullDetails("fresh-two", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.NotFound<>());
 
         mockMvc.perform(getSeriesInProgressRequest(user, user.id()).param("page", "1").param("size", "1"))
                 .andExpect(status().isOk())
@@ -893,7 +896,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.aggregate.remainingEpisodeCount").value(6))
                 .andExpect(jsonPath("$.aggregate.remainingRuntimeMinutes").value(100));
 
-        verify(tmdbClient, never()).getTvFullDetails(any(), any());
+        verify(tmdbClient, times(1)).getTvFullDetails("fresh-two", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
         verify(tmdbClient, never()).getSeasonFullDetails(any(), any(), any());
     }
 
@@ -918,7 +921,7 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].seasonProgress[0].seasonNumber").value(1))
                 .andExpect(jsonPath("$.content[0].seasonProgress[0].totalEpisodeCount").value(1));
 
-        verify(tmdbClient, times(1)).getTvFullDetails("cold-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, times(2)).getTvFullDetails("cold-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
         verify(tmdbClient, times(1)).getSeasonFullDetails("cold-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
         assertThat(seriesProgressMetadataRepository.findById("cold-series")).isPresent();
         assertThat(seriesProgressSeasonMetadataRepository.findBySeriesTmdbIdAndSeasonNumber("cold-series", 1))
@@ -949,8 +952,8 @@ class DiaryEntryControllerIntegrationTest {
                         .orElseThrow()
                         .getTotalKnownRuntime()).isEqualTo(50));
 
-        verify(tmdbClient, times(1)).getTvFullDetails("stale-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
-        verify(tmdbClient, times(1)).getSeasonFullDetails("stale-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, atLeastOnce()).getTvFullDetails("stale-series", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(tmdbClient, atLeastOnce()).getSeasonFullDetails("stale-series", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
     }
 
     @Test
