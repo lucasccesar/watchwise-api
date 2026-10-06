@@ -1,17 +1,13 @@
 package com.watchwise.watchwise_api.summary.service.impl;
 
-import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
-import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
+import com.watchwise.watchwise_api.seriesprogress.dto.ProgressEpisodeDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -21,11 +17,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
 
@@ -33,27 +26,13 @@ import static org.mockito.Mockito.mock;
 class HomeNextEpisodeAssemblerTest {
 
     @Mock
-    private TmdbClient tmdbClient;
-
-    @Mock
     private ContentRepository contentRepository;
 
     @Mock
     private ContentStatsService contentStatsService;
 
-    @Mock
-    private ExecutorService executor;
-
     @InjectMocks
     private HomeNextEpisodeAssembler assembler;
-
-    @BeforeEach
-    void configureDirectExecutor() {
-        doAnswer(invocation -> {
-            ((Runnable) invocation.getArgument(0)).run();
-            return null;
-        }).when(executor).execute(any(Runnable.class));
-    }
 
     @Test
     @DisplayName("[assemble] Should Return Next Episode Metadata And Progress - When Next Episode Exists")
@@ -61,18 +40,13 @@ class HomeNextEpisodeAssemblerTest {
         UUID contentId = UUID.randomUUID();
         User user = User.builder().preferredLanguage("en-US").build();
         SeriesInProgressResponseDTO progress = new SeriesInProgressResponseDTO(
-                "1399", 2, 4, null, 12L, 24, 50.0);
-        TmdbEpisodeFullDetails episode = new TmdbEpisodeFullDetails(
-                1, "Next episode", null, "2026-10-10", 5, 2, 55, "/still.jpg", List.of());
-        TmdbTvFullDetails series = mock(TmdbTvFullDetails.class);
-        when(series.name()).thenReturn("The Last of Us");
+                "1399", 2, 9, null, 12L, 24, 50.0)
+                .withPresentation(
+                        "The Last of Us", "/poster.jpg", null,
+                        new ProgressEpisodeDTO(2, 5, "Next episode", java.time.LocalDate.of(2026, 10, 10),
+                                55, "/still.jpg", false));
         Content content = Content.builder().id(contentId).seriesTmdbId("1399").seasonNumber(2)
                 .episodeNumber(5).build();
-
-        when(tmdbClient.getEpisodeFullDetails("1399", 2, 5, "en-US"))
-                .thenReturn(new TmdbLookupResult.Found<>(episode));
-        when(tmdbClient.getTvFullDetails("1399", "en-US"))
-                .thenReturn(new TmdbLookupResult.Found<>(series));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
                 "1399", 2, 5, com.watchwise.watchwise_api.content.entity.ContentType.EPISODE))
                 .thenReturn(Optional.of(content));
