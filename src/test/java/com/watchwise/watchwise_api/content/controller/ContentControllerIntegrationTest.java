@@ -20,6 +20,11 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.entity.UserContentPoster;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,6 +89,12 @@ class ContentControllerIntegrationTest {
     private UserContentPosterRepository userContentPosterRepository;
 
     @Autowired
+    private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private DroppedEntryRepository droppedEntryRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -98,6 +109,8 @@ class ContentControllerIntegrationTest {
     @BeforeEach
     void setUp() throws Exception {
         userContentPosterRepository.deleteAll();
+        diaryEntryRepository.deleteAll();
+        droppedEntryRepository.deleteAll();
         contentRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
@@ -615,6 +628,167 @@ class ContentControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getPage] Should Count Only Visible Diary And Dropped Reviews - When Visible And Hidden Reviews Exist")
+    void shouldCountOnlyVisibleDiaryAndDroppedReviewsWhenVisibleAndHiddenReviewsExist() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        User publicReviewer = registerUserEntity("visiblepagereviewer", true);
+        User privateReviewer = registerUserEntity("hiddenpagereviewer", false);
+        LocalDateTime now = LocalDateTime.now();
+
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(publicReviewer).content(content).watchNumber(1).comment("Visible diary")
+                .createdAt(now).updatedAt(now).build());
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(privateReviewer).content(content).watchNumber(1).comment("Hidden diary")
+                .createdAt(now.plusSeconds(1)).updatedAt(now.plusSeconds(1)).build());
+        droppedEntryRepository.save(DroppedEntry.builder()
+                .user(publicReviewer).content(content).type(ContentType.MOVIE).comment("Visible dropped")
+                .createdAt(now.plusSeconds(2)).updatedAt(now.plusSeconds(2)).build());
+        droppedEntryRepository.save(DroppedEntry.builder()
+                .user(privateReviewer).content(content).type(ContentType.MOVIE).comment("Hidden dropped")
+                .createdAt(now.plusSeconds(3)).updatedAt(now.plusSeconds(3)).build());
+
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbMovieFullDetails(
+                        "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
+                        "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
+                        List.of(), List.of(), null, null, null, null, null, null, null, null, null)));
+        when(tmdbClient.getMovieReleaseDates("603", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieReleaseDates("603", null)));
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.visibleReviewsCount").value(2));
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Compose A Season Page Without A Persisted Series Reference")
+    void shouldComposeASeasonPageWithoutAPersistedSeriesReference() throws Exception {
+        Content season = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).type(ContentType.SEASON)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(
+                        101, "Season 1", null, "/season.jpg", "2008-01-20", 1,
+                        List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 45, "/still.jpg", null)),
+                        null, null)));
+        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(
+                        "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                        List.of(), List.of(), null,
+                        List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, "/season.jpg")),
+                        null, null, null, null, 1, 1, null, null, "Ended", null)));
+        when(tmdbClient.getTvContentRatings("1399", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + season.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.details.type").value("SEASON"))
+                .andExpect(jsonPath("$.sections.seasons").isEmpty())
+                .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty())
+                .andExpect(jsonPath("$.sections.episodes[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.sections.episodes[0].episodeNumber").value(1))
+                .andExpect(jsonPath("$.navigation").value(nullValue()));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+        assertThat(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return Root Episode Data Without A Persisted Season Reference")
+    void shouldReturnRootEpisodeDataWithoutAPersistedSeasonReference() throws Exception {
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(2).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getEpisodeFullDetails("1399", 1, 2, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbEpisodeFullDetails(
+                        201, "Cat's in the Bag...", "Overview", "2008-01-27", 2, 1, 48,
+                        "/episode-still.jpg", List.of())));
+        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(
+                        "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                        List.of(), List.of(), null, List.of(), null,
+                        new TmdbAggregateCredits(
+                                List.of(),
+                                List.of(new TmdbAggregateCrewMember(
+                                        42, "Vince Gilligan", "/vince.jpg",
+                                        List.of(new TmdbAggregateCrewJob("Executive Producer"))))),
+                        null, null, 1, 3, null, null, "Ended", null)));
+        when(tmdbClient.getTvContentRatings("1399", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + episode.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metadata.presentationPosterPath").value("/episode-still.jpg"))
+                .andExpect(jsonPath("$.metadata.presentationCrew[0].name").value("Vince Gilligan"))
+                .andExpect(jsonPath("$.metadata.crewInherited").value(true))
+                .andExpect(jsonPath("$.details.parentTitle").value("Breaking Bad"))
+                .andExpect(jsonPath("$.sections.seasons").isEmpty())
+                .andExpect(jsonPath("$.sections.episodes").isEmpty())
+                .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty())
+                .andExpect(jsonPath("$.navigation").value(nullValue()));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+        assertThat(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).isEmpty();
+        assertThat(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "1399", 1, null, ContentType.SEASON)).isEmpty();
+        verify(tmdbClient, never()).getSeasonFullDetails("1399", 1, "en-US");
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Compose Episode Presentation From Persisted Season")
+    void shouldComposeEpisodePresentationFromPersistedSeason() throws Exception {
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(2).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content season = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).type(ContentType.SEASON)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        TmdbTvFullDetails seriesDetails = new TmdbTvFullDetails(
+                "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null, List.of(), null,
+                new TmdbAggregateCredits(
+                        List.of(),
+                        List.of(new TmdbAggregateCrewMember(
+                                42, "Vince Gilligan", "/vince.jpg",
+                                List.of(new TmdbAggregateCrewJob("Executive Producer"))))),
+                null, null, 1, 2, null, null, "Ended", null);
+        when(tmdbClient.getEpisodeFullDetails("1399", 1, 2, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
+                        201, "Cat's in the Bag...", "Overview", "2008-01-27", 2, 1, 48,
+                        "/episode-still.jpg", List.of())));
+        when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
+                        101, "Season 1", null, "/season-poster.jpg", "2008-01-20", 2,
+                        List.of(
+                                new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 45, "/pilot-still.jpg", null),
+                                new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48,
+                                        "/episode-still.jpg", null)),
+                        null, null)));
+        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(seriesDetails));
+        when(tmdbClient.getTvContentRatings("1399", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + episode.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metadata.presentationPosterPath").value("/season-poster.jpg"))
+                .andExpect(jsonPath("$.metadata.presentationCrew[0].name").value("Vince Gilligan"))
+                .andExpect(jsonPath("$.metadata.crewInherited").value(true))
+                .andExpect(jsonPath("$.details.posterPath").value("/episode-still.jpg"))
+                .andExpect(jsonPath("$.details.crew[0].name").value("Vince Gilligan"))
+                .andExpect(jsonPath("$.navigation.episodeNumber").value(2));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+        assertThat(contentRepository.findById(season.getId())).isPresent();
+    }
+
+    @Test
     @DisplayName("[getPage] Should Return Existing Season Reference In A Series Page")
     void shouldReturnExistingSeasonReferenceInSeriesPage() throws Exception {
         Content series = contentRepository.save(Content.builder()
@@ -741,5 +915,13 @@ class ContentControllerIntegrationTest {
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
+    }
+
+    private User registerUserEntity(String username, boolean isProfilePublic) throws Exception {
+        mockMvc.perform(registerRequest(username, username + "@email.com"))
+                .andExpect(status().isCreated());
+        User user = userRepository.findByUsernameIgnoreCase(username).orElseThrow();
+        user.setIsProfilePublic(isProfilePublic);
+        return userRepository.save(user);
     }
 }
