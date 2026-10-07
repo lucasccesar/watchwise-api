@@ -207,6 +207,25 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);
 
     @Query("""
+            SELECT d FROM DiaryEntry d JOIN FETCH d.content
+            WHERE d.user.id = :userId
+            AND (
+                (d.content.type IN (
+                    com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
+                    com.watchwise.watchwise_api.content.entity.ContentType.SERIES)
+                    AND d.content.tmdbId IN :tmdbIds)
+                OR (d.content.type IN (
+                    com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
+                    com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
+                    AND d.content.seriesTmdbId IN :seriesTmdbIds)
+            )
+            """)
+    List<DiaryEntry> findViewerStateEntries(
+            @Param("userId") UUID userId,
+            @Param("tmdbIds") Collection<String> tmdbIds,
+            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    @Query("""
             SELECT DISTINCT
                 CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
                      THEN com.watchwise.watchwise_api.content.entity.ContentType.MOVIE

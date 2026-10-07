@@ -27,7 +27,7 @@ public class ContentStateResolver {
         Objects.requireNonNull(schedule, "schedule is required");
         Objects.requireNonNull(clock, "clock is required");
 
-        WatchResolution watchResolution = resolveWatchStatus(
+        WatchProgress watchProgress = resolveWatchProgress(
                 content, schedule, watchedDirectContentIds, watchedEpisodeCoordinates, clock);
         ReleaseStatus releaseStatus = resolveReleaseStatus(schedule.releaseDate(), clock);
         ContentProductionStatus productionStatus = content.getType() == ContentType.EPISODE
@@ -35,28 +35,31 @@ public class ContentStateResolver {
                 : normalizeProductionStatus(schedule.externalStatus());
 
         return new ContentStateDTO(
-                watchResolution.status(),
+                watchProgress.status(),
                 releaseStatus,
                 productionStatus,
-                watchResolution.watchedEpisodeCount(),
-                watchResolution.releasedEpisodeCount());
+                watchProgress.watchedEpisodeCount(),
+                watchProgress.releasedEpisodeCount());
     }
 
-    private WatchResolution resolveWatchStatus(
+    public WatchProgress resolveWatchProgress(
             Content content,
             ContentSchedule schedule,
             Set<java.util.UUID> watchedDirectContentIds,
             Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates,
             Clock clock) {
+        Objects.requireNonNull(content, "content is required");
+        Objects.requireNonNull(schedule, "schedule is required");
+        Objects.requireNonNull(clock, "clock is required");
         if (content.getType() == ContentType.MOVIE || content.getType() == ContentType.EPISODE) {
             boolean watched = content.getId() != null
                     && watchedDirectContentIds != null
                     && watchedDirectContentIds.contains(content.getId());
-            return new WatchResolution(watched ? WatchStatus.WATCHED : WatchStatus.UNWATCHED, null, null);
+            return new WatchProgress(watched ? WatchStatus.WATCHED : WatchStatus.UNWATCHED, null, null);
         }
 
         if (!schedule.complete()) {
-            return new WatchResolution(WatchStatus.UNKNOWN, null, null);
+            return new WatchProgress(WatchStatus.UNKNOWN, null, null);
         }
 
         Set<WatchedEpisodeCoordinate> releasedEpisodes = releasedEpisodeCoordinates(content, schedule, clock);
@@ -70,7 +73,7 @@ public class ContentStateResolver {
                 : watchedEpisodeCount == releasedEpisodeCount
                 ? WatchStatus.WATCHED
                 : WatchStatus.PARTIALLY_WATCHED;
-        return new WatchResolution(status, watchedEpisodeCount, releasedEpisodeCount);
+        return new WatchProgress(status, watchedEpisodeCount, releasedEpisodeCount);
     }
 
     private Set<WatchedEpisodeCoordinate> releasedEpisodeCoordinates(
@@ -130,7 +133,7 @@ public class ContentStateResolver {
         };
     }
 
-    private record WatchResolution(
+    public record WatchProgress(
             WatchStatus status,
             Integer watchedEpisodeCount,
             Integer releasedEpisodeCount) {

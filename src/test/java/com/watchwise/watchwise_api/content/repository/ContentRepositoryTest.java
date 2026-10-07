@@ -18,6 +18,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,6 +77,24 @@ class ContentRepositoryTest {
         Optional<Content> result = contentRepository.findByTmdbIdAndType("999", ContentType.MOVIE);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findAllForViewerCoordinates] Should Return Matching Direct And Series Child References - When Coordinates Are Batched")
+    void shouldReturnMatchingDirectAndSeriesChildReferencesWhenCoordinatesAreBatched() {
+        Content movie = contentRepository.save(buildMovie("550"));
+        Content series = contentRepository.save(buildSeries("1396"));
+        Content season = contentRepository.save(buildSeason("1396", 1));
+        Content episode = contentRepository.save(buildEpisode("1396", 1, 1));
+        contentRepository.save(buildEpisode("999", 1, 1));
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Content> result = contentRepository.findAllForViewerCoordinates(
+                List.of("550", "1396"), List.of("1396"));
+
+        assertThat(result).extracting(Content::getId)
+                .containsExactlyInAnyOrder(movie.getId(), series.getId(), season.getId(), episode.getId());
     }
 
     @Test

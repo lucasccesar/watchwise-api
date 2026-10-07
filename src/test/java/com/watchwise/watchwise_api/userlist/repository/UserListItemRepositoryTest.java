@@ -152,6 +152,28 @@ class UserListItemRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findViewerMembershipsByContentIdIn] Should Return Only Lists Owned By The Viewer With Associations Initialized - When Other User Lists Also Contain The Content")
+    void shouldReturnOnlyViewerListMembershipsWithAssociationsInitialized() {
+        UserList otherUsersList = userListRepository.save(buildList(
+                userRepository.save(buildUser("marina-membership", "marina-membership@email.com")),
+                "Other viewer list"));
+        userListItemRepository.save(buildContentItem(scifi, fightClub, 1));
+        userListItemRepository.save(buildContentItem(nestedList, pulpFiction, 1));
+        userListItemRepository.saveAndFlush(buildContentItem(otherUsersList, fightClub, 1));
+        entityManager.clear();
+
+        List<UserListItem> result = userListItemRepository.findViewerMembershipsByContentIdIn(
+                lucas.getId(), List.of(fightClub.getId(), pulpFiction.getId()));
+
+        assertThat(result).extracting(item -> item.getUserList().getId())
+                .containsExactlyInAnyOrder(scifi.getId(), nestedList.getId());
+        assertThat(result).allSatisfy(item -> {
+            assertThat(Hibernate.isInitialized(item.getContent())).isTrue();
+            assertThat(Hibernate.isInitialized(item.getUserList())).isTrue();
+        });
+    }
+
+    @Test
     @DisplayName("[findByUserListIdWithContentAndChildListOrderByPositionAsc] Should Return Items Ordered By Position With Content And Child List Already Initialized - When Multiple Items Exist")
     void shouldReturnItemsOrderedByPositionWithContentAndChildListAlreadyInitializedWhenMultipleItemsExist() {
         userListItemRepository.save(buildContentItem(scifi, fightClub, 1));

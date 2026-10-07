@@ -172,6 +172,23 @@ class WatchlistEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUserIdAndContentIdInWithContent] Should Return Only Viewer Entries With Content Initialized - When Multiple Users And Content Are Requested")
+    void shouldReturnOnlyViewerEntriesWithContentInitialized() {
+        WatchlistEntry first = watchlistEntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, 1));
+        WatchlistEntry second = watchlistEntryRepository.saveAndFlush(
+                buildEntry(lucas, pulpFiction, ContentType.MOVIE, 2));
+        watchlistEntryRepository.saveAndFlush(buildEntry(marina, breakingBad, ContentType.SERIES, 1));
+        entityManager.clear();
+
+        List<WatchlistEntry> result = watchlistEntryRepository.findByUserIdAndContentIdInWithContent(
+                lucas.getId(), List.of(fightClub.getId(), pulpFiction.getId(), breakingBad.getId()));
+
+        assertThat(result).extracting(WatchlistEntry::getId)
+                .containsExactlyInAnyOrder(first.getId(), second.getId());
+        assertThat(result).allSatisfy(entry -> assertThat(Hibernate.isInitialized(entry.getContent())).isTrue());
+    }
+
+    @Test
     @DisplayName("[findByUserIdAndTypeAndContentId] Should Return Empty - When No Entry Exists For That User And Content")
     void shouldReturnEmptyWhenNoEntryExistsForThatUserAndContent() {
         Optional<WatchlistEntry> result = watchlistEntryRepository

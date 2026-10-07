@@ -1308,6 +1308,25 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findViewerStateEntries] Should Return Viewer Rows For Direct And Series Coordinates - When Other Viewer And Series Rows Exist")
+    void shouldReturnViewerRowsForDirectAndSeriesCoordinates() {
+        Content seriesEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        diaryEntryRepository.save(buildEntry(lucas, fightClub, 1));
+        diaryEntryRepository.save(buildEntry(lucas, seriesEpisode, 2));
+        diaryEntryRepository.save(buildEntry(marina, fightClub, 3));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeriesEpisode, 4));
+        entityManager.clear();
+
+        List<DiaryEntry> result = diaryEntryRepository.findViewerStateEntries(
+                lucas.getId(), List.of("550"), List.of("1399"));
+
+        assertThat(result).extracting(entry -> entry.getContent().getId())
+                .containsExactlyInAnyOrder(fightClub.getId(), seriesEpisode.getId());
+        assertThat(result).allSatisfy(entry -> assertThat(entry.getUser().getId()).isEqualTo(lucas.getId()));
+    }
+
+    @Test
     @DisplayName("[findWatchedEpisodeCoordinates] Should Return Distinct Episodes Of Requested Series Watched By User")
     void shouldReturnDistinctEpisodesOfRequestedSeriesWatchedByUser() {
         Content targetEpisode = contentRepository.save(buildEpisode("1399", 1, 1));

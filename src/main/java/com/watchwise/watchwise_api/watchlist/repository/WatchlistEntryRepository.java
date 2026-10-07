@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Collection;
 import java.util.UUID;
 
 public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, UUID> {
@@ -53,6 +54,13 @@ public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, 
             @Param("userId") UUID userId, Pageable pageable);
 
     Optional<WatchlistEntry> findByUserIdAndTypeAndContentId(UUID userId, ContentType type, UUID contentId);
+
+    @Query("""
+            SELECT w FROM WatchlistEntry w JOIN FETCH w.content
+            WHERE w.user.id = :userId AND w.content.id IN :contentIds
+            """)
+    List<WatchlistEntry> findByUserIdAndContentIdInWithContent(
+            @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);
 
     @Modifying
     @Query("""

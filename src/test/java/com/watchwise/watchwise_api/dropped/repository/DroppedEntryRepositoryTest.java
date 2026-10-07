@@ -25,6 +25,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -87,6 +88,23 @@ class DroppedEntryRepositoryTest {
 
         assertThat(result).isPresent();
         assertThat(result.get().getId()).isEqualTo(saved.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserIdAndContentIdInWithContent] Should Return Only Viewer Entries With Content Initialized - When Multiple Users And Content Are Requested")
+    void shouldReturnOnlyViewerEntriesWithContentInitialized() {
+        DroppedEntry first = droppedEntryRepository.save(buildEntry(lucas, fightClub, ContentType.MOVIE, null));
+        DroppedEntry second = droppedEntryRepository.saveAndFlush(
+                buildEntry(lucas, breakingBad, ContentType.SERIES, "Paused"));
+        droppedEntryRepository.saveAndFlush(buildEntry(marina, pulpFiction, ContentType.MOVIE, "Other viewer"));
+        entityManager.clear();
+
+        List<DroppedEntry> result = droppedEntryRepository.findByUserIdAndContentIdInWithContent(
+                lucas.getId(), List.of(fightClub.getId(), breakingBad.getId(), pulpFiction.getId()));
+
+        assertThat(result).extracting(DroppedEntry::getId)
+                .containsExactlyInAnyOrder(first.getId(), second.getId());
+        assertThat(result).allSatisfy(entry -> assertThat(Hibernate.isInitialized(entry.getContent())).isTrue());
     }
 
     @Test
