@@ -30,6 +30,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewSource;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
@@ -253,6 +254,28 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         return enrichDiaryEntryResponse(entry, likedEntryIds.contains(diaryEntryId), commentsCount,
                 watchedWith, customPosterUrl);
+    }
+
+    @Override
+    public List<DiaryDaySummaryDTO> getDiaryDailySummary(
+            UUID viewerId, UUID userId, ContentType type, LocalDate dateFrom, LocalDate dateTo,
+            Boolean hasReview, String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewDiary(viewerId, userId, target);
+        validateScoreRange(score, scoreFrom, scoreTo);
+
+        String normalizedSeriesTmdbId = seriesTmdbId == null ? null : seriesTmdbId.trim();
+        if (seriesTmdbId != null && normalizedSeriesTmdbId.isEmpty()) {
+            throw new BadRequestException("seriesTmdbId cannot be blank");
+        }
+
+        return diaryEntryReadRepository.findDailySummary(new DiaryEntrySearchCriteria(
+                        userId, type, dateFrom, dateTo, hasReview, normalizedSeriesTmdbId,
+                        score, scoreFrom, scoreTo))
+                .stream()
+                .map(row -> new DiaryDaySummaryDTO(row.date(), row.plays(), row.totalMinutes()))
+                .toList();
     }
 
     @Override

@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
@@ -138,6 +139,25 @@ class DiaryEntryControllerTest {
 
         verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, 2, 20, null,
                 dateFrom, dateTo, true, "1399", null, 7, 10, DiaryEntrySort.RATING_DESC);
+    }
+
+    @Test
+    @DisplayName("[getDiaryDailySummary] Should Forward History Filters - When Called")
+    void shouldForwardHistoryFiltersWhenGettingDiaryDailySummary() {
+        UUID targetUserId = UUID.randomUUID();
+        LocalDate dateFrom = LocalDate.of(2026, 1, 1);
+        LocalDate dateTo = LocalDate.of(2026, 9, 30);
+        DiaryDaySummaryDTO summary = new DiaryDaySummaryDTO(dateTo, 2, 120);
+        when(diaryEntryService.getDiaryDailySummary(currentUserId, targetUserId, ContentType.MOVIE,
+                dateFrom, dateTo, true, "1399", null, 7, 10)).thenReturn(List.of(summary));
+
+        ResponseEntity<List<DiaryDaySummaryDTO>> result = diaryEntryController.getDiaryDailySummary(
+                targetUserId, ContentType.MOVIE, dateFrom, dateTo, true, "1399", null, 7, 10);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).containsExactly(summary);
+        verify(diaryEntryService).getDiaryDailySummary(currentUserId, targetUserId, ContentType.MOVIE,
+                dateFrom, dateTo, true, "1399", null, 7, 10);
     }
 
     @Test

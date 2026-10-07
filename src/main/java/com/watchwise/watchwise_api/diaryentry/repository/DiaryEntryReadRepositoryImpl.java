@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.TypedQuery;
+import jakarta.persistence.Tuple;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Expression;
@@ -18,6 +19,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,6 +47,30 @@ public class DiaryEntryReadRepositoryImpl implements DiaryEntryReadRepository {
                 .setMaxResults(pageable.getPageSize());
 
         return new PageImpl<>(typedQuery.getResultList(), pageable, count(criteria));
+    }
+
+    @Override
+    public List<DiaryDaySummaryRow> findDailySummary(DiaryEntrySearchCriteria criteria) {
+        CriteriaBuilder builder = entityManager.getCriteriaBuilder();
+        CriteriaQuery<Tuple> query = builder.createTupleQuery();
+        Root<DiaryEntry> root = query.from(DiaryEntry.class);
+        Join<DiaryEntry, ?> content = root.join("content", JoinType.INNER);
+        Expression<LocalDate> day = builder.coalesce(
+                root.<LocalDate>get("watchedDate"), root.get("createdAt").as(LocalDate.class));
+        Expression<Number> runtimeMinutes = builder.coalesce(
+                builder.sum(content.<Integer>get("runtimeMinutes")), 0);
+
+        query.multiselect(day.alias("date"), builder.count(root).alias("plays"), runtimeMinutes.alias("totalMinutes"));
+        query.where(predicates(builder, root, content, criteria));
+        query.groupBy(day);
+        query.orderBy(builder.desc(day));
+
+        return entityManager.createQuery(query).getResultList().stream()
+                .map(row -> new DiaryDaySummaryRow(
+                        row.get("date", LocalDate.class),
+                        ((Number) row.get("plays")).longValue(),
+                        ((Number) row.get("totalMinutes")).longValue()))
+                .toList();
     }
 
     private long count(DiaryEntrySearchCriteria criteria) {

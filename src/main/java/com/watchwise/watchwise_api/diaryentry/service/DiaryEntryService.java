@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
@@ -33,6 +34,10 @@ public interface DiaryEntryService {
     }
 
     DiaryEntryResponseDTO getDiaryEntry(UUID viewerId, UUID diaryEntryId);
+
+    List<DiaryDaySummaryDTO> getDiaryDailySummary(
+            UUID viewerId, UUID userId, ContentType type, LocalDate dateFrom, LocalDate dateTo,
+            Boolean hasReview, String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo);
 
     default Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
             ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview) {

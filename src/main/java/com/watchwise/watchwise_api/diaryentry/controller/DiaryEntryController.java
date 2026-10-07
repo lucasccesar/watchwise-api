@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
@@ -92,6 +93,21 @@ public class DiaryEntryController {
     @GetMapping("/diary/{diaryEntryId}")
     public ResponseEntity<DiaryEntryResponseDTO> getDiaryEntry(@PathVariable UUID diaryEntryId) {
         return ResponseEntity.ok(diaryEntryService.getDiaryEntry(getCurrentUserId(), diaryEntryId));
+    }
+
+    @GetMapping("/users/{userId}/diary/daily-summary")
+    public ResponseEntity<List<DiaryDaySummaryDTO>> getDiaryDailySummary(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) ContentType type,
+            @RequestParam(required = false) LocalDate dateFrom,
+            @RequestParam(required = false) LocalDate dateTo,
+            @RequestParam(required = false) Boolean hasReview,
+            @RequestParam(required = false) String seriesTmdbId,
+            @RequestParam(required = false) Integer score,
+            @RequestParam(required = false) Integer scoreFrom,
+            @RequestParam(required = false) Integer scoreTo) {
+        return ResponseEntity.ok(diaryEntryService.getDiaryDailySummary(
+                getCurrentUserId(), userId, type, dateFrom, dateTo, hasReview, seriesTmdbId, score, scoreFrom, scoreTo));
     }
 
     @GetMapping("/users/{userId}/diary/series")

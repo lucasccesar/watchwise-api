@@ -257,6 +257,29 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[DiaryEntryReadRepository] Should Aggregate Plays And Runtime By Day - When Daily Summary Is Requested")
+    void shouldAggregatePlaysAndRuntimeByDayWhenDailySummaryIsRequested() {
+        LocalDate today = LocalDate.now();
+        Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE, 120, null));
+        Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 45));
+
+        DiaryEntry watchedMovie = withWatchedDate(buildEntry(lucas, movie), today);
+        DiaryEntry watchedEpisode = withWatchedDate(buildEntry(lucas, episode), today);
+        diaryEntryRepository.save(watchedMovie);
+        diaryEntryRepository.saveAndFlush(watchedEpisode);
+        entityManager.clear();
+
+        List<DiaryEntryReadRepository.DiaryDaySummaryRow> result = diaryEntryReadRepository.findDailySummary(
+                new DiaryEntrySearchCriteria(lucas.getId(), null, today, today, null, null, null, null, null));
+
+        assertThat(result).singleElement().satisfies(row -> {
+            assertThat(row.date()).isEqualTo(today);
+            assertThat(row.plays()).isEqualTo(2L);
+            assertThat(row.totalMinutes()).isEqualTo(165L);
+        });
+    }
+
+    @Test
     @DisplayName("[findByUserIdWithFilters] Should Exclude Entries With No Watched Date - When A Date Range Is Given")
     void shouldExcludeEntriesWithNoWatchedDate() {
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, fightClub));
