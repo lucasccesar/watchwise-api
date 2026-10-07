@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
@@ -120,6 +121,23 @@ class DiaryEntryControllerTest {
 
         verify(diaryEntryService).getDiaryEntries(
                 currentUserId, targetUserId, 2024, 1, 10, null, null, null, null, "1399", 10);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Forward Range And Sort Filters - When Provided")
+    void shouldForwardRangeAndSortFiltersWhenGettingDiaryEntries() {
+        UUID targetUserId = UUID.randomUUID();
+        LocalDate dateFrom = LocalDate.of(2026, 1, 1);
+        LocalDate dateTo = LocalDate.of(2026, 9, 30);
+        when(diaryEntryService.getDiaryEntries(currentUserId, targetUserId, null, 2, 20, null,
+                dateFrom, dateTo, true, "1399", null, 7, 10, DiaryEntrySort.RATING_DESC))
+                .thenReturn(Page.empty());
+
+        diaryEntryController.getDiaryEntries(targetUserId, null, 2, 20, null, dateFrom, dateTo,
+                true, "1399", null, 7, 10, DiaryEntrySort.RATING_DESC);
+
+        verify(diaryEntryService).getDiaryEntries(currentUserId, targetUserId, null, 2, 20, null,
+                dateFrom, dateTo, true, "1399", null, 7, 10, DiaryEntrySort.RATING_DESC);
     }
 
     @Test

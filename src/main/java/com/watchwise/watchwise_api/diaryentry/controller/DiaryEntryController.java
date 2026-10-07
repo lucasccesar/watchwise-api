@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import jakarta.validation.Valid;
@@ -58,8 +59,31 @@ public class DiaryEntryController {
             @RequestParam(required = false) LocalDate dateTo,
             @RequestParam(required = false) Boolean hasReview,
             @RequestParam(required = false) String seriesTmdbId,
-            @RequestParam(required = false) Integer score
+            @RequestParam(required = false) Integer score,
+            @RequestParam(required = false) Integer scoreFrom,
+            @RequestParam(required = false) Integer scoreTo,
+            @RequestParam(required = false, defaultValue = "NEWEST") DiaryEntrySort sortBy
     ) {
+        Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(
+                getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview, seriesTmdbId, score,
+                scoreFrom, scoreTo, sortBy);
+        return ResponseEntity.ok(PageResponseDTO.of(entries));
+    }
+
+    /**
+     * Compatibility overload for callers compiled against the pre-sort Java API.
+     */
+    public ResponseEntity<PageResponseDTO<DiaryEntryResponseDTO>> getDiaryEntries(
+            UUID userId,
+            Integer year,
+            Integer page,
+            Integer size,
+            ContentType type,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            Boolean hasReview,
+            String seriesTmdbId,
+            Integer score) {
         Page<DiaryEntryResponseDTO> entries = diaryEntryService.getDiaryEntries(
                 getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview, seriesTmdbId, score);
         return ResponseEntity.ok(PageResponseDTO.of(entries));

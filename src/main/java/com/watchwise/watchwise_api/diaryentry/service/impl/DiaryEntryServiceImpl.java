@@ -43,6 +43,9 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryReadRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySearchCriteria;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
@@ -96,6 +99,7 @@ import java.util.stream.Stream;
 public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private final DiaryEntryRepository diaryEntryRepository;
+    private final DiaryEntryReadRepository diaryEntryReadRepository;
     private final UserRepository userRepository;
     private final ContentRepository contentRepository;
     private final ContentService contentService;
@@ -151,6 +155,70 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         userId, type, effectiveDateFrom, effectiveDateTo, hasReview, normalizedSeriesTmdbId, score, pageRequest)
                 : diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(userId, pageRequest);
 
+        List<UUID> entryIds = entries.getContent().stream().map(DiaryEntry::getId).toList();
+        Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
+        Map<UUID, Long> commentCountsByEntryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(entryIds))
+                .orElseGet(Map::of);
+        Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(entryIds);
+        Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, entries.getContent());
+
+        return entries.map(entry -> enrichDiaryEntryResponse(
+                entry,
+                likedEntryIds.contains(entry.getId()),
+                commentCountsByEntryId.getOrDefault(entry.getId(), 0L),
+                watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
+                customPosterByContentId.get(entry.getContent().getId())));
+    }
+
+    @Override
+    public Page<DiaryEntryResponseDTO> getDiaryEntries(
+            UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
+            ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview,
+            String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo, DiaryEntrySort sortBy) {
+        DiaryEntrySort effectiveSort = sortBy == null ? DiaryEntrySort.NEWEST : sortBy;
+        validateScoreRange(score, scoreFrom, scoreTo);
+        if (effectiveSort == DiaryEntrySort.NEWEST && scoreFrom == null && scoreTo == null) {
+            return getDiaryEntries(viewerId, userId, year, pageNumber, pageSize, type, dateFrom, dateTo,
+                    hasReview, seriesTmdbId, score);
+        }
+
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewDiary(viewerId, userId, target);
+
+        String normalizedSeriesTmdbId = seriesTmdbId == null ? null : seriesTmdbId.trim();
+        if (seriesTmdbId != null && normalizedSeriesTmdbId.isEmpty()) {
+            throw new BadRequestException("seriesTmdbId cannot be blank");
+        }
+        if (year != null && (dateFrom != null || dateTo != null)) {
+            throw new BadRequestException("year cannot be combined with dateFrom/dateTo");
+        }
+
+        LocalDate effectiveDateFrom = dateFrom != null ? dateFrom : (year != null ? startOfYear(year) : null);
+        LocalDate effectiveDateTo = dateTo != null ? dateTo : (year != null ? endOfYear(year) : null);
+        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
+        Page<DiaryEntry> entries = diaryEntryReadRepository.findPage(
+                new DiaryEntrySearchCriteria(userId, type, effectiveDateFrom, effectiveDateTo, hasReview,
+                        normalizedSeriesTmdbId, score, scoreFrom, scoreTo),
+                effectiveSort, pageRequest);
+
+        return enrichDiaryPage(viewerId, userId, entries);
+    }
+
+    private void validateScoreRange(Integer score, Integer scoreFrom, Integer scoreTo) {
+        if (scoreFrom != null && (scoreFrom < 1 || scoreFrom > 10)
+                || scoreTo != null && (scoreTo < 1 || scoreTo > 10)) {
+            throw new BadRequestException("scoreFrom and scoreTo must be between 1 and 10");
+        }
+        if (score != null && (scoreFrom != null || scoreTo != null)) {
+            throw new BadRequestException("score cannot be combined with scoreFrom/scoreTo");
+        }
+        if (scoreFrom != null && scoreTo != null && scoreFrom > scoreTo) {
+            throw new BadRequestException("scoreFrom cannot be greater than scoreTo");
+        }
+    }
+
+    private Page<DiaryEntryResponseDTO> enrichDiaryPage(UUID viewerId, UUID userId, Page<DiaryEntry> entries) {
         List<UUID> entryIds = entries.getContent().stream().map(DiaryEntry::getId).toList();
         Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
         Map<UUID, Long> commentCountsByEntryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(entryIds))

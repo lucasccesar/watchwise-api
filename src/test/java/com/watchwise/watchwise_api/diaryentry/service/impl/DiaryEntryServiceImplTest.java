@@ -43,6 +43,8 @@ import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryReadRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
@@ -120,6 +122,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
+    private DiaryEntryReadRepository diaryEntryReadRepository;
 
     @Mock
     private UserRepository userRepository;
@@ -330,6 +335,34 @@ class DiaryEntryServiceImplTest {
 
         assertThat(result.commentsCount()).isEqualTo(7L);
         verify(diaryEntryRepository).findByIdWithContentAndUser(entry.getId());
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Use Read Query - When Non-Default Sort Is Requested")
+    void shouldUseReadQueryWhenNonDefaultSortIsRequested() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryReadRepository.findPage(any(), eq(DiaryEntrySort.RATING_DESC), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 10, null, null, null, null, null, null,
+                7, 10, DiaryEntrySort.RATING_DESC);
+
+        assertThat(result).isEmpty();
+        verify(diaryEntryReadRepository).findPage(any(), eq(DiaryEntrySort.RATING_DESC), any(PageRequest.class));
+        verify(diaryEntryRepository, never()).findByUserIdWithFilters(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Reject Invalid Score Range - When Bound Is Outside 1 To 10")
+    void shouldRejectInvalidScoreRangeWhenBoundIsOutsideAllowedRange() {
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 10, null, null, null, null, null, null,
+                0, 10, DiaryEntrySort.NEWEST))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("scoreFrom and scoreTo must be between 1 and 10");
+
+        verifyNoInteractions(diaryEntryReadRepository);
     }
 
     @Test

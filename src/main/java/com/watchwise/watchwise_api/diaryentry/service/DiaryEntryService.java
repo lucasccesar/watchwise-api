@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
@@ -23,6 +24,13 @@ public interface DiaryEntryService {
 
     Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
             ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview, String seriesTmdbId, Integer score);
+
+    default Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber,
+            Integer pageSize, ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview,
+            String seriesTmdbId, Integer score, Integer scoreFrom, Integer scoreTo, DiaryEntrySort sortBy) {
+        return getDiaryEntries(viewerId, userId, year, pageNumber, pageSize, type, dateFrom, dateTo, hasReview,
+                seriesTmdbId, score);
+    }
 
     DiaryEntryResponseDTO getDiaryEntry(UUID viewerId, UUID diaryEntryId);
 

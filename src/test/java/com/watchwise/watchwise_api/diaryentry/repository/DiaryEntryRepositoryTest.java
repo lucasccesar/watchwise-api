@@ -19,9 +19,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -41,6 +43,7 @@ import static org.assertj.core.api.Assertions.tuple;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
+@Import(DiaryEntryReadRepositoryImpl.class)
 class DiaryEntryRepositoryTest {
 
     @Container
@@ -55,6 +58,9 @@ class DiaryEntryRepositoryTest {
 
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private DiaryEntryReadRepository diaryEntryReadRepository;
 
     @Autowired
     private ProfileSummaryQueryRepository profileSummaryQueryRepository;
@@ -224,6 +230,30 @@ class DiaryEntryRepositoryTest {
         assertThat(result.getContent()).extracting(DiaryEntry::getScore)
                 .containsExactly(10);
         assertThat(result.getContent().getFirst().getContent().getSeriesTmdbId()).isEqualTo("1399");
+    }
+
+    @Test
+    @DisplayName("[DiaryEntryReadRepository] Should Filter Score Range And Sort Descending - When Requested")
+    void shouldFilterScoreRangeAndSortDescendingWhenRequested() {
+        DiaryEntry scoreFour = buildEntry(lucas, fightClub);
+        scoreFour.setScore(4);
+        DiaryEntry scoreSeven = buildEntry(lucas, pulpFiction, 2);
+        scoreSeven.setScore(7);
+        DiaryEntry scoreTen = buildEntry(lucas, fightClub, 3);
+        scoreTen.setScore(10);
+        DiaryEntry unscored = buildEntry(lucas, pulpFiction, 4);
+        diaryEntryRepository.save(scoreFour);
+        diaryEntryRepository.save(scoreSeven);
+        diaryEntryRepository.save(scoreTen);
+        diaryEntryRepository.saveAndFlush(unscored);
+        entityManager.clear();
+
+        Page<DiaryEntry> result = diaryEntryReadRepository.findPage(
+                new DiaryEntrySearchCriteria(lucas.getId(), null, null, null, null, null, null, 4, 10),
+                DiaryEntrySort.RATING_DESC, Pageable.ofSize(10));
+
+        assertThat(result.getContent()).extracting(DiaryEntry::getScore).containsExactly(10, 7, 4);
+        assertThat(result.getTotalElements()).isEqualTo(3);
     }
 
     @Test
