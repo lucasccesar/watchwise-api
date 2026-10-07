@@ -6,14 +6,20 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvContentRatings;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentposter.entity.UserContentPoster;
+import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -75,6 +81,9 @@ class ContentControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private UserContentPosterRepository userContentPosterRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -88,6 +97,7 @@ class ContentControllerIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        userContentPosterRepository.deleteAll();
         contentRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
@@ -564,6 +574,109 @@ class ContentControllerIntegrationTest {
         mockMvc.perform(get("/contents/" + content.getId() + "/details").cookie(accessTokenCookie))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return A Movie Page Without Creating Child References And With Viewer Poster")
+    void shouldReturnMoviePageWithoutCreatingChildReferencesAndWithViewerPoster() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        var viewer = userRepository.findByUsernameIgnoreCase("contentuser").orElseThrow();
+        userContentPosterRepository.save(UserContentPoster.builder()
+                .user(viewer)
+                .content(content)
+                .customPosterUrl("https://image.tmdb.org/t/p/w342/viewer-poster.jpg")
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbMovieFullDetails(
+                        "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
+                        "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
+                        List.of(), List.of(), null, null, null, null, null, null, null, null, null)));
+        when(tmdbClient.getMovieReleaseDates("603", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieReleaseDates("603", null)));
+
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.details.contentId").value(content.getId().toString()))
+                .andExpect(jsonPath("$.details.customPosterUrl")
+                        .value("https://image.tmdb.org/t/p/w342/viewer-poster.jpg"))
+                .andExpect(jsonPath("$.stats.contentId").value(content.getId().toString()))
+                .andExpect(jsonPath("$.visibleReviewsCount").value(0))
+                .andExpect(jsonPath("$.sections.seasons").isEmpty())
+                .andExpect(jsonPath("$.sections.episodes").isEmpty())
+                .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty());
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return Existing Season Reference In A Series Page")
+    void shouldReturnExistingSeasonReferenceInSeriesPage() throws Exception {
+        Content series = contentRepository.save(Content.builder()
+                .tmdbId("1399").type(ContentType.SERIES)
+                .totalRuntimeMinutes(45).runtimeMinutes(45).runtimeMinutesEpisodeCount(1)
+                .runtimeReportedEpisodeCount(1).runtimeAggregateVerifiedAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content season = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).type(ContentType.SEASON)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(
+                        "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                        List.of(), List.of(), null,
+                        List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, "/season.jpg")),
+                        null, null, null, null, 1, 1, null, null, "Ended", null)));
+        when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(
+                        101, "Season 1", null, "/season.jpg", "2008-01-20", 1,
+                        List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 45, "/still.jpg", null)),
+                        null, null)));
+        when(tmdbClient.getTvContentRatings("1399", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + series.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.details.type").value("SERIES"))
+                .andExpect(jsonPath("$.sections.seasons[0].contentId").value(season.getId().toString()))
+                .andExpect(jsonPath("$.sections.seasons[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.sections.seasons[0].seasonNumber").value(1));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return NotFound - When Content Does Not Exist")
+    void shouldReturnNotFoundWhenContentDoesNotExistForPage() throws Exception {
+        mockMvc.perform(get("/contents/" + UUID.randomUUID() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return BadGateway - When TMDB Is Unavailable")
+    void shouldReturnBadGatewayWhenTmdbIsUnavailableForPage() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getMovieFullDetails("603", "en-US"))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.message").value("TMDB is currently unavailable"));
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForPage() throws Exception {
+        mockMvc.perform(get("/contents/" + UUID.randomUUID() + "/page"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

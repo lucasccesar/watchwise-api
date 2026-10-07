@@ -2,11 +2,13 @@ package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPageDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.content.service.ContentPageService;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +43,9 @@ class ContentControllerTest {
 
     @Mock
     private ContentDetailsService contentDetailsService;
+
+    @Mock
+    private ContentPageService contentPageService;
 
     @Mock
     private RequestThrottler requestThrottler;
@@ -153,6 +158,20 @@ class ContentControllerTest {
 
         assertThat(result.getBody()).isEqualTo(details);
         verify(contentDetailsService).getDetails(contentId, currentUserId, posterUserId);
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return Ok With The Page For The Current User")
+    void shouldReturnOkWithThePageForTheCurrentUser() {
+        UUID contentId = UUID.randomUUID();
+        ContentPageDTO page = new ContentPageDTO(null, null, null, 0, null, null, null);
+        when(contentPageService.getPage(contentId, currentUserId)).thenReturn(page);
+
+        ResponseEntity<ContentPageDTO> result = contentController.getPage(contentId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(page);
+        verify(contentPageService).getPage(contentId, currentUserId);
     }
 
     @Test

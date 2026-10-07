@@ -2,10 +2,12 @@ package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPageDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
+import com.watchwise.watchwise_api.content.service.ContentPageService;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import jakarta.validation.Valid;
@@ -33,6 +35,7 @@ public class ContentController {
     private final ContentService contentService;
     private final ContentStatsService contentStatsService;
     private final ContentDetailsService contentDetailsService;
+    private final ContentPageService contentPageService;
     private final RequestThrottler requestThrottler;
 
     @Value("${app.rate-limit.content-reference.max-requests}")
@@ -63,6 +66,11 @@ public class ContentController {
             @PathVariable UUID contentId,
             @RequestParam(required = false) UUID posterUserId) {
         return ResponseEntity.ok(contentDetailsService.getDetails(contentId, getCurrentUserId(), posterUserId));
+    }
+
+    @GetMapping("/{contentId}/page")
+    public ResponseEntity<ContentPageDTO> getPage(@PathVariable UUID contentId) {
+        return ResponseEntity.ok(contentPageService.getPage(contentId, getCurrentUserId()));
     }
 
     @GetMapping("/details")
