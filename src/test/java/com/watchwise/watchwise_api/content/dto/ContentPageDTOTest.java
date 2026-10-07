@@ -43,7 +43,8 @@ class ContentPageDTOTest {
         assertThat(fieldNames(json)).containsExactlyInAnyOrder(
                 "details", "metadata", "stats", "visibleReviewsCount", "viewerState", "navigation", "sections");
         assertThat(fieldNames(json.get("metadata"))).containsExactlyInAnyOrder(
-                "originalLanguage", "certification", "homepageUrl", "tmdbUrl", "imdbUrl", "watchProviders");
+                "originalLanguage", "certification", "homepageUrl", "tmdbUrl", "imdbUrl", "watchProviders",
+                "presentationPosterPath", "presentationCrew", "crewInherited");
         assertThat(fieldNames(json.get("stats"))).containsExactlyInAnyOrder(
                 "contentId", "averageScore", "ratingsCount", "ratingsDistribution", "playsCount", "commentsCount");
         assertThat(fieldNames(json.get("viewerState"))).containsExactlyInAnyOrder(
@@ -59,6 +60,8 @@ class ContentPageDTOTest {
                 "posterPath", "releaseDate", "runtimeMinutes", "stats", "viewerState");
         assertThat(json.get("sections").get("seasons").get(0).get("contentId").isNull()).isTrue();
         assertThat(json.get("metadata").get("watchProviders")).isEmpty();
+        assertThat(json.get("metadata").get("presentationCrew")).isEmpty();
+        assertThat(json.get("metadata").get("crewInherited").asBoolean()).isFalse();
         assertThat(json.get("stats").get("ratingsDistribution")).isEmpty();
         assertThat(json.get("viewerState").get("lists")).isEmpty();
         assertThat(json.get("sections").get("episodes")).isEmpty();

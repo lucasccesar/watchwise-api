@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.content.dto.ContentPageMetadataDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageSectionsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
+import com.watchwise.watchwise_api.content.dto.CrewMemberDTO;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -210,7 +211,7 @@ class ContentPageServiceImplTest {
         UUID seasonId = UUID.randomUUID();
         Content episode = content(ContentType.EPISODE, episodeId, null, "1399", 2, 3);
         Content season = content(ContentType.SEASON, seasonId, null, "1399", 2, null);
-        ContentDetailsDTO episodeDetails = details(episodeId, ContentType.EPISODE, "/episode-still.jpg");
+        ContentDetailsDTO episodeDetails = detailsWithCrew(episodeId, ContentType.EPISODE, "/episode-still.jpg");
         ContentDetailsDTO seasonDetails = details(seasonId, ContentType.SEASON, "/season-poster.jpg");
         ContentPageMetadataDTO metadata = new ContentPageMetadataDTO(null, null, null, null, null, List.of());
         ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
@@ -278,6 +279,13 @@ class ContentPageServiceImplTest {
                 contentId, type, "Title", null, posterPath, null, null, null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
                 null, null, List.of(), List.of(), List.of());
+    }
+
+    private ContentDetailsDTO detailsWithCrew(UUID contentId, ContentType type, String posterPath) {
+        return new ContentDetailsDTO(
+                contentId, type, "Title", null, posterPath, null, null, null, null, null, null,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                null, null, List.of(), List.of(new CrewMemberDTO(7, "Director", null, List.of("Director"))), List.of());
     }
 
     private ContentViewerStateDTO viewerState() {
