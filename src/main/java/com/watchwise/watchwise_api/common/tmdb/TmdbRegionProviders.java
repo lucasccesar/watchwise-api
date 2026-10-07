@@ -8,5 +8,13 @@ import java.util.List;
 public record TmdbRegionProviders(
         List<TmdbProvider> flatrate,
         List<TmdbProvider> rent,
-        List<TmdbProvider> buy) {
+        List<TmdbProvider> buy,
+        String link) {
+
+    public TmdbRegionProviders(
+            List<TmdbProvider> flatrate,
+            List<TmdbProvider> rent,
+            List<TmdbProvider> buy) {
+        this(flatrate, rent, buy, null);
+    }
 }

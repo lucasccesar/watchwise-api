@@ -30,7 +30,8 @@ public record TmdbTvFullDetails(
         TmdbVideos videos,
         String status,
         @JsonProperty("external_ids") TmdbExternalIds externalIds,
-        List<TmdbNetwork> networks) {
+        List<TmdbNetwork> networks,
+        String homepage) {
 
     public TmdbTvFullDetails(
             String id,
@@ -59,7 +60,7 @@ public record TmdbTvFullDetails(
         this(id, name, originalName, null, overview, posterPath, backdropPath, firstAirDate, episodeRunTime,
                 genres, productionCountries, createdBy, seasons, nextEpisodeToAir, aggregateCredits,
                 watchProviders, alternativeTitles, numberOfSeasons, numberOfEpisodes, productionCompanies,
-                videos, status, externalIds, networks);
+                videos, status, externalIds, networks, null);
     }
 
     public TmdbTvFullDetails(
@@ -87,7 +88,7 @@ public record TmdbTvFullDetails(
         this(id, name, originalName, null, overview, posterPath, backdropPath, firstAirDate, episodeRunTime,
                 genres, productionCountries, createdBy, seasons, nextEpisodeToAir, aggregateCredits,
                 watchProviders, alternativeTitles, numberOfSeasons, numberOfEpisodes, productionCompanies,
-                videos, status, null, null);
+                videos, status, null, null, null);
     }
 
     public TmdbTvFullDetails(
@@ -116,6 +117,6 @@ public record TmdbTvFullDetails(
         this(id, name, originalName, null, overview, posterPath, backdropPath, firstAirDate, episodeRunTime,
                 genres, productionCountries, createdBy, seasons, nextEpisodeToAir, aggregateCredits,
                 watchProviders, alternativeTitles, numberOfSeasons, numberOfEpisodes, productionCompanies,
-                videos, status, externalIds, null);
+                videos, status, externalIds, null, null);
     }
 }

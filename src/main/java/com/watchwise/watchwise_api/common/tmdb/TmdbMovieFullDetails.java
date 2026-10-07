@@ -27,11 +27,12 @@ public record TmdbMovieFullDetails(
         TmdbVideos videos,
         String status,
         @JsonProperty("external_ids") TmdbExternalIds externalIds,
-        @JsonProperty("release_dates") TmdbMovieReleaseDates releaseDates) {
+        @JsonProperty("release_dates") TmdbMovieReleaseDates releaseDates,
+        String homepage) {
 
     public TmdbMovieFullDetails(String id, String title, TmdbMovieReleaseDates releaseDates) {
         this(id, title, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, releaseDates);
+                null, null, null, null, null, null, null, null, null, releaseDates, null);
     }
 
     public TmdbMovieFullDetails(
@@ -56,7 +57,7 @@ public record TmdbMovieFullDetails(
             TmdbExternalIds externalIds) {
         this(id, title, originalTitle, null, overview, posterPath, backdropPath, releaseDate, runtime,
                 genres, productionCountries, credits, watchProviders, alternativeTitles, budget, revenue,
-                productionCompanies, videos, status, externalIds, null);
+                productionCompanies, videos, status, externalIds, null, null);
     }
 
     public TmdbMovieFullDetails(
@@ -79,6 +80,6 @@ public record TmdbMovieFullDetails(
             TmdbVideos videos) {
         this(id, title, originalTitle, null, overview, posterPath, backdropPath, releaseDate, runtime,
                 genres, productionCountries, credits, watchProviders, alternativeTitles, budget,
-                revenue, productionCompanies, videos, null, null, null);
+                revenue, productionCompanies, videos, null, null, null, null);
     }
 }

@@ -5,6 +5,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TmdbProvider(
+        @JsonProperty("provider_id") Integer providerId,
         @JsonProperty("provider_name") String providerName,
         @JsonProperty("logo_path") String logoPath) {
+
+    public TmdbProvider(String providerName, String logoPath) {
+        this(null, providerName, logoPath);
+    }
 }

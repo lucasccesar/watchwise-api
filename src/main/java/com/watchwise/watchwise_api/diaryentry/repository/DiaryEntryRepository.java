@@ -1110,6 +1110,22 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
         long getReviewsCount();
     }
 
+    @Query("""
+            SELECT d.score AS score, COUNT(d) AS count
+            FROM DiaryEntry d
+            WHERE d.content.id = :contentId
+            AND d.user.isProfilePublic = true
+            AND d.score IS NOT NULL
+            GROUP BY d.score
+            ORDER BY d.score
+            """)
+    List<PublicScoreDistribution> findPublicScoreDistributionByContentId(@Param("contentId") UUID contentId);
+
+    interface PublicScoreDistribution {
+        Integer getScore();
+        long getCount();
+    }
+
     // --- Reviews scoped by Content, across all users (GET /contents/{contentId}/reviews) ---
 
     @Query("""
