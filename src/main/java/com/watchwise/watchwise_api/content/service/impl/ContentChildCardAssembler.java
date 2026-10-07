@@ -32,17 +32,26 @@ import java.util.stream.Collectors;
 public class ContentChildCardAssembler {
 
     private static final int RECENT_EPISODES_LIMIT = 3;
+    private static final int MAX_STATS_BATCH_SIZE = 100;
 
     private final ContentStatsService contentStatsService;
     private final ContentViewerStateService contentViewerStateService;
 
     public ContentPageSectionsDTO assembleSections(
             ContentDetailsDTO details, ContentCoordinate rootCoordinate, UUID viewerId) {
+        return assembleSections(details, null, rootCoordinate, viewerId);
+    }
+
+    public ContentPageSectionsDTO assembleSections(
+            ContentDetailsDTO details,
+            ContentDetailsDTO parentSeriesDetails,
+            ContentCoordinate rootCoordinate,
+            UUID viewerId) {
         Objects.requireNonNull(details, "details is required");
         Objects.requireNonNull(rootCoordinate, "rootCoordinate is required");
         Objects.requireNonNull(viewerId, "viewerId is required");
 
-        SectionSpecs sections = sectionSpecs(details, rootCoordinate);
+        SectionSpecs sections = sectionSpecs(details, parentSeriesDetails, rootCoordinate);
         List<CardSpec> allSpecs = new ArrayList<>();
         allSpecs.addAll(sections.seasons());
         allSpecs.addAll(sections.episodes());
@@ -56,6 +65,14 @@ public class ContentChildCardAssembler {
 
     public ContentNavigationDTO assembleNavigation(
             ContentDetailsDTO details, ContentCoordinate rootCoordinate, UUID viewerId) {
+        return assembleNavigation(details, null, rootCoordinate, viewerId);
+    }
+
+    public ContentNavigationDTO assembleNavigation(
+            ContentDetailsDTO details,
+            ContentDetailsDTO parentSeasonDetails,
+            ContentCoordinate rootCoordinate,
+            UUID viewerId) {
         Objects.requireNonNull(details, "details is required");
         Objects.requireNonNull(rootCoordinate, "rootCoordinate is required");
         Objects.requireNonNull(viewerId, "viewerId is required");
@@ -64,8 +81,9 @@ public class ContentChildCardAssembler {
             return null;
         }
 
-        CardSpec previous = adjacentEpisode(details, rootCoordinate, -1);
-        CardSpec next = adjacentEpisode(details, rootCoordinate, 1);
+        EpisodeBoundary boundary = episodeBoundary(parentSeasonDetails);
+        CardSpec previous = adjacentEpisode(boundary, rootCoordinate, -1);
+        CardSpec next = adjacentEpisode(boundary, rootCoordinate, 1);
         List<CardSpec> adjacent = new ArrayList<>();
         if (previous != null) {
             adjacent.add(previous);
@@ -78,19 +96,24 @@ public class ContentChildCardAssembler {
                 rootCoordinate.seriesTmdbId(),
                 rootCoordinate.seasonNumber(),
                 rootCoordinate.episodeNumber(),
-                details.numberOfEpisodes(),
+                boundary == null ? null : boundary.episodeCount(),
                 previous == null ? null : cards.get(previous.coordinate()),
                 next == null ? null : cards.get(next.coordinate()));
     }
 
-    private SectionSpecs sectionSpecs(ContentDetailsDTO details, ContentCoordinate rootCoordinate) {
+    private SectionSpecs sectionSpecs(
+            ContentDetailsDTO details,
+            ContentDetailsDTO parentSeriesDetails,
+            ContentCoordinate rootCoordinate) {
         return switch (rootCoordinate.type()) {
             case SERIES -> new SectionSpecs(
                     seriesSeasonSpecs(details.seasons(), rootCoordinate.tmdbId()),
                     List.of(),
                     seriesRecentEpisodeSpecs(details.recentEpisodes(), rootCoordinate.tmdbId()));
             case SEASON -> new SectionSpecs(
-                    List.of(),
+                    parentSeriesDetails == null
+                            ? List.of()
+                            : seriesSeasonSpecs(parentSeriesDetails.seasons(), rootCoordinate.seriesTmdbId()),
                     seasonEpisodeSpecs(
                             details.episodes(), rootCoordinate.seriesTmdbId(), rootCoordinate.seasonNumber()),
                     List.of());
@@ -140,7 +163,8 @@ public class ContentChildCardAssembler {
                 .toList();
     }
 
-    private CardSpec adjacentEpisode(ContentDetailsDTO details, ContentCoordinate rootCoordinate, int offset) {
+    private CardSpec adjacentEpisode(
+            EpisodeBoundary boundary, ContentCoordinate rootCoordinate, int offset) {
         if (!hasText(rootCoordinate.seriesTmdbId())
                 || rootCoordinate.seasonNumber() == null
                 || rootCoordinate.episodeNumber() == null
@@ -148,14 +172,17 @@ public class ContentChildCardAssembler {
             return null;
         }
 
-        int episodeNumber = rootCoordinate.episodeNumber() + offset;
-        if (episodeNumber <= 0
-                || (offset > 0 && details.numberOfEpisodes() != null
-                && episodeNumber > details.numberOfEpisodes())) {
+        if (offset > 0 && boundary == null) {
             return null;
         }
 
-        EpisodeSummaryDTO summary = safeList(details.episodes()).stream()
+        int episodeNumber = rootCoordinate.episodeNumber() + offset;
+        if (episodeNumber <= 0
+                || (offset > 0 && episodeNumber > boundary.episodeCount())) {
+            return null;
+        }
+
+        EpisodeSummaryDTO summary = safeList(boundary == null ? null : boundary.episodes()).stream()
                 .filter(candidate -> Objects.equals(candidate.seasonNumber(), rootCoordinate.seasonNumber()))
                 .filter(candidate -> Objects.equals(candidate.episodeNumber(), episodeNumber))
                 .findFirst()
@@ -226,18 +253,38 @@ public class ContentChildCardAssembler {
         if (distinctContentIds.isEmpty()) {
             return Map.of();
         }
-        List<ContentStatsResponseDTO> stats = contentStatsService.getStatsBatch(distinctContentIds);
-        if (stats == null) {
-            return Map.of();
+        Map<UUID, ContentStatsResponseDTO> statsByContentId = new LinkedHashMap<>();
+        for (int start = 0; start < distinctContentIds.size(); start += MAX_STATS_BATCH_SIZE) {
+            int end = Math.min(start + MAX_STATS_BATCH_SIZE, distinctContentIds.size());
+            List<ContentStatsResponseDTO> stats = contentStatsService.getStatsBatch(
+                    distinctContentIds.subList(start, end));
+            if (stats == null) {
+                continue;
+            }
+            stats.stream()
+                    .filter(Objects::nonNull)
+                    .filter(stat -> stat.contentId() != null)
+                    .forEach(stat -> statsByContentId.putIfAbsent(stat.contentId(), stat));
         }
-        return stats.stream()
+        return statsByContentId;
+    }
+
+    private EpisodeBoundary episodeBoundary(ContentDetailsDTO parentSeasonDetails) {
+        if (parentSeasonDetails == null) {
+            return null;
+        }
+        List<EpisodeSummaryDTO> episodes = safeList(parentSeasonDetails.episodes());
+        Integer listedEpisodeCount = episodes.stream()
+                .map(EpisodeSummaryDTO::episodeNumber)
                 .filter(Objects::nonNull)
-                .filter(stat -> stat.contentId() != null)
-                .collect(Collectors.toMap(
-                        ContentStatsResponseDTO::contentId,
-                        Function.identity(),
-                        (left, right) -> left,
-                        LinkedHashMap::new));
+                .filter(episodeNumber -> episodeNumber > 0)
+                .max(Integer::compareTo)
+                .orElse(null);
+        Integer episodeCount = parentSeasonDetails.numberOfEpisodes() != null
+                && parentSeasonDetails.numberOfEpisodes() > 0
+                ? parentSeasonDetails.numberOfEpisodes()
+                : listedEpisodeCount;
+        return episodeCount == null ? null : new EpisodeBoundary(episodes, episodeCount);
     }
 
     private ContentChildCardDTO toCard(
@@ -322,5 +369,8 @@ public class ContentChildCardAssembler {
             List<CardSpec> seasons,
             List<CardSpec> episodes,
             List<CardSpec> recentEpisodes) {
+    }
+
+    private record EpisodeBoundary(List<EpisodeSummaryDTO> episodes, Integer episodeCount) {
     }
 }
