@@ -131,7 +131,8 @@ class ContentPageMetadataServiceImplTest {
                 .build();
         when(tmdbClient.getEpisodeFullDetails("1396", 1, 2, "en-US"))
                 .thenReturn(found(new TmdbEpisodeFullDetails(62086, "Cat's in the Bag...", null,
-                        "2008-02-17", 2, 1, 47, null, List.of(), null)));
+                        "2008-02-17", 2, 1, 47, null, List.of(),
+                        new TmdbExternalIds("tt1234567", null, null, null))));
         when(tmdbClient.getTvFullDetails("1396", "en-US"))
                 .thenReturn(found(tvDetails("en", "https://breakingbad.example", "tt0903747")));
         when(tmdbClient.getTvContentRatings("1396", "en-US"))
@@ -144,9 +145,32 @@ class ContentPageMetadataServiceImplTest {
         assertThat(result.certification()).isEqualTo("TV-MA");
         assertThat(result.homepageUrl()).isEqualTo("https://breakingbad.example");
         assertThat(result.tmdbUrl()).isEqualTo("https://www.themoviedb.org/tv/1396/season/1/episode/2");
-        assertThat(result.imdbUrl()).isEqualTo("https://www.imdb.com/title/tt0903747");
+        assertThat(result.imdbUrl()).isEqualTo("https://www.imdb.com/title/tt1234567");
         assertThat(result.watchProviders()).extracting(provider -> provider.providerName())
                 .containsExactly("Netflix", "Google Play");
+    }
+
+    @Test
+    @DisplayName("[getMetadata] Should Keep Episode IMDb URL Null - When Episode Has No Own IMDb ID")
+    void shouldKeepEpisodeImdbUrlNullWhenEpisodeHasNoOwnImdbId() {
+        Content content = Content.builder()
+                .type(ContentType.EPISODE)
+                .seriesTmdbId("1396")
+                .seasonNumber(1)
+                .episodeNumber(2)
+                .build();
+        when(tmdbClient.getEpisodeFullDetails("1396", 1, 2, "en-US"))
+                .thenReturn(found(new TmdbEpisodeFullDetails(62086, "Cat's in the Bag...", null,
+                        "2008-02-17", 2, 1, 47, null, List.of(), null)));
+        when(tmdbClient.getTvFullDetails("1396", "en-US"))
+                .thenReturn(found(tvDetails("en", "https://breakingbad.example", "tt0903747")));
+        when(tmdbClient.getTvContentRatings("1396", "en-US"))
+                .thenReturn(found(new TmdbTvContentRatings("1396", List.of(
+                        new TmdbTvContentRating("US", "TV-MA")))));
+
+        ContentPageMetadataDTO result = metadataService.getMetadata(content, "en-US", "US");
+
+        assertThat(result.imdbUrl()).isNull();
     }
 
     @Test

@@ -910,6 +910,35 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findPublicScoreDistributionByContentId] Should Return Only Public Scored Rows For The Requested Content")
+    void shouldReturnOnlyPublicScoredRowsForTheRequestedContent() {
+        marina.setIsProfilePublic(false);
+        userRepository.saveAndFlush(marina);
+
+        DiaryEntry publicScored = buildEntry(lucas, fightClub);
+        publicScored.setScore(8);
+        DiaryEntry privateScored = buildEntry(marina, fightClub);
+        privateScored.setScore(9);
+        DiaryEntry publicUnscored = buildEntry(lucas, fightClub, 2);
+        DiaryEntry unrelatedContent = buildEntry(lucas, pulpFiction);
+        unrelatedContent.setScore(10);
+        diaryEntryRepository.save(publicScored);
+        diaryEntryRepository.save(privateScored);
+        diaryEntryRepository.save(publicUnscored);
+        diaryEntryRepository.saveAndFlush(unrelatedContent);
+        entityManager.clear();
+
+        List<DiaryEntryRepository.PublicScoreDistribution> result =
+                diaryEntryRepository.findPublicScoreDistributionByContentId(fightClub.getId());
+
+        assertThat(result)
+                .extracting(
+                        DiaryEntryRepository.PublicScoreDistribution::getScore,
+                        DiaryEntryRepository.PublicScoreDistribution::getCount)
+                .containsExactly(tuple(8, 1L));
+    }
+
+    @Test
     @DisplayName("[findTopByUserIdAndContentTypeOrderByCreatedAtDesc] Should Return Only Entries Of The Given Type Most Recently Created First")
     void shouldReturnOnlyEntriesOfTheGivenTypeMostRecentlyCreatedFirst() {
         Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE));

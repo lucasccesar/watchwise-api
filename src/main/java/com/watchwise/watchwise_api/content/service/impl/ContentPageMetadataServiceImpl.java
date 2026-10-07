@@ -71,7 +71,8 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
                 tvCertification(content.getTmdbId(), language, region),
                 details.watchProviders(),
                 region,
-                TMDB_TV_URL + content.getTmdbId());
+                TMDB_TV_URL + content.getTmdbId(),
+                details.externalIds());
     }
 
     private ContentPageMetadataDTO seasonMetadata(Content content, String language, String region) {
@@ -85,11 +86,12 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
                 tvCertification(content.getSeriesTmdbId(), language, region),
                 watchProviders,
                 region,
-                TMDB_TV_URL + content.getSeriesTmdbId() + "/season/" + content.getSeasonNumber());
+                TMDB_TV_URL + content.getSeriesTmdbId() + "/season/" + content.getSeasonNumber(),
+                series.externalIds());
     }
 
     private ContentPageMetadataDTO episodeMetadata(Content content, String language, String region) {
-        tmdbClient
+        TmdbEpisodeFullDetails episode = tmdbClient
                 .getEpisodeFullDetails(
                         content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), language)
                 .toOptional().orElseThrow(this::tmdbUnavailable);
@@ -101,7 +103,8 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
                 region,
                 TMDB_TV_URL + content.getSeriesTmdbId()
                         + "/season/" + content.getSeasonNumber()
-                        + "/episode/" + content.getEpisodeNumber());
+                        + "/episode/" + content.getEpisodeNumber(),
+                episode.externalIds());
     }
 
     private TmdbTvFullDetails tvDetails(String tmdbId, String language) {
@@ -114,13 +117,14 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
             String certification,
             TmdbWatchProviders watchProviders,
             String region,
-            String tmdbUrl) {
+            String tmdbUrl,
+            TmdbExternalIds externalIds) {
         return new ContentPageMetadataDTO(
                 details.originalLanguage(),
                 certification,
                 details.homepage(),
                 tmdbUrl,
-                imdbUrl(details.externalIds()),
+                imdbUrl(externalIds),
                 providers(watchProviders, region));
     }
 
