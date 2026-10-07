@@ -10,12 +10,6 @@ import java.util.Map;
 import java.util.UUID;
 
 public interface ContentViewerStateService {
-
-    ContentViewerStateDTO getState(UUID viewerId, Content content);
-
-    Map<ContentCoordinate, ContentViewerStateDTO> getStates(
-            UUID viewerId, Collection<ContentCoordinate> coordinates);
-
     Resolution resolve(
             UUID viewerId,
             Collection<ContentCoordinate> coordinates,

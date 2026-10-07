@@ -1308,8 +1308,8 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findViewerStateEntries] Should Return Viewer Rows For Direct And Series Coordinates - When Other Viewer And Series Rows Exist")
-    void shouldReturnViewerRowsForDirectAndSeriesCoordinates() {
+    @DisplayName("[findViewerStateEntriesByContentIdIn] Should Return Only Viewer Rows For Requested Content IDs")
+    void shouldReturnOnlyViewerRowsForRequestedContentIds() {
         Content seriesEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
         Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
         diaryEntryRepository.save(buildEntry(lucas, fightClub, 1));
@@ -1318,12 +1318,34 @@ class DiaryEntryRepositoryTest {
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeriesEpisode, 4));
         entityManager.clear();
 
-        List<DiaryEntry> result = diaryEntryRepository.findViewerStateEntries(
-                lucas.getId(), List.of("550"), List.of("1399"));
+        List<DiaryEntry> result = diaryEntryRepository.findViewerStateEntriesByContentIdIn(
+                lucas.getId(), List.of(fightClub.getId(), seriesEpisode.getId()));
 
         assertThat(result).extracting(entry -> entry.getContent().getId())
                 .containsExactlyInAnyOrder(fightClub.getId(), seriesEpisode.getId());
         assertThat(result).allSatisfy(entry -> assertThat(entry.getUser().getId()).isEqualTo(lucas.getId()));
+    }
+
+    @Test
+    @DisplayName("[findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber] Should Return Only Requested Season Coordinates")
+    void shouldReturnOnlyRequestedSeasonCoordinates() {
+        Content targetEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content otherSeasonEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
+        Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        diaryEntryRepository.save(buildEntry(lucas, targetEpisode));
+        diaryEntryRepository.save(buildEntry(lucas, otherSeasonEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeriesEpisode));
+        entityManager.clear();
+
+        List<DiaryEntryRepository.WatchedEpisodeCoordinateProjection> result = diaryEntryRepository
+                .findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(
+                        lucas.getId(), "1399", 1);
+
+        assertThat(result)
+                .extracting(DiaryEntryRepository.WatchedEpisodeCoordinateProjection::getSeriesTmdbId,
+                        DiaryEntryRepository.WatchedEpisodeCoordinateProjection::getSeasonNumber,
+                        DiaryEntryRepository.WatchedEpisodeCoordinateProjection::getEpisodeNumber)
+                .containsExactly(tuple("1399", 1, 1));
     }
 
     @Test

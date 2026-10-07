@@ -80,21 +80,31 @@ class ContentRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findAllForViewerCoordinates] Should Return Matching Direct And Series Child References - When Coordinates Are Batched")
-    void shouldReturnMatchingDirectAndSeriesChildReferencesWhenCoordinatesAreBatched() {
+    @DisplayName("[exact coordinate queries] Should Return Only Requested Content Coordinates")
+    void shouldReturnOnlyRequestedContentCoordinates() {
         Content movie = contentRepository.save(buildMovie("550"));
         Content series = contentRepository.save(buildSeries("1396"));
         Content season = contentRepository.save(buildSeason("1396", 1));
         Content episode = contentRepository.save(buildEpisode("1396", 1, 1));
+        contentRepository.save(buildSeason("1396", 2));
+        contentRepository.save(buildEpisode("1396", 1, 2));
         contentRepository.save(buildEpisode("999", 1, 1));
         entityManager.flush();
         entityManager.clear();
 
-        List<Content> result = contentRepository.findAllForViewerCoordinates(
-                List.of("550", "1396"), List.of("1396"));
+        List<Content> direct = contentRepository.findByTypeAndTmdbIdIn(
+                ContentType.MOVIE, List.of("550"));
+        List<Content> seriesResult = contentRepository.findByTypeAndTmdbIdIn(
+                ContentType.SERIES, List.of("1396"));
+        List<Content> seasons = contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
+                ContentType.SEASON, "1396", List.of(1));
+        List<Content> episodes = contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberAndEpisodeNumberIn(
+                ContentType.EPISODE, "1396", 1, List.of(1));
 
-        assertThat(result).extracting(Content::getId)
-                .containsExactlyInAnyOrder(movie.getId(), series.getId(), season.getId(), episode.getId());
+        assertThat(direct).extracting(Content::getId).containsExactly(movie.getId());
+        assertThat(seriesResult).extracting(Content::getId).containsExactly(series.getId());
+        assertThat(seasons).extracting(Content::getId).containsExactly(season.getId());
+        assertThat(episodes).extracting(Content::getId).containsExactly(episode.getId());
     }
 
     @Test

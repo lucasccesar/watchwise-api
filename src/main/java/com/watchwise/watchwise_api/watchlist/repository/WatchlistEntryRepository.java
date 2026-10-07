@@ -58,6 +58,7 @@ public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, 
     @Query("""
             SELECT w FROM WatchlistEntry w JOIN FETCH w.content
             WHERE w.user.id = :userId AND w.content.id IN :contentIds
+            AND w.type = w.content.type
             """)
     List<WatchlistEntry> findByUserIdAndContentIdInWithContent(
             @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);

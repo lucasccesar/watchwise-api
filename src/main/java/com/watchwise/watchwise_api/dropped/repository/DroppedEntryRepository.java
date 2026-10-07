@@ -40,6 +40,7 @@ public interface DroppedEntryRepository extends JpaRepository<DroppedEntry, UUID
     @Query("""
             SELECT d FROM DroppedEntry d JOIN FETCH d.content
             WHERE d.user.id = :userId AND d.content.id IN :contentIds
+            AND d.type = d.content.type
             """)
     List<DroppedEntry> findByUserIdAndContentIdInWithContent(
             @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);

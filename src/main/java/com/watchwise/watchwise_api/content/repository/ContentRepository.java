@@ -29,19 +29,12 @@ public interface ContentRepository extends JpaRepository<Content, UUID> {
 
     Optional<Content> findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(String seriesTmdbId, ContentType type);
 
-    @Query("""
-            SELECT content FROM Content content
-            WHERE (content.type IN (
-                com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
-                com.watchwise.watchwise_api.content.entity.ContentType.SERIES)
-                AND content.tmdbId IN :tmdbIds)
-            OR (content.type IN (
-                com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
-                com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
-                AND content.seriesTmdbId IN :seriesTmdbIds)
-            """)
-    List<Content> findAllForViewerCoordinates(
-            @Param("tmdbIds") Collection<String> tmdbIds,
-            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+    List<Content> findByTypeAndTmdbIdIn(ContentType type, Collection<String> tmdbIds);
+
+    List<Content> findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
+            ContentType type, String seriesTmdbId, Collection<Integer> seasonNumbers);
+
+    List<Content> findByTypeAndSeriesTmdbIdAndSeasonNumberAndEpisodeNumberIn(
+            ContentType type, String seriesTmdbId, Integer seasonNumber, Collection<Integer> episodeNumbers);
 
 }

@@ -209,21 +209,44 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     @Query("""
             SELECT d FROM DiaryEntry d JOIN FETCH d.content
             WHERE d.user.id = :userId
-            AND (
-                (d.content.type IN (
-                    com.watchwise.watchwise_api.content.entity.ContentType.MOVIE,
-                    com.watchwise.watchwise_api.content.entity.ContentType.SERIES)
-                    AND d.content.tmdbId IN :tmdbIds)
-                OR (d.content.type IN (
-                    com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
-                    com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
-                    AND d.content.seriesTmdbId IN :seriesTmdbIds)
-            )
+            AND d.content.id IN :contentIds
             """)
-    List<DiaryEntry> findViewerStateEntries(
+    List<DiaryEntry> findViewerStateEntriesByContentIdIn(
+            @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);
+
+    @Query("""
+            SELECT DISTINCT c.seriesTmdbId AS seriesTmdbId,
+                            c.seasonNumber AS seasonNumber,
+                            c.episodeNumber AS episodeNumber
+            FROM DiaryEntry d JOIN d.content c
+            WHERE d.user.id = :userId
+            AND c.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND c.seriesTmdbId IN :seriesTmdbIds
+            """)
+    List<WatchedEpisodeCoordinateProjection> findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdIn(
+            @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    @Query("""
+            SELECT DISTINCT c.seriesTmdbId AS seriesTmdbId,
+                            c.seasonNumber AS seasonNumber,
+                            c.episodeNumber AS episodeNumber
+            FROM DiaryEntry d JOIN d.content c
+            WHERE d.user.id = :userId
+            AND c.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            AND c.seriesTmdbId = :seriesTmdbId
+            AND c.seasonNumber = :seasonNumber
+            """)
+    List<WatchedEpisodeCoordinateProjection>
+    findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(
             @Param("userId") UUID userId,
-            @Param("tmdbIds") Collection<String> tmdbIds,
-            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+            @Param("seriesTmdbId") String seriesTmdbId,
+            @Param("seasonNumber") Integer seasonNumber);
+
+    interface WatchedEpisodeCoordinateProjection {
+        String getSeriesTmdbId();
+        Integer getSeasonNumber();
+        Integer getEpisodeNumber();
+    }
 
     @Query("""
             SELECT DISTINCT

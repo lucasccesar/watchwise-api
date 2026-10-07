@@ -189,6 +189,18 @@ class WatchlistEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUserIdAndContentIdInWithContent] Should Ignore Entry With Mismatched Type - When Content ID Matches")
+    void shouldIgnoreEntryWithMismatchedTypeWhenContentIdMatches() {
+        watchlistEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, ContentType.SERIES, 1));
+        entityManager.clear();
+
+        List<WatchlistEntry> result = watchlistEntryRepository.findByUserIdAndContentIdInWithContent(
+                lucas.getId(), List.of(fightClub.getId()));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     @DisplayName("[findByUserIdAndTypeAndContentId] Should Return Empty - When No Entry Exists For That User And Content")
     void shouldReturnEmptyWhenNoEntryExistsForThatUserAndContent() {
         Optional<WatchlistEntry> result = watchlistEntryRepository

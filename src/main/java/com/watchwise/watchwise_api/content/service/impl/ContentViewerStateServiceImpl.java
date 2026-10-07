@@ -41,7 +41,6 @@ import java.util.stream.Collectors;
 @Service
 public class ContentViewerStateServiceImpl implements ContentViewerStateService {
 
-    private static final String EMPTY_COORDINATE = "__none__";
     private static final Comparator<DiaryEntry> LATEST_DIARY_ENTRY = Comparator
             .comparing(DiaryEntry::getWatchNumber, Comparator.nullsLast(Comparator.naturalOrder()))
             .thenComparing(DiaryEntry::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
@@ -94,25 +93,6 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
     }
 
     @Override
-    public ContentViewerStateDTO getState(UUID viewerId, Content content) {
-        Objects.requireNonNull(content, "content is required");
-        ContentCoordinate coordinate = ContentCoordinate.from(content);
-        return resolveExistingContentStates(
-                viewerId,
-                List.of(coordinate),
-                Map.of(coordinate, content),
-                Map.of())
-                .statesByCoordinate()
-                .get(coordinate);
-    }
-
-    @Override
-    public Map<ContentCoordinate, ContentViewerStateDTO> getStates(
-            UUID viewerId, Collection<ContentCoordinate> coordinates) {
-        return resolve(viewerId, coordinates, Map.of()).statesByCoordinate();
-    }
-
-    @Override
     public Resolution resolve(
             UUID viewerId,
             Collection<ContentCoordinate> coordinates,
@@ -123,10 +103,7 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             return new Resolution(Map.of(), Map.of());
         }
 
-        Set<String> tmdbIds = coordinateTmdbIds(requestedCoordinates);
-        Set<String> seriesTmdbIds = coordinateSeriesTmdbIds(requestedCoordinates);
-        Map<ContentCoordinate, Content> contentByCoordinate = findExistingContent(
-                requestedCoordinates, tmdbIds, seriesTmdbIds);
+        Map<ContentCoordinate, Content> contentByCoordinate = findExistingContent(requestedCoordinates);
 
         return resolveExistingContentStates(
                 viewerId, requestedCoordinates, contentByCoordinate, schedulesByCoordinate);
@@ -138,8 +115,6 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             Map<ContentCoordinate, Content> contentByCoordinate,
             Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate) {
         Objects.requireNonNull(viewerId, "viewerId is required");
-        Set<String> tmdbIds = coordinateTmdbIds(requestedCoordinates);
-        Set<String> seriesTmdbIds = coordinateSeriesTmdbIds(requestedCoordinates);
 
         if (contentByCoordinate.isEmpty()) {
             Map<ContentCoordinate, ContentViewerStateDTO> emptyStates = requestedCoordinates.stream()
@@ -155,8 +130,8 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 .map(Content::getId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        List<DiaryEntry> diaryEntries = diaryEntryRepository.findViewerStateEntries(
-                viewerId, queryValues(tmdbIds), queryValues(seriesTmdbIds));
+        List<DiaryEntry> diaryEntries = diaryEntryRepository.findViewerStateEntriesByContentIdIn(
+                viewerId, contentIds);
         List<WatchlistEntry> watchlistEntries = watchlistEntryRepository
                 .findByUserIdAndContentIdInWithContent(viewerId, contentIds);
         List<DroppedEntry> droppedEntries = droppedEntryRepository
@@ -176,17 +151,11 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 .map(Content::getId)
                 .filter(contentIds::contains)
                 .collect(Collectors.toUnmodifiableSet());
-        Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates = diaryEntries.stream()
-                .map(DiaryEntry::getContent)
-                .filter(this::isEpisode)
-                .map(this::toWatchedEpisodeCoordinate)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toUnmodifiableSet());
+        Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates = findWatchedEpisodeCoordinates(
+                viewerId, requestedCoordinates, contentByCoordinate);
 
-        Map<UUID, WatchlistEntry> watchlistByContentId = indexByContentId(
-                watchlistEntries, WatchlistEntry::getContent);
-        Map<UUID, DroppedEntry> droppedByContentId = indexByContentId(
-                droppedEntries, DroppedEntry::getContent);
+        Map<UUID, WatchlistEntry> watchlistByContentId = indexWatchlistByContentId(watchlistEntries);
+        Map<UUID, DroppedEntry> droppedByContentId = indexDroppedByContentId(droppedEntries);
         Map<UUID, List<UserListItem>> listItemsByContentId = listItems.stream()
                 .filter(item -> item.getContent() != null && item.getContent().getId() != null)
                 .collect(Collectors.groupingBy(
@@ -260,13 +229,60 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 content, schedule, watchedDirectContentIds, watchedEpisodeCoordinates, clock);
     }
 
-    private Map<ContentCoordinate, Content> findExistingContent(
-            Collection<ContentCoordinate> coordinates,
-            Set<String> tmdbIds,
-            Set<String> seriesTmdbIds) {
-        List<Content> existingContent = contentRepository.findAllForViewerCoordinates(
-                queryValues(tmdbIds), queryValues(seriesTmdbIds));
+    private Map<ContentCoordinate, Content> findExistingContent(Collection<ContentCoordinate> coordinates) {
         Map<ContentCoordinate, Content> contentByCoordinate = new HashMap<>();
+        coordinates.stream()
+                .filter(coordinate -> coordinate.type() == ContentType.MOVIE
+                        || coordinate.type() == ContentType.SERIES)
+                .collect(Collectors.groupingBy(
+                        ContentCoordinate::type,
+                        Collectors.mapping(ContentCoordinate::tmdbId, Collectors.filtering(
+                                this::hasText, Collectors.toCollection(LinkedHashSet::new)))))
+                .forEach((type, tmdbIds) -> {
+                    if (!tmdbIds.isEmpty()) {
+                        addMatchingContent(
+                                contentByCoordinate,
+                                coordinates,
+                                contentRepository.findByTypeAndTmdbIdIn(type, tmdbIds));
+                    }
+                });
+
+        coordinates.stream()
+                .filter(coordinate -> coordinate.type() == ContentType.SEASON)
+                .filter(coordinate -> hasText(coordinate.seriesTmdbId()) && coordinate.seasonNumber() != null)
+                .collect(Collectors.groupingBy(
+                        ContentCoordinate::seriesTmdbId,
+                        Collectors.mapping(ContentCoordinate::seasonNumber, Collectors.toCollection(LinkedHashSet::new))))
+                .forEach((seriesTmdbId, seasonNumbers) -> addMatchingContent(
+                        contentByCoordinate,
+                        coordinates,
+                        contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
+                                ContentType.SEASON, seriesTmdbId, seasonNumbers)));
+
+        coordinates.stream()
+                .filter(coordinate -> coordinate.type() == ContentType.EPISODE)
+                .filter(coordinate -> hasText(coordinate.seriesTmdbId())
+                        && coordinate.seasonNumber() != null && coordinate.episodeNumber() != null)
+                .collect(Collectors.groupingBy(
+                        coordinate -> new SeriesSeason(coordinate.seriesTmdbId(), coordinate.seasonNumber()),
+                        Collectors.mapping(ContentCoordinate::episodeNumber,
+                                Collectors.toCollection(LinkedHashSet::new))))
+                .forEach((seriesSeason, episodeNumbers) -> addMatchingContent(
+                        contentByCoordinate,
+                        coordinates,
+                        contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberAndEpisodeNumberIn(
+                                ContentType.EPISODE,
+                                seriesSeason.seriesTmdbId(),
+                                seriesSeason.seasonNumber(),
+                                episodeNumbers)));
+
+        return contentByCoordinate;
+    }
+
+    private void addMatchingContent(
+            Map<ContentCoordinate, Content> contentByCoordinate,
+            Collection<ContentCoordinate> coordinates,
+            Collection<Content> existingContent) {
         for (Content content : safeList(existingContent)) {
             if (content == null || content.getType() == null) {
                 continue;
@@ -276,29 +292,6 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 contentByCoordinate.putIfAbsent(coordinate, content);
             }
         }
-        return contentByCoordinate;
-    }
-
-    private Set<String> coordinateTmdbIds(Collection<ContentCoordinate> coordinates) {
-        return coordinates.stream()
-                .filter(coordinate -> coordinate.type() == ContentType.MOVIE
-                        || coordinate.type() == ContentType.SERIES)
-                .map(ContentCoordinate::tmdbId)
-                .filter(this::hasText)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    private Set<String> coordinateSeriesTmdbIds(Collection<ContentCoordinate> coordinates) {
-        return coordinates.stream()
-                .map(this::seriesTmdbIdFor)
-                .filter(this::hasText)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-    }
-
-    private String seriesTmdbIdFor(ContentCoordinate coordinate) {
-        return coordinate.type() == ContentType.SERIES
-                ? coordinate.tmdbId()
-                : coordinate.seriesTmdbId();
     }
 
     private List<ContentCoordinate> distinctCoordinates(Collection<ContentCoordinate> coordinates) {
@@ -324,34 +317,69 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         return new ContentListMembershipDTO(list.getId(), list.getName(), list.getVisibility());
     }
 
-    private <T> Map<UUID, T> indexByContentId(
-            Collection<T> entries,
-            Function<T, Content> contentExtractor) {
+    private Map<UUID, WatchlistEntry> indexWatchlistByContentId(Collection<WatchlistEntry> entries) {
         return safeList(entries).stream()
                 .filter(Objects::nonNull)
-                .filter(entry -> contentExtractor.apply(entry) != null
-                        && contentExtractor.apply(entry).getId() != null)
+                .filter(entry -> entry.getContent() != null
+                        && entry.getContent().getId() != null
+                        && entry.getType() == entry.getContent().getType())
                 .collect(Collectors.toMap(
-                        entry -> contentExtractor.apply(entry).getId(),
+                        entry -> entry.getContent().getId(),
                         Function.identity(),
                         (left, right) -> left,
                         LinkedHashMap::new));
     }
 
-    private WatchedEpisodeCoordinate toWatchedEpisodeCoordinate(Content content) {
-        if (!hasText(content.getSeriesTmdbId())
-                || content.getSeasonNumber() == null
-                || content.getSeasonNumber() < 0
-                || content.getEpisodeNumber() == null
-                || content.getEpisodeNumber() <= 0) {
-            return null;
-        }
-        return new WatchedEpisodeCoordinate(
-                content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber());
+    private Map<UUID, DroppedEntry> indexDroppedByContentId(Collection<DroppedEntry> entries) {
+        return safeList(entries).stream()
+                .filter(Objects::nonNull)
+                .filter(entry -> entry.getContent() != null
+                        && entry.getContent().getId() != null
+                        && entry.getType() == entry.getContent().getType())
+                .collect(Collectors.toMap(
+                        entry -> entry.getContent().getId(),
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new));
     }
 
-    private boolean isEpisode(Content content) {
-        return content != null && content.getType() == ContentType.EPISODE;
+    private Set<WatchedEpisodeCoordinate> findWatchedEpisodeCoordinates(
+            UUID viewerId,
+            Collection<ContentCoordinate> requestedCoordinates,
+            Map<ContentCoordinate, Content> contentByCoordinate) {
+        Set<WatchedEpisodeCoordinate> result = new LinkedHashSet<>();
+        Set<String> seriesIds = requestedCoordinates.stream()
+                .filter(coordinate -> coordinate.type() == ContentType.SERIES)
+                .map(ContentCoordinate::tmdbId)
+                .filter(this::hasText)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!seriesIds.isEmpty()) {
+            addWatchedEpisodeCoordinates(result,
+                    diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdIn(viewerId, seriesIds));
+        }
+
+        requestedCoordinates.stream()
+                .filter(coordinate -> coordinate.type() == ContentType.SEASON)
+                .filter(coordinate -> hasText(coordinate.seriesTmdbId()) && coordinate.seasonNumber() != null)
+                .filter(contentByCoordinate::containsKey)
+                .forEach(coordinate -> addWatchedEpisodeCoordinates(result,
+                        diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(
+                                viewerId, coordinate.seriesTmdbId(), coordinate.seasonNumber())));
+        return Set.copyOf(result);
+    }
+
+    private void addWatchedEpisodeCoordinates(
+            Set<WatchedEpisodeCoordinate> target,
+            Collection<DiaryEntryRepository.WatchedEpisodeCoordinateProjection> rows) {
+        for (DiaryEntryRepository.WatchedEpisodeCoordinateProjection row : safeList(rows)) {
+            if (row == null || !hasText(row.getSeriesTmdbId())
+                    || row.getSeasonNumber() == null || row.getSeasonNumber() < 0
+                    || row.getEpisodeNumber() == null || row.getEpisodeNumber() <= 0) {
+                continue;
+            }
+            target.add(new WatchedEpisodeCoordinate(
+                    row.getSeriesTmdbId(), row.getSeasonNumber(), row.getEpisodeNumber()));
+        }
     }
 
     private ContentViewerStateDTO emptyState() {
@@ -383,15 +411,14 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         return new ContentSchedule(key, null, null, List.of(), false, false);
     }
 
-    private Set<String> queryValues(Set<String> values) {
-        return values.isEmpty() ? Set.of(EMPTY_COORDINATE) : Set.copyOf(values);
-    }
-
     private <T> List<T> safeList(Collection<T> values) {
         return values == null ? List.of() : List.copyOf(values);
     }
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private record SeriesSeason(String seriesTmdbId, Integer seasonNumber) {
     }
 }

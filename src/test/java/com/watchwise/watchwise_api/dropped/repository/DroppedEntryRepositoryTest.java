@@ -108,6 +108,18 @@ class DroppedEntryRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByUserIdAndContentIdInWithContent] Should Ignore Entry With Mismatched Type - When Content ID Matches")
+    void shouldIgnoreEntryWithMismatchedTypeWhenContentIdMatches() {
+        droppedEntryRepository.saveAndFlush(buildEntry(lucas, fightClub, ContentType.SERIES, "Wrong type"));
+        entityManager.clear();
+
+        List<DroppedEntry> result = droppedEntryRepository.findByUserIdAndContentIdInWithContent(
+                lucas.getId(), List.of(fightClub.getId()));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     @DisplayName("[findByUserIdAndTypeAndContentId] Should Return Empty - When No Entry Exists For That User And Content")
     void shouldReturnEmptyWhenNoEntryExistsForThatUserAndContent() {
         Optional<DroppedEntry> result = droppedEntryRepository
