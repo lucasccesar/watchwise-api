@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.service.ContentStateResolver;
 import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepositoryCustom;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -231,50 +232,7 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
 
     private Map<ContentCoordinate, Content> findExistingContent(Collection<ContentCoordinate> coordinates) {
         Map<ContentCoordinate, Content> contentByCoordinate = new HashMap<>();
-        coordinates.stream()
-                .filter(coordinate -> coordinate.type() == ContentType.MOVIE
-                        || coordinate.type() == ContentType.SERIES)
-                .collect(Collectors.groupingBy(
-                        ContentCoordinate::type,
-                        Collectors.mapping(ContentCoordinate::tmdbId, Collectors.filtering(
-                                this::hasText, Collectors.toCollection(LinkedHashSet::new)))))
-                .forEach((type, tmdbIds) -> {
-                    if (!tmdbIds.isEmpty()) {
-                        addMatchingContent(
-                                contentByCoordinate,
-                                coordinates,
-                                contentRepository.findByTypeAndTmdbIdIn(type, tmdbIds));
-                    }
-                });
-
-        coordinates.stream()
-                .filter(coordinate -> coordinate.type() == ContentType.SEASON)
-                .filter(coordinate -> hasText(coordinate.seriesTmdbId()) && coordinate.seasonNumber() != null)
-                .collect(Collectors.groupingBy(
-                        ContentCoordinate::seriesTmdbId,
-                        Collectors.mapping(ContentCoordinate::seasonNumber, Collectors.toCollection(LinkedHashSet::new))))
-                .forEach((seriesTmdbId, seasonNumbers) -> addMatchingContent(
-                        contentByCoordinate,
-                        coordinates,
-                        contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
-                                ContentType.SEASON, seriesTmdbId, seasonNumbers)));
-
-        coordinates.stream()
-                .filter(coordinate -> coordinate.type() == ContentType.EPISODE)
-                .filter(coordinate -> hasText(coordinate.seriesTmdbId())
-                        && coordinate.seasonNumber() != null && coordinate.episodeNumber() != null)
-                .collect(Collectors.groupingBy(
-                        coordinate -> new SeriesSeason(coordinate.seriesTmdbId(), coordinate.seasonNumber()),
-                        Collectors.mapping(ContentCoordinate::episodeNumber,
-                                Collectors.toCollection(LinkedHashSet::new))))
-                .forEach((seriesSeason, episodeNumbers) -> addMatchingContent(
-                        contentByCoordinate,
-                        coordinates,
-                        contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberAndEpisodeNumberIn(
-                                ContentType.EPISODE,
-                                seriesSeason.seriesTmdbId(),
-                                seriesSeason.seasonNumber(),
-                                episodeNumbers)));
+        addMatchingContent(contentByCoordinate, coordinates, contentRepository.findAllByCoordinates(coordinates));
 
         return contentByCoordinate;
     }
@@ -347,24 +305,26 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             UUID viewerId,
             Collection<ContentCoordinate> requestedCoordinates,
             Map<ContentCoordinate, Content> contentByCoordinate) {
-        Set<WatchedEpisodeCoordinate> result = new LinkedHashSet<>();
         Set<String> seriesIds = requestedCoordinates.stream()
                 .filter(coordinate -> coordinate.type() == ContentType.SERIES)
                 .map(ContentCoordinate::tmdbId)
                 .filter(this::hasText)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (!seriesIds.isEmpty()) {
-            addWatchedEpisodeCoordinates(result,
-                    diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdIn(viewerId, seriesIds));
-        }
-
-        requestedCoordinates.stream()
+        Set<DiaryEntryRepositoryCustom.SeriesSeasonPair> seriesSeasonPairs = requestedCoordinates.stream()
                 .filter(coordinate -> coordinate.type() == ContentType.SEASON)
                 .filter(coordinate -> hasText(coordinate.seriesTmdbId()) && coordinate.seasonNumber() != null)
                 .filter(contentByCoordinate::containsKey)
-                .forEach(coordinate -> addWatchedEpisodeCoordinates(result,
-                        diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(
-                                viewerId, coordinate.seriesTmdbId(), coordinate.seasonNumber())));
+                .map(coordinate -> new DiaryEntryRepositoryCustom.SeriesSeasonPair(
+                        coordinate.seriesTmdbId(), coordinate.seasonNumber()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        Set<WatchedEpisodeCoordinate> result = new LinkedHashSet<>();
+        if (seriesIds.isEmpty() && seriesSeasonPairs.isEmpty()) {
+            return Set.of();
+        }
+        addWatchedEpisodeCoordinates(result,
+                diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(
+                        viewerId, seriesIds, seriesSeasonPairs));
         return Set.copyOf(result);
     }
 
@@ -419,6 +379,4 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         return value != null && !value.isBlank();
     }
 
-    private record SeriesSeason(String seriesTmdbId, Integer seasonNumber) {
-    }
 }

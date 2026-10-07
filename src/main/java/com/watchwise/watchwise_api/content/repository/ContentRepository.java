@@ -13,7 +13,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
-public interface ContentRepository extends JpaRepository<Content, UUID> {
+public interface ContentRepository extends JpaRepository<Content, UUID>, ContentRepositoryCustom {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select content from Content content where content.id = :contentId")

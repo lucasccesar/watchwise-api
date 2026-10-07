@@ -19,7 +19,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
+public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, DiaryEntryRepositoryCustom {
 
     // --- Feed (GET /feed) ---
 
@@ -246,6 +246,26 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
         String getSeriesTmdbId();
         Integer getSeasonNumber();
         Integer getEpisodeNumber();
+    }
+
+    record WatchedEpisodeCoordinateRow(
+            String seriesTmdbId, Integer seasonNumber, Integer episodeNumber)
+            implements WatchedEpisodeCoordinateProjection {
+
+        @Override
+        public String getSeriesTmdbId() {
+            return seriesTmdbId;
+        }
+
+        @Override
+        public Integer getSeasonNumber() {
+            return seasonNumber;
+        }
+
+        @Override
+        public Integer getEpisodeNumber() {
+            return episodeNumber;
+        }
     }
 
     @Query("""

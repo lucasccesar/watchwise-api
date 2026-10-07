@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.content.service.ContentStateResolver;
 import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepositoryCustom;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -98,7 +99,7 @@ class ContentViewerStateServiceImplTest {
         DiaryEntry rewatch = diary(movie, UUID.fromString("00000000-0000-0000-0000-000000000003"),
                 1, LocalDateTime.of(2026, 10, 3, 12, 0), 10, "Rewatch", LocalDate.of(2026, 10, 3));
 
-        when(contentRepository.findByTypeAndTmdbIdIn(eq(ContentType.MOVIE), eq(Set.of("550"))))
+        when(contentRepository.findAllByCoordinates(eq(List.of(coordinate))))
                 .thenReturn(List.of(movie));
         when(diaryEntryRepository.findViewerStateEntriesByContentIdIn(
                 eq(VIEWER_ID), eq(Set.of(movie.getId()))))
@@ -122,7 +123,7 @@ class ContentViewerStateServiceImplTest {
         assertThat(state.playsCount()).isEqualTo(3);
         assertThat(state.latestDiaryEntryId()).isEqualTo(latestByCreatedAt.getId());
 
-        verify(contentRepository).findByTypeAndTmdbIdIn(eq(ContentType.MOVIE), eq(Set.of("550")));
+        verify(contentRepository).findAllByCoordinates(eq(List.of(coordinate)));
         verify(diaryEntryRepository).findViewerStateEntriesByContentIdIn(
                 eq(VIEWER_ID), eq(Set.of(movie.getId())));
     }
@@ -134,17 +135,17 @@ class ContentViewerStateServiceImplTest {
         Content season = content(ContentType.SEASON, null, SERIES_ID, 1, null);
         ContentCoordinate seriesCoordinate = coordinate(series);
         ContentCoordinate seasonCoordinate = coordinate(season);
-        Set<String> directTmdbIds = Set.of(SERIES_ID);
-        Set<String> seriesTmdbIds = Set.of(SERIES_ID);
         ContentViewerStateDTO seriesState = state(WatchStatus.PARTIALLY_WATCHED, 2, 5);
         ContentViewerStateDTO seasonState = state(WatchStatus.WATCHED, 2, 2);
 
-        when(contentRepository.findByTypeAndTmdbIdIn(ContentType.SERIES, Set.of(SERIES_ID)))
-                .thenReturn(List.of(series));
-        when(contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
-                ContentType.SEASON, SERIES_ID, Set.of(1)))
-                .thenReturn(List.of(season));
+        when(contentRepository.findAllByCoordinates(eq(List.of(seriesCoordinate, seasonCoordinate))))
+                .thenReturn(List.of(series, season));
         when(diaryEntryRepository.findViewerStateEntriesByContentIdIn(VIEWER_ID, Set.of(series.getId(), season.getId())))
+                .thenReturn(List.of());
+        when(diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(
+                VIEWER_ID,
+                Set.of(SERIES_ID),
+                Set.of(new DiaryEntryRepositoryCustom.SeriesSeasonPair(SERIES_ID, 1))))
                 .thenReturn(List.of());
         Set<UUID> contentIds = Set.of(series.getId(), season.getId());
         when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
@@ -164,9 +165,11 @@ class ContentViewerStateServiceImplTest {
                 .statesByCoordinate();
 
         assertThat(result).containsEntry(seriesCoordinate, seriesState).containsEntry(seasonCoordinate, seasonState);
-        verify(contentRepository).findByTypeAndTmdbIdIn(ContentType.SERIES, Set.of(SERIES_ID));
-        verify(contentRepository).findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
-                ContentType.SEASON, SERIES_ID, Set.of(1));
+        verify(contentRepository).findAllByCoordinates(eq(List.of(seriesCoordinate, seasonCoordinate)));
+        verify(diaryEntryRepository).findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(
+                VIEWER_ID,
+                Set.of(SERIES_ID),
+                Set.of(new DiaryEntryRepositoryCustom.SeriesSeasonPair(SERIES_ID, 1)));
         verify(diaryEntryRepository).findViewerStateEntriesByContentIdIn(
                 VIEWER_ID, contentIds);
         verify(watchlistEntryRepository).findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds);
@@ -183,8 +186,7 @@ class ContentViewerStateServiceImplTest {
                 LocalDateTime.of(2026, 10, 1, 12, 0), 8, "Episode review", LocalDate.of(2026, 10, 1));
         Set<UUID> contentIds = Set.of(episode.getId());
 
-        when(contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberAndEpisodeNumberIn(
-                ContentType.EPISODE, SERIES_ID, 1, Set.of(1)))
+        when(contentRepository.findAllByCoordinates(eq(List.of(coordinate))))
                 .thenReturn(List.of(episode));
         when(diaryEntryRepository.findViewerStateEntriesByContentIdIn(VIEWER_ID, contentIds))
                 .thenReturn(List.of(diaryEntry));
@@ -200,13 +202,10 @@ class ContentViewerStateServiceImplTest {
 
         assertThat(state.watchStatus()).isEqualTo(WatchStatus.WATCHED);
         assertThat(state.playsCount()).isOne();
-        verify(contentRepository).findByTypeAndSeriesTmdbIdAndSeasonNumberAndEpisodeNumberIn(
-                ContentType.EPISODE, SERIES_ID, 1, Set.of(1));
+        verify(contentRepository).findAllByCoordinates(eq(List.of(coordinate)));
         verify(diaryEntryRepository).findViewerStateEntriesByContentIdIn(VIEWER_ID, contentIds);
         verify(diaryEntryRepository, never())
-                .findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdIn(any(), any());
-        verify(diaryEntryRepository, never())
-                .findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(any(), any(), any());
+                .findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(any(), any(), any());
     }
 
     @Test
@@ -219,13 +218,14 @@ class ContentViewerStateServiceImplTest {
         Set<WatchedEpisodeCoordinate> watchedCoordinates = Set.of(
                 new WatchedEpisodeCoordinate(SERIES_ID, 1, 1));
 
-        when(contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
-                ContentType.SEASON, SERIES_ID, Set.of(1)))
+        when(contentRepository.findAllByCoordinates(eq(List.of(coordinate))))
                 .thenReturn(List.of(season));
         when(diaryEntryRepository.findViewerStateEntriesByContentIdIn(VIEWER_ID, contentIds))
                 .thenReturn(List.of());
-        when(diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(
-                VIEWER_ID, SERIES_ID, 1))
+        when(diaryEntryRepository.findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(
+                VIEWER_ID,
+                Set.of(),
+                Set.of(new DiaryEntryRepositoryCustom.SeriesSeasonPair(SERIES_ID, 1))))
                 .thenReturn(List.of(watchedEpisode));
         when(watchlistEntryRepository.findByUserIdAndContentIdInWithContent(VIEWER_ID, contentIds))
                 .thenReturn(List.of());
@@ -245,10 +245,12 @@ class ContentViewerStateServiceImplTest {
         assertThat(state.watchedEpisodeCount()).isEqualTo(1);
         assertThat(state.releasedEpisodeCount()).isEqualTo(1);
         verify(diaryEntryRepository).findViewerStateEntriesByContentIdIn(VIEWER_ID, contentIds);
-        verify(diaryEntryRepository).findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(
-                VIEWER_ID, SERIES_ID, 1);
+        verify(diaryEntryRepository).findWatchedEpisodeCoordinatesByUserIdAndSeriesIdsOrSeriesSeasonPairs(
+                VIEWER_ID,
+                Set.of(),
+                Set.of(new DiaryEntryRepositoryCustom.SeriesSeasonPair(SERIES_ID, 1)));
         verify(diaryEntryRepository, never())
-                .findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdIn(any(), any());
+                .findWatchedEpisodeCoordinatesByUserIdAndSeriesSeasonPairs(any(), any());
     }
 
     @Test
@@ -268,7 +270,7 @@ class ContentViewerStateServiceImplTest {
         UserListItem listItem = UserListItem.builder()
                 .id(UUID.randomUUID()).userList(list).content(movie).position(1).build();
 
-        when(contentRepository.findByTypeAndTmdbIdIn(ContentType.MOVIE, Set.of("550")))
+        when(contentRepository.findAllByCoordinates(eq(List.of(coordinate))))
                 .thenReturn(List.of(movie));
         when(diaryEntryRepository.findViewerStateEntriesByContentIdIn(VIEWER_ID, Set.of(movie.getId())))
                 .thenReturn(List.of());
@@ -338,7 +340,7 @@ class ContentViewerStateServiceImplTest {
     @DisplayName("[resolve] Should Return Empty Read-Only State - When Coordinate Has No Local Content Reference")
     void shouldReturnEmptyReadOnlyStateWhenCoordinateHasNoLocalContentReference() {
         ContentCoordinate coordinate = new ContentCoordinate(ContentType.MOVIE, "550", null, null, null);
-        when(contentRepository.findByTypeAndTmdbIdIn(eq(ContentType.MOVIE), eq(Set.of("550"))))
+        when(contentRepository.findAllByCoordinates(eq(List.of(coordinate))))
                 .thenReturn(List.of());
 
         ContentViewerStateService.Resolution result = service.resolve(
@@ -360,7 +362,8 @@ class ContentViewerStateServiceImplTest {
     }
 
     private void stubEmptySources(Content content) {
-        when(contentRepository.findByTypeAndTmdbIdIn(content.getType(), Set.of(content.getTmdbId())))
+        ContentCoordinate coordinate = coordinate(content);
+        when(contentRepository.findAllByCoordinates(eq(List.of(coordinate))))
                 .thenReturn(List.of(content));
         when(diaryEntryRepository.findViewerStateEntriesByContentIdIn(VIEWER_ID, Set.of(content.getId())))
                 .thenReturn(List.of());

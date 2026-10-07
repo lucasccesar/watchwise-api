@@ -2,7 +2,10 @@ package com.watchwise.watchwise_api.content.repository;
 
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import jakarta.persistence.EntityManager;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +40,7 @@ class ContentRepositoryTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
     }
 
     @Autowired
@@ -105,6 +109,41 @@ class ContentRepositoryTest {
         assertThat(seriesResult).extracting(Content::getId).containsExactly(series.getId());
         assertThat(seasons).extracting(Content::getId).containsExactly(season.getId());
         assertThat(episodes).extracting(Content::getId).containsExactly(episode.getId());
+    }
+
+    @Test
+    @DisplayName("[findAllByCoordinates] Should Execute One Query And Return Exact Coordinates - When Multiple Series And Seasons Are Requested")
+    void shouldExecuteOneQueryAndReturnExactCoordinatesWhenMultipleSeriesAndSeasonsAreRequested() {
+        Content movie = contentRepository.save(buildMovie("550"));
+        Content firstSeries = contentRepository.save(buildSeries("1399"));
+        Content secondSeries = contentRepository.save(buildSeries("1396"));
+        Content firstSeason = contentRepository.save(buildSeason("1399", 1));
+        Content secondSeason = contentRepository.save(buildSeason("1396", 2));
+        Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
+        Content secondEpisode = contentRepository.save(buildEpisode("1396", 2, 3));
+        contentRepository.save(buildSeason("1399", 2));
+        contentRepository.save(buildEpisode("1396", 1, 1));
+        entityManager.flush();
+        entityManager.clear();
+
+        Statistics statistics = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
+        List<Content> result = contentRepository.findAllByCoordinates(List.of(
+                new ContentCoordinate(ContentType.MOVIE, "550", null, null, null),
+                new ContentCoordinate(ContentType.SERIES, "1399", null, null, null),
+                new ContentCoordinate(ContentType.SERIES, "1396", null, null, null),
+                new ContentCoordinate(ContentType.SEASON, null, "1399", 1, null),
+                new ContentCoordinate(ContentType.SEASON, null, "1396", 2, null),
+                new ContentCoordinate(ContentType.EPISODE, null, "1399", 1, 2),
+                new ContentCoordinate(ContentType.EPISODE, null, "1396", 2, 3)));
+
+        assertThat(result).extracting(Content::getId)
+                .containsExactlyInAnyOrder(
+                        movie.getId(), firstSeries.getId(), secondSeries.getId(), firstSeason.getId(),
+                        secondSeason.getId(), firstEpisode.getId(), secondEpisode.getId());
+        assertThat(statistics.getPrepareStatementCount()).isOne();
+        assertThat(statistics.getQueryExecutionCount()).isOne();
     }
 
     @Test

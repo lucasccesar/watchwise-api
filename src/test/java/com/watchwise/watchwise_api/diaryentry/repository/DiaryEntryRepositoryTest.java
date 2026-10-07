@@ -12,7 +12,9 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.SessionFactory;
 import org.hibernate.Hibernate;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -54,6 +56,7 @@ class DiaryEntryRepositoryTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
     }
 
     @Autowired
@@ -1327,25 +1330,38 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber] Should Return Only Requested Season Coordinates")
-    void shouldReturnOnlyRequestedSeasonCoordinates() {
-        Content targetEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
-        Content otherSeasonEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
-        Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
-        diaryEntryRepository.save(buildEntry(lucas, targetEpisode));
-        diaryEntryRepository.save(buildEntry(lucas, otherSeasonEpisode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, otherSeriesEpisode));
+    @DisplayName("[findWatchedEpisodeCoordinatesByUserIdAndSeriesSeasonPairs] Should Execute One Projection Query And Return Exact Requested Pairs")
+    void shouldExecuteOneProjectionQueryAndReturnExactRequestedPairs() {
+        Content firstSeriesFirstSeasonEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content firstSeriesFirstSeasonSecondEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
+        Content firstSeriesOtherSeasonEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
+        Content secondSeriesTargetEpisode = contentRepository.save(buildEpisode("1396", 1, 3));
+        Content secondSeriesOtherSeasonEpisode = contentRepository.save(buildEpisode("1396", 2, 1));
+        diaryEntryRepository.save(buildEntry(lucas, firstSeriesFirstSeasonEpisode));
+        diaryEntryRepository.save(buildEntry(lucas, firstSeriesFirstSeasonSecondEpisode));
+        diaryEntryRepository.save(buildEntry(lucas, firstSeriesOtherSeasonEpisode));
+        diaryEntryRepository.save(buildEntry(lucas, secondSeriesTargetEpisode));
+        diaryEntryRepository.save(buildEntry(lucas, secondSeriesOtherSeasonEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(marina, firstSeriesFirstSeasonEpisode));
         entityManager.clear();
 
+        Statistics statistics = entityManager.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+
         List<DiaryEntryRepository.WatchedEpisodeCoordinateProjection> result = diaryEntryRepository
-                .findWatchedEpisodeCoordinatesByUserIdAndSeriesTmdbIdAndSeasonNumber(
-                        lucas.getId(), "1399", 1);
+                .findWatchedEpisodeCoordinatesByUserIdAndSeriesSeasonPairs(
+                        lucas.getId(), List.of(
+                                new DiaryEntryRepository.SeriesSeasonPair("1399", 1),
+                                new DiaryEntryRepository.SeriesSeasonPair("1396", 1)));
 
         assertThat(result)
                 .extracting(DiaryEntryRepository.WatchedEpisodeCoordinateProjection::getSeriesTmdbId,
                         DiaryEntryRepository.WatchedEpisodeCoordinateProjection::getSeasonNumber,
                         DiaryEntryRepository.WatchedEpisodeCoordinateProjection::getEpisodeNumber)
-                .containsExactly(tuple("1399", 1, 1));
+                .containsExactlyInAnyOrder(tuple("1399", 1, 1), tuple("1399", 1, 2), tuple("1396", 1, 3));
+        assertThat(statistics.getPrepareStatementCount()).isOne();
+        assertThat(statistics.getQueryExecutionCount()).isOne();
+        assertThat(statistics.getEntityLoadCount()).isZero();
     }
 
     @Test
