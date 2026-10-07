@@ -23,6 +23,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapItemDTO;
@@ -39,6 +40,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.SummaryResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.WatchCompanionCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
+import com.watchwise.watchwise_api.summary.service.AllTimeStatsReader;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
@@ -137,12 +139,29 @@ class SummaryServiceImplTest {
     @Mock
     private com.watchwise.watchwise_api.summary.service.ProfileSummaryReader profileSummaryReader;
 
+    @Mock
+    private AllTimeStatsReader allTimeStatsReader;
+
     @InjectMocks
     private SummaryServiceImpl summaryService;
 
     private UUID lucasId;
     private UUID marinaId;
     private User lucas;
+
+    @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Delegate To The Reader - When Type Is Valid")
+    void shouldDelegateToTheReaderWhenAllTimeEditionTypeIsValid() {
+        AllTimeEditionStatsDTO expected = new AllTimeEditionStatsDTO(ContentType.MOVIE, 1L, 120L, 1L,
+                10.0, 2.0, 1.0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(allTimeStatsReader.read(lucasId, ContentType.MOVIE)).thenReturn(expected);
+
+        AllTimeEditionStatsDTO result = summaryService.getAllTimeStatsEdition(lucasId, lucasId, ContentType.MOVIE);
+
+        assertThat(result).isSameAs(expected);
+        verify(allTimeStatsReader).read(lucasId, ContentType.MOVIE);
+    }
 
     @BeforeEach
     void setUp() {

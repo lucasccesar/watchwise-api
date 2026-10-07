@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.summary.service;
 
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
@@ -23,6 +24,8 @@ public interface SummaryService {
     YearInReviewResponseDTO getYearInReview(UUID viewerId, UUID userId, ContentType type, Integer year);
 
     AllTimeStatsResponseDTO getAllTimeStats(UUID viewerId, UUID userId);
+
+    AllTimeEditionStatsDTO getAllTimeStatsEdition(UUID viewerId, UUID userId, ContentType type);
 
     EpisodeRatingsGridResponseDTO getEpisodeRatingsGrid(UUID viewerId, UUID userId, String seriesTmdbId);
 

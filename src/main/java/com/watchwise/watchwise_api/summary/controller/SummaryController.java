@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.summary.controller;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
@@ -67,6 +68,15 @@ public class SummaryController {
     @GetMapping("/users/{userId}/summary/all-time")
     public ResponseEntity<AllTimeStatsResponseDTO> getAllTimeStats(@PathVariable UUID userId) {
         AllTimeStatsResponseDTO response = summaryService.getAllTimeStats(getCurrentUserId(), userId);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/users/{userId}/summary/all-time/edition")
+    public ResponseEntity<AllTimeEditionStatsDTO> getAllTimeStatsEdition(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) ContentType type
+    ) {
+        AllTimeEditionStatsDTO response = summaryService.getAllTimeStatsEdition(getCurrentUserId(), userId, type);
         return ResponseEntity.ok(response);
     }
 

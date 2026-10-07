@@ -283,6 +283,33 @@ class SummaryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Return BadRequest - When Type Is Missing")
+    void shouldReturnBadRequestWhenAllTimeEditionTypeIsMissing() throws Exception {
+        RegisteredUser user = registerUser("alltimeeditionnotype");
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/all-time/edition")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("type must be one of: MOVIE, SERIES"));
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Return Empty Movie Edition - When User Has No Entries")
+    void shouldReturnEmptyMovieEditionWhenUserHasNoEntries() throws Exception {
+        RegisteredUser user = registerUser("alltimeeditionempty");
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/all-time/edition")
+                        .param("type", "MOVIE")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("MOVIE"))
+                .andExpect(jsonPath("$.watchedCount").value(0))
+                .andExpect(jsonPath("$.minutesWatched").value(0))
+                .andExpect(jsonPath("$.totalTheaterVisits").value(0))
+                .andExpect(jsonPath("$.ratingsDistribution").isEmpty());
+    }
+
+    @Test
     @DisplayName("[getHomeSummary] Should Return NotFound - When Target User Does Not Exist")
     void shouldReturnNotFoundWhenTargetUserDoesNotExistForHomeSummary() throws Exception {
         RegisteredUser viewer = registerUser("homesummarynotfound");

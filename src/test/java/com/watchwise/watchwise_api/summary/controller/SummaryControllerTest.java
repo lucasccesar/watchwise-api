@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.summary.controller;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.HomeSummaryResponseDTO;
@@ -171,6 +172,21 @@ class SummaryControllerTest {
     }
 
     @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Return Ok With The Service Result - When Called")
+    void shouldReturnOkWithTheServiceResultWhenGetAllTimeStatsEditionIsCalled() {
+        UUID targetUserId = UUID.randomUUID();
+        AllTimeEditionStatsDTO dto = buildAllTimeEditionStatsResponseDto();
+        when(summaryService.getAllTimeStatsEdition(currentUserId, targetUserId, ContentType.MOVIE)).thenReturn(dto);
+
+        ResponseEntity<AllTimeEditionStatsDTO> result =
+                summaryController.getAllTimeStatsEdition(targetUserId, ContentType.MOVIE);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+        verify(summaryService).getAllTimeStatsEdition(currentUserId, targetUserId, ContentType.MOVIE);
+    }
+
+    @Test
     @DisplayName("[getEpisodeRatingsGrid] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenGetEpisodeRatingsGridIsCalled() {
         UUID targetUserId = UUID.randomUUID();
@@ -211,5 +227,10 @@ class SummaryControllerTest {
 
     private AllTimeStatsResponseDTO buildAllTimeStatsResponseDto() {
         return new AllTimeStatsResponseDTO(0L, 0L, 0L, 0L, 0L, 0.0, 0.0, 0.0, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+    }
+
+    private AllTimeEditionStatsDTO buildAllTimeEditionStatsResponseDto() {
+        return new AllTimeEditionStatsDTO(ContentType.MOVIE, 0L, 0L, 0L, 0.0, 0.0, 0.0,
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 }

@@ -23,6 +23,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
+import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
 import com.watchwise.watchwise_api.summary.dto.ContentWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.CountryCountDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyMinutesDTO;
@@ -50,6 +51,7 @@ import com.watchwise.watchwise_api.summary.dto.WatchTimeDTO;
 import com.watchwise.watchwise_api.summary.dto.YearCountDTO;
 import com.watchwise.watchwise_api.summary.dto.YearInReviewResponseDTO;
 import com.watchwise.watchwise_api.summary.service.ProfileSummaryReader;
+import com.watchwise.watchwise_api.summary.service.AllTimeStatsReader;
 import com.watchwise.watchwise_api.summary.service.SummaryService;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
@@ -109,6 +111,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final FeedService feedService;
     private final HomeNextEpisodeAssembler homeNextEpisodeAssembler;
     private final ProfileSummaryReader profileSummaryReader;
+    private final AllTimeStatsReader allTimeStatsReader;
 
     @Override
     public SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type) {
@@ -435,6 +438,19 @@ public class SummaryServiceImpl implements SummaryService {
                 averageMinutesPerDay,
                 watchCountByYearMovies, watchCountByYearEpisodes, watchCountByDecade, watchCountByCountry,
                 mostLoggedContent, genreCountsMovies, genreCountsSeries, topRated, bottomRated, topWatchCompanions);
+    }
+
+    @Override
+    public AllTimeEditionStatsDTO getAllTimeStatsEdition(UUID viewerId, UUID userId, ContentType type) {
+        User target = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        assertCanViewSummary(viewerId, userId, target);
+
+        if (type == null || !ALLOWED_SUMMARY_TYPES.contains(type)) {
+            throw new BadRequestException("type must be one of: MOVIE, SERIES");
+        }
+
+        return allTimeStatsReader.read(userId, type);
     }
 
     @Override
