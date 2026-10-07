@@ -195,6 +195,7 @@ class SummaryServiceImplTest {
         lenient().when(homeWatchAggregate.getTotalMoviesWatched()).thenReturn(0L);
         lenient().when(homeWatchAggregate.getTotalDistinctMoviesWatched()).thenReturn(0L);
         lenient().when(homeWatchAggregate.getTotalEpisodesWatched()).thenReturn(0L);
+        lenient().when(homeWatchAggregate.getDistinctSeriesWatched()).thenReturn(0L);
         lenient().when(notificationRepository.existsByUserIdAndIsReadFalse(any())).thenReturn(false);
         lenient().when(feedService.getFeed(any(), any(), any()))
                 .thenReturn(new CursorPageResponseDTO<>(List.of(), 3, null, false));

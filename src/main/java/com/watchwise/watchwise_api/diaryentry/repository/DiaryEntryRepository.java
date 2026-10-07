@@ -522,6 +522,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
         Long getTotalMoviesWatched();
         Long getTotalDistinctMoviesWatched();
         Long getTotalEpisodesWatched();
+        Long getDistinctSeriesWatched();
     }
 
     @Query(value = """
@@ -532,7 +533,12 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
                     AS "totalMinutesWatchedEpisodes",
                 COUNT(CASE WHEN c.type = 'MOVIE' THEN 1 END) AS "totalMoviesWatched",
                 COUNT(DISTINCT CASE WHEN c.type = 'MOVIE' THEN c.tmdb_id END) AS "totalDistinctMoviesWatched",
-                COUNT(CASE WHEN c.type = 'EPISODE' THEN 1 END) AS "totalEpisodesWatched"
+                COUNT(CASE WHEN c.type = 'EPISODE' THEN 1 END) AS "totalEpisodesWatched",
+                COUNT(DISTINCT CASE
+                    WHEN c.type = 'SERIES' THEN c.tmdb_id
+                    WHEN c.type IN ('SEASON', 'EPISODE') THEN c.series_tmdb_id
+                    ELSE NULL
+                END) AS "distinctSeriesWatched"
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             WHERE d.user_id = :userId

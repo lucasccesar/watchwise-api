@@ -130,6 +130,7 @@ public class SummaryServiceImpl implements SummaryService {
         long totalMoviesWatched = aggregate.getTotalMoviesWatched();
         long totalDistinctMoviesWatched = aggregate.getTotalDistinctMoviesWatched();
         long totalEpisodesWatched = aggregate.getTotalEpisodesWatched();
+        long distinctSeriesWatched = aggregate.getDistinctSeriesWatched();
 
         List<SeriesInProgressResponseDTO> progress;
         try {
@@ -164,7 +165,8 @@ public class SummaryServiceImpl implements SummaryService {
         HomeViewerDTO viewer = new HomeViewerDTO(target.getName(), target.getUsername(), target.getProfilePicture());
 
         return new HomeSummaryResponseDTO(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched,
-                totalDistinctMoviesWatched, totalEpisodesWatched, nextEpisodes, watchCountByDayLast30Days,
+                totalDistinctMoviesWatched, totalEpisodesWatched, distinctSeriesWatched, nextEpisodes,
+                watchCountByDayLast30Days,
                 genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, viewer,
                 notificationRepository.existsByUserIdAndIsReadFalse(userId), recentlyWatched, socialActivities);
     }

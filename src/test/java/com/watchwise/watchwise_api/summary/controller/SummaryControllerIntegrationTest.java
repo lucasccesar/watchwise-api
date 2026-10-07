@@ -282,7 +282,8 @@ class SummaryControllerIntegrationTest {
                 .andExpect(jsonPath("$.totalMinutesWatchedMovies").value(139))
                 .andExpect(jsonPath("$.totalMinutesWatchedEpisodes").value(55))
                 .andExpect(jsonPath("$.totalMoviesWatched").value(1))
-                .andExpect(jsonPath("$.totalEpisodesWatched").value(1));
+                .andExpect(jsonPath("$.totalEpisodesWatched").value(1))
+                .andExpect(jsonPath("$.distinctSeriesWatched").value(1));
     }
 
     @Test

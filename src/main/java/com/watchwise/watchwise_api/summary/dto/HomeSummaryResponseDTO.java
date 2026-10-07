@@ -9,6 +9,7 @@ public record HomeSummaryResponseDTO(
         long totalMoviesWatched,
         long totalDistinctMoviesWatched,
         long totalEpisodesWatched,
+        long distinctSeriesWatched,
         List<SeriesInProgressPreviewDTO> nextEpisodes,
         List<DailyWatchCountDTO> watchCountByDayLast30Days,
         List<GenreCountDTO> genreCountsMoviesLast30Days,
@@ -21,8 +22,8 @@ public record HomeSummaryResponseDTO(
     public HomeSummaryResponseDTO(
             long totalMinutesWatchedMovies,
             long totalMinutesWatchedEpisodes,
-            long totalMoviesWatched,
-            long totalEpisodesWatched,
+        long totalMoviesWatched,
+        long totalEpisodesWatched,
             List<SeriesInProgressPreviewDTO> nextEpisodes,
             List<DailyWatchCountDTO> watchCountByDayLast30Days,
             List<GenreCountDTO> genreCountsMoviesLast30Days,
@@ -30,7 +31,7 @@ public record HomeSummaryResponseDTO(
             List<?> recentlyWatched
     ) {
         this(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched, totalMoviesWatched,
-                totalEpisodesWatched, nextEpisodes, watchCountByDayLast30Days, genreCountsMoviesLast30Days,
+                totalEpisodesWatched, 0L, nextEpisodes, watchCountByDayLast30Days, genreCountsMoviesLast30Days,
                 genreCountsSeriesLast30Days, null, false, List.of(), List.of());
     }
 }
