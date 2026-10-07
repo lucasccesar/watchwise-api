@@ -451,7 +451,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
             AND c.type = 'EPISODE'
             AND c.season_number > 0
             AND c.series_tmdb_id IS NOT NULL
-            GROUP BY c.series_tmdb_id, sc.id
+            GROUP BY c.series_tmdb_id
             ORDER BY c.series_tmdb_id
             """, nativeQuery = true)
     List<SeriesEpisodeCount> findEpisodeSeriesCountsByUserId(@Param("userId") UUID userId);
