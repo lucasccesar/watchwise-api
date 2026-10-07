@@ -114,6 +114,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID> {
     @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.user WHERE d.id = :id")
     Optional<DiaryEntry> findByIdWithUser(@Param("id") UUID id);
 
+    @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user WHERE d.id = :id")
+    Optional<DiaryEntry> findByIdWithContentAndUser(@Param("id") UUID id);
+
     @Query("SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user WHERE d.id IN :ids")
     List<DiaryEntry> findByIdInWithContentAndUser(@Param("ids") Collection<UUID> ids);
 

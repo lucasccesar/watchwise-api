@@ -24,6 +24,8 @@ public interface DiaryEntryService {
     Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
             ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview, String seriesTmdbId, Integer score);
 
+    DiaryEntryResponseDTO getDiaryEntry(UUID viewerId, UUID diaryEntryId);
+
     default Page<DiaryEntryResponseDTO> getDiaryEntries(UUID viewerId, UUID userId, Integer year, Integer pageNumber, Integer pageSize,
             ContentType type, LocalDate dateFrom, LocalDate dateTo, Boolean hasReview) {
         return getDiaryEntries(viewerId, userId, year, pageNumber, pageSize, type, dateFrom, dateTo, hasReview, null, null);

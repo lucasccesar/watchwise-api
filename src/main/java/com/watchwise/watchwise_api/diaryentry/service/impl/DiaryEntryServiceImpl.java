@@ -167,6 +167,27 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     @Override
+    public DiaryEntryResponseDTO getDiaryEntry(UUID viewerId, UUID diaryEntryId) {
+        DiaryEntry entry = diaryEntryRepository.findByIdWithContentAndUser(diaryEntryId)
+                .orElseThrow(() -> new NotFoundException("Diary entry not found"));
+
+        User owner = entry.getUser();
+        assertCanViewDiary(viewerId, owner.getId(), owner);
+
+        Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, List.of(diaryEntryId));
+        long commentsCount = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(List.of(diaryEntryId)))
+                .orElseGet(Map::of)
+                .getOrDefault(diaryEntryId, 0L);
+        List<UserPreviewDTO> watchedWith = loadWatchedWith(List.of(diaryEntryId))
+                .getOrDefault(diaryEntryId, List.of());
+        String customPosterUrl = loadPostersForOwner(owner.getId(), List.of(entry))
+                .get(entry.getContent().getId());
+
+        return enrichDiaryEntryResponse(entry, likedEntryIds.contains(diaryEntryId), commentsCount,
+                watchedWith, customPosterUrl);
+    }
+
+    @Override
     public List<DiarySeriesOptionDTO> getDiarySeriesOptions(UUID viewerId, UUID userId) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));

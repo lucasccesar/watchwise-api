@@ -316,6 +316,23 @@ class DiaryEntryServiceImplTest {
     // ---------- getDiaryEntries ----------
 
     @Test
+    @DisplayName("[getDiaryEntry] Should Return Enriched Entry - When Entry Is Visible")
+    void shouldReturnEnrichedEntryWhenEntryIsVisible() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        DiaryEntryResponseDTO mapped = buildResponseDto(entry);
+        when(diaryEntryRepository.findByIdWithContentAndUser(entry.getId())).thenReturn(Optional.of(entry));
+        when(likeService.getLikedDiaryEntryIds(lucasId, List.of(entry.getId()))).thenReturn(Set.of(entry.getId()));
+        when(commentPreviewAssembler.countDiaryEntries(List.of(entry.getId())))
+                .thenReturn(Map.of(entry.getId(), 7L));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, true, List.of())).thenReturn(mapped);
+
+        DiaryEntryResponseDTO result = diaryEntryService.getDiaryEntry(lucasId, entry.getId());
+
+        assertThat(result.commentsCount()).isEqualTo(7L);
+        verify(diaryEntryRepository).findByIdWithContentAndUser(entry.getId());
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Return Mapped Page - When Viewer Is The Profile Owner")
     void shouldReturnMappedPageWhenViewerIsTheProfileOwner() {
         DiaryEntry entry = buildEntry(lucas, fightClub);

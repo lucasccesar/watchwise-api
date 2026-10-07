@@ -95,6 +95,20 @@ class DiaryEntryControllerTest {
     }
 
     @Test
+    @DisplayName("[getDiaryEntry] Should Return The Enriched Entry - When Called")
+    void shouldReturnTheEnrichedEntryWhenGettingDiaryEntry() {
+        UUID diaryEntryId = UUID.randomUUID();
+        DiaryEntryResponseDTO dto = buildResponseDto();
+        when(diaryEntryService.getDiaryEntry(currentUserId, diaryEntryId)).thenReturn(dto);
+
+        ResponseEntity<DiaryEntryResponseDTO> result = diaryEntryController.getDiaryEntry(diaryEntryId);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(dto);
+        verify(diaryEntryService).getDiaryEntry(currentUserId, diaryEntryId);
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Forward Series And Score Filters - When Provided")
     void shouldForwardSeriesAndScoreFiltersWhenGettingDiaryEntries() {
         UUID targetUserId = UUID.randomUUID();

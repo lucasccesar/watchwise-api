@@ -65,6 +65,11 @@ public class DiaryEntryController {
         return ResponseEntity.ok(PageResponseDTO.of(entries));
     }
 
+    @GetMapping("/diary/{diaryEntryId}")
+    public ResponseEntity<DiaryEntryResponseDTO> getDiaryEntry(@PathVariable UUID diaryEntryId) {
+        return ResponseEntity.ok(diaryEntryService.getDiaryEntry(getCurrentUserId(), diaryEntryId));
+    }
+
     @GetMapping("/users/{userId}/diary/series")
     public ResponseEntity<List<DiarySeriesOptionDTO>> getDiarySeriesOptions(@PathVariable UUID userId) {
         return ResponseEntity.ok(diaryEntryService.getDiarySeriesOptions(getCurrentUserId(), userId));
