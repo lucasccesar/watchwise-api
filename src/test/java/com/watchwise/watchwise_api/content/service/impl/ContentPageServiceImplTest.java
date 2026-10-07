@@ -36,6 +36,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -202,12 +203,42 @@ class ContentPageServiceImplTest {
         verify(contentChildCardAssembler).assembleNavigation(episodeDetails, seasonDetails, coordinate, VIEWER_ID);
     }
 
+    @Test
+    @DisplayName("[getPage] Should Expose Episode Presentation Poster And Inherited Crew Flag")
+    void shouldExposeEpisodePresentationPosterAndInheritedCrewFlag() {
+        UUID episodeId = UUID.randomUUID();
+        UUID seasonId = UUID.randomUUID();
+        Content episode = content(ContentType.EPISODE, episodeId, null, "1399", 2, 3);
+        Content season = content(ContentType.SEASON, seasonId, null, "1399", 2, null);
+        ContentDetailsDTO episodeDetails = details(episodeId, ContentType.EPISODE, "/episode-still.jpg");
+        ContentDetailsDTO seasonDetails = details(seasonId, ContentType.SEASON, "/season-poster.jpg");
+        ContentPageMetadataDTO metadata = new ContentPageMetadataDTO(null, null, null, null, null, List.of());
+        ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
+        ContentCoordinate coordinate = ContentCoordinate.from(episode);
+        stubCommonPageReads(episode, episodeDetails, coordinate);
+        when(contentPageMetadataService.getMetadata(eq(episode), eq("en-US"), eq("US")))
+                .thenReturn(metadata);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "1399", 2, null, ContentType.SEASON)).thenReturn(Optional.of(season));
+        when(contentDetailsService.getDetails(seasonId, VIEWER_ID)).thenReturn(seasonDetails);
+        when(contentChildCardAssembler.assembleSections(episodeDetails, null, coordinate, VIEWER_ID))
+                .thenReturn(sections);
+        when(contentChildCardAssembler.assembleNavigation(episodeDetails, seasonDetails, coordinate, VIEWER_ID))
+                .thenReturn(null);
+
+        ContentPageDTO result = contentPageService.getPage(episodeId, VIEWER_ID);
+
+        assertThat(result.metadata().presentationPosterPath()).isEqualTo("/season-poster.jpg");
+        assertThat(result.metadata().presentationCrew()).isEqualTo(episodeDetails.crew());
+        assertThat(result.metadata().crewInherited()).isTrue();
+    }
+
     private void stubCommonPageReads(
             Content content, ContentDetailsDTO details, ContentCoordinate coordinate) {
         when(contentRepository.findById(content.getId())).thenReturn(Optional.of(content));
         when(userRepository.findById(VIEWER_ID)).thenReturn(Optional.of(viewer()));
         when(contentDetailsService.getDetails(content.getId(), VIEWER_ID)).thenReturn(details);
-        when(contentPageMetadataService.getMetadata(eq(content), eq("en-US"), eq("US")))
+        lenient().when(contentPageMetadataService.getMetadata(eq(content), eq("en-US"), eq("US")))
                 .thenReturn(new ContentPageMetadataDTO(null, null, null, null, null, List.of()));
         when(contentPageStatsService.getStats(content.getId()))
                 .thenReturn(new ContentPageStatsDTO(content.getId(), null, 0, List.of(), 0, 0));
@@ -239,8 +270,12 @@ class ContentPageServiceImplTest {
     }
 
     private ContentDetailsDTO details(UUID contentId, ContentType type) {
+        return details(contentId, type, "/poster.jpg");
+    }
+
+    private ContentDetailsDTO details(UUID contentId, ContentType type, String posterPath) {
         return new ContentDetailsDTO(
-                contentId, type, "Title", null, "/poster.jpg", null, null, null, null, null, null,
+                contentId, type, "Title", null, posterPath, null, null, null, null, null, null,
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
                 null, null, List.of(), List.of(), List.of());
     }

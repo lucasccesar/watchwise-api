@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentNavigationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPageMetadataDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageSectionsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -55,6 +56,15 @@ public class ContentPageServiceImpl implements ContentPageService {
 
         ContentDetailsDTO parentSeriesDetails = parentSeriesDetails(content, viewerId);
         ContentDetailsDTO parentSeasonDetails = parentSeasonDetails(content, viewerId);
+        ContentPageMetadataDTO metadata = contentPageMetadataService.getMetadata(
+                content, viewer.getPreferredLanguage(), viewer.getPreferredRegion());
+        if (content.getType() == ContentType.EPISODE) {
+            String presentationPosterPath = parentSeasonDetails != null
+                    && parentSeasonDetails.posterPath() != null
+                    ? parentSeasonDetails.posterPath()
+                    : details.posterPath();
+            metadata = metadata.withPresentation(presentationPosterPath, details.crew(), true);
+        }
         ContentPageSectionsDTO sections = contentChildCardAssembler.assembleSections(
                 details, parentSeriesDetails, rootCoordinate, viewerId);
         ContentNavigationDTO navigation = contentChildCardAssembler.assembleNavigation(
@@ -62,8 +72,7 @@ public class ContentPageServiceImpl implements ContentPageService {
 
         return new ContentPageDTO(
                 details,
-                contentPageMetadataService.getMetadata(
-                        content, viewer.getPreferredLanguage(), viewer.getPreferredRegion()),
+                metadata,
                 contentPageStatsService.getStats(contentId),
                 visibleReviewsCount(contentId, viewerId),
                 viewerState,
