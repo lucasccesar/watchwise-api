@@ -125,10 +125,15 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
         String getSource();
     }
 
+    default Page<ContentReviewKey> findContentReviewKeys(
+            UUID contentId, UUID viewerId, Pageable pageable) {
+        return findContentReviewKeys(contentId, viewerId, ContentReviewSort.RECENT.name(), pageable);
+    }
+
     @Query(value = """
             SELECT review_id, source
             FROM (
-                SELECT d.id AS review_id, 'DIARY' AS source, d.created_at AS created_at
+                SELECT d.id AS review_id, 'DIARY' AS source, d.likes_count AS likes_count, d.created_at AS created_at
                 FROM diary_entries d
                 JOIN users u ON u.id = d.user_id
                 WHERE d.content_id = :contentId
@@ -140,8 +145,13 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND (:sort <> 'FOLLOWING' OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
                 UNION ALL
-                SELECT d.id AS review_id, 'DROPPED' AS source, d.created_at AS created_at
+                SELECT d.id AS review_id, 'DROPPED' AS source, d.likes_count AS likes_count, d.created_at AS created_at
                 FROM dropped_entries d
                 JOIN users u ON u.id = d.user_id
                 WHERE d.content_id = :contentId
@@ -153,8 +163,14 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND (:sort <> 'FOLLOWING' OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
             ) reviews
-            ORDER BY created_at DESC, review_id DESC
+            ORDER BY CASE WHEN :sort = 'POPULAR' THEN likes_count END DESC,
+                     created_at DESC, review_id DESC
             """,
             countQuery = """
             SELECT COUNT(*)
@@ -171,6 +187,11 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND (:sort <> 'FOLLOWING' OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
                 UNION ALL
                 SELECT d.id
                 FROM dropped_entries d
@@ -184,10 +205,16 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND (:sort <> 'FOLLOWING' OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                           AND f.status = 'ACCEPTED'
+                       ))
             ) reviews
             """, nativeQuery = true)
     Page<ContentReviewKey> findContentReviewKeys(
-            @Param("contentId") UUID contentId, @Param("viewerId") UUID viewerId, Pageable pageable);
+            @Param("contentId") UUID contentId, @Param("viewerId") UUID viewerId,
+            @Param("sort") String sort, Pageable pageable);
 
     @Query("""
             SELECT COALESCE(MAX(de.watchNumber), 0) FROM DiaryEntry de

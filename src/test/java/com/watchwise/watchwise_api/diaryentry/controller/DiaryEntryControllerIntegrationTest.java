@@ -1096,8 +1096,83 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(2))
                 .andExpect(jsonPath("$.content[0].source").value("DROPPED"))
                 .andExpect(jsonPath("$.content[0].comment").value("Stopped halfway"))
+                .andExpect(jsonPath("$.content[0].reviewer.id").value(reviewer.id().toString()))
+                .andExpect(jsonPath("$.content[0].reviewer.username").value("reviewscontentreviewer"))
                 .andExpect(jsonPath("$.content[1].source").value("DIARY"))
                 .andExpect(jsonPath("$.content[1].comment").value("Great movie"));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Order Reviews By Likes Before Date - When Sort Is Popular")
+    void shouldOrderReviewsByLikesBeforeDateWhenSortIsPopular() throws Exception {
+        RegisteredUser viewer = registerUser("reviewspopularviewer");
+        RegisteredUser olderPopularReviewer = registerUser("reviewspopularolder");
+        RegisteredUser newerLessPopularReviewer = registerUser("reviewspopularnewer");
+        User olderReviewerEntity = userRepository.findById(olderPopularReviewer.id()).orElseThrow();
+        User newerReviewerEntity = userRepository.findById(newerLessPopularReviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+
+        DiaryEntry olderPopular = persistEntry(olderReviewerEntity, fightClub);
+        olderPopular.setComment("Popular review");
+        olderPopular.setLikesCount(5);
+        olderPopular.setCreatedAt(LocalDateTime.now().minusDays(1));
+        diaryEntryRepository.save(olderPopular);
+
+        DiaryEntry newerLessPopular = persistEntry(newerReviewerEntity, fightClub);
+        newerLessPopular.setComment("Recent review");
+        newerLessPopular.setLikesCount(1);
+        newerLessPopular.setCreatedAt(LocalDateTime.now());
+        diaryEntryRepository.save(newerLessPopular);
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews")
+                        .param("sort", "POPULAR")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].comment").value("Popular review"))
+                .andExpect(jsonPath("$.content[0].reviewer.id").value(olderPopularReviewer.id().toString()))
+                .andExpect(jsonPath("$.content[1].comment").value("Recent review"));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Include Only Accepted Followed Authors - When Sort Is Following")
+    void shouldIncludeOnlyAcceptedFollowedAuthorsWhenSortIsFollowing() throws Exception {
+        RegisteredUser viewer = registerUser("reviewsfollowingviewer");
+        RegisteredUser followedReviewer = registerUser("reviewsfollowingaccepted", false);
+        RegisteredUser publicUnfollowedReviewer = registerUser("reviewsfollowingpublic");
+        persistFollow(viewer.id(), followedReviewer.id(), FollowStatus.ACCEPTED);
+        User followedReviewerEntity = userRepository.findById(followedReviewer.id()).orElseThrow();
+        User publicReviewerEntity = userRepository.findById(publicUnfollowedReviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+
+        DiaryEntry followedReview = persistEntry(followedReviewerEntity, fightClub);
+        followedReview.setComment("Followed review");
+        diaryEntryRepository.save(followedReview);
+        DiaryEntry publicReview = persistEntry(publicReviewerEntity, fightClub);
+        publicReview.setComment("Public review");
+        diaryEntryRepository.save(publicReview);
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews")
+                        .param("sort", "FOLLOWING")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].comment").value("Followed review"))
+                .andExpect(jsonPath("$.content[0].reviewer.id").value(followedReviewer.id().toString()));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return BadRequest For An Unsupported Sort - When Sort Is Invalid")
+    void shouldReturnBadRequestForAnUnsupportedSortWhenSortIsInvalid() throws Exception {
+        RegisteredUser viewer = registerUser("reviewsinvalidsort");
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews")
+                        .param("sort", "UNSUPPORTED")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        "Invalid value 'UNSUPPORTED' for parameter 'sort'. Expected type: ContentReviewSort. Accepted values: POPULAR, RECENT, FOLLOWING"))
+                .andExpect(jsonPath("$.path").value("/contents/" + fightClub.getId() + "/reviews"));
     }
 
     @Test
