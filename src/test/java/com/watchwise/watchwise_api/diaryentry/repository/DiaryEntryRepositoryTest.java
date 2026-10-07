@@ -1094,6 +1094,7 @@ class DiaryEntryRepositoryTest {
     @DisplayName("[sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween] Should Sum Episode Runtime Per Series - When Multiple Episodes Watched")
     void shouldSumEpisodeRuntimePerSeriesWhenMultipleEpisodesWatched() {
         contentRepository.deleteAll();
+        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, null));
         Content episode1 = contentRepository.save(buildEpisode("1399", 1, 1, 55));
         Content episode2 = contentRepository.save(buildEpisode("1399", 1, 2, 58));
         LocalDate today = LocalDate.now();
@@ -1105,6 +1106,7 @@ class DiaryEntryRepositoryTest {
                         lucas.getId(), today.minusDays(1), today.plusDays(1), PageRequest.of(0, 10));
 
         assertThat(result).hasSize(1);
+        assertThat(result.getFirst().getContentId()).isEqualTo(series.getId());
         assertThat(result.getFirst().getSeriesTmdbId()).isEqualTo("1399");
         assertThat(result.getFirst().getTotalMinutes()).isEqualTo(113L);
     }

@@ -539,13 +539,15 @@ class SummaryServiceImplTest {
     @DisplayName("[getMonthInReview] Should Only Populate TopSeriesByWatchTime - When Type Is SERIES")
     void shouldOnlyPopulateTopSeriesByWatchTimeWhenTypeIsSeriesForMonthInReview() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        UUID seriesContentId = UUID.randomUUID();
         when(diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(eq(lucasId), any(), any(), any()))
-                .thenReturn(List.of(seriesRuntime("1399", 320L)));
+                .thenReturn(List.of(seriesRuntime("1399", seriesContentId, 320L)));
 
         MonthInReviewResponseDTO result = summaryService.getMonthInReview(lucasId, lucasId, ContentType.SERIES, YearMonth.of(2026, 8));
 
         assertThat(result.topSeriesByWatchTime()).hasSize(1);
         assertThat(result.topSeriesByWatchTime().getFirst().seriesTmdbId()).isEqualTo("1399");
+        assertThat(result.topSeriesByWatchTime().getFirst().contentId()).isEqualTo(seriesContentId);
         assertThat(result.topLongestMovies()).isEmpty();
     }
 
@@ -1060,6 +1062,10 @@ class SummaryServiceImplTest {
     }
 
     private DiaryEntryRepository.SeriesRuntime seriesRuntime(String seriesTmdbId, long totalMinutes) {
+        return seriesRuntime(seriesTmdbId, null, totalMinutes);
+    }
+
+    private DiaryEntryRepository.SeriesRuntime seriesRuntime(String seriesTmdbId, UUID contentId, long totalMinutes) {
         return new DiaryEntryRepository.SeriesRuntime() {
             @Override
             public String getSeriesTmdbId() {
@@ -1069,6 +1075,11 @@ class SummaryServiceImplTest {
             @Override
             public Long getTotalMinutes() {
                 return totalMinutes;
+            }
+
+            @Override
+            public UUID getContentId() {
+                return contentId;
             }
         };
     }

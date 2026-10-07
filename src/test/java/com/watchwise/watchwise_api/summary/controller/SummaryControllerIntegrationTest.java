@@ -149,6 +149,19 @@ class SummaryControllerIntegrationTest {
                 .build());
     }
 
+    private Content persistSeries(String tmdbId) {
+        LocalDateTime now = LocalDateTime.now();
+        return contentRepository.save(Content.builder()
+                .tmdbId(tmdbId)
+                .type(ContentType.SERIES)
+                .genres(java.util.List.of("Drama"))
+                .releaseYear(2020)
+                .countries(java.util.List.of("US"))
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
     private Content persistEpisode(String seriesTmdbId, int seasonNumber, int episodeNumber, int runtimeMinutes) {
         LocalDateTime now = LocalDateTime.now();
         return contentRepository.save(Content.builder()
@@ -163,10 +176,16 @@ class SummaryControllerIntegrationTest {
     }
 
     private void persistEntry(User user, Content content) {
+        persistEntry(user, content, null, false);
+    }
+
+    private void persistEntry(User user, Content content, Integer score, boolean watchedInTheater) {
         LocalDateTime now = LocalDateTime.now();
         diaryEntryRepository.save(DiaryEntry.builder()
                 .user(user)
                 .content(content)
+                .score(score)
+                .watchedInTheater(watchedInTheater)
                 .watchedDate(LocalDate.now())
                 .watchNumber(1)
                 .createdAt(now)
@@ -283,6 +302,52 @@ class SummaryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Return Movie Aggregates - When Type Is Movie")
+    void shouldReturnMovieAggregatesWhenAllTimeEditionTypeIsMovie() throws Exception {
+        RegisteredUser user = registerUser("alltimeeditionmovie");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("550", ContentType.MOVIE, 139);
+        persistEntry(entity, movie, 8, true);
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/all-time/edition")
+                        .param("type", "MOVIE")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("MOVIE"))
+                .andExpect(jsonPath("$.watchedCount").value(1))
+                .andExpect(jsonPath("$.minutesWatched").value(139))
+                .andExpect(jsonPath("$.totalTheaterVisits").value(1))
+                .andExpect(jsonPath("$.ratingsDistribution[0].score").value(8))
+                .andExpect(jsonPath("$.ratingsDistribution[0].count").value(1));
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Deduplicate Series Titles - When Type Is Series")
+    void shouldDeduplicateSeriesTitlesWhenAllTimeEditionTypeIsSeries() throws Exception {
+        RegisteredUser user = registerUser("alltimeeditionseries");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content series = persistSeries("1399");
+        Content firstEpisode = persistEpisode("1399", 1, 1, 55);
+        Content secondEpisode = persistEpisode("1399", 1, 2, 45);
+        persistEntry(entity, firstEpisode, 9, false);
+        persistEntry(entity, secondEpisode, 8, false);
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/all-time/edition")
+                        .param("type", "SERIES")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("SERIES"))
+                .andExpect(jsonPath("$.watchedCount").value(2))
+                .andExpect(jsonPath("$.minutesWatched").value(100))
+                .andExpect(jsonPath("$.mostLoggedContent[0].content.id").value(series.getId().toString()))
+                .andExpect(jsonPath("$.mostLoggedContent[0].count").value(2))
+                .andExpect(jsonPath("$.ratingsDistribution[0].score").value(8))
+                .andExpect(jsonPath("$.ratingsDistribution[0].count").value(1))
+                .andExpect(jsonPath("$.ratingsDistribution[1].score").value(9))
+                .andExpect(jsonPath("$.ratingsDistribution[1].count").value(1));
+    }
+
+    @Test
     @DisplayName("[getAllTimeStatsEdition] Should Return BadRequest - When Type Is Missing")
     void shouldReturnBadRequestWhenAllTimeEditionTypeIsMissing() throws Exception {
         RegisteredUser user = registerUser("alltimeeditionnotype");
@@ -291,6 +356,41 @@ class SummaryControllerIntegrationTest {
                         .cookie(user.accessToken()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("type must be one of: MOVIE, SERIES"));
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Return BadRequest - When Type Is Not Movie Or Series")
+    void shouldReturnBadRequestWhenAllTimeEditionTypeIsNotMovieOrSeries() throws Exception {
+        RegisteredUser user = registerUser("alltimeeditionbadtype");
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/all-time/edition")
+                        .param("type", "EPISODE")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("type must be one of: MOVIE, SERIES"));
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenAllTimeEditionHasNoAccessTokenCookie() throws Exception {
+        RegisteredUser user = registerUser("alltimeeditionnoauth");
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/all-time/edition")
+                        .param("type", "MOVIE"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStatsEdition] Should Return Forbidden - When Target Profile Is Private")
+    void shouldReturnForbiddenWhenAllTimeEditionTargetProfileIsPrivate() throws Exception {
+        RegisteredUser viewer = registerUser("alltimeeditionviewer");
+        RegisteredUser target = registerUser("alltimeeditionprivate", false);
+
+        mockMvc.perform(get("/users/" + target.id() + "/summary/all-time/edition")
+                        .param("type", "MOVIE")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
     }
 
     @Test

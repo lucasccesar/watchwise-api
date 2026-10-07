@@ -282,7 +282,7 @@ public class SummaryServiceImpl implements SummaryService {
         List<SeriesWatchTimeDTO> topSeriesByWatchTime = type == ContentType.SERIES
                 ? diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(
                                 userId, start, end, PageRequest.of(0, TOP_SERIES_LIMIT))
-                        .stream().map(row -> new SeriesWatchTimeDTO(row.getSeriesTmdbId(), row.getTotalMinutes())).toList()
+                        .stream().map(row -> new SeriesWatchTimeDTO(row.getContentId(), row.getSeriesTmdbId(), row.getTotalMinutes())).toList()
                 : List.of();
 
         List<com.watchwise.watchwise_api.content.dto.ContentRefDTO> topLongestMovies = type == ContentType.MOVIE
@@ -592,14 +592,15 @@ public class SummaryServiceImpl implements SummaryService {
             return diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
                             userId, start, end, PageRequest.of(0, YEAR_LONGEST_LIMIT))
                     .stream()
-                    .map(c -> new LongestWatchedItemDTO(ContentType.MOVIE, c.getTmdbId(), null,
+                    .map(c -> new LongestWatchedItemDTO(ContentType.MOVIE, c.getId(), c.getTmdbId(), null,
                             c.getRuntimeMinutes() == null ? 0 : c.getRuntimeMinutes()))
                     .toList();
         }
         return diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(
                         userId, start, end, PageRequest.of(0, YEAR_LONGEST_LIMIT))
                 .stream()
-                .map(row -> new LongestWatchedItemDTO(ContentType.SERIES, null, row.getSeriesTmdbId(), row.getTotalMinutes()))
+                .map(row -> new LongestWatchedItemDTO(ContentType.SERIES, row.getContentId(), null,
+                        row.getSeriesTmdbId(), row.getTotalMinutes()))
                 .toList();
     }
 
