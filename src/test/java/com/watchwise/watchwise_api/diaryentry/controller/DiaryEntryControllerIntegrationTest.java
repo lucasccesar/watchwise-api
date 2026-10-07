@@ -451,6 +451,51 @@ class DiaryEntryControllerIntegrationTest {
     // ---------- GET /users/{userId}/diary ----------
 
     @Test
+    @DisplayName("[getDiaryEntry] Should Return Enriched Entry - When Owner Reads It")
+    void shouldReturnEnrichedEntryWhenOwnerReadsIt() throws Exception {
+        RegisteredUser user = registerUser("getdiaryentryowner");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        DiaryEntry entry = persistEntry(entity, persistContent("550", ContentType.MOVIE));
+
+        mockMvc.perform(get("/diary/" + entry.getId()).cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(entry.getId().toString()))
+                .andExpect(jsonPath("$.commentsCount").value(0))
+                .andExpect(jsonPath("$.likedByMe").value(false));
+    }
+
+    @Test
+    @DisplayName("[getDiaryDailySummary] Should Aggregate Plays And Minutes - When Entries Match The Range")
+    void shouldAggregatePlaysAndMinutesWhenEntriesMatchDailySummaryRange() throws Exception {
+        RegisteredUser user = registerUser("getdiarydailysummary");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        LocalDate watchedDate = LocalDate.of(2026, 9, 22);
+        Content movie = contentRepository.save(Content.builder()
+                .tmdbId("550")
+                .type(ContentType.MOVIE)
+                .runtimeMinutes(120)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        Content episode = persistEpisodeWithRuntime("1399", 1, 1, 45);
+        DiaryEntry movieEntry = persistEntry(entity, movie);
+        movieEntry.setWatchedDate(watchedDate);
+        diaryEntryRepository.save(movieEntry);
+        DiaryEntry episodeEntry = persistEntry(entity, episode);
+        episodeEntry.setWatchedDate(watchedDate);
+        diaryEntryRepository.saveAndFlush(episodeEntry);
+
+        mockMvc.perform(get("/users/" + user.id() + "/diary/daily-summary")
+                        .cookie(user.accessToken())
+                        .param("dateFrom", watchedDate.toString())
+                        .param("dateTo", watchedDate.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].date").value(watchedDate.toString()))
+                .andExpect(jsonPath("$[0].plays").value(2))
+                .andExpect(jsonPath("$[0].totalMinutes").value(165));
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Return The Entries Most Recently Created First - When Entries Exist")
     void shouldReturnTheEntriesMostRecentlyCreatedFirstWhenEntriesExist() throws Exception {
         RegisteredUser user = registerUser("getdiaryok");
