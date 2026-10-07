@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
@@ -119,9 +120,18 @@ public class DiaryEntryController {
     public ResponseEntity<PageResponseDTO<ContentReviewResponseDTO>> getReviewsForContent(
             @PathVariable UUID contentId,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false, defaultValue = "RECENT") ContentReviewSort sort
     ) {
-        Page<ContentReviewResponseDTO> reviews = diaryEntryService.getReviewsForContent(getCurrentUserId(), contentId, page, size);
+        Page<ContentReviewResponseDTO> reviews = diaryEntryService.getReviewsForContent(
+                getCurrentUserId(), contentId, sort, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(reviews));
+    }
+
+    public ResponseEntity<PageResponseDTO<ContentReviewResponseDTO>> getReviewsForContent(
+            UUID contentId, Integer page, Integer size) {
+        Page<ContentReviewResponseDTO> reviews = diaryEntryService.getReviewsForContent(
+                getCurrentUserId(), contentId, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(reviews));
     }
 

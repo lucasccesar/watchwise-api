@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import org.springframework.data.domain.Page;
@@ -57,6 +58,9 @@ public interface DiaryEntryService {
             Sort.Direction direction);
 
     Page<ContentReviewResponseDTO> getReviewsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize);
+
+    Page<ContentReviewResponseDTO> getReviewsForContent(
+            UUID viewerId, UUID contentId, ContentReviewSort sort, Integer pageNumber, Integer pageSize);
 
     DiaryEntryCreationResultDTO createDiaryEntry(UUID userId, DiaryEntryCreationDTO diaryEntryCreationDTO);
 

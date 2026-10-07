@@ -47,6 +47,7 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryReadRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySearchCriteria;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
+import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
@@ -603,13 +604,26 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     @Override
     public Page<ContentReviewResponseDTO> getReviewsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize) {
+        return getReviewsForContentInternal(viewerId, contentId, null, pageNumber, pageSize);
+    }
+
+    @Override
+    public Page<ContentReviewResponseDTO> getReviewsForContent(
+            UUID viewerId, UUID contentId, ContentReviewSort sort, Integer pageNumber, Integer pageSize) {
+        return getReviewsForContentInternal(viewerId, contentId,
+                sort == null ? ContentReviewSort.RECENT : sort, pageNumber, pageSize);
+    }
+
+    private Page<ContentReviewResponseDTO> getReviewsForContentInternal(
+            UUID viewerId, UUID contentId, ContentReviewSort sort, Integer pageNumber, Integer pageSize) {
         if (!contentRepository.existsById(contentId)) {
             throw new NotFoundException("Content not found");
         }
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        Page<DiaryEntryRepository.ContentReviewKey> reviewKeys = diaryEntryRepository.findContentReviewKeys(
-                contentId, viewerId, pageRequest);
+        Page<DiaryEntryRepository.ContentReviewKey> reviewKeys = sort == null
+                ? diaryEntryRepository.findContentReviewKeys(contentId, viewerId, pageRequest)
+                : diaryEntryRepository.findContentReviewKeys(contentId, viewerId, sort.name(), pageRequest);
 
         List<UUID> diaryIds = reviewKeys.getContent().stream()
                 .filter(key -> ContentReviewSource.DIARY.name().equals(key.getSource()))
@@ -675,12 +689,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                     commentCountsByDiaryId.getOrDefault(entry.getId(), 0L),
                     watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
                     customPosterByAuthorAndContent.get(posterKey));
-            return ContentReviewResponseDTO.fromDiary(diaryResponse);
+            return ContentReviewResponseDTO.fromDiary(diaryResponse, userMapper.userToUserPreviewDto(entry.getUser()));
         }
 
         DroppedEntry entry = droppedById.get(key.getReviewId());
         return new ContentReviewResponseDTO(
                 entry.getId(), ContentReviewSource.DROPPED, entry.getUser().getId(),
+                userMapper.userToUserPreviewDto(entry.getUser()),
                 contentMapper.contentToContentRefDto(entry.getContent()), entry.getComment(), null, null, null, null,
                 null, null, null, entry.getCreatedAt(), entry.getUpdatedAt(), entry.getLikesCount(),
                 commentCountsByDroppedId.getOrDefault(entry.getId(), 0L),

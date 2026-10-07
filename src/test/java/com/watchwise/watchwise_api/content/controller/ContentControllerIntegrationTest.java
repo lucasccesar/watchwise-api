@@ -23,6 +23,11 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.entity.UserContentPoster;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
+import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
+import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -89,6 +94,12 @@ class ContentControllerIntegrationTest {
     private UserContentPosterRepository userContentPosterRepository;
 
     @Autowired
+    private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private DroppedEntryRepository droppedEntryRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -103,6 +114,8 @@ class ContentControllerIntegrationTest {
     @BeforeEach
     void setUp() throws Exception {
         userContentPosterRepository.deleteAll();
+        diaryEntryRepository.deleteAll();
+        droppedEntryRepository.deleteAll();
         contentRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
@@ -620,6 +633,42 @@ class ContentControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getPage] Should Count Only Visible Diary And Dropped Reviews - When Visible And Hidden Reviews Exist")
+    void shouldCountOnlyVisibleDiaryAndDroppedReviewsWhenVisibleAndHiddenReviewsExist() throws Exception {
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("603").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        User publicReviewer = registerUserEntity("visiblepagereviewer", true);
+        User privateReviewer = registerUserEntity("hiddenpagereviewer", false);
+        LocalDateTime now = LocalDateTime.now();
+
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(publicReviewer).content(content).watchNumber(1).comment("Visible diary")
+                .createdAt(now).updatedAt(now).build());
+        diaryEntryRepository.save(DiaryEntry.builder()
+                .user(privateReviewer).content(content).watchNumber(1).comment("Hidden diary")
+                .createdAt(now.plusSeconds(1)).updatedAt(now.plusSeconds(1)).build());
+        droppedEntryRepository.save(DroppedEntry.builder()
+                .user(publicReviewer).content(content).type(ContentType.MOVIE).comment("Visible dropped")
+                .createdAt(now.plusSeconds(2)).updatedAt(now.plusSeconds(2)).build());
+        droppedEntryRepository.save(DroppedEntry.builder()
+                .user(privateReviewer).content(content).type(ContentType.MOVIE).comment("Hidden dropped")
+                .createdAt(now.plusSeconds(3)).updatedAt(now.plusSeconds(3)).build());
+
+        when(tmdbClient.getMovieFullDetails("603", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbMovieFullDetails(
+                        "603", "The Matrix", "The Matrix", "A hacker discovers reality is a simulation",
+                        "/poster.jpg", "/backdrop.jpg", "1999-03-31", 136,
+                        List.of(), List.of(), null, null, null, null, null, null, null, null, null)));
+        when(tmdbClient.getMovieReleaseDates("603", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieReleaseDates("603", null)));
+
+        mockMvc.perform(get("/contents/" + content.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.visibleReviewsCount").value(2));
+    }
+
+    @Test
     @DisplayName("[getPage] Should Compose A Season Page Without A Persisted Series Reference")
     void shouldComposeASeasonPageWithoutAPersistedSeriesReference() throws Exception {
         Content season = contentRepository.save(Content.builder()
@@ -871,5 +920,13 @@ class ContentControllerIntegrationTest {
         return post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
+    }
+
+    private User registerUserEntity(String username, boolean isProfilePublic) throws Exception {
+        mockMvc.perform(registerRequest(username, username + "@email.com"))
+                .andExpect(status().isCreated());
+        User user = userRepository.findByUsernameIgnoreCase(username).orElseThrow();
+        user.setIsProfilePublic(isProfilePublic);
+        return userRepository.save(user);
     }
 }

@@ -63,6 +63,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
@@ -1096,8 +1097,109 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(2))
                 .andExpect(jsonPath("$.content[0].source").value("DROPPED"))
                 .andExpect(jsonPath("$.content[0].comment").value("Stopped halfway"))
+                .andExpect(jsonPath("$.content[0].reviewer.id").value(reviewer.id().toString()))
+                .andExpect(jsonPath("$.content[0].reviewer.username").value("reviewscontentreviewer"))
                 .andExpect(jsonPath("$.content[1].source").value("DIARY"))
-                .andExpect(jsonPath("$.content[1].comment").value("Great movie"));
+                .andExpect(jsonPath("$.content[1].comment").value("Great movie"))
+                .andExpect(jsonPath("$.content[1].reviewer.id").value(reviewer.id().toString()));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return Page Two With Correct Metadata - When Page Size Is Two")
+    void shouldReturnPageTwoWithCorrectMetadataWhenPageSizeIsTwo() throws Exception {
+        RegisteredUser viewer = registerUser("reviewspaginationviewer");
+        RegisteredUser reviewer = registerUser("reviewspaginationreviewer");
+        User reviewerEntity = userRepository.findById(reviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+        LocalDateTime createdAt = LocalDateTime.of(2026, 10, 7, 12, 0);
+
+        for (int watchNumber = 1; watchNumber <= 3; watchNumber++) {
+            DiaryEntry entry = persistEntry(reviewerEntity, fightClub, null, watchNumber);
+            entry.setComment("Review " + watchNumber);
+            entry.setCreatedAt(createdAt.minusHours(watchNumber));
+            entry.setUpdatedAt(entry.getCreatedAt());
+            diaryEntryRepository.save(entry);
+        }
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews")
+                        .param("page", "2")
+                        .param("size", "2")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].comment").value("Review 3"));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Break Popular Ties By Review Id - When Likes And Timestamps Match")
+    void shouldBreakPopularTiesByReviewIdWhenLikesAndTimestampsMatch() throws Exception {
+        RegisteredUser viewer = registerUser("reviewspopulartieviewer");
+        RegisteredUser diaryReviewer = registerUser("reviewspopulartiediary");
+        RegisteredUser droppedReviewer = registerUser("reviewspopulartiedropped");
+        User diaryReviewerEntity = userRepository.findById(diaryReviewer.id()).orElseThrow();
+        User droppedReviewerEntity = userRepository.findById(droppedReviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+        LocalDateTime timestamp = LocalDateTime.of(2026, 10, 7, 12, 0);
+
+        DiaryEntry diaryReview = persistEntry(diaryReviewerEntity, fightClub);
+        diaryReview.setComment("Diary tie");
+        diaryReview.setLikesCount(4);
+        diaryReview.setCreatedAt(timestamp);
+        diaryReview.setUpdatedAt(timestamp);
+        diaryEntryRepository.saveAndFlush(diaryReview);
+
+        DroppedEntry droppedReview = droppedEntryRepository.saveAndFlush(DroppedEntry.builder()
+                .user(droppedReviewerEntity)
+                .content(fightClub)
+                .type(ContentType.MOVIE)
+                .comment("Dropped tie")
+                .likesCount(4)
+                .createdAt(timestamp)
+                .updatedAt(timestamp)
+                .build());
+        String firstReviewId = Stream.of(diaryReview.getId(), droppedReview.getId())
+                .map(UUID::toString)
+                .max(String::compareTo)
+                .orElseThrow();
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews")
+                        .param("sort", "POPULAR")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].id").value(firstReviewId))
+                .andExpect(jsonPath("$.content[0].likesCount").value(4));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Return Only Accepted Followed Authors - When Sort Is Following")
+    void shouldReturnOnlyAcceptedFollowedAuthorsWhenSortIsFollowing() throws Exception {
+        RegisteredUser viewer = registerUser("reviewsfollowingviewer");
+        RegisteredUser followedReviewer = registerUser("reviewsfollowingaccepted", false);
+        RegisteredUser publicUnfollowedReviewer = registerUser("reviewsfollowingpublic");
+        persistFollow(viewer.id(), followedReviewer.id(), FollowStatus.ACCEPTED);
+        User followedReviewerEntity = userRepository.findById(followedReviewer.id()).orElseThrow();
+        User publicReviewerEntity = userRepository.findById(publicUnfollowedReviewer.id()).orElseThrow();
+        Content fightClub = persistContent("550", ContentType.MOVIE);
+
+        DiaryEntry followedReview = persistEntry(followedReviewerEntity, fightClub);
+        followedReview.setComment("Followed review");
+        diaryEntryRepository.save(followedReview);
+        DiaryEntry publicReview = persistEntry(publicReviewerEntity, fightClub);
+        publicReview.setComment("Public review");
+        diaryEntryRepository.save(publicReview);
+
+        mockMvc.perform(get("/contents/" + fightClub.getId() + "/reviews")
+                        .param("sort", "FOLLOWING")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].comment").value("Followed review"));
     }
 
     @Test
