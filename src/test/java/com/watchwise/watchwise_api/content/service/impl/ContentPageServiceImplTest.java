@@ -234,6 +234,28 @@ class ContentPageServiceImplTest {
         assertThat(result.metadata().crewInherited()).isTrue();
     }
 
+    @Test
+    @DisplayName("[getPage] Should Return Empty Parent Navigation Without Creating Missing Parent")
+    void shouldReturnEmptyParentNavigationWithoutCreatingMissingParent() {
+        UUID episodeId = UUID.randomUUID();
+        Content episode = content(ContentType.EPISODE, episodeId, null, "1399", 2, 3);
+        ContentDetailsDTO episodeDetails = details(episodeId, ContentType.EPISODE, "/episode-still.jpg");
+        ContentPageSectionsDTO sections = new ContentPageSectionsDTO(List.of(), List.of(), List.of());
+        ContentCoordinate coordinate = ContentCoordinate.from(episode);
+        stubCommonPageReads(episode, episodeDetails, coordinate);
+        when(contentChildCardAssembler.assembleSections(episodeDetails, null, coordinate, VIEWER_ID))
+                .thenReturn(sections);
+        when(contentChildCardAssembler.assembleNavigation(episodeDetails, null, coordinate, VIEWER_ID))
+                .thenReturn(null);
+
+        ContentPageDTO result = contentPageService.getPage(episodeId, VIEWER_ID);
+
+        assertThat(result.navigation()).isNull();
+        assertThat(result.sections()).isEqualTo(sections);
+        verify(contentRepository, org.mockito.Mockito.never())
+                .save(org.mockito.ArgumentMatchers.any(Content.class));
+    }
+
     private void stubCommonPageReads(
             Content content, ContentDetailsDTO details, ContentCoordinate coordinate) {
         when(contentRepository.findById(content.getId())).thenReturn(Optional.of(content));
