@@ -78,6 +78,12 @@ class DiaryEntryMapperTest {
         assertThat(result.updatedAt()).isEqualTo(updatedAt);
         assertThat(result.likesCount()).isEqualTo(5);
         assertThat(result.likedByMe()).isTrue();
+        assertThat(result.commentsCount()).isZero();
+
+        DiaryEntryResponseDTO enriched = result.withCommentsCount(4)
+                .withCustomPosterUrl("https://image.tmdb.org/t/p/w342/custom.png");
+        assertThat(enriched.commentsCount()).isEqualTo(4);
+        assertThat(enriched.customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/custom.png");
     }
 
     @Test

@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -152,6 +153,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private LikeService likeService;
+
+    @Mock
+    private CommentPreviewAssembler commentPreviewAssembler;
 
     @Mock
     private WatchCompanionRepository watchCompanionRepository;

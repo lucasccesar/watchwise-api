@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.service.impl;
 
+import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
@@ -107,6 +108,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final WatchlistEntryService watchlistEntryService;
     private final DroppedEntryRepository droppedEntryRepository;
     private final LikeService likeService;
+    private final CommentPreviewAssembler commentPreviewAssembler;
     private final WatchCompanionRepository watchCompanionRepository;
     private final PageRequestFactory pageRequestFactory;
     private final TmdbClient tmdbClient;
@@ -151,12 +153,15 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         List<UUID> entryIds = entries.getContent().stream().map(DiaryEntry::getId).toList();
         Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
+        Map<UUID, Long> commentCountsByEntryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(entryIds))
+                .orElseGet(Map::of);
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(entryIds);
         Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId, entries.getContent());
 
         return entries.map(entry -> enrichDiaryEntryResponse(
                 entry,
                 likedEntryIds.contains(entry.getId()),
+                commentCountsByEntryId.getOrDefault(entry.getId(), 0L),
                 watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
                 customPosterByContentId.get(entry.getContent().getId())));
     }
@@ -514,6 +519,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         Set<UUID> likedDiaryIds = likeService.getLikedDiaryEntryIds(viewerId, diaryIds);
         Set<UUID> likedDroppedIds = likeService.getLikedDroppedEntryIds(viewerId, droppedIds);
+        Map<UUID, Long> commentCountsByDiaryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(diaryIds))
+                .orElseGet(Map::of);
+        Map<UUID, Long> commentCountsByDroppedId = Optional.ofNullable(commentPreviewAssembler.countDroppedEntries(droppedIds))
+                .orElseGet(Map::of);
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(diaryIds);
         List<UserContentPosterService.UserContentPosterKey> posterKeys = diaryIds.stream()
                 .map(diaryById::get)
@@ -527,7 +536,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         List<ContentReviewResponseDTO> reviews = reviewKeys.getContent().stream()
                 .map(key -> toContentReviewResponse(key, diaryById, droppedById, likedDiaryIds, likedDroppedIds,
-                        watchedWithByEntryId, customPosterByAuthorAndContent))
+                        commentCountsByDiaryId, commentCountsByDroppedId, watchedWithByEntryId,
+                        customPosterByAuthorAndContent))
                 .toList();
 
         return new PageImpl<>(reviews, pageRequest, reviewKeys.getTotalElements());
@@ -539,6 +549,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             Map<UUID, DroppedEntry> droppedById,
             Set<UUID> likedDiaryIds,
             Set<UUID> likedDroppedIds,
+            Map<UUID, Long> commentCountsByDiaryId,
+            Map<UUID, Long> commentCountsByDroppedId,
             Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId,
             Map<UserContentPosterService.UserContentPosterKey, String> customPosterByAuthorAndContent) {
         if (ContentReviewSource.DIARY.name().equals(key.getSource())) {
@@ -548,6 +560,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             DiaryEntryResponseDTO diaryResponse = enrichDiaryEntryResponse(
                     entry,
                     likedDiaryIds.contains(entry.getId()),
+                    commentCountsByDiaryId.getOrDefault(entry.getId(), 0L),
                     watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
                     customPosterByAuthorAndContent.get(posterKey));
             return ContentReviewResponseDTO.fromDiary(diaryResponse);
@@ -558,6 +571,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 entry.getId(), ContentReviewSource.DROPPED, entry.getUser().getId(),
                 contentMapper.contentToContentRefDto(entry.getContent()), entry.getComment(), null, null, null, null,
                 null, null, null, entry.getCreatedAt(), entry.getUpdatedAt(), entry.getLikesCount(),
+                commentCountsByDroppedId.getOrDefault(entry.getId(), 0L),
                 likedDroppedIds.contains(entry.getId()), List.of());
     }
 
@@ -802,9 +816,16 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private DiaryEntryResponseDTO enrichDiaryEntryResponse(
-            DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith, String customPosterUrl) {
+            DiaryEntry entry, boolean likedByMe, long commentsCount,
+            List<UserPreviewDTO> watchedWith, String customPosterUrl) {
         return diaryEntryMapper.diaryEntryToResponseDto(entry, likedByMe, watchedWith)
+                .withCommentsCount(commentsCount)
                 .withCustomPosterUrl(customPosterUrl);
+    }
+
+    private DiaryEntryResponseDTO enrichDiaryEntryResponse(
+            DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith, String customPosterUrl) {
+        return enrichDiaryEntryResponse(entry, likedByMe, 0L, watchedWith, customPosterUrl);
     }
 
     private Map<UUID, String> loadPostersForOwner(UUID ownerId, Collection<DiaryEntry> entries) {

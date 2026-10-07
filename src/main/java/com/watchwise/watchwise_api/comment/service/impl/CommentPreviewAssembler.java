@@ -30,6 +30,20 @@ public class CommentPreviewAssembler {
     private final LikeService likeService;
     private final CommentMapper commentMapper;
 
+    public Map<UUID, Long> countDiaryEntries(Collection<UUID> diaryEntryIds) {
+        return countOnly(diaryEntryIds,
+                ids -> commentRepository.countByDiaryEntryIdIn(ids).stream()
+                        .collect(Collectors.toMap(CommentRepository.DiaryCommentCount::getDiaryEntryId,
+                                CommentRepository.DiaryCommentCount::getCount)));
+    }
+
+    public Map<UUID, Long> countDroppedEntries(Collection<UUID> droppedEntryIds) {
+        return countOnly(droppedEntryIds,
+                ids -> commentRepository.countByDroppedEntryIdIn(ids).stream()
+                        .collect(Collectors.toMap(CommentRepository.DroppedCommentCount::getDroppedEntryId,
+                                CommentRepository.DroppedCommentCount::getCount)));
+    }
+
     public Map<UUID, CommentPreviewData> assembleDiaryEntryPreviews(
             Collection<UUID> diaryEntryIds, UUID viewerId) {
         return assemble(diaryEntryIds,
@@ -113,5 +127,20 @@ public class CommentPreviewAssembler {
                     new CommentPreviewData(countsByTargetId.getOrDefault(targetId, 0L), recentComments));
         }
         return previewsByTargetId;
+    }
+
+    private Map<UUID, Long> countOnly(
+            Collection<UUID> targetIds,
+            Function<Collection<UUID>, Map<UUID, Long>> countLoader) {
+        if (targetIds.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<UUID, Long> countsByTargetId = countLoader.apply(targetIds);
+        Map<UUID, Long> result = new LinkedHashMap<>();
+        for (UUID targetId : targetIds) {
+            result.put(targetId, countsByTargetId.getOrDefault(targetId, 0L));
+        }
+        return result;
     }
 }

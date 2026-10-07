@@ -59,6 +59,40 @@ class CommentPreviewAssemblerTest {
     }
 
     @Test
+    void countsDiaryEntriesWithoutLoadingRecentCommentsOrLikes() {
+        UUID firstTargetId = UUID.randomUUID();
+        UUID secondTargetId = UUID.randomUUID();
+        List<UUID> targetIds = List.of(firstTargetId, secondTargetId);
+
+        CommentRepository.DiaryCommentCount firstCount = diaryCount(firstTargetId, 3);
+        when(commentRepository.countByDiaryEntryIdIn(targetIds)).thenReturn(List.of(firstCount));
+
+        assertThat(assembler.countDiaryEntries(targetIds))
+                .containsEntry(firstTargetId, 3L)
+                .containsEntry(secondTargetId, 0L);
+
+        verify(commentRepository).countByDiaryEntryIdIn(targetIds);
+        verify(commentRepository, never()).findRecentByDiaryEntryIdIn(any());
+        verifyNoInteractions(likeService, commentMapper);
+    }
+
+    @Test
+    void countsDroppedEntriesWithoutLoadingRecentCommentsOrLikes() {
+        UUID firstTargetId = UUID.randomUUID();
+        List<UUID> targetIds = List.of(firstTargetId);
+
+        CommentRepository.DroppedCommentCount firstCount = droppedCount(firstTargetId, 4);
+        when(commentRepository.countByDroppedEntryIdIn(targetIds)).thenReturn(List.of(firstCount));
+
+        assertThat(assembler.countDroppedEntries(targetIds))
+                .containsEntry(firstTargetId, 4L);
+
+        verify(commentRepository).countByDroppedEntryIdIn(targetIds);
+        verify(commentRepository, never()).findRecentByDroppedEntryIdIn(any());
+        verifyNoInteractions(likeService, commentMapper);
+    }
+
+    @Test
     void returnsZeroCountAndEmptyCommentsForTargetsWithoutComments() {
         UUID viewerId = UUID.randomUUID();
         UUID diaryEntryId = UUID.randomUUID();
