@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentNavigationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPageMetadataDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageSectionsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -12,6 +13,7 @@ import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentDetailsService;
 import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
+import com.watchwise.watchwise_api.content.service.ContentPageParentDetailsService;
 import com.watchwise.watchwise_api.content.service.ContentPageService;
 import com.watchwise.watchwise_api.content.service.ContentPageStatsService;
 import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
@@ -38,6 +40,7 @@ public class ContentPageServiceImpl implements ContentPageService {
     private final ContentPageStatsService contentPageStatsService;
     private final ContentViewerStateService contentViewerStateService;
     private final ContentChildCardAssembler contentChildCardAssembler;
+    private final ContentPageParentDetailsService contentPageParentDetailsService;
 
     @Override
     public ContentPageDTO getPage(UUID contentId, UUID viewerId) {
@@ -53,17 +56,31 @@ public class ContentPageServiceImpl implements ContentPageService {
                 .statesByCoordinate()
                 .get(rootCoordinate);
 
-        ContentDetailsDTO parentSeriesDetails = parentSeriesDetails(content, viewerId);
-        ContentDetailsDTO parentSeasonDetails = parentSeasonDetails(content, viewerId);
+        ContentDetailsDTO parentSeriesDetails = contentPageParentDetailsService.resolveSeries(
+                content, viewerId);
+        ContentDetailsDTO parentSeasonDetails = contentPageParentDetailsService.resolveSeason(content, viewerId);
         ContentPageSectionsDTO sections = contentChildCardAssembler.assembleSections(
                 details, parentSeriesDetails, rootCoordinate, viewerId);
-        ContentNavigationDTO navigation = contentChildCardAssembler.assembleNavigation(
-                details, parentSeasonDetails, rootCoordinate, viewerId);
+        ContentNavigationDTO navigation = content.getType() == ContentType.EPISODE
+                && parentSeasonDetails == null
+                ? null
+                : contentChildCardAssembler.assembleNavigation(
+                        details, parentSeasonDetails, rootCoordinate, viewerId);
+
+        ContentPageMetadataDTO metadata = contentPageMetadataService.getMetadata(
+                content, viewer.getPreferredLanguage(), viewer.getPreferredRegion());
+        if (content.getType() == ContentType.EPISODE) {
+            String presentationPosterPath = parentSeasonDetails != null
+                    && hasText(parentSeasonDetails.posterPath())
+                    ? parentSeasonDetails.posterPath()
+                    : details.posterPath();
+            metadata = metadata.withEpisodePresentation(
+                    presentationPosterPath, metadata.presentationCrew());
+        }
 
         return new ContentPageDTO(
                 details,
-                contentPageMetadataService.getMetadata(
-                        content, viewer.getPreferredLanguage(), viewer.getPreferredRegion()),
+                metadata,
                 contentPageStatsService.getStats(contentId),
                 visibleReviewsCount(contentId, viewerId),
                 viewerState,
@@ -71,28 +88,13 @@ public class ContentPageServiceImpl implements ContentPageService {
                 sections);
     }
 
-    private ContentDetailsDTO parentSeriesDetails(Content content, UUID viewerId) {
-        if (content.getType() != ContentType.SEASON) {
-            return null;
-        }
-        return contentRepository.findByTmdbIdAndType(content.getSeriesTmdbId(), ContentType.SERIES)
-                .map(parent -> contentDetailsService.getDetails(parent.getId(), viewerId))
-                .orElse(null);
-    }
-
-    private ContentDetailsDTO parentSeasonDetails(Content content, UUID viewerId) {
-        if (content.getType() != ContentType.EPISODE) {
-            return null;
-        }
-        return contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
-                        content.getSeriesTmdbId(), content.getSeasonNumber(), null, ContentType.SEASON)
-                .map(parent -> contentDetailsService.getDetails(parent.getId(), viewerId))
-                .orElse(null);
-    }
-
     private long visibleReviewsCount(UUID contentId, UUID viewerId) {
         return diaryEntryRepository.findContentReviewKeys(
                         contentId, viewerId, PageRequest.of(0, 1))
                 .getTotalElements();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewJob;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -131,7 +134,7 @@ class ContentPageMetadataServiceImplTest {
                 .build();
         when(tmdbClient.getEpisodeFullDetails("1396", 1, 2, "en-US"))
                 .thenReturn(found(new TmdbEpisodeFullDetails(62086, "Cat's in the Bag...", null,
-                        "2008-02-17", 2, 1, 47, null, List.of(),
+                        "2008-02-17", 2, 1, 47, "/episode-still.jpg", List.of(),
                         new TmdbExternalIds("tt1234567", null, null, null))));
         when(tmdbClient.getTvFullDetails("1396", "en-US"))
                 .thenReturn(found(tvDetails("en", "https://breakingbad.example", "tt0903747")));
@@ -148,6 +151,10 @@ class ContentPageMetadataServiceImplTest {
         assertThat(result.imdbUrl()).isEqualTo("https://www.imdb.com/title/tt1234567");
         assertThat(result.watchProviders()).extracting(provider -> provider.providerName())
                 .containsExactly("Netflix", "Google Play");
+        assertThat(result.presentationPosterPath()).isEqualTo("/episode-still.jpg");
+        assertThat(result.presentationCrew()).extracting(crew -> crew.name())
+                .containsExactly("Vince Gilligan");
+        assertThat(result.crewInherited()).isTrue();
     }
 
     @Test
@@ -202,7 +209,12 @@ class ContentPageMetadataServiceImplTest {
     private TmdbTvFullDetails tvDetails(String language, String homepage, String imdbId) {
         return new TmdbTvFullDetails(
                 "1396", "Breaking Bad", "Breaking Bad", language, "A story", null, null,
-                "2008-01-20", List.of(47), List.of(), List.of(), List.of(), List.of(), null, null,
+                "2008-01-20", List.of(47), List.of(), List.of(), List.of(), List.of(), null,
+                new TmdbAggregateCredits(
+                        List.of(),
+                        List.of(new TmdbAggregateCrewMember(
+                                42, "Vince Gilligan", "/vince.jpg",
+                                List.of(new TmdbAggregateCrewJob("Executive Producer"))))),
                 watchProviders("US"), null, 5, 62, List.of(), null, "Ended",
                 imdbId == null ? null : new TmdbExternalIds(imdbId, null, null, null), List.of(), homepage);
     }

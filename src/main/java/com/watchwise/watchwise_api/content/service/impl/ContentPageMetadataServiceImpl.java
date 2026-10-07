@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewJob;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
@@ -16,6 +19,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbWatchProviders;
 import com.watchwise.watchwise_api.content.dto.ContentPageMetadataDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageWatchProviderDTO;
+import com.watchwise.watchwise_api.content.dto.CrewMemberDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.service.ContentPageMetadataService;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +38,9 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
     private static final String TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/";
     private static final String TMDB_TV_URL = "https://www.themoviedb.org/tv/";
     private static final String IMDB_TITLE_URL = "https://www.imdb.com/title/";
+    private static final Set<String> PRESENTATION_CREW_JOBS = Set.of(
+            "Director", "Screenplay", "Executive Producer", "Production Manager",
+            "First Assistant Director", "Director of Photography", "Supervising Art Director");
 
     private final TmdbClient tmdbClient;
 
@@ -104,7 +112,8 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
                 TMDB_TV_URL + content.getSeriesTmdbId()
                         + "/season/" + content.getSeasonNumber()
                         + "/episode/" + content.getEpisodeNumber(),
-                episode.externalIds());
+                episode.externalIds())
+                .withEpisodePresentation(episode.stillPath(), presentationCrew(series.aggregateCredits()));
     }
 
     private TmdbTvFullDetails tvDetails(String tmdbId, String language) {
@@ -193,6 +202,31 @@ public class ContentPageMetadataServiceImpl implements ContentPageMetadataServic
                 .map(provider -> new ContentPageWatchProviderDTO(
                         provider.providerId(), provider.providerName(), provider.logoPath(), type, watchUrl))
                 .forEach(target::add);
+    }
+
+    private List<CrewMemberDTO> presentationCrew(TmdbAggregateCredits credits) {
+        if (credits == null || credits.crew() == null) {
+            return List.of();
+        }
+        return credits.crew().stream()
+                .filter(Objects::nonNull)
+                .map(this::presentationCrewMember)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private CrewMemberDTO presentationCrewMember(TmdbAggregateCrewMember member) {
+        List<String> jobs = member.jobs() == null
+                ? List.of()
+                : member.jobs().stream()
+                        .filter(Objects::nonNull)
+                        .map(TmdbAggregateCrewJob::job)
+                        .filter(Objects::nonNull)
+                        .filter(PRESENTATION_CREW_JOBS::contains)
+                        .toList();
+        return jobs.isEmpty()
+                ? null
+                : new CrewMemberDTO(member.id(), member.name(), member.profilePath(), jobs);
     }
 
     private TmdbWatchProviders providersForSeasonOrSeries(

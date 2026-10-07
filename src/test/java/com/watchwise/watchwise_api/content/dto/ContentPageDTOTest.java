@@ -43,7 +43,8 @@ class ContentPageDTOTest {
         assertThat(fieldNames(json)).containsExactlyInAnyOrder(
                 "details", "metadata", "stats", "visibleReviewsCount", "viewerState", "navigation", "sections");
         assertThat(fieldNames(json.get("metadata"))).containsExactlyInAnyOrder(
-                "originalLanguage", "certification", "homepageUrl", "tmdbUrl", "imdbUrl", "watchProviders");
+                "originalLanguage", "certification", "homepageUrl", "tmdbUrl", "imdbUrl", "watchProviders",
+                "presentationPosterPath", "presentationCrew", "crewInherited");
         assertThat(fieldNames(json.get("stats"))).containsExactlyInAnyOrder(
                 "contentId", "averageScore", "ratingsCount", "ratingsDistribution", "playsCount", "commentsCount");
         assertThat(fieldNames(json.get("viewerState"))).containsExactlyInAnyOrder(
@@ -105,6 +106,8 @@ class ContentPageDTOTest {
                 "countries", "cast", "guestStars", "creators", "watchProviders", "seasons", "episodes",
                 "recentEpisodes", "budget", "revenue", "productionCompanies", "crew", "videos", "imdb_id",
                 "facebook_id", "instagram_id", "twitter_id", "customPosterUrl", "parentTitle", "parentReleaseYear");
+        assertThat(fieldNames(details)).doesNotContain(
+                "presentationPosterPath", "presentationCrew", "crewInherited");
         assertThat(fieldNames(stats)).containsExactlyInAnyOrder(
                 "contentId", "averageScore", "playsCount", "reviewsCount", "commentsCount");
     }

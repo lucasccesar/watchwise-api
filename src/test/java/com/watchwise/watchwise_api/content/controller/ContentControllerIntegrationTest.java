@@ -5,6 +5,9 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewJob;
+import com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCrewMember;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbExternalIds;
@@ -45,8 +48,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -612,6 +617,131 @@ class ContentControllerIntegrationTest {
                 .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty());
 
         assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Compose A Season Page Without A Persisted Series Reference")
+    void shouldComposeASeasonPageWithoutAPersistedSeriesReference() throws Exception {
+        Content season = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).type(ContentType.SEASON)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSeasonFullDetails(
+                        101, "Season 1", null, "/season.jpg", "2008-01-20", 1,
+                        List.of(new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 45, "/still.jpg", null)),
+                        null, null)));
+        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(
+                        "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                        List.of(), List.of(), null,
+                        List.of(new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 1, "/season.jpg")),
+                        null, null, null, null, 1, 1, null, null, "Ended", null)));
+        when(tmdbClient.getTvContentRatings("1399", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + season.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.details.type").value("SEASON"))
+                .andExpect(jsonPath("$.sections.seasons").isEmpty())
+                .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty())
+                .andExpect(jsonPath("$.sections.episodes[0].seriesTmdbId").value("1399"))
+                .andExpect(jsonPath("$.sections.episodes[0].episodeNumber").value(1))
+                .andExpect(jsonPath("$.navigation").value(nullValue()));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+        assertThat(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Return Root Episode Data Without A Persisted Season Reference")
+    void shouldReturnRootEpisodeDataWithoutAPersistedSeasonReference() throws Exception {
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(2).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        when(tmdbClient.getEpisodeFullDetails("1399", 1, 2, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbEpisodeFullDetails(
+                        201, "Cat's in the Bag...", "Overview", "2008-01-27", 2, 1, 48,
+                        "/episode-still.jpg", List.of())));
+        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbTvFullDetails(
+                        "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                        List.of(), List.of(), null, List.of(), null,
+                        new TmdbAggregateCredits(
+                                List.of(),
+                                List.of(new TmdbAggregateCrewMember(
+                                        42, "Vince Gilligan", "/vince.jpg",
+                                        List.of(new TmdbAggregateCrewJob("Executive Producer"))))),
+                        null, null, 1, 3, null, null, "Ended", null)));
+        when(tmdbClient.getTvContentRatings("1399", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + episode.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metadata.presentationPosterPath").value("/episode-still.jpg"))
+                .andExpect(jsonPath("$.metadata.presentationCrew[0].name").value("Vince Gilligan"))
+                .andExpect(jsonPath("$.metadata.crewInherited").value(true))
+                .andExpect(jsonPath("$.details.parentTitle").value("Breaking Bad"))
+                .andExpect(jsonPath("$.sections.seasons").isEmpty())
+                .andExpect(jsonPath("$.sections.episodes").isEmpty())
+                .andExpect(jsonPath("$.sections.recentEpisodes").isEmpty())
+                .andExpect(jsonPath("$.navigation").value(nullValue()));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+        assertThat(contentRepository.findByTmdbIdAndType("1399", ContentType.SERIES)).isEmpty();
+        assertThat(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "1399", 1, null, ContentType.SEASON)).isEmpty();
+        verify(tmdbClient, never()).getSeasonFullDetails("1399", 1, "en-US");
+    }
+
+    @Test
+    @DisplayName("[getPage] Should Compose Episode Presentation From Persisted Season")
+    void shouldComposeEpisodePresentationFromPersistedSeason() throws Exception {
+        Content episode = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).episodeNumber(2).type(ContentType.EPISODE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content season = contentRepository.save(Content.builder()
+                .seriesTmdbId("1399").seasonNumber(1).type(ContentType.SEASON)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        TmdbTvFullDetails seriesDetails = new TmdbTvFullDetails(
+                "1399", "Breaking Bad", "Breaking Bad", null, null, null, "2008-01-20", null,
+                List.of(), List.of(), null, List.of(), null,
+                new TmdbAggregateCredits(
+                        List.of(),
+                        List.of(new TmdbAggregateCrewMember(
+                                42, "Vince Gilligan", "/vince.jpg",
+                                List.of(new TmdbAggregateCrewJob("Executive Producer"))))),
+                null, null, 1, 2, null, null, "Ended", null);
+        when(tmdbClient.getEpisodeFullDetails("1399", 1, 2, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbEpisodeFullDetails(
+                        201, "Cat's in the Bag...", "Overview", "2008-01-27", 2, 1, 48,
+                        "/episode-still.jpg", List.of())));
+        when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
+                        101, "Season 1", null, "/season-poster.jpg", "2008-01-20", 2,
+                        List.of(
+                                new TmdbEpisodeSummary(1, "Pilot", null, "2008-01-20", 45, "/pilot-still.jpg", null),
+                                new TmdbEpisodeSummary(2, "Cat's in the Bag...", null, "2008-01-27", 48,
+                                        "/episode-still.jpg", null)),
+                        null, null)));
+        when(tmdbClient.getTvFullDetails("1399", "en-US")).thenReturn(new TmdbLookupResult.Found<>(seriesDetails));
+        when(tmdbClient.getTvContentRatings("1399", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvContentRatings("1399", null)));
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/contents/" + episode.getId() + "/page").cookie(accessTokenCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.metadata.presentationPosterPath").value("/season-poster.jpg"))
+                .andExpect(jsonPath("$.metadata.presentationCrew[0].name").value("Vince Gilligan"))
+                .andExpect(jsonPath("$.metadata.crewInherited").value(true))
+                .andExpect(jsonPath("$.details.posterPath").value("/episode-still.jpg"))
+                .andExpect(jsonPath("$.details.crew[0].name").value("Vince Gilligan"))
+                .andExpect(jsonPath("$.navigation.episodeNumber").value(2));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+        assertThat(contentRepository.findById(season.getId())).isPresent();
     }
 
     @Test
