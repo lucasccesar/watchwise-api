@@ -15,6 +15,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -46,9 +47,57 @@ public class TmdbClient {
     private final Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache;
     private final Cache<String, TmdbLookupResult<TmdbCardMetadata>> tmdbCardMetadataCache;
     private final ConcurrentMap<TmdbCardMetadataFlightKey,
-            CompletableFuture<TmdbLookupResult<TmdbCardMetadata>>> cardMetadataFlights = new ConcurrentHashMap<>();
+            CardMetadataFlight> cardMetadataFlights = new ConcurrentHashMap<>();
 
-    private record TmdbCardMetadataFlightKey(TmdbCardMetadataKey key, String language) {
+    static record TmdbCardMetadataFlightKey(TmdbCardMetadataKey key, String language) {
+    }
+
+    static final class CardMetadataFlight {
+
+        private final CompletableFuture<TmdbLookupResult<TmdbCardMetadata>> result = new CompletableFuture<>();
+        private final AtomicInteger references = new AtomicInteger(1);
+        private final AtomicBoolean acceptingWaiters = new AtomicBoolean(true);
+        private final ConcurrentMap<TmdbCardMetadataFlightKey, CardMetadataFlight> flights;
+
+        CardMetadataFlight(ConcurrentMap<TmdbCardMetadataFlightKey, CardMetadataFlight> flights) {
+            this.flights = flights;
+        }
+
+        boolean tryAcquireWaiter(TmdbCardMetadataFlightKey key) {
+            while (acceptingWaiters.get()) {
+                int currentReferences = references.get();
+                if (references.compareAndSet(currentReferences, currentReferences + 1)) {
+                    if (acceptingWaiters.get()) {
+                        return true;
+                    }
+                    release(key);
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        void stopAcceptingWaiters() {
+            acceptingWaiters.set(false);
+        }
+
+        void release(TmdbCardMetadataFlightKey key) {
+            if (references.decrementAndGet() == 0 && !acceptingWaiters.get()) {
+                flights.remove(key, this);
+            }
+        }
+
+        void complete(TmdbLookupResult<TmdbCardMetadata> value) {
+            result.complete(value);
+        }
+
+        void completeExceptionally(Throwable failure) {
+            result.completeExceptionally(failure);
+        }
+
+        TmdbLookupResult<TmdbCardMetadata> awaitResult() {
+            return result.join();
+        }
     }
 
     public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> searchMovies(
@@ -333,11 +382,14 @@ public class TmdbClient {
         }
 
         TmdbCardMetadataFlightKey flightKey = new TmdbCardMetadataFlightKey(key, language);
-        CompletableFuture<TmdbLookupResult<TmdbCardMetadata>> newFlight = new CompletableFuture<>();
-        CompletableFuture<TmdbLookupResult<TmdbCardMetadata>> activeFlight =
+        CardMetadataFlight newFlight = new CardMetadataFlight(cardMetadataFlights);
+        CardMetadataFlight activeFlight =
                 cardMetadataFlights.putIfAbsent(flightKey, newFlight);
         if (activeFlight != null) {
-            return awaitCardMetadataFlight(activeFlight);
+            if (activeFlight.tryAcquireWaiter(flightKey)) {
+                return awaitCardMetadataFlight(flightKey, activeFlight, true);
+            }
+            return awaitCardMetadataFlight(flightKey, activeFlight, false);
         }
 
         try {
@@ -351,14 +403,17 @@ public class TmdbClient {
             newFlight.completeExceptionally(failure);
             throw failure;
         } finally {
-            cardMetadataFlights.remove(flightKey, newFlight);
+            newFlight.stopAcceptingWaiters();
+            newFlight.release(flightKey);
         }
     }
 
     private TmdbLookupResult<TmdbCardMetadata> awaitCardMetadataFlight(
-            CompletableFuture<TmdbLookupResult<TmdbCardMetadata>> flight) {
+            TmdbCardMetadataFlightKey key,
+            CardMetadataFlight flight,
+            boolean releaseReference) {
         try {
-            return flight.join();
+            return flight.awaitResult();
         } catch (CompletionException failure) {
             Throwable cause = failure.getCause();
             if (cause instanceof RuntimeException runtimeException) {
@@ -368,6 +423,10 @@ public class TmdbClient {
                 throw error;
             }
             throw failure;
+        } finally {
+            if (releaseReference) {
+                flight.release(key);
+            }
         }
     }
 

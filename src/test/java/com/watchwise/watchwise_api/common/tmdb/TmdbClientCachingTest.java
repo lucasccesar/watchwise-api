@@ -28,6 +28,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -850,6 +852,32 @@ class TmdbClientCachingTest {
                 "999999996", HttpStatus.SERVICE_UNAVAILABLE, TmdbLookupResult::isUnavailable);
     }
 
+    @Test
+    void shouldRetainFlightUntilRegisteredWaiterObservesResult() {
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.MOVIE, "999999995", null, null, null);
+        TmdbClient.TmdbCardMetadataFlightKey flightKey =
+                new TmdbClient.TmdbCardMetadataFlightKey(key, "en-US");
+        ConcurrentMap<TmdbClient.TmdbCardMetadataFlightKey, TmdbClient.CardMetadataFlight> flights =
+                new ConcurrentHashMap<>();
+        TmdbClient.CardMetadataFlight flight = new TmdbClient.CardMetadataFlight(flights);
+        TmdbLookupResult<TmdbCardMetadata> unavailable = new TmdbLookupResult.Unavailable<>();
+        flights.put(flightKey, flight);
+
+        assertThat(flight.tryAcquireWaiter(flightKey)).isTrue();
+        flight.complete(unavailable);
+        flight.stopAcceptingWaiters();
+        flight.release(flightKey);
+
+        assertThat(flights).containsEntry(flightKey, flight);
+        assertThat(flight.tryAcquireWaiter(flightKey)).isFalse();
+        assertThat(flight.awaitResult()).isSameAs(unavailable);
+
+        flight.release(flightKey);
+
+        assertThat(flights).doesNotContainKey(flightKey);
+    }
+
     private void assertConcurrentCardMetadataFailureIsShared(
             String tmdbId,
             HttpStatus status,
@@ -872,11 +900,15 @@ class TmdbClientCachingTest {
         });
         if (status == HttpStatus.SERVICE_UNAVAILABLE) {
             mockServer.expect(requestTo(requestUrl)).andRespond(withStatus(status));
+            mockServer.expect(requestTo(requestUrl)).andRespond(withSuccess("""
+                    {"id":%s,"title":"Recovered title","poster_path":"/recovered.jpg",
+                     "release_date":"2026-01-02","runtime":101}
+                    """.formatted(tmdbId), MediaType.APPLICATION_JSON));
         }
 
         TmdbCardMetadataKey key = new TmdbCardMetadataKey(
                 TmdbCardMetadataKey.Type.MOVIE, tmdbId, null, null, null);
-        int callers = 8;
+        int callers = 32;
         ExecutorService executor = Executors.newFixedThreadPool(callers);
         List<AtomicReference<Thread>> waitingCallerThreads = new ArrayList<>();
         CountDownLatch waitingCallersStarted = new CountDownLatch(callers - 1);
@@ -910,6 +942,10 @@ class TmdbClientCachingTest {
         }
 
         assertThat(tmdbCardMetadataCache.getIfPresent(key.cacheKey("en-US"))).isNull();
+        if (status == HttpStatus.SERVICE_UNAVAILABLE) {
+            assertThat(tmdbClient.getCardMetadata(key, "en-US").toOptional()).contains(new TmdbCardMetadata(
+                    "Recovered title", "/recovered.jpg", "2026-01-02", 101));
+        }
         mockServer.verify();
     }
 
