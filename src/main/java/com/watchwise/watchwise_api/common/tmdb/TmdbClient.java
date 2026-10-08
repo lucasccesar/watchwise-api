@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
@@ -39,6 +40,7 @@ public class TmdbClient {
     private final Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>>> tmdbTrendingMovieCache;
     private final Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache;
+    private final Cache<String, TmdbLookupResult<TmdbCardMetadata>> tmdbCardMetadataCache;
 
     public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> searchMovies(
             String query, String language, int page) {
@@ -237,8 +239,85 @@ public class TmdbClient {
         return aggregate.id() != null && aggregate.id().matches("\\d+");
     }
 
+    public TmdbLookupResult<TmdbCardMetadata> getCardMetadata(TmdbCardMetadataKey key, String language) {
+        String cacheKey = key.cacheKey(language);
+        return cachedLookup(tmdbCardMetadataCache, cacheKey, () -> loadCardMetadata(key, language));
+    }
+
+    private TmdbLookupResult<TmdbCardMetadata> loadCardMetadata(TmdbCardMetadataKey key, String language) {
+        return switch (key.type()) {
+            case MOVIE -> mapLookup(callWithRetry(() -> tmdbRestClient.get()
+                            .uri(uriBuilder -> uriBuilder.path("/movie/{id}")
+                                    .queryParam("language", language).build(key.tmdbId()))
+                            .retrieve().body(TmdbMovieFullDetails.class), "movie card metadata " + key.tmdbId()),
+                    this::movieCardMetadata);
+            case SERIES -> mapLookup(callWithRetry(() -> tmdbRestClient.get()
+                            .uri(uriBuilder -> uriBuilder.path("/tv/{id}")
+                                    .queryParam("language", language).build(key.tmdbId()))
+                            .retrieve().body(TmdbTvFullDetails.class), "series card metadata " + key.tmdbId()),
+                    this::tvCardMetadata);
+            case SEASON -> mapLookup(callWithRetry(() -> tmdbRestClient.get()
+                            .uri(uriBuilder -> uriBuilder.path("/tv/{seriesId}/season/{seasonNumber}")
+                                    .queryParam("language", language)
+                                    .build(key.seriesTmdbId(), key.seasonNumber()))
+                            .retrieve().body(TmdbSeasonFullDetails.class), "season card metadata "
+                            + key.seriesTmdbId() + "/" + key.seasonNumber()), this::seasonCardMetadata);
+            case EPISODE -> mapLookup(callWithRetry(() -> tmdbRestClient.get()
+                            .uri(uriBuilder -> uriBuilder.path(
+                                            "/tv/{seriesId}/season/{seasonNumber}/episode/{episodeNumber}")
+                                    .queryParam("language", language)
+                                    .build(key.seriesTmdbId(), key.seasonNumber(), key.episodeNumber()))
+                            .retrieve().body(TmdbEpisodeFullDetails.class), "episode card metadata "
+                            + key.seriesTmdbId() + "/" + key.seasonNumber() + "/" + key.episodeNumber()),
+                    this::episodeCardMetadata);
+        };
+    }
+
+    private TmdbCardMetadata movieCardMetadata(TmdbMovieFullDetails details) {
+        return new TmdbCardMetadata(details.title(), details.posterPath(), details.releaseDate(), details.runtime());
+    }
+
+    private TmdbCardMetadata tvCardMetadata(TmdbTvFullDetails details) {
+        Integer runtime = details.episodeRunTime() == null || details.episodeRunTime().isEmpty()
+                ? null
+                : (int) Math.round(details.episodeRunTime().stream().mapToInt(Integer::intValue).average().orElse(0));
+        return new TmdbCardMetadata(details.name(), details.posterPath(), details.firstAirDate(), runtime);
+    }
+
+    private TmdbCardMetadata seasonCardMetadata(TmdbSeasonFullDetails details) {
+        return new TmdbCardMetadata(details.name(), details.posterPath(), details.airDate(), null);
+    }
+
+    private TmdbCardMetadata episodeCardMetadata(TmdbEpisodeFullDetails details) {
+        return new TmdbCardMetadata(details.name(), details.stillPath(), details.airDate(), details.runtime());
+    }
+
+    private <T> TmdbLookupResult<TmdbCardMetadata> mapLookup(
+            TmdbLookupResult<T> result, Function<T, TmdbCardMetadata> mapper) {
+        if (result instanceof TmdbLookupResult.Found<T> found) {
+            return new TmdbLookupResult.Found<>(mapper.apply(found.value()), found.origin());
+        }
+        return result.isNotFound()
+                ? new TmdbLookupResult.NotFound<>()
+                : new TmdbLookupResult.Unavailable<>();
+    }
+
+    private <T> TmdbLookupResult<T> cacheCardMetadata(
+            TmdbCardMetadataKey key,
+            String language,
+            TmdbLookupResult<T> result,
+            Function<T, TmdbCardMetadata> mapper) {
+        if (result instanceof TmdbLookupResult.Found<T> found) {
+            tmdbCardMetadataCache.put(key.cacheKey(language), new TmdbLookupResult.Found<>(
+                    mapper.apply(found.value()), found.origin()));
+        }
+        return result;
+    }
+
     public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {
-        return cachedLookup(tmdbMovieFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.MOVIE, tmdbId, null, null, null);
+        TmdbLookupResult<TmdbMovieFullDetails> result = cachedLookup(tmdbMovieFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/movie/{id}")
                                 .queryParam("append_to_response", "credits,watch/providers,alternative_titles,videos,external_ids,release_dates")
@@ -247,10 +326,13 @@ public class TmdbClient {
                         .retrieve()
                         .body(TmdbMovieFullDetails.class),
                 "movie full details " + tmdbId));
+        return cacheCardMetadata(key, language, result, this::movieCardMetadata);
     }
 
     public TmdbLookupResult<TmdbTvFullDetails> getTvFullDetails(String tmdbId, String language) {
-        return cachedLookup(tmdbTvFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.SERIES, tmdbId, null, null, null);
+        TmdbLookupResult<TmdbTvFullDetails> result = cachedLookup(tmdbTvFullDetailsCache, tmdbId + "|" + language, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri(uriBuilder -> uriBuilder
                                 .path("/tv/{id}")
                                 .queryParam("append_to_response", "aggregate_credits,watch/providers,alternative_titles,videos,external_ids")
@@ -259,10 +341,13 @@ public class TmdbClient {
                         .retrieve()
                         .body(TmdbTvFullDetails.class),
                 "tv full details " + tmdbId));
+        return cacheCardMetadata(key, language, result, this::tvCardMetadata);
     }
 
     public TmdbLookupResult<TmdbSeasonFullDetails> getSeasonFullDetails(String seriesTmdbId, Integer seasonNumber, String language) {
-        return cachedLookup(tmdbSeasonFullDetailsCache, seriesTmdbId + "|" + seasonNumber + "|" + language,
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.SEASON, null, seriesTmdbId, seasonNumber, null);
+        TmdbLookupResult<TmdbSeasonFullDetails> result = cachedLookup(tmdbSeasonFullDetailsCache, seriesTmdbId + "|" + seasonNumber + "|" + language,
                 () -> callWithRetry(() -> tmdbRestClient.get()
                                 .uri(uriBuilder -> uriBuilder
                                         .path("/tv/{seriesId}/season/{seasonNumber}")
@@ -272,6 +357,7 @@ public class TmdbClient {
                                 .retrieve()
                                 .body(TmdbSeasonFullDetails.class),
                         "season full details " + seriesTmdbId + "/" + seasonNumber));
+        return cacheCardMetadata(key, language, result, this::seasonCardMetadata);
     }
 
     public TmdbLookupResult<TmdbMovieReleaseDates> getMovieReleaseDates(String tmdbId, String language) {
@@ -287,7 +373,9 @@ public class TmdbClient {
 
     public TmdbLookupResult<TmdbSeasonFullDetails> getCalendarSeasonDetails(
             String seriesTmdbId, Integer seasonNumber, String language) {
-        return cachedLookup(tmdbCalendarSeasonDetailsCache, seriesTmdbId + "|" + seasonNumber + "|" + language,
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.SEASON, null, seriesTmdbId, seasonNumber, null);
+        TmdbLookupResult<TmdbSeasonFullDetails> result = cachedLookup(tmdbCalendarSeasonDetailsCache, seriesTmdbId + "|" + seasonNumber + "|" + language,
                 () -> callWithRetry(() -> tmdbRestClient.get()
                                 .uri(uriBuilder -> uriBuilder.path("/tv/{seriesId}/season/{seasonNumber}")
                                         .queryParam("language", language)
@@ -295,11 +383,14 @@ public class TmdbClient {
                                 .retrieve()
                                 .body(TmdbSeasonFullDetails.class),
                         "calendar season details " + seriesTmdbId + "/" + seasonNumber));
+        return cacheCardMetadata(key, language, result, this::seasonCardMetadata);
     }
 
     public TmdbLookupResult<TmdbEpisodeFullDetails> getEpisodeFullDetails(
             String seriesTmdbId, Integer seasonNumber, Integer episodeNumber, String language) {
-        return cachedLookup(tmdbEpisodeFullDetailsCache,
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.EPISODE, null, seriesTmdbId, seasonNumber, episodeNumber);
+        TmdbLookupResult<TmdbEpisodeFullDetails> result = cachedLookup(tmdbEpisodeFullDetailsCache,
                 seriesTmdbId + "|" + seasonNumber + "|" + episodeNumber + "|" + language,
                 () -> callWithRetry(() -> tmdbRestClient.get()
                                 .uri(uriBuilder -> uriBuilder
@@ -310,6 +401,7 @@ public class TmdbClient {
                                 .retrieve()
                                 .body(TmdbEpisodeFullDetails.class),
                         "episode full details " + seriesTmdbId + "/" + seasonNumber + "/" + episodeNumber));
+        return cacheCardMetadata(key, language, result, this::episodeCardMetadata);
     }
 
     public TmdbLookupResult<TmdbEpisodeImages> getEpisodeImages(

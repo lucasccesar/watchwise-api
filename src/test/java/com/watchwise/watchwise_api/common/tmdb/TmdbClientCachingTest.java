@@ -99,14 +99,16 @@ class TmdbClientCachingTest {
                 Cache<String, TmdbLookupResult<TmdbPersonAggregate>> tmdbPersonAggregateCache,
                 Cache<String, TmdbLookupResult<TmdbPersonDetails>> tmdbPersonDetailsCache,
                 Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>>> tmdbTrendingMovieCache,
-                Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache) {
+                Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache,
+                Cache<String, TmdbLookupResult<TmdbCardMetadata>> tmdbCardMetadataCache) {
             return new TmdbClient(tmdbRestClient, tmdbMovieFullDetailsCache, tmdbTvFullDetailsCache,
                     tmdbSeasonFullDetailsCache, tmdbEpisodeFullDetailsCache,
                     tmdbEpisodeImagesCache,
                     tmdbMovieReleaseDatesCache, tmdbCalendarSeasonDetailsCache,
                     tmdbMovieSearchCache, tmdbTvSearchCache, tmdbPersonSearchCache, tmdbMultiSearchCache,
                     tmdbMovieDiscoveryCache, tmdbTvDiscoveryCache, tmdbTvContentRatingsCache,
-                    tmdbPersonAggregateCache, tmdbPersonDetailsCache, tmdbTrendingMovieCache, tmdbTrendingTvCache);
+                    tmdbPersonAggregateCache, tmdbPersonDetailsCache, tmdbTrendingMovieCache, tmdbTrendingTvCache,
+                    tmdbCardMetadataCache);
         }
     }
 
@@ -170,6 +172,9 @@ class TmdbClientCachingTest {
     @Autowired
     private Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache;
 
+    @Autowired
+    private Cache<String, TmdbLookupResult<TmdbCardMetadata>> tmdbCardMetadataCache;
+
     @BeforeEach
     void resetExpectationsAndCache() {
         mockServer.reset();
@@ -191,6 +196,7 @@ class TmdbClientCachingTest {
         tmdbPersonDetailsCache.invalidateAll();
         tmdbTrendingMovieCache.invalidateAll();
         tmdbTrendingTvCache.invalidateAll();
+        tmdbCardMetadataCache.invalidateAll();
     }
 
     @Test
@@ -766,6 +772,44 @@ class TmdbClientCachingTest {
 
         assertThat(first).isPresent();
         assertThat(second).isPresent();
+        mockServer.verify();
+    }
+
+    @Test
+    void shouldUseOneExternalRequestForRepeatedCardMetadataLookups() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/movie/603?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg",
+                         "release_date":"1999-03-31","runtime":136}
+                        """, MediaType.APPLICATION_JSON));
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.MOVIE, "603", null, null, null);
+
+        TmdbLookupResult<TmdbCardMetadata> first = tmdbClient.getCardMetadata(key, "en-US");
+        TmdbLookupResult<TmdbCardMetadata> second = tmdbClient.getCardMetadata(key, "en-US");
+
+        assertThat(first.toOptional()).contains(new TmdbCardMetadata(
+                "The Matrix", "/matrix.jpg", "1999-03-31", 136));
+        assertThat(second.toOptional()).contains(new TmdbCardMetadata(
+                "The Matrix", "/matrix.jpg", "1999-03-31", 136));
+        mockServer.verify();
+    }
+
+    @Test
+    void shouldReuseSuccessfulFullMovieDetailsForCardMetadata() {
+        mockServer.expect(requestTo(
+                        "https://api.themoviedb.org/3/movie/603?append_to_response=credits,watch/providers,alternative_titles,videos,external_ids,release_dates&language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":"603","title":"The Matrix","poster_path":"/matrix.jpg",
+                         "release_date":"1999-03-31","runtime":136}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertThat(tmdbClient.getMovieFullDetails("603", "en-US").toOptional()).isPresent();
+        TmdbLookupResult<TmdbCardMetadata> card = tmdbClient.getCardMetadata(
+                new TmdbCardMetadataKey(TmdbCardMetadataKey.Type.MOVIE, "603", null, null, null), "en-US");
+
+        assertThat(card.toOptional()).contains(new TmdbCardMetadata(
+                "The Matrix", "/matrix.jpg", "1999-03-31", 136));
         mockServer.verify();
     }
 

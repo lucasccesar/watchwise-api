@@ -26,6 +26,13 @@ public class TmdbCacheConfig {
     }
 
     @Bean
+    public Cache<String, TmdbLookupResult<TmdbCardMetadata>> tmdbCardMetadataCache(
+            @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours,
+            @Value("${app.tmdb.details-cache-maximum-size:10000}") long maximumSize) {
+        return newScheduleCache(ttlHours, maximumSize);
+    }
+
+    @Bean
     public Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache(
             @Value("${app.tmdb.details-cache-ttl-hours}") long ttlHours) {
         return newCache(ttlHours);

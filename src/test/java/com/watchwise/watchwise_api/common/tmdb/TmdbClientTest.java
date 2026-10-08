@@ -41,7 +41,8 @@ class TmdbClientTest {
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
                 Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
-                Caffeine.newBuilder().build(), Caffeine.newBuilder().build());
+                Caffeine.newBuilder().build(), Caffeine.newBuilder().build(),
+                Caffeine.newBuilder().build());
     }
 
     @Test
@@ -510,6 +511,25 @@ class TmdbClientTest {
         assertThat(result).isPresent();
         assertThat(result.get().title()).isEqualTo("The Matrix");
         assertThat(result.get().runtime()).isEqualTo(136);
+    }
+
+    @Test
+    @DisplayName("[getCardMetadata] Should Map Movie Fields - When A Lightweight Lookup Succeeds")
+    void shouldMapMovieFieldsWhenCardMetadataLookupSucceeds() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/movie/603?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id": 603, "title": "The Matrix", "poster_path": "/matrix.jpg",
+                         "release_date": "1999-03-31", "runtime": 136}
+                        """, MediaType.APPLICATION_JSON));
+
+        TmdbLookupResult<TmdbCardMetadata> result = tmdbClient.getCardMetadata(
+                new TmdbCardMetadataKey(TmdbCardMetadataKey.Type.MOVIE, "603", null, null, null), "en-US");
+
+        assertThat(result).isInstanceOfSatisfying(TmdbLookupResult.Found.class, found -> {
+            assertThat(found.value()).isEqualTo(new TmdbCardMetadata(
+                    "The Matrix", "/matrix.jpg", "1999-03-31", 136));
+        });
+        mockServer.verify();
     }
 
     @Test
