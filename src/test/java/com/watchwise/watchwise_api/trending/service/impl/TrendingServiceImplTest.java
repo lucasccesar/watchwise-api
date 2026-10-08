@@ -103,13 +103,13 @@ class TrendingServiceImplTest {
         assertThat(result.movies()).containsExactly(new TrendingCardDTO(
                 "603", MovieOrSeriesType.MOVIE, "The Matrix",
                 "https://image.tmdb.org/t/p/w500/matrix.jpg", 1999,
-                List.of(28, 878), 8.7, 123.4, 136, null,
+                List.of("Science Fiction", "Action"), 8.7, 123.4, 136, null,
                 card(ContentType.MOVIE, "603", "The Matrix", "/matrix.jpg", 136).viewerState(),
                 ContentPreviewStatus.AVAILABLE));
         assertThat(result.series()).containsExactly(new TrendingCardDTO(
                 "1396", MovieOrSeriesType.SERIES, "Breaking Bad",
                 "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", 2008,
-                List.of(18, 80), 9.1, 456.7, 47, 5,
+                List.of("Drama", "Crime"), 9.1, 456.7, 47, 5,
                 card(ContentType.SERIES, "1396", "Breaking Bad", "/breaking-bad.jpg", 47).viewerState(),
                 ContentPreviewStatus.AVAILABLE));
         assertThat(result.moviesPage()).isEqualTo(new TrendingResponseDTO.SectionPage(1, 12, 2, 21, true));
@@ -274,7 +274,9 @@ class TrendingServiceImplTest {
         return new ContentCardDTO(
                 UUID.randomUUID(), type, tmdbId, null, null, null,
                 title, posterPath, null, releaseDate, releaseYear,
-                runtimeMinutes, null, type == ContentType.SERIES ? 5 : null, null, null, null,
+                runtimeMinutes, null, type == ContentType.SERIES ? 5 : null, null,
+                type == ContentType.SERIES ? List.of("Drama", "Crime") : List.of("Science Fiction", "Action"),
+                null,
                 new ContentCardViewerStateDTO(
                         WatchStatus.WATCHED, 9, LocalDate.of(2026, 10, 1), 2,
                         false, 2, true, false, null, null),

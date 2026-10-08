@@ -123,6 +123,26 @@ class ContentCardAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assemble] Should Propagate Canonical Genres And Season Count - When Series Metadata Is Available")
+    void shouldPropagateCanonicalGenresAndSeasonCountWhenSeriesMetadataIsAvailable() {
+        ContentCoordinate coordinate = new ContentCoordinate(ContentType.SERIES, "1396", null, null, null);
+        when(contentViewerStateService.resolve(isNull(), eq(List.of(coordinate)), eq(Map.of())))
+                .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, emptyState()), Map.of()));
+        when(tmdbCardMetadataResolver.resolve(coordinate, "pt-BR"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbCardMetadata(
+                        "Breaking Bad", "/breaking-bad.jpg", "2008-01-20", 47,
+                        List.of("Drama", "Crime"), 5)));
+
+        ContentCardDTO card = assembler().assemble(
+                List.of(new ContentCardSpec(coordinate, null, null, null, null)),
+                new ContentCardContext("pt-BR", "BR", null, null),
+                Set.of(ContentCardFieldSet.BASIC_METADATA)).get(coordinate);
+
+        assertThat(card.genres()).containsExactly("Drama", "Crime");
+        assertThat(card.numberOfSeasons()).isEqualTo(5);
+    }
+
+    @Test
     @DisplayName("[assemble] Should Resolve Public Stats In One Batch - When Stats Are Requested")
     void shouldResolvePublicStatsInOneBatchWhenStatsAreRequested() {
         ContentCoordinate coordinate = movie("550");

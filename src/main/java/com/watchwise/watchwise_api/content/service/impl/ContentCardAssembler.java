@@ -223,6 +223,8 @@ public class ContentCardAssembler {
         Integer runtimeMinutes = spec.runtimeMinutes() != null
                 ? spec.runtimeMinutes()
                 : metadata == null ? null : metadata.runtimeMinutes();
+        Integer numberOfSeasons = metadata == null ? null : metadata.numberOfSeasons();
+        List<String> genres = metadata == null ? null : metadata.genres();
         ContentCardStatsDTO stats = requestedFields.contains(ContentCardFieldSet.STATS)
                 ? toStats(data.contentId(), data.contentId() == null
                         ? null
@@ -249,9 +251,9 @@ public class ContentCardAssembler {
                 releaseDate == null ? null : releaseDate.getYear(),
                 runtimeMinutes,
                 null,
+                numberOfSeasons,
                 null,
-                null,
-                null,
+                genres,
                 stats,
                 viewerState,
                 data.metadata().status());

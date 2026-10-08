@@ -154,6 +154,16 @@ class TrendingControllerTest {
     }
 
     @Test
+    @DisplayName("[getTrendingSection] Should Reject External Page Above 500 Before Rate Limit")
+    void shouldRejectExternalPageAbove500BeforeRateLimit() {
+        assertThatThrownBy(() -> trendingController.getTrendingSection("movie", "day", 501, 12))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("page must be less than or equal to 500 for external searches");
+
+        verifyNoInteractions(requestThrottler, trendingService);
+    }
+
+    @Test
     @DisplayName("[getTrendingSection] Should Reject Invalid Type Before Rate Limit")
     void shouldRejectInvalidTypeBeforeRateLimit() {
         assertThatThrownBy(() -> trendingController.getTrendingSection("people", "day", 1, 12))

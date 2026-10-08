@@ -171,7 +171,7 @@ public class TrendingServiceImpl implements TrendingService {
         Integer runtime = firstNonNull(card == null ? null : card.runtimeMinutes(), movie.runtime());
         return new TrendingCardDTO(
                 movie.id(), MovieOrSeriesType.MOVIE, title, TmdbImageUrlBuilder.posterUrl(posterPath),
-                year, movie.genreIds(), movie.voteAverage(), movie.popularity(), runtime, null,
+                year, card == null ? null : card.genres(), movie.voteAverage(), movie.popularity(), runtime, null,
                 card == null ? null : card.viewerState(),
                 card == null ? ContentPreviewStatus.UNAVAILABLE : card.previewStatus());
     }
@@ -188,7 +188,7 @@ public class TrendingServiceImpl implements TrendingService {
                 series.numberOfSeasons(), card == null ? null : card.numberOfSeasons());
         return new TrendingCardDTO(
                 series.id(), MovieOrSeriesType.SERIES, title, TmdbImageUrlBuilder.posterUrl(posterPath),
-                year, series.genreIds(), series.voteAverage(), series.popularity(), runtime,
+                year, card == null ? null : card.genres(), series.voteAverage(), series.popularity(), runtime,
                 numberOfSeasons, card == null ? null : card.viewerState(),
                 card == null ? ContentPreviewStatus.UNAVAILABLE : card.previewStatus());
     }

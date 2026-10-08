@@ -12,7 +12,7 @@ public record TrendingCardDTO(
         String title,
         String posterUrl,
         Integer year,
-        List<Integer> genres,
+        List<String> genres,
         Double tmdbVoteAverage,
         Double popularity,
         Integer runtimeMinutes,

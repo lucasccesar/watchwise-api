@@ -22,6 +22,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TrendingController {
 
+    private static final int MAX_EXTERNAL_PAGE = 500;
+
     private final TrendingService trendingService;
     private final RequestThrottler requestThrottler;
 
@@ -88,6 +90,9 @@ public class TrendingController {
     private void validatePage(int page) {
         if (page < 1) {
             throw new BadRequestException("page must be greater than 0");
+        }
+        if (page > MAX_EXTERNAL_PAGE) {
+            throw new BadRequestException("page must be less than or equal to 500 for external searches");
         }
     }
 

@@ -120,12 +120,12 @@ class TrendingControllerIntegrationTest {
                 List.of(new TrendingCardDTO(
                         "603", MovieOrSeriesType.MOVIE, "The Matrix",
                         "https://image.tmdb.org/t/p/w500/matrix.jpg", 1999,
-                        List.of(28, 878), 8.7, 123.4, 136, null, null,
+                        List.of("Science Fiction", "Action"), 8.7, 123.4, 136, null, null,
                         ContentPreviewStatus.AVAILABLE)),
                 List.of(new TrendingCardDTO(
                         "1396", MovieOrSeriesType.SERIES, "Breaking Bad",
                         "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", 2008,
-                        List.of(18, 80), 9.1, 456.7, 47, 5, null,
+                        List.of("Drama", "Crime"), 9.1, 456.7, 47, 5, null,
                         ContentPreviewStatus.AVAILABLE)));
         when(trendingService.getTrending(user.id(), TrendingTimeWindow.DAY, 21)).thenReturn(expected);
 

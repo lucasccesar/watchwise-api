@@ -10,6 +10,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.Optional;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -343,22 +345,38 @@ public class TmdbClient {
     }
 
     private TmdbCardMetadata movieCardMetadata(TmdbMovieFullDetails details) {
-        return new TmdbCardMetadata(details.title(), details.posterPath(), details.releaseDate(), details.runtime());
+        return new TmdbCardMetadata(
+                details.title(), details.posterPath(), details.releaseDate(), details.runtime(),
+                genreNames(details.genres()), null);
     }
 
     private TmdbCardMetadata tvCardMetadata(TmdbTvFullDetails details) {
         Integer runtime = details.episodeRunTime() == null || details.episodeRunTime().isEmpty()
                 ? null
                 : (int) Math.round(details.episodeRunTime().stream().mapToInt(Integer::intValue).average().orElse(0));
-        return new TmdbCardMetadata(details.name(), details.posterPath(), details.firstAirDate(), runtime);
+        return new TmdbCardMetadata(
+                details.name(), details.posterPath(), details.firstAirDate(), runtime,
+                genreNames(details.genres()), details.numberOfSeasons());
     }
 
     private TmdbCardMetadata seasonCardMetadata(TmdbSeasonFullDetails details) {
-        return new TmdbCardMetadata(details.name(), details.posterPath(), details.airDate(), null);
+        return new TmdbCardMetadata(details.name(), details.posterPath(), details.airDate(), null, null, null);
     }
 
     private TmdbCardMetadata episodeCardMetadata(TmdbEpisodeFullDetails details) {
-        return new TmdbCardMetadata(details.name(), details.stillPath(), details.airDate(), details.runtime());
+        return new TmdbCardMetadata(
+                details.name(), details.stillPath(), details.airDate(), details.runtime(), null, null);
+    }
+
+    private List<String> genreNames(List<TmdbGenre> genres) {
+        if (genres == null) {
+            return null;
+        }
+        return genres.stream()
+                .filter(Objects::nonNull)
+                .map(TmdbGenre::name)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     private <T> TmdbLookupResult<TmdbCardMetadata> mapLookup(

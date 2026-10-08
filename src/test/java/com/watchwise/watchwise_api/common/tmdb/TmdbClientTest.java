@@ -14,6 +14,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -519,7 +520,8 @@ class TmdbClientTest {
         mockServer.expect(requestTo("https://api.themoviedb.org/3/movie/603?language=en-US"))
                 .andRespond(withSuccess("""
                         {"id": 603, "title": "The Matrix", "poster_path": "/matrix.jpg",
-                         "release_date": "1999-03-31", "runtime": 136}
+                         "release_date": "1999-03-31", "runtime": 136,
+                         "genres": [{"id":878,"name":"Science Fiction"},{"id":28,"name":"Action"}]}
                         """, MediaType.APPLICATION_JSON));
 
         TmdbLookupResult<TmdbCardMetadata> result = tmdbClient.getCardMetadata(
@@ -527,8 +529,30 @@ class TmdbClientTest {
 
         assertThat(result).isInstanceOfSatisfying(TmdbLookupResult.Found.class, found -> {
             assertThat(found.value()).isEqualTo(new TmdbCardMetadata(
-                    "The Matrix", "/matrix.jpg", "1999-03-31", 136));
+                    "The Matrix", "/matrix.jpg", "1999-03-31", 136,
+                    List.of("Science Fiction", "Action"), null));
         });
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[getCardMetadata] Should Map Series Genres And Season Count - When A Lightweight Lookup Succeeds")
+    void shouldMapSeriesGenresAndSeasonCountWhenCardMetadataLookupSucceeds() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/tv/1396?language=pt-BR"))
+                .andRespond(withSuccess("""
+                        {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg",
+                         "first_air_date":"2008-01-20","episode_run_time":[47],
+                         "genres":[{"id":18,"name":"Drama"},{"id":80,"name":"Crime"}],
+                         "number_of_seasons":5}
+                        """, MediaType.APPLICATION_JSON));
+
+        TmdbLookupResult<TmdbCardMetadata> result = tmdbClient.getCardMetadata(
+                new TmdbCardMetadataKey(TmdbCardMetadataKey.Type.SERIES, "1396", null, null, null), "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(TmdbLookupResult.Found.class, found ->
+                assertThat(found.value()).isEqualTo(new TmdbCardMetadata(
+                        "Breaking Bad", "/breaking-bad.jpg", "2008-01-20", 47,
+                        List.of("Drama", "Crime"), 5)));
         mockServer.verify();
     }
 
