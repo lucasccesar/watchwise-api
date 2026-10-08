@@ -765,6 +765,40 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getMonthInReview] Should Add Top Longest Movie Cards Without Changing The Legacy Raw Ranking")
+    void shouldAddTopLongestMovieCardsWithoutChangingTheLegacyRawRanking() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movie = buildContent("100", ContentType.MOVIE);
+        movie.setRuntimeMinutes(120);
+        ContentRefDTO rawReference = new ContentRefDTO(movie.getId(), "100", ContentType.MOVIE,
+                null, null, null, null, null, null, null, 120, null);
+        when(diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
+                eq(lucasId), any(), any(), any())).thenReturn(List.of(movie));
+        when(contentMapper.contentToContentRefDto(movie)).thenReturn(rawReference);
+        ContentCardDTO card = cardFor(movie, "Long movie", "/long-movie.jpg");
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(movie), card));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.topLongestMovies()).containsExactly(rawReference);
+        assertThat(result.topSeriesByWatchTime()).isEmpty();
+        JsonNode json = serialize(result);
+        assertThat(json.get("topLongestMovieCards")).isNotNull();
+        assertThat(json.get("topLongestMovieCards").get(0).get("title").asString())
+                .isEqualTo("Long movie");
+
+        ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
+        ArgumentCaptor<Set<ContentCardFieldSet>> fields = ArgumentCaptor.forClass(Set.class);
+        verify(contentCardAssembler).assemble(specs.capture(), any(ContentCardContext.class), fields.capture());
+        assertThat(specs.getValue()).hasSize(1);
+        assertThat(specs.getValue().iterator().next().coordinate()).isEqualTo(ContentCoordinate.from(movie));
+        assertThat(specs.getValue().iterator().next().runtimeMinutes()).isEqualTo(120);
+        assertThat(fields.getValue()).containsExactly(ContentCardFieldSet.BASIC_METADATA);
+    }
+
+    @Test
     @DisplayName("[getMonthInReview] Should Only Populate TopSeriesByWatchTime - When Type Is SERIES")
     void shouldOnlyPopulateTopSeriesByWatchTimeWhenTypeIsSeriesForMonthInReview() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));

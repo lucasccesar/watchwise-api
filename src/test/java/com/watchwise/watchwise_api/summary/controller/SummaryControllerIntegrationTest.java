@@ -392,7 +392,9 @@ class SummaryControllerIntegrationTest {
                 .andExpect(jsonPath("$.watchCount").value(1))
                 .andExpect(jsonPath("$.minutesWatched").value(139))
                 .andExpect(jsonPath("$.recentWatched[0].card.previewStatus").value("PARTIAL"))
-                .andExpect(jsonPath("$.topRated[0].card.previewStatus").value("PARTIAL"));
+                .andExpect(jsonPath("$.topRated[0].card.previewStatus").value("PARTIAL"))
+                .andExpect(jsonPath("$.topLongestMovies[0].tmdbId").value("month-review-card"))
+                .andExpect(jsonPath("$.topLongestMovieCards[0].previewStatus").value("PARTIAL"));
 
         verify(tmdbClient, never()).getMovieFullDetails(anyString(), anyString());
     }

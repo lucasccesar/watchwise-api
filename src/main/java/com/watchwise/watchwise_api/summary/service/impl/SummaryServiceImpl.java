@@ -335,6 +335,14 @@ public class SummaryServiceImpl implements SummaryService {
                         .stream().map(row -> new SeriesWatchTimeDTO(row.getContentId(), row.getSeriesTmdbId(), row.getTotalMinutes())).toList()
                 : List.of();
 
+        List<Content> topLongestMovieContents = type == ContentType.MOVIE
+                ? diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
+                                userId, start, end, PageRequest.of(0, TOP_LONGEST_MOVIES_LIMIT))
+                : List.of();
+        List<ContentRefDTO> topLongestMovies = topLongestMovieContents.stream()
+                .map(contentMapper::contentToContentRefDto)
+                .toList();
+
         List<ContentCardSpec> cardSpecs = distinctCardSpecs(Stream.concat(
                         Stream.of(recentWatchedEntries, topRatedRaw, bottomRatedRaw)
                                 .flatMap(Collection::stream)
@@ -343,7 +351,9 @@ public class SummaryServiceImpl implements SummaryService {
                                 Stream.of(firstWatchedEntry, lastWatchedEntry)
                                         .filter(Objects::nonNull)
                                         .map(this::toCardSpec),
-                                topSeriesByWatchTime.stream().map(this::toCardSpec)))
+                                Stream.concat(
+                                        topSeriesByWatchTime.stream().map(this::toCardSpec),
+                                        topLongestMovieContents.stream().map(this::toCardSpec))))
                 .toList());
         Map<ContentCoordinate, ContentCardDTO> cards = assembleSummaryCards(target, cardSpecs,
                 !topRatedRaw.isEmpty() || !bottomRatedRaw.isEmpty() || !topSeriesByWatchTime.isEmpty());
@@ -360,18 +370,15 @@ public class SummaryServiceImpl implements SummaryService {
         topSeriesByWatchTime = topSeriesByWatchTime.stream()
                 .map(item -> item.withCard(cardFor(item, cards)))
                 .toList();
-
-        List<com.watchwise.watchwise_api.content.dto.ContentRefDTO> topLongestMovies = type == ContentType.MOVIE
-                ? diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
-                                userId, start, end, PageRequest.of(0, TOP_LONGEST_MOVIES_LIMIT))
-                        .stream().map(contentMapper::contentToContentRefDto).toList()
-                : List.of();
+        List<ContentCardDTO> topLongestMovieCards = topLongestMovieContents.stream()
+                .map(content -> cardFor(content, cards))
+                .toList();
 
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanions(userId, watchedContentType, start, end);
 
         return new MonthInReviewResponseDTO(recentWatched, topRated, bottomRated, ratingsDistribution, watchCount,
                 minutesWatched, firstWatched, lastWatched, minutesPerDay, watchCountByDayOfWeek, genreCounts,
-                topSeriesByWatchTime, topLongestMovies, topWatchCompanions);
+                topSeriesByWatchTime, topLongestMovies, topWatchCompanions, topLongestMovieCards);
     }
 
     @Override
