@@ -713,7 +713,8 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         List<ContentCardSpec> specs = distinctCardSpecs(reviews.stream()
                 .map(ContentReviewResponseDTO::content)
                 .filter(content -> content != null && content.type() != null)
-                .map(content -> new ContentCardSpec(toCoordinate(content), null, null, null, null))
+                .map(content -> new ContentCardSpec(
+                        toCoordinate(content), null, null, null, content.runtimeMinutes()))
                 .toList());
         if (specs.isEmpty()) {
             return Map.of();
