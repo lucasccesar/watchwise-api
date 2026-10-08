@@ -17,18 +17,26 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
 import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewSource;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
@@ -104,7 +112,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
@@ -170,6 +180,9 @@ class DiaryEntryServiceImplTest {
     private UserMapper userMapper;
 
     @Mock
+    private ContentCardAssembler contentCardAssembler;
+
+    @Mock
     private TmdbClient tmdbClient;
 
     @Mock
@@ -204,6 +217,12 @@ class DiaryEntryServiceImplTest {
 
     @Captor
     private ArgumentCaptor<ContentRefCreationDTO> contentRefCreationCaptor;
+
+    @Captor
+    private ArgumentCaptor<List<ContentCardSpec>> cardSpecsCaptor;
+
+    @Captor
+    private ArgumentCaptor<ContentCardContext> cardContextCaptor;
 
     private UUID lucasId;
     private UUID marinaId;
@@ -379,6 +398,74 @@ class DiaryEntryServiceImplTest {
         Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(lucasId, lucasId, null, 1, 10, null, null, null, null);
 
         assertThat(result.getContent()).containsExactly(dto);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Assemble One Card Per Selected Page Coordinate - When Entries Share Content")
+    void shouldAssembleOneCardPerSelectedPageCoordinateWhenEntriesShareContent() {
+        DiaryEntry firstEntry = buildEntry(lucas, fightClub);
+        DiaryEntry secondEntry = buildEntry(lucas, fightClub);
+        DiaryEntryResponseDTO firstDto = buildResponseDto(firstEntry);
+        DiaryEntryResponseDTO secondDto = buildResponseDto(secondEntry);
+        ContentCardDTO card = cardFor(fightClub, "Fight Club", ContentPreviewStatus.AVAILABLE);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(firstEntry, secondEntry), PageRequest.of(0, 2), 3));
+        when(diaryEntryMapper.diaryEntryToResponseDto(firstEntry, false, List.of())).thenReturn(firstDto);
+        when(diaryEntryMapper.diaryEntryToResponseDto(secondEntry, false, List.of())).thenReturn(secondDto);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(fightClub), card));
+
+        Page<DiaryEntryResponseDTO> result = diaryEntryService.getDiaryEntries(
+                lucasId, lucasId, null, 1, 2, null, null, null, null);
+
+        assertThat(result.getContent()).extracting(DiaryEntryResponseDTO::card)
+                .containsExactly(card, card);
+        verify(contentCardAssembler).assemble(cardSpecsCaptor.capture(), cardContextCaptor.capture(), anySet());
+        assertThat(cardSpecsCaptor.getValue()).extracting(ContentCardSpec::coordinate)
+                .containsExactly(ContentCoordinate.from(fightClub));
+        assertThat(cardContextCaptor.getValue().posterUserId()).isEqualTo(lucasId);
+        assertThat(cardContextCaptor.getValue().viewerId()).isEqualTo(lucasId);
+    }
+
+    @Test
+    @DisplayName("[getDiaryEntries] Should Omit Viewer Card Facets - When Viewer Is Absent")
+    void shouldOmitViewerCardFacetsWhenViewerIsAbsent() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(entry)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(buildResponseDto(entry));
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(fightClub),
+                        cardFor(fightClub, "Fight Club", ContentPreviewStatus.AVAILABLE)));
+
+        diaryEntryService.getDiaryEntries(null, lucasId, null, 1, 10, null, null, null, null);
+
+        verify(contentCardAssembler).assemble(anyCollection(), cardContextCaptor.capture(), anySet());
+        assertThat(cardContextCaptor.getValue().viewerId()).isNull();
+        org.mockito.ArgumentCaptor<Set<ContentCardFieldSet>> fieldsCaptor =
+                org.mockito.ArgumentCaptor.forClass(Set.class);
+        verify(contentCardAssembler).assemble(anyCollection(), any(ContentCardContext.class), fieldsCaptor.capture());
+        assertThat(fieldsCaptor.getValue()).doesNotContain(
+                ContentCardFieldSet.VIEWER_STATE, ContentCardFieldSet.WATCHLIST_PROGRESS);
+    }
+
+    @Test
+    @DisplayName("[getDiaryDailySummary] Should Use The Aggregate Read - Without Paging Or Card Resolution")
+    void shouldUseTheAggregateReadWithoutPagingOrCardResolution() {
+        LocalDate date = LocalDate.of(2026, 10, 7);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryReadRepository.findDailySummary(any()))
+                .thenReturn(List.of(new DiaryEntryReadRepository.DiaryDaySummaryRow(date, 3, 240)));
+
+        List<DiaryDaySummaryDTO> result = diaryEntryService.getDiaryDailySummary(
+                lucasId, lucasId, ContentType.MOVIE, date, date, true, null, null, null, null);
+
+        assertThat(result).containsExactly(new DiaryDaySummaryDTO(date, 3, 240));
+        verify(diaryEntryReadRepository).findDailySummary(any());
+        verify(diaryEntryReadRepository, never()).findPage(any(), any(), any());
+        verifyNoInteractions(contentCardAssembler);
     }
 
     @Test
@@ -1672,8 +1759,9 @@ class DiaryEntryServiceImplTest {
     void shouldReturnMappedPageWhenContentHasReviewsVisibleToTheViewer() {
         DiaryEntry entry = buildEntry(marina, fightClub);
         entry.setComment("Great movie");
-        DiaryEntryResponseDTO dto = buildResponseDto(entry);
+        DiaryEntryResponseDTO dto = buildResponseDtoWithContent(entry);
         UserPreviewDTO reviewer = new UserPreviewDTO(marinaId, "marina", "marina.png", true);
+        ContentCardDTO card = cardFor(fightClub, "Fight Club", ContentPreviewStatus.AVAILABLE);
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
         DiaryEntryRepository.ContentReviewKey reviewKey = reviewKey(entry, ContentReviewSource.DIARY);
         when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
@@ -1682,10 +1770,44 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(entry));
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(dto);
         when(userMapper.userToUserPreviewDto(marina)).thenReturn(reviewer);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(fightClub), card));
 
         Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
 
-        assertThat(result.getContent()).containsExactly(ContentReviewResponseDTO.fromDiary(dto, reviewer));
+        assertThat(result.getContent()).singleElement().satisfies(review -> {
+            assertThat(review).isEqualTo(ContentReviewResponseDTO.fromDiary(dto, reviewer).withCard(card));
+            assertThat(review.card()).isEqualTo(card);
+            assertThat(review.comment()).isEqualTo("Great movie");
+        });
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Preserve The Review Row - When Card Metadata Is Unavailable")
+    void shouldPreserveTheReviewRowWhenCardMetadataIsUnavailable() {
+        DiaryEntry entry = buildEntry(marina, fightClub);
+        entry.setComment("Still visible");
+        DiaryEntryResponseDTO dto = buildResponseDtoWithContent(entry);
+        UserPreviewDTO reviewer = new UserPreviewDTO(marinaId, "marina", "marina.png", true);
+        ContentCardDTO unavailableCard = cardFor(fightClub, null, ContentPreviewStatus.UNAVAILABLE);
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        DiaryEntryRepository.ContentReviewKey reviewKey = reviewKey(entry, ContentReviewSource.DIARY);
+        when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(reviewKey)));
+        when(diaryEntryRepository.findByIdInWithContentAndUser(List.of(entry.getId())))
+                .thenReturn(List.of(entry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(dto);
+        when(userMapper.userToUserPreviewDto(marina)).thenReturn(reviewer);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(fightClub), unavailableCard));
+
+        Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
+
+        assertThat(result.getContent()).singleElement().satisfies(review -> {
+            assertThat(review.comment()).isEqualTo("Still visible");
+            assertThat(review.card()).isEqualTo(unavailableCard);
+            assertThat(review.card().previewStatus()).isEqualTo(ContentPreviewStatus.UNAVAILABLE);
+        });
     }
 
     @Test
@@ -5619,6 +5741,27 @@ class DiaryEntryServiceImplTest {
                 entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(),
                 null, entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
                 entry.getLikesCount(), false);
+    }
+
+    private DiaryEntryResponseDTO buildResponseDtoWithContent(DiaryEntry entry) {
+        Content content = entry.getContent();
+        ContentRefDTO contentRef = new ContentRefDTO(
+                content.getId(), content.getTmdbId(), content.getType(), content.getSeriesTmdbId(),
+                content.getSeasonNumber(), content.getEpisodeNumber(), content.getIsSeasonFinale(),
+                content.getIsSeriesFinale(), content.getCreatedAt(), content.getUpdatedAt());
+        return new DiaryEntryResponseDTO(
+                entry.getId(), entry.getUser().getId(), contentRef, entry.getComment(), entry.getScore(),
+                entry.getWatchedDate(), entry.getWatchNumber(), entry.getWatchedInTheater(), null,
+                entry.getAutoGenerated(), entry.getIgnore(), entry.getCreatedAt(), entry.getUpdatedAt(),
+                entry.getLikesCount(), false);
+    }
+
+    private ContentCardDTO cardFor(Content content, String title, ContentPreviewStatus previewStatus) {
+        return new ContentCardDTO(
+                content.getId(), content.getType(), content.getTmdbId(), content.getSeriesTmdbId(),
+                content.getSeasonNumber(), content.getEpisodeNumber(), title, "/poster.jpg", null,
+                LocalDate.of(1999, 10, 15), 1999, content.getRuntimeMinutes(), null, null, null, null,
+                null, null, previewStatus);
     }
 
     private Content buildContent(String tmdbId, ContentType type) {

@@ -512,6 +512,8 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(2))
                 .andExpect(jsonPath("$.content[0].content.tmdbId").value("680"))
+                .andExpect(jsonPath("$.content[0].card.type").value("MOVIE"))
+                .andExpect(jsonPath("$.content[0].card.previewStatus").value("UNAVAILABLE"))
                 .andExpect(jsonPath("$.content[1].content.tmdbId").value("550"))
                 .andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.totalPages").value(1))
@@ -1097,10 +1099,13 @@ class DiaryEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.content.length()").value(2))
                 .andExpect(jsonPath("$.content[0].source").value("DROPPED"))
                 .andExpect(jsonPath("$.content[0].comment").value("Stopped halfway"))
+                .andExpect(jsonPath("$.content[0].card.type").value("MOVIE"))
+                .andExpect(jsonPath("$.content[0].card.previewStatus").value("UNAVAILABLE"))
                 .andExpect(jsonPath("$.content[0].reviewer.id").value(reviewer.id().toString()))
                 .andExpect(jsonPath("$.content[0].reviewer.username").value("reviewscontentreviewer"))
                 .andExpect(jsonPath("$.content[1].source").value("DIARY"))
                 .andExpect(jsonPath("$.content[1].comment").value("Great movie"))
+                .andExpect(jsonPath("$.content[1].card.type").value("MOVIE"))
                 .andExpect(jsonPath("$.content[1].reviewer.id").value(reviewer.id().toString()));
     }
 

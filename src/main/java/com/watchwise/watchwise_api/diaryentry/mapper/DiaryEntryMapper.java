@@ -18,6 +18,8 @@ public interface DiaryEntryMapper {
     @Mapping(target = "commentsCount", ignore = true)
     @Mapping(target = "withCustomPosterUrl", ignore = true)
     @Mapping(target = "withCommentsCount", ignore = true)
+    @Mapping(target = "withCard", ignore = true)
+    @Mapping(target = "card", ignore = true)
     @Mapping(target = "watchedWith", expression = "java(java.util.List.of())")
     DiaryEntryResponseDTO diaryEntryToResponseDto(DiaryEntry entry, boolean likedByMe);
 
@@ -26,6 +28,8 @@ public interface DiaryEntryMapper {
     @Mapping(target = "commentsCount", ignore = true)
     @Mapping(target = "withCustomPosterUrl", ignore = true)
     @Mapping(target = "withCommentsCount", ignore = true)
+    @Mapping(target = "withCard", ignore = true)
+    @Mapping(target = "card", ignore = true)
     DiaryEntryResponseDTO diaryEntryToResponseDto(DiaryEntry entry, boolean likedByMe, List<UserPreviewDTO> watchedWith);
 
 }
