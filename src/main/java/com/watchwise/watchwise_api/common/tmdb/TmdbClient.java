@@ -10,8 +10,9 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 @Slf4j
@@ -241,7 +242,7 @@ public class TmdbClient {
 
     public TmdbLookupResult<TmdbCardMetadata> getCardMetadata(TmdbCardMetadataKey key, String language) {
         String cacheKey = key.cacheKey(language);
-        return cachedLookup(tmdbCardMetadataCache, cacheKey, () -> loadCardMetadata(key, language));
+        return cachedCardMetadataLookup(cacheKey, () -> loadCardMetadata(key, language));
     }
 
     private TmdbLookupResult<TmdbCardMetadata> loadCardMetadata(TmdbCardMetadataKey key, String language) {
@@ -312,6 +313,27 @@ public class TmdbClient {
                     mapper.apply(found.value()), found.origin()));
         }
         return result;
+    }
+
+    private TmdbLookupResult<TmdbCardMetadata> cachedCardMetadataLookup(
+            String cacheKey, Supplier<TmdbLookupResult<TmdbCardMetadata>> loader) {
+        AtomicBoolean loadedFromRemote = new AtomicBoolean(false);
+        AtomicReference<TmdbLookupResult<TmdbCardMetadata>> loadedResult = new AtomicReference<>();
+        TmdbLookupResult<TmdbCardMetadata> cached = tmdbCardMetadataCache.get(cacheKey, ignoredKey -> {
+            loadedFromRemote.set(true);
+            TmdbLookupResult<TmdbCardMetadata> result = loader.get();
+            loadedResult.set(result);
+            return result instanceof TmdbLookupResult.Found<TmdbCardMetadata> ? result : null;
+        });
+        if (cached == null) {
+            TmdbLookupResult<TmdbCardMetadata> result = loadedResult.get();
+            return result == null ? new TmdbLookupResult.Unavailable<>() : result;
+        }
+        if (cached instanceof TmdbLookupResult.Found<TmdbCardMetadata> found) {
+            TmdbLookupOrigin origin = loadedFromRemote.get() ? TmdbLookupOrigin.REMOTE : TmdbLookupOrigin.CACHE;
+            return new TmdbLookupResult.Found<>(found.value(), origin);
+        }
+        return cached;
     }
 
     public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {

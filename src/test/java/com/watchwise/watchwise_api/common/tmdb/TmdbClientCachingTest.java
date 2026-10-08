@@ -814,6 +814,29 @@ class TmdbClientCachingTest {
     }
 
     @Test
+    void shouldRetryCardMetadataAfterNotFoundForSameKey() {
+        String requestUrl = "https://api.themoviedb.org/3/movie/999999998?language=en-US";
+        mockServer.expect(requestTo(requestUrl))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"status_message\":\"Not found\"}"));
+        mockServer.expect(requestTo(requestUrl))
+                .andRespond(withSuccess("""
+                        {"id":999999998,"title":"Recovered title","poster_path":"/recovered.jpg",
+                         "release_date":"2026-01-02","runtime":101}
+                        """, MediaType.APPLICATION_JSON));
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.MOVIE, "999999998", null, null, null);
+
+        TmdbLookupResult<TmdbCardMetadata> first = tmdbClient.getCardMetadata(key, "en-US");
+        TmdbLookupResult<TmdbCardMetadata> second = tmdbClient.getCardMetadata(key, "en-US");
+
+        assertThat(first.isNotFound()).isTrue();
+        assertThat(second.toOptional()).contains(new TmdbCardMetadata(
+                "Recovered title", "/recovered.jpg", "2026-01-02", 101));
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("[getMovieFullDetails] Should Cache A Confirmed NotFound - When TMDB Responds With 404")
     void shouldCacheAConfirmedNotFoundWhenMovieFullDetailsRespondsWith404() {
         mockServer.expect(requestTo(
