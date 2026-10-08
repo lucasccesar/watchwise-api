@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentStateResolver;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
+import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
@@ -56,11 +57,21 @@ class ContentChildCardAssemblerTest {
     @Mock
     private ContentViewerStateService contentViewerStateService;
 
+    @Mock
+    private TmdbCardMetadataResolver tmdbCardMetadataResolver;
+
+    @Mock
+    private UserContentPosterService userContentPosterService;
+
     private ContentChildCardAssembler assembler;
 
     @BeforeEach
     void setUp() {
-        assembler = new ContentChildCardAssembler(contentStatsService, contentViewerStateService);
+        assembler = new ContentChildCardAssembler(new ContentCardAssembler(
+                contentStatsService,
+                contentViewerStateService,
+                tmdbCardMetadataResolver,
+                userContentPosterService));
     }
 
     @Test
@@ -250,7 +261,11 @@ class ContentChildCardAssemblerTest {
                 new ContentStateResolver(),
                 Clock.systemUTC());
         ContentChildCardAssembler readOnlyAssembler = new ContentChildCardAssembler(
-                contentStatsService, readOnlyViewerStateService);
+                new ContentCardAssembler(
+                        contentStatsService,
+                        readOnlyViewerStateService,
+                        tmdbCardMetadataResolver,
+                        userContentPosterService));
 
         ContentChildCardDTO card = readOnlyAssembler.assembleSections(
                         details(ContentType.SEASON, List.of(), List.of(

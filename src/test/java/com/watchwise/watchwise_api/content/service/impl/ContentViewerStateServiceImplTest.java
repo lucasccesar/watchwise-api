@@ -356,6 +356,22 @@ class ContentViewerStateServiceImplTest {
                 userListItemRepository, contentStateResolver);
     }
 
+    @Test
+    @DisplayName("[resolve] Should Resolve Existing References Without Personal Reads - When Viewer Is Absent")
+    void shouldResolveExistingReferencesWithoutPersonalReadsWhenViewerIsAbsent() {
+        Content movie = movieContent();
+        ContentCoordinate coordinate = coordinate(movie);
+        when(contentRepository.findAllByCoordinates(eq(List.of(coordinate)))).thenReturn(List.of(movie));
+
+        ContentViewerStateService.Resolution result = service.resolve(null, List.of(coordinate), Map.of());
+
+        assertThat(result.existingContentIdsByCoordinate()).containsEntry(coordinate, movie.getId());
+        assertThat(result.statesByCoordinate()).containsEntry(coordinate, state(WatchStatus.UNWATCHED, null, null));
+        verify(contentRepository).findAllByCoordinates(eq(List.of(coordinate)));
+        verifyNoInteractions(diaryEntryRepository, watchlistEntryRepository, droppedEntryRepository,
+                userListItemRepository, contentStateResolver);
+    }
+
     private ContentViewerStateDTO state(WatchStatus status, Integer watched, Integer released) {
         return new ContentViewerStateDTO(status, null, null, null, null, null, 0, null,
                 false, null, false, null, List.of(), watched, released);

@@ -1,6 +1,9 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
 import com.watchwise.watchwise_api.content.dto.ContentChildCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentCardStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentDetailsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentNavigationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPageSectionsDTO;
@@ -10,9 +13,9 @@ import com.watchwise.watchwise_api.content.dto.EpisodeSummaryDTO;
 import com.watchwise.watchwise_api.content.dto.SeasonSummaryDTO;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
-import com.watchwise.watchwise_api.content.service.ContentStatsService;
-import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -24,18 +27,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class ContentChildCardAssembler {
 
     private static final int RECENT_EPISODES_LIMIT = 3;
-    private static final int MAX_STATS_BATCH_SIZE = 100;
 
-    private final ContentStatsService contentStatsService;
-    private final ContentViewerStateService contentViewerStateService;
+    private final ContentCardAssembler contentCardAssembler;
 
     public ContentPageSectionsDTO assembleSections(
             ContentDetailsDTO details, ContentCoordinate rootCoordinate, UUID viewerId) {
@@ -217,55 +217,59 @@ public class ContentChildCardAssembler {
     }
 
     private Map<ContentCoordinate, ContentChildCardDTO> assembleCards(
-            Collection<CardSpec> specs, UUID viewerId) {
-        List<CardSpec> distinctSpecs = safeList(specs).stream()
-                .collect(Collectors.toMap(
-                        CardSpec::coordinate,
-                        Function.identity(),
-                        (left, right) -> left,
-                        LinkedHashMap::new))
-                .values().stream()
-                .toList();
+            List<CardSpec> specs, UUID viewerId) {
+        Map<ContentCoordinate, CardSpec> distinctSpecsByCoordinate = new LinkedHashMap<>();
+        for (CardSpec spec : safeList(specs)) {
+            distinctSpecsByCoordinate.putIfAbsent(spec.coordinate(), spec);
+        }
+        List<CardSpec> distinctSpecs = new ArrayList<>(distinctSpecsByCoordinate.values());
         if (distinctSpecs.isEmpty()) {
             return Map.of();
         }
 
-        List<ContentCoordinate> coordinates = distinctSpecs.stream()
-                .map(CardSpec::coordinate)
+        List<ContentCardSpec> cardSpecs = distinctSpecs.stream()
+                .map(spec -> new ContentCardSpec(
+                        spec.coordinate(), spec.title(), spec.posterPath(), spec.releaseDate(), spec.runtimeMinutes()))
                 .toList();
-        ContentViewerStateService.Resolution resolution = contentViewerStateService.resolve(
-                viewerId, coordinates, Map.of());
-        Map<UUID, ContentStatsResponseDTO> statsByContentId = statsByContentId(
-                distinctSpecs.stream()
-                        .map(spec -> resolution.existingContentIdsByCoordinate().get(spec.coordinate()))
-                        .toList());
+        ContentCardAssembler.AssemblyResult result = contentCardAssembler.assembleWithViewerStates(
+                cardSpecs,
+                new ContentCardContext(null, null, null, viewerId),
+                Set.of(ContentCardFieldSet.STATS, ContentCardFieldSet.VIEWER_STATE));
 
-        return distinctSpecs.stream().collect(Collectors.toMap(
-                CardSpec::coordinate,
-                spec -> toCard(spec, resolution, statsByContentId),
-                (left, right) -> left,
-                LinkedHashMap::new));
+        Map<ContentCoordinate, ContentChildCardDTO> cards = new LinkedHashMap<>();
+        for (CardSpec spec : distinctSpecs) {
+            cards.put(spec.coordinate(), toChildCard(
+                    spec,
+                    result.cardsByCoordinate().get(spec.coordinate()),
+                    result.viewerStatesByCoordinate().get(spec.coordinate())));
+        }
+        return cards;
     }
 
-    private Map<UUID, ContentStatsResponseDTO> statsByContentId(Collection<UUID> contentIds) {
-        List<UUID> distinctContentIds = safeList(contentIds).stream().distinct().toList();
-        if (distinctContentIds.isEmpty()) {
-            return Map.of();
-        }
-        Map<UUID, ContentStatsResponseDTO> statsByContentId = new LinkedHashMap<>();
-        for (int start = 0; start < distinctContentIds.size(); start += MAX_STATS_BATCH_SIZE) {
-            int end = Math.min(start + MAX_STATS_BATCH_SIZE, distinctContentIds.size());
-            List<ContentStatsResponseDTO> stats = contentStatsService.getStatsBatch(
-                    distinctContentIds.subList(start, end));
-            if (stats == null) {
-                continue;
-            }
-            stats.stream()
-                    .filter(Objects::nonNull)
-                    .filter(stat -> stat.contentId() != null)
-                    .forEach(stat -> statsByContentId.putIfAbsent(stat.contentId(), stat));
-        }
-        return statsByContentId;
+    private ContentChildCardDTO toChildCard(
+            CardSpec spec,
+            ContentCardDTO card,
+            ContentViewerStateDTO viewerState) {
+        ContentCoordinate coordinate = spec.coordinate();
+        ContentCardStatsDTO stats = card == null ? null : card.stats();
+        ContentStatsResponseDTO statsResponse = stats == null
+                ? new ContentStatsResponseDTO(card == null ? null : card.contentId(), null, 0, 0, 0)
+                : new ContentStatsResponseDTO(
+                        card.contentId(), stats.averageScore(), stats.playsCount(),
+                        stats.reviewsCount(), stats.commentsCount());
+        return new ContentChildCardDTO(
+                card == null ? null : card.contentId(),
+                coordinate.type(),
+                coordinate.tmdbId(),
+                coordinate.seriesTmdbId(),
+                coordinate.seasonNumber(),
+                coordinate.episodeNumber(),
+                spec.title(),
+                spec.posterPath(),
+                spec.releaseDate(),
+                spec.runtimeMinutes(),
+                statsResponse,
+                viewerState == null ? emptyState() : viewerState);
     }
 
     private EpisodeBoundary episodeBoundary(ContentDetailsDTO parentSeasonDetails) {
@@ -286,32 +290,6 @@ public class ContentChildCardAssembler {
         return episodeCount == null ? null : new EpisodeBoundary(episodes, episodeCount);
     }
 
-    private ContentChildCardDTO toCard(
-            CardSpec spec,
-            ContentViewerStateService.Resolution resolution,
-            Map<UUID, ContentStatsResponseDTO> statsByContentId) {
-        UUID contentId = resolution.existingContentIdsByCoordinate().get(spec.coordinate());
-        ContentStatsResponseDTO stats = contentId == null
-                ? zeroStats()
-                : statsByContentId.getOrDefault(contentId, zeroStats(contentId));
-        ContentViewerStateDTO viewerState = resolution.statesByCoordinate()
-                .getOrDefault(spec.coordinate(), emptyState());
-        ContentCoordinate coordinate = spec.coordinate();
-        return new ContentChildCardDTO(
-                contentId,
-                coordinate.type(),
-                coordinate.tmdbId(),
-                coordinate.seriesTmdbId(),
-                coordinate.seasonNumber(),
-                coordinate.episodeNumber(),
-                spec.title(),
-                spec.posterPath(),
-                spec.releaseDate(),
-                spec.runtimeMinutes(),
-                stats,
-                viewerState);
-    }
-
     private List<ContentChildCardDTO> toCards(
             List<CardSpec> specs, Map<ContentCoordinate, ContentChildCardDTO> cards) {
         return specs.stream().map(spec -> cards.get(spec.coordinate())).toList();
@@ -327,14 +305,6 @@ public class ContentChildCardAssembler {
 
     private <T> List<T> safeList(Collection<T> values) {
         return values == null ? List.of() : values.stream().filter(Objects::nonNull).toList();
-    }
-
-    private ContentStatsResponseDTO zeroStats() {
-        return new ContentStatsResponseDTO(null, null, 0, 0, 0);
-    }
-
-    private ContentStatsResponseDTO zeroStats(UUID contentId) {
-        return new ContentStatsResponseDTO(contentId, null, 0, 0, 0);
     }
 
     private ContentViewerStateDTO emptyState() {

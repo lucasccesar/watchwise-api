@@ -98,7 +98,6 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             UUID viewerId,
             Collection<ContentCoordinate> coordinates,
             Map<ContentCoordinate, ContentSchedule> schedulesByCoordinate) {
-        Objects.requireNonNull(viewerId, "viewerId is required");
         List<ContentCoordinate> requestedCoordinates = distinctCoordinates(coordinates);
         if (requestedCoordinates.isEmpty()) {
             return new Resolution(Map.of(), Map.of());
@@ -106,8 +105,31 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
 
         Map<ContentCoordinate, Content> contentByCoordinate = findExistingContent(requestedCoordinates);
 
+        if (viewerId == null) {
+            return resolveWithoutViewerState(requestedCoordinates, contentByCoordinate);
+        }
+
         return resolveExistingContentStates(
                 viewerId, requestedCoordinates, contentByCoordinate, schedulesByCoordinate);
+    }
+
+    private Resolution resolveWithoutViewerState(
+            List<ContentCoordinate> requestedCoordinates,
+            Map<ContentCoordinate, Content> contentByCoordinate) {
+        Map<ContentCoordinate, ContentViewerStateDTO> emptyStates = requestedCoordinates.stream()
+                .collect(Collectors.toMap(
+                        Function.identity(),
+                        ignored -> emptyState(),
+                        (left, right) -> left,
+                        LinkedHashMap::new));
+        Map<ContentCoordinate, UUID> existingContentIdsByCoordinate = contentByCoordinate.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue().getId() != null)
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> entry.getValue().getId(),
+                        (left, right) -> left,
+                        LinkedHashMap::new));
+        return new Resolution(emptyStates, existingContentIdsByCoordinate);
     }
 
     private Resolution resolveExistingContentStates(
