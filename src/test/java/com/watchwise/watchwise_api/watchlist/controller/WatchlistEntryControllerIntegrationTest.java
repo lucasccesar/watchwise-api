@@ -195,6 +195,11 @@ class WatchlistEntryControllerIntegrationTest {
         return request;
     }
 
+    private MockHttpServletRequestBuilder getWatchlistViewRequest(RegisteredUser viewer, UUID targetUserId) {
+        return get("/users/" + targetUserId + "/watchlist/view")
+                .cookie(viewer.accessToken());
+    }
+
     private String contentBody(String tmdbId) {
         return """
                 {
@@ -399,6 +404,81 @@ class WatchlistEntryControllerIntegrationTest {
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values: MOVIE, SERIES")))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("SEASON"))))
                 .andExpect(jsonPath("$.detail").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getWatchlistView] Should Return Visual Page Envelope - When Owner Has Entries")
+    void shouldReturnVisualPageEnvelopeWhenOwnerHasEntries() throws Exception {
+        RegisteredUser user = registerUser("getwatchlistviewok");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content content = contentRepository.save(Content.builder()
+                .tmdbId("550")
+                .type(ContentType.MOVIE)
+                .runtimeMinutes(120)
+                .genres(List.of("Drama"))
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        persistEntry(entity, content, ContentType.MOVIE, 1);
+
+        long contentCountBefore = contentRepository.count();
+        mockMvc.perform(getWatchlistViewRequest(user, user.id())
+                        .param("type", "MOVIE")
+                        .param("genre", "Drama")
+                        .param("status", "ALL")
+                        .param("sort", "DATE_ADDED")
+                        .param("direction", "DESC")
+                        .param("page", "1")
+                        .param("size", "30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").exists())
+                .andExpect(jsonPath("$.content[0].card.type").value("MOVIE"))
+                .andExpect(jsonPath("$.content[0].position").value(1))
+                .andExpect(jsonPath("$.content[0].status").value("NEW"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(30))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.aggregate.totalCount").value(1))
+                .andExpect(jsonPath("$.aggregate.movieCount").value(1))
+                .andExpect(jsonPath("$.aggregate.seriesCount").value(0))
+                .andExpect(jsonPath("$.aggregate.totalRuntimeMinutes").value(120))
+                .andExpect(jsonPath("$.aggregate.upcomingCount").value(0));
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+    }
+
+    @Test
+    @DisplayName("[getWatchlistView] Should Return BadRequest - When Sort Or Status Is Invalid")
+    void shouldReturnBadRequestWhenSortOrStatusIsInvalid() throws Exception {
+        RegisteredUser user = registerUser("getwatchlistviewinvalid");
+
+        mockMvc.perform(getWatchlistViewRequest(user, user.id()).param("sort", "UNKNOWN"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values")))
+                .andExpect(jsonPath("$.detail").doesNotExist());
+
+        mockMvc.perform(getWatchlistViewRequest(user, user.id()).param("status", "UNKNOWN"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values")))
+                .andExpect(jsonPath("$.detail").doesNotExist());
+
+        mockMvc.perform(getWatchlistViewRequest(user, user.id()).param("direction", "SIDEWAYS"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("direction")))
+                .andExpect(jsonPath("$.detail").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[getWatchlistView] Should Respect Private Profile Visibility")
+    void shouldRespectPrivateProfileVisibility() throws Exception {
+        RegisteredUser viewer = registerUser("getwatchlistviewviewer");
+        RegisteredUser target = registerUser("getwatchlistviewprivate", false);
+
+        mockMvc.perform(getWatchlistViewRequest(viewer, target.id()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("This user profile is private"));
     }
 
     @Test

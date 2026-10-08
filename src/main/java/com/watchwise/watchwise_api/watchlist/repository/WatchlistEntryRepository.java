@@ -53,6 +53,13 @@ public interface WatchlistEntryRepository extends JpaRepository<WatchlistEntry, 
     Page<WatchlistEntry> findByUserIdOrderByPositionAsc(
             @Param("userId") UUID userId, Pageable pageable);
 
+    @Query("""
+            SELECT w FROM WatchlistEntry w JOIN FETCH w.content
+            WHERE w.user.id = :userId
+            ORDER BY w.position ASC, w.id ASC
+            """)
+    List<WatchlistEntry> findByUserIdWithContentForView(@Param("userId") UUID userId);
+
     Optional<WatchlistEntry> findByUserIdAndTypeAndContentId(UUID userId, ContentType type, UUID contentId);
 
     @Query("""

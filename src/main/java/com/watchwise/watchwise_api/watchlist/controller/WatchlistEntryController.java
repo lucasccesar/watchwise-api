@@ -6,6 +6,9 @@ import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistPageResponseDTO;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistSort;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistStatus;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistViewResponseDTO;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +44,23 @@ public class WatchlistEntryController {
         WatchlistPageResponseDTO entries = watchlistEntryService.getWatchlist(
                 getCurrentUserId(), userId, type == null ? null : type.toContentType(), page, size);
         return ResponseEntity.ok(entries);
+    }
+
+    @GetMapping("/{userId}/watchlist/view")
+    public ResponseEntity<WatchlistViewResponseDTO> getWatchlistView(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) MovieOrSeriesType type,
+            @RequestParam(required = false) String genre,
+            @RequestParam(required = false) WatchlistStatus status,
+            @RequestParam(required = false) WatchlistSort sort,
+            @RequestParam(required = false) String direction,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        WatchlistViewResponseDTO view = watchlistEntryService.getWatchlistView(
+                getCurrentUserId(), userId, type == null ? null : type.toContentType(), genre, status, sort,
+                direction, page, size);
+        return ResponseEntity.ok(view);
     }
 
     @PostMapping("/me/watchlist/{type}")

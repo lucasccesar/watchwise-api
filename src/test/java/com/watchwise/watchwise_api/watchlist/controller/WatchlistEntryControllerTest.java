@@ -7,6 +7,10 @@ import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistPageResponseDTO;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistAggregateDTO;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistSort;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistStatus;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistViewResponseDTO;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -74,6 +78,26 @@ class WatchlistEntryControllerTest {
         watchlistEntryController.getWatchlist(targetUserId, MovieOrSeriesType.MOVIE, 1, 10);
 
         verify(watchlistEntryService).getWatchlist(currentUserId, targetUserId, ContentType.MOVIE, 1, 10);
+    }
+
+    @Test
+    void shouldGetWatchlistViewWithTypedFiltersAndDirection() {
+        UUID targetUserId = UUID.randomUUID();
+        WatchlistViewResponseDTO expected = new WatchlistViewResponseDTO(
+                List.of(), 1, 30, 0, 0, false, new WatchlistAggregateDTO(0, 0, 0, 0, 0));
+        when(watchlistEntryService.getWatchlistView(
+                currentUserId, targetUserId, ContentType.SERIES, "Drama", WatchlistStatus.IN_PROGRESS,
+                WatchlistSort.RATING, "DESC", 1, 30)).thenReturn(expected);
+
+        ResponseEntity<WatchlistViewResponseDTO> result = watchlistEntryController.getWatchlistView(
+                targetUserId, MovieOrSeriesType.SERIES, "Drama", WatchlistStatus.IN_PROGRESS,
+                WatchlistSort.RATING, "DESC", 1, 30);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(expected);
+        verify(watchlistEntryService).getWatchlistView(
+                currentUserId, targetUserId, ContentType.SERIES, "Drama", WatchlistStatus.IN_PROGRESS,
+                WatchlistSort.RATING, "DESC", 1, 30);
     }
 
     @Test

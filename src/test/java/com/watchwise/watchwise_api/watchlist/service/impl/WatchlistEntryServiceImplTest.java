@@ -6,12 +6,22 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardStatsDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
+import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentreleasedatesnapshot.service.ContentReleaseDateSnapshotService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -21,6 +31,11 @@ import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistPageResponseDTO;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistAggregateDTO;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistCardDTO;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistSort;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistStatus;
+import com.watchwise.watchwise_api.watchlist.dto.WatchlistViewResponseDTO;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.mapper.WatchlistEntryMapper;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
@@ -41,6 +56,8 @@ import org.springframework.data.domain.PageRequest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -49,7 +66,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.lenient;
@@ -70,6 +89,8 @@ class WatchlistEntryServiceImplTest {
     @Mock private WatchlistEntryMapper watchlistEntryMapper;
     @Mock private AdvisoryLock advisoryLock;
     @Mock private ContentReleaseDateSnapshotService releaseDateSnapshotService;
+    @Mock private ContentCardAssembler contentCardAssembler;
+    @Mock private ContentViewerStateService contentViewerStateService;
     @Spy private PageRequestFactory pageRequestFactory = new PageRequestFactory();
     @InjectMocks private WatchlistEntryServiceImpl watchlistEntryService;
 
@@ -285,6 +306,189 @@ class WatchlistEntryServiceImplTest {
                 userId, userId, ContentType.MOVIE, 1, 0)).isInstanceOf(BadRequestException.class);
         verify(watchlistEntryRepository, never()).findByUserIdAndTypeOrderByPositionAsc(
                 any(UUID.class), any(ContentType.class), any(PageRequest.class));
+    }
+
+    @Test
+    void shouldFilterByTypeAndGenreBeforePaginationAndAggregateFilteredCandidates() {
+        WatchlistEntry dramaMovie = entry(content("550", ContentType.MOVIE, 120, List.of("Drama")), ContentType.MOVIE, 1);
+        WatchlistEntry dramaSeries = entry(content("1396", ContentType.SERIES, null, List.of("Drama"), 480), ContentType.SERIES, 2);
+        WatchlistEntry comedyMovie = entry(content("680", ContentType.MOVIE, 90, List.of("Comedy")), ContentType.MOVIE, 3);
+        List<WatchlistEntry> candidates = List.of(dramaMovie, dramaSeries, comedyMovie);
+        stubViewCandidates(candidates);
+        stubViewDates(List.of(dramaMovie), Map.of(
+                dramaMovie.getId(), LocalDate.now().minusDays(2)));
+        stubOwnerStates(candidates, Map.of());
+        stubCards(candidates);
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, ContentType.MOVIE, "Drama", WatchlistStatus.ALL,
+                WatchlistSort.DATE_ADDED, "ASC", 1, 1);
+
+        assertThat(result.content()).extracting(card -> card.card().tmdbId()).containsExactly("550");
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(result.totalElements()).isEqualTo(1);
+        assertThat(result.totalPages()).isEqualTo(1);
+        assertThat(result.hasNext()).isFalse();
+        assertThat(result.aggregate()).isEqualTo(new WatchlistAggregateDTO(1, 1, 0, 120, 0));
+    }
+
+    @Test
+    void shouldCountUpcomingAfterFilteringBeforePagination() {
+        WatchlistEntry upcoming = entry(content("550", ContentType.MOVIE, 120, List.of("Drama")), ContentType.MOVIE, 1);
+        WatchlistEntry released = entry(content("680", ContentType.MOVIE, 90, List.of("Drama")), ContentType.MOVIE, 2);
+        List<WatchlistEntry> candidates = List.of(upcoming, released);
+        stubViewCandidates(candidates);
+        stubViewDates(candidates, Map.of(
+                upcoming.getId(), LocalDate.now().plusDays(5),
+                released.getId(), LocalDate.now().minusDays(5)));
+        stubOwnerStates(candidates, Map.of());
+        stubCards(candidates);
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.UPCOMING,
+                WatchlistSort.DATE_ADDED, "ASC", 1, 1);
+
+        assertThat(result.content()).extracting(card -> card.card().tmdbId()).containsExactly("550");
+        assertThat(result.aggregate()).isEqualTo(new WatchlistAggregateDTO(1, 1, 0, 120, 1));
+    }
+
+    @Test
+    void shouldFilterInProgressSeriesUsingOwnerState() {
+        WatchlistEntry inProgress = entry(content("1396", ContentType.SERIES, null, List.of("Drama"), 480), ContentType.SERIES, 1);
+        WatchlistEntry newSeries = entry(content("1399", ContentType.SERIES, null, List.of("Drama"), 360), ContentType.SERIES, 2);
+        List<WatchlistEntry> candidates = List.of(inProgress, newSeries);
+        stubViewCandidates(candidates);
+        stubViewDates(candidates, Map.of(
+                inProgress.getId(), LocalDate.now().minusDays(5),
+                newSeries.getId(), LocalDate.now().minusDays(4)));
+        stubOwnerStates(candidates, Map.of(
+                ContentCoordinate.from(inProgress.getContent()), ownerState(WatchStatus.PARTIALLY_WATCHED, 2)));
+        stubCards(candidates);
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.IN_PROGRESS,
+                WatchlistSort.DATE_ADDED, "ASC", 1, 10);
+
+        assertThat(result.content()).extracting(card -> card.card().tmdbId()).containsExactly("1396");
+        assertThat(result.content()).singleElement().extracting(WatchlistCardDTO::status)
+                .isEqualTo(WatchlistStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void shouldApplyAllVisualSortsAndStableTieBreaking() {
+        WatchlistEntry first = entry(content("1", ContentType.MOVIE, 100, List.of("Drama")), ContentType.MOVIE, 2);
+        WatchlistEntry second = entry(content("2", ContentType.MOVIE, 200, List.of("Drama")), ContentType.MOVIE, 1);
+        WatchlistEntry third = entry(content("3", ContentType.MOVIE, 150, List.of("Drama")), ContentType.MOVIE, 3);
+        LocalDateTime addedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        first.setCreatedAt(addedAt);
+        second.setCreatedAt(addedAt.plusDays(1));
+        third.setCreatedAt(addedAt.plusDays(2));
+        List<WatchlistEntry> candidates = List.of(first, second, third);
+        stubViewCandidates(candidates);
+        stubViewDates(candidates, Map.of(
+                first.getId(), LocalDate.of(2026, 1, 1),
+                second.getId(), LocalDate.of(2027, 1, 1),
+                third.getId(), LocalDate.of(2026, 6, 1)));
+        stubOwnerStates(candidates, Map.of());
+        stubCards(candidates);
+
+        assertThat(viewIds(WatchlistSort.DATE_ADDED, "ASC")).containsExactly("1", "2", "3");
+        assertThat(viewIds(WatchlistSort.RELEASE_DATE, "DESC")).containsExactly("2", "3", "1");
+        assertThat(viewIds(WatchlistSort.RUNTIME, "DESC")).containsExactly("2", "3", "1");
+        assertThat(viewIds(WatchlistSort.RATING, "DESC")).containsExactly("2", "1", "3");
+        assertThat(viewIds(WatchlistSort.TITLE, "ASC")).containsExactly("1", "2", "3");
+    }
+
+    @Test
+    void shouldUseWatchlistEntryIdAsStableTieBreaker() {
+        WatchlistEntry higherId = entry(content("higher", ContentType.MOVIE, 100, List.of("Drama")), ContentType.MOVIE, 1);
+        WatchlistEntry lowerId = entry(content("lower", ContentType.MOVIE, 100, List.of("Drama")), ContentType.MOVIE, 2);
+        lowerId.setId(UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        higherId.setId(UUID.fromString("00000000-0000-0000-0000-000000000002"));
+        List<WatchlistEntry> candidates = List.of(higherId, lowerId);
+        stubViewCandidates(candidates);
+        LocalDate sameReleaseDate = LocalDate.of(2026, 1, 1);
+        stubViewDates(candidates, Map.of(
+                higherId.getId(), sameReleaseDate,
+                lowerId.getId(), sameReleaseDate));
+        stubOwnerStates(candidates, Map.of());
+        stubCards(candidates);
+
+        assertThat(viewIds(WatchlistSort.RUNTIME, "ASC")).containsExactly("lower", "higher");
+    }
+
+    @Test
+    void shouldRejectMaterializedSortWhenFilteredCandidatesExceedConfiguredCap() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                watchlistEntryService, "maxMaterializedSortCandidates", 1);
+        WatchlistEntry first = entry(content("1", ContentType.MOVIE, 100, List.of("Drama")), ContentType.MOVIE, 1);
+        WatchlistEntry second = entry(content("2", ContentType.MOVIE, 100, List.of("Drama")), ContentType.MOVIE, 2);
+        List<WatchlistEntry> candidates = List.of(first, second);
+        stubViewCandidates(candidates);
+        stubViewDates(candidates, Map.of(
+                first.getId(), LocalDate.now().minusDays(2),
+                second.getId(), LocalDate.now().minusDays(1)));
+        stubOwnerStates(candidates, Map.of());
+
+        assertThatThrownBy(() -> watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.ALL,
+                WatchlistSort.TITLE, "ASC", 1, 10))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("restrict type, genre or status");
+        assertThatThrownBy(() -> watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.ALL,
+                WatchlistSort.RATING, "ASC", 1, 10))
+                .isInstanceOf(BadRequestException.class);
+        verifyNoInteractions(contentCardAssembler);
+    }
+
+    @Test
+    void shouldRejectPrivateWatchlistViewBeforeLoadingCandidates() {
+        user.setIsProfilePublic(false);
+        UUID viewerId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(
+                viewerId, userId, FollowStatus.ACCEPTED)).thenReturn(false);
+
+        assertThatThrownBy(() -> watchlistEntryService.getWatchlistView(
+                viewerId, userId, null, null, WatchlistStatus.ALL,
+                WatchlistSort.DATE_ADDED, "DESC", 1, 10))
+                .isInstanceOf(ForbiddenException.class);
+        verify(watchlistEntryRepository, never()).findByUserIdWithContentForView(userId);
+    }
+
+    @Test
+    void shouldRejectBlankGenreBeforeLoadingCandidates() {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> watchlistEntryService.getWatchlistView(
+                userId, userId, null, "  ", WatchlistStatus.ALL,
+                WatchlistSort.DATE_ADDED, "DESC", 1, 10))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("genre must not be blank");
+        verify(watchlistEntryRepository, never()).findByUserIdWithContentForView(userId);
+    }
+
+    @Test
+    void shouldReadWatchlistViewWithoutCreatingContentAndPreservePartialCardStatus() {
+        WatchlistEntry candidate = entry(content("550", ContentType.MOVIE, 120, List.of("Drama")), ContentType.MOVIE, 1);
+        stubViewCandidates(List.of(candidate));
+        stubViewDates(List.of(candidate), Map.of(candidate.getId(), LocalDate.now().minusDays(1)));
+        stubOwnerStates(List.of(candidate), Map.of());
+        ContentCardDTO partial = card(candidate.getContent(), "550", null, ContentPreviewStatus.PARTIAL, null);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(candidate.getContent()), partial));
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.ALL,
+                WatchlistSort.DATE_ADDED, "DESC", 1, 10);
+
+        assertThat(result.content()).singleElement().extracting(card -> card.card().previewStatus())
+                .isEqualTo(ContentPreviewStatus.PARTIAL);
+        verifyNoInteractions(contentService, contentRepository);
+        verify(contentCardAssembler).assemble(anyCollection(), eq(new ContentCardContext(
+                user.getPreferredLanguage(), user.getPreferredRegion(), userId, null)), anySet());
     }
 
     @Test
@@ -505,6 +709,76 @@ class WatchlistEntryServiceImplTest {
                 "constraint violated", null, constraintName));
     }
 
+    private void stubViewCandidates(List<WatchlistEntry> candidates) {
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(watchlistEntryRepository.findByUserIdWithContentForView(userId)).thenReturn(candidates);
+    }
+
+    private void stubViewDates(List<WatchlistEntry> candidates, Map<UUID, LocalDate> dates) {
+        when(releaseDateSnapshotService.resolve(user, candidates))
+                .thenReturn(new ContentReleaseDateSnapshotService.WatchlistDateResolution(dates));
+    }
+
+    private void stubOwnerStates(
+            List<WatchlistEntry> candidates,
+            Map<ContentCoordinate, ContentViewerStateDTO> states) {
+        List<ContentCoordinate> coordinates = candidates.stream()
+                .map(WatchlistEntry::getContent)
+                .map(ContentCoordinate::from)
+                .toList();
+        when(contentViewerStateService.resolve(eq(userId), anyList(), eq(Map.of())))
+                .thenReturn(new ContentViewerStateService.Resolution(states, Map.of()));
+    }
+
+    private void stubCards(List<WatchlistEntry> candidates) {
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenAnswer(invocation -> {
+                    Collection<ContentCardSpec> specs = invocation.getArgument(0);
+                    Map<ContentCoordinate, ContentCardDTO> cards = new LinkedHashMap<>();
+                    for (ContentCardSpec spec : specs) {
+                        Content content = candidates.stream()
+                                .map(WatchlistEntry::getContent)
+                                .filter(candidate -> ContentCoordinate.from(candidate).equals(spec.coordinate()))
+                                .findFirst()
+                                .orElseThrow();
+                        String tmdbId = content.getTmdbId();
+                        double rating = switch (tmdbId) {
+                            case "1" -> 8.0;
+                            case "2" -> 9.0;
+                            case "3" -> 7.0;
+                            default -> 5.0;
+                        };
+                        cards.put(spec.coordinate(), card(content, tmdbId,
+                                "Title " + tmdbId, ContentPreviewStatus.AVAILABLE, rating));
+                    }
+                    return cards;
+                });
+    }
+
+    private List<String> viewIds(WatchlistSort sort, String direction) {
+        return watchlistEntryService.getWatchlistView(
+                        userId, userId, null, null, WatchlistStatus.ALL, sort, direction, 1, 10)
+                .content().stream()
+                .map(card -> card.card().tmdbId())
+                .toList();
+    }
+
+    private ContentViewerStateDTO ownerState(WatchStatus status, int playsCount) {
+        return new ContentViewerStateDTO(
+                status, null, null, null, null, null, playsCount, null,
+                false, null, false, null, List.of(), null, null);
+    }
+
+    private ContentCardDTO card(
+            Content content, String tmdbId, String title, ContentPreviewStatus previewStatus, Double rating) {
+        return new ContentCardDTO(
+                content.getId(), content.getType(), tmdbId, content.getSeriesTmdbId(),
+                content.getSeasonNumber(), content.getEpisodeNumber(), title, "/poster.jpg", null,
+                null, content.getReleaseYear(), content.getRuntimeMinutes(), content.getTotalRuntimeMinutes(),
+                null, null, content.getGenres(),
+                rating == null ? null : new ContentCardStatsDTO(rating, 0L, 0L, 0L), null, previewStatus);
+    }
+
     private void stubResolution(List<WatchlistEntry> entries, Map<UUID, LocalDate> dates) {
         when(releaseDateSnapshotService.resolve(user, entries))
                 .thenReturn(new ContentReleaseDateSnapshotService.WatchlistDateResolution(dates));
@@ -523,6 +797,19 @@ class WatchlistEntryServiceImplTest {
 
     private Content content(String tmdbId, ContentType type) {
         return Content.builder().id(UUID.randomUUID()).tmdbId(tmdbId).type(type)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+    }
+
+    private Content content(String tmdbId, ContentType type, Integer runtimeMinutes, List<String> genres) {
+        return Content.builder().id(UUID.randomUUID()).tmdbId(tmdbId).type(type)
+                .runtimeMinutes(runtimeMinutes).genres(genres)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+    }
+
+    private Content content(
+            String tmdbId, ContentType type, Integer runtimeMinutes, List<String> genres, Integer totalRuntimeMinutes) {
+        return Content.builder().id(UUID.randomUUID()).tmdbId(tmdbId).type(type)
+                .runtimeMinutes(runtimeMinutes).totalRuntimeMinutes(totalRuntimeMinutes).genres(genres)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
     }
 }
