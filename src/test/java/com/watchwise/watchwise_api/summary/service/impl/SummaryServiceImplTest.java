@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
@@ -74,6 +75,7 @@ import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.Collection;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -474,6 +476,161 @@ class SummaryServiceImplTest {
         assertThat(result.firstWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/first.png");
         assertThat(result.lastWatched().customPosterUrl()).isEqualTo("https://image.tmdb.org/t/p/w342/last.png");
         verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Resolve One Card For Repeated Ranking Coordinates And Preserve Totals")
+    void shouldResolveOneCardForRepeatedRankingCoordinatesAndPreserveTotalsForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movie = buildContent("550", ContentType.MOVIE);
+        movie.setRuntimeMinutes(139);
+        DiaryEntry entry = buildDiaryEntry(movie, LocalDateTime.now());
+        entry.setScore(9);
+        when(diaryEntryRepository.findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.countByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any())).thenReturn(5L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any())).thenReturn(695L);
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false))
+                .thenReturn(buildDiaryEntryResponseDto(entry));
+
+        ContentCardDTO card = cardFor(movie, "Fight Club", "/fight-club.jpg");
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(movie), card));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.watchCount()).isEqualTo(5L);
+        assertThat(result.minutesWatched()).isEqualTo(695L);
+        assertThat(result.recentWatched().getFirst().card()).isEqualTo(card);
+        assertThat(result.topRated().getFirst().card()).isEqualTo(card);
+        assertThat(result.bottomRated().getFirst().card()).isEqualTo(card);
+        assertThat(result.firstWatched().card()).isEqualTo(card);
+        assertThat(result.lastWatched().card()).isEqualTo(card);
+
+        ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
+        ArgumentCaptor<Set<ContentCardFieldSet>> fields = ArgumentCaptor.forClass(Set.class);
+        verify(contentCardAssembler).assemble(specs.capture(), any(ContentCardContext.class), fields.capture());
+        assertThat(specs.getValue()).hasSize(1);
+        assertThat(fields.getValue()).containsExactlyInAnyOrder(
+                ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.STATS);
+        assertThat(fields.getValue()).doesNotContain(ContentCardFieldSet.VIEWER_STATE);
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Keep The Ranking Row And Totals When Card Metadata Is Partial")
+    void shouldKeepTheRankingRowAndTotalsWhenCardMetadataIsPartialForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movie = buildContent("partial-month", ContentType.MOVIE);
+        DiaryEntry entry = buildDiaryEntry(movie, LocalDateTime.now());
+        when(diaryEntryRepository.findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.countByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any())).thenReturn(3L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any())).thenReturn(210L);
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false))
+                .thenReturn(buildDiaryEntryResponseDto(entry));
+        ContentCardDTO partialCard = new ContentCardDTO(movie.getId(), ContentType.MOVIE, movie.getTmdbId(),
+                null, null, null, "Partial", null, null, null, null, null,
+                null, null, null, null, null, null, ContentPreviewStatus.PARTIAL);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(movie), partialCard));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.MOVIE, YearMonth.of(2026, 8));
+
+        assertThat(result.recentWatched()).hasSize(1);
+        assertThat(result.recentWatched().getFirst().card().previewStatus())
+                .isEqualTo(ContentPreviewStatus.PARTIAL);
+        assertThat(result.watchCount()).isEqualTo(3L);
+        assertThat(result.minutesWatched()).isEqualTo(210L);
+
+        ArgumentCaptor<Set<ContentCardFieldSet>> fields = ArgumentCaptor.forClass(Set.class);
+        verify(contentCardAssembler).assemble(anyCollection(), any(ContentCardContext.class), fields.capture());
+        assertThat(fields.getValue()).containsExactly(ContentCardFieldSet.BASIC_METADATA);
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Resolve The Series Ranking Card With The Selected Type")
+    void shouldResolveTheSeriesRankingCardWithTheSelectedTypeForMonthInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content series = buildContent("1399", ContentType.SERIES);
+        DiaryEntry recent = buildDiaryEntry(series, LocalDateTime.now());
+        when(diaryEntryRepository.findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                eq(lucasId), eq(ContentType.SERIES), any(), any(), any())).thenReturn(List.of(recent));
+        when(diaryEntryMapper.diaryEntryToResponseDto(recent, false))
+                .thenReturn(buildDiaryEntryResponseDto(recent));
+        UUID seriesContentId = UUID.randomUUID();
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(
+                eq(lucasId), any(), any(), any())).thenReturn(List.of(seriesRuntime("1399", seriesContentId, 320L)));
+
+        ContentCardDTO card = cardFor(series, "Breaking Bad", "/breaking-bad.jpg");
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(series), card));
+
+        MonthInReviewResponseDTO result = summaryService.getMonthInReview(
+                lucasId, lucasId, ContentType.SERIES, YearMonth.of(2026, 8));
+
+        assertThat(result.topSeriesByWatchTime()).hasSize(1);
+        assertThat(serialize(result).get("topSeriesByWatchTime").get(0).get("card")).isNotNull();
+        assertThat(result.recentWatched().getFirst().card()).isEqualTo(card);
+        verify(diaryEntryRepository, never()).findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                eq(lucasId), eq(ContentType.EPISODE), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Resolve Ranking Cards Once And Preserve The Year Chart")
+    void shouldResolveRankingCardsOnceAndPreserveTheYearChartForYearInReview() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        Content movie = buildContent("680", ContentType.MOVIE);
+        movie.setRuntimeMinutes(181);
+        DiaryEntry entry = buildDiaryEntry(movie, LocalDateTime.now());
+        entry.setScore(10);
+        when(diaryEntryRepository.findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findEarliestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findLatestWatchedEntriesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any(), any())).thenReturn(List.of(entry));
+        when(diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
+                eq(lucasId), any(), any(), any())).thenReturn(List.of(movie));
+        when(diaryEntryRepository.countByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any())).thenReturn(12L);
+        when(diaryEntryRepository.sumRuntimeMinutesByUserIdAndContentTypeAndWatchedDateBetween(
+                eq(lucasId), eq(ContentType.MOVIE), any(), any())).thenReturn(2172L);
+        when(diaryEntryMapper.diaryEntryToResponseDto(entry, false))
+                .thenReturn(buildDiaryEntryResponseDto(entry));
+        ContentCardDTO card = cardFor(movie, "Inception", "/inception.jpg");
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(movie), card));
+
+        YearInReviewResponseDTO result = summaryService.getYearInReview(
+                lucasId, lucasId, ContentType.MOVIE, 2026);
+
+        assertThat(result.watchCount()).isEqualTo(12L);
+        assertThat(result.minutesWatched()).isEqualTo(2172L);
+        assertThat(result.topRated().getFirst().card()).isEqualTo(card);
+        assertThat(result.bottomRated().getFirst().card()).isEqualTo(card);
+        assertThat(result.firstWatched().card()).isEqualTo(card);
+        assertThat(result.lastWatched().card()).isEqualTo(card);
+        assertThat(serialize(result).get("longestWatched").get(0).get("card")).isNotNull();
+
+        ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
+        verify(contentCardAssembler).assemble(specs.capture(), any(ContentCardContext.class), anySet());
+        assertThat(specs.getValue()).hasSize(1);
     }
 
     @Test

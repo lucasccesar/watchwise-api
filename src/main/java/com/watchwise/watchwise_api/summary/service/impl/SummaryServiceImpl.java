@@ -78,6 +78,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -103,6 +104,10 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int SINGLE_WATCHED_ENTRY_LIMIT = 1;
     private static final double AVERAGE_DAYS_PER_MONTH = 30.44;
     private static final Set<ContentType> ALLOWED_SUMMARY_TYPES = Set.of(ContentType.MOVIE, ContentType.SERIES);
+    private static final Set<ContentCardFieldSet> BASIC_CARD_FIELDS = Set.of(
+            ContentCardFieldSet.BASIC_METADATA);
+    private static final Set<ContentCardFieldSet> SUMMARY_CARD_FIELDS_WITH_STATS = Set.of(
+            ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.STATS);
 
     private final UserRepository userRepository;
     private final FollowerRepository followerRepository;
@@ -309,13 +314,6 @@ public class SummaryServiceImpl implements SummaryService {
                 collectDiaryEntries(recentWatchedEntries, topRatedRaw, bottomRatedRaw,
                         firstWatchedEntry == null ? List.of() : List.of(firstWatchedEntry),
                         lastWatchedEntry == null ? List.of() : List.of(lastWatchedEntry)));
-        List<DiaryEntryResponseDTO> recentWatched = toDiaryEntryResponseDtos(recentWatchedEntries, customPosterByContentId);
-        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type), customPosterByContentId);
-        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId);
-        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null
-                ? null : toDiaryEntryResponseDto(firstWatchedEntry, customPosterByContentId);
-        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null
-                ? null : toDiaryEntryResponseDto(lastWatchedEntry, customPosterByContentId);
 
         List<DailyMinutesDTO> minutesPerDay = diaryEntryRepository
                 .sumRuntimeMinutesByUserIdAndContentTypeGroupByWatchedDateBetween(userId, watchedContentType, start, end)
@@ -336,6 +334,32 @@ public class SummaryServiceImpl implements SummaryService {
                                 userId, start, end, PageRequest.of(0, TOP_SERIES_LIMIT))
                         .stream().map(row -> new SeriesWatchTimeDTO(row.getContentId(), row.getSeriesTmdbId(), row.getTotalMinutes())).toList()
                 : List.of();
+
+        List<ContentCardSpec> cardSpecs = distinctCardSpecs(Stream.concat(
+                        Stream.of(recentWatchedEntries, topRatedRaw, bottomRatedRaw)
+                                .flatMap(Collection::stream)
+                                .map(this::toCardSpec),
+                        Stream.concat(
+                                Stream.of(firstWatchedEntry, lastWatchedEntry)
+                                        .filter(Objects::nonNull)
+                                        .map(this::toCardSpec),
+                                topSeriesByWatchTime.stream().map(this::toCardSpec)))
+                .toList());
+        Map<ContentCoordinate, ContentCardDTO> cards = assembleSummaryCards(target, cardSpecs,
+                !topRatedRaw.isEmpty() || !bottomRatedRaw.isEmpty() || !topSeriesByWatchTime.isEmpty());
+
+        List<DiaryEntryResponseDTO> recentWatched = toDiaryEntryResponseDtos(
+                recentWatchedEntries, customPosterByContentId, cards);
+        List<DiaryEntryResponseDTO> topRated = promoteTop5First(
+                topRatedRaw, userId, List.of(type), customPosterByContentId, cards);
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId, cards);
+        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(firstWatchedEntry, customPosterByContentId, cards);
+        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(lastWatchedEntry, customPosterByContentId, cards);
+        topSeriesByWatchTime = topSeriesByWatchTime.stream()
+                .map(item -> item.withCard(cardFor(item, cards)))
+                .toList();
 
         List<com.watchwise.watchwise_api.content.dto.ContentRefDTO> topLongestMovies = type == ContentType.MOVIE
                 ? diaryEntryRepository.findDistinctMovieContentByUserIdAndWatchedDateBetweenOrderByRuntimeDesc(
@@ -407,14 +431,32 @@ public class SummaryServiceImpl implements SummaryService {
                 collectDiaryEntries(topRatedRaw, bottomRatedRaw,
                         firstWatchedEntry == null ? List.of() : List.of(firstWatchedEntry),
                         lastWatchedEntry == null ? List.of() : List.of(lastWatchedEntry)));
-        List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, List.of(type), customPosterByContentId);
-        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId);
-        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null
-                ? null : toDiaryEntryResponseDto(firstWatchedEntry, customPosterByContentId);
-        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null
-                ? null : toDiaryEntryResponseDto(lastWatchedEntry, customPosterByContentId);
 
         List<LongestWatchedItemDTO> longestWatched = computeLongestWatched(userId, type, start, end);
+
+        List<ContentCardSpec> cardSpecs = distinctCardSpecs(Stream.concat(
+                        Stream.of(topRatedRaw, bottomRatedRaw)
+                                .flatMap(Collection::stream)
+                                .map(this::toCardSpec),
+                        Stream.concat(
+                                Stream.of(firstWatchedEntry, lastWatchedEntry)
+                                        .filter(Objects::nonNull)
+                                        .map(this::toCardSpec),
+                                longestWatched.stream().map(this::toCardSpec)))
+                .toList());
+        Map<ContentCoordinate, ContentCardDTO> cards = assembleSummaryCards(target, cardSpecs,
+                !topRatedRaw.isEmpty() || !bottomRatedRaw.isEmpty() || !longestWatched.isEmpty());
+
+        List<DiaryEntryResponseDTO> topRated = promoteTop5First(
+                topRatedRaw, userId, List.of(type), customPosterByContentId, cards);
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId, cards);
+        DiaryEntryResponseDTO firstWatched = firstWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(firstWatchedEntry, customPosterByContentId, cards);
+        DiaryEntryResponseDTO lastWatched = lastWatchedEntry == null
+                ? null : toDiaryEntryResponseDto(lastWatchedEntry, customPosterByContentId, cards);
+        longestWatched = longestWatched.stream()
+                .map(item -> item.withCard(cardFor(item, cards)))
+                .toList();
 
         List<GenreCountDTO> genreCounts = (type == ContentType.MOVIE
                 ? diaryEntryRepository.countEntriesByGenreAndUserIdForMoviesAndWatchedDateBetween(userId, start, end)
@@ -592,9 +634,22 @@ public class SummaryServiceImpl implements SummaryService {
                 .toList();
     }
 
+    private List<DiaryEntryResponseDTO> toDiaryEntryResponseDtos(List<DiaryEntry> entries,
+            Map<UUID, String> customPosterByContentId, Map<ContentCoordinate, ContentCardDTO> cards) {
+        return entries.stream()
+                .map(entry -> toDiaryEntryResponseDto(entry, customPosterByContentId, cards))
+                .toList();
+    }
+
     private DiaryEntryResponseDTO toDiaryEntryResponseDto(DiaryEntry entry, Map<UUID, String> customPosterByContentId) {
         return diaryEntryMapper.diaryEntryToResponseDto(entry, false)
                 .withCustomPosterUrl(customPosterByContentId.get(entry.getContent().getId()));
+    }
+
+    private DiaryEntryResponseDTO toDiaryEntryResponseDto(DiaryEntry entry,
+            Map<UUID, String> customPosterByContentId, Map<ContentCoordinate, ContentCardDTO> cards) {
+        return toDiaryEntryResponseDto(entry, customPosterByContentId)
+                .withCard(cardFor(entry.getContent(), cards));
     }
 
     private List<DiaryEntryResponseDTO> promoteTop5First(List<DiaryEntry> entries, UUID userId,
@@ -610,12 +665,100 @@ public class SummaryServiceImpl implements SummaryService {
                 .toList();
     }
 
+    private List<DiaryEntryResponseDTO> promoteTop5First(List<DiaryEntry> entries, UUID userId,
+            List<ContentType> top5Types, Map<UUID, String> customPosterByContentId,
+            Map<ContentCoordinate, ContentCardDTO> cards) {
+        Set<UUID> top5ContentIds = top5Types.stream()
+                .flatMap(t -> top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(userId, t).stream())
+                .map(entry -> entry.getContent().getId())
+                .collect(Collectors.toSet());
+
+        return entries.stream()
+                .sorted(Comparator.comparing((DiaryEntry d) -> !top5ContentIds.contains(d.getContent().getId())))
+                .map(entry -> toDiaryEntryResponseDto(entry, customPosterByContentId, cards))
+                .toList();
+    }
+
     private List<DiaryEntryResponseDTO> sortBottomRated(List<DiaryEntry> entries,
             Map<UUID, String> customPosterByContentId) {
         return entries.stream()
                 .sorted(Comparator.comparing(DiaryEntry::getScore))
                 .map(entry -> toDiaryEntryResponseDto(entry, customPosterByContentId))
                 .toList();
+    }
+
+    private List<DiaryEntryResponseDTO> sortBottomRated(List<DiaryEntry> entries,
+            Map<UUID, String> customPosterByContentId, Map<ContentCoordinate, ContentCardDTO> cards) {
+        return entries.stream()
+                .sorted(Comparator.comparing(DiaryEntry::getScore))
+                .map(entry -> toDiaryEntryResponseDto(entry, customPosterByContentId, cards))
+                .toList();
+    }
+
+    private ContentCardSpec toCardSpec(DiaryEntry entry) {
+        return new ContentCardSpec(ContentCoordinate.from(entry.getContent()), null, null, null,
+                entry.getContent().getRuntimeMinutes());
+    }
+
+    private ContentCardSpec toCardSpec(SeriesWatchTimeDTO item) {
+        return new ContentCardSpec(
+                new ContentCoordinate(ContentType.SERIES, item.seriesTmdbId(), null, null, null),
+                null, null, null, null);
+    }
+
+    private ContentCardSpec toCardSpec(LongestWatchedItemDTO item) {
+        ContentCoordinate coordinate = item.type() == ContentType.MOVIE
+                ? new ContentCoordinate(ContentType.MOVIE, item.tmdbId(), null, null, null)
+                : new ContentCoordinate(ContentType.SERIES, item.seriesTmdbId(), null, null, null);
+        return new ContentCardSpec(coordinate, null, null, null, null);
+    }
+
+    private List<ContentCardSpec> distinctCardSpecs(Collection<ContentCardSpec> specs) {
+        return specs.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(
+                        ContentCardSpec::coordinate,
+                        spec -> spec,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new))
+                .values().stream()
+                .toList();
+    }
+
+    private Map<ContentCoordinate, ContentCardDTO> assembleSummaryCards(
+            User target, Collection<ContentCardSpec> specs, boolean includeStats) {
+        if (specs.isEmpty()) {
+            return Map.of();
+        }
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+                specs,
+                new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), null, null),
+                includeStats ? SUMMARY_CARD_FIELDS_WITH_STATS : BASIC_CARD_FIELDS);
+        return cards == null ? Map.of() : cards;
+    }
+
+    private ContentCardDTO cardFor(Content content, Map<ContentCoordinate, ContentCardDTO> cards) {
+        if (content == null || content.getType() == null) {
+            return null;
+        }
+        return cards.get(ContentCoordinate.from(content));
+    }
+
+    private ContentCardDTO cardFor(SeriesWatchTimeDTO item, Map<ContentCoordinate, ContentCardDTO> cards) {
+        if (item == null || item.seriesTmdbId() == null) {
+            return null;
+        }
+        return cards.get(new ContentCoordinate(ContentType.SERIES, item.seriesTmdbId(), null, null, null));
+    }
+
+    private ContentCardDTO cardFor(LongestWatchedItemDTO item, Map<ContentCoordinate, ContentCardDTO> cards) {
+        if (item == null) {
+            return null;
+        }
+        ContentCoordinate coordinate = item.type() == ContentType.MOVIE
+                ? new ContentCoordinate(ContentType.MOVIE, item.tmdbId(), null, null, null)
+                : new ContentCoordinate(ContentType.SERIES, item.seriesTmdbId(), null, null, null);
+        return cards.get(coordinate);
     }
 
     private Map<UUID, String> loadPostersForOwner(UUID ownerId, Collection<DiaryEntry> entries) {

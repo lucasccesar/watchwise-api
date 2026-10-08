@@ -45,6 +45,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
@@ -95,6 +97,7 @@ class SummaryControllerIntegrationTest {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
+        when(tmdbClient.getCardMetadata(any(), anyString())).thenReturn(new TmdbLookupResult.Unavailable<>());
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
@@ -365,7 +368,55 @@ class SummaryControllerIntegrationTest {
                 .andExpect(jsonPath("$.minutesWatched").value(139))
                 .andExpect(jsonPath("$.totalTheaterVisits").value(1))
                 .andExpect(jsonPath("$.ratingsDistribution[0].score").value(8))
-                .andExpect(jsonPath("$.ratingsDistribution[0].count").value(1));
+                .andExpect(jsonPath("$.ratingsDistribution[0].count").value(1))
+                .andExpect(jsonPath("$.mostLoggedContent[0].count").value(1))
+                .andExpect(jsonPath("$.mostLoggedContent[0].card.previewStatus").value("PARTIAL"))
+                .andExpect(jsonPath("$.topRated[0].card.previewStatus").value("PARTIAL"));
+
+        verify(tmdbClient, never()).getMovieFullDetails(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("[getMonthInReview] Should Keep Ranking Rows And Totals When Card Metadata Is Unavailable")
+    void shouldKeepMonthRankingRowsAndTotalsWhenCardMetadataIsUnavailable() throws Exception {
+        RegisteredUser user = registerUser("monthreviewcardunavailable");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("month-review-card", ContentType.MOVIE, 139);
+        persistEntry(entity, movie, 8, false);
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/month")
+                        .param("type", "MOVIE")
+                        .param("month", "2026-10")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.watchCount").value(1))
+                .andExpect(jsonPath("$.minutesWatched").value(139))
+                .andExpect(jsonPath("$.recentWatched[0].card.previewStatus").value("PARTIAL"))
+                .andExpect(jsonPath("$.topRated[0].card.previewStatus").value("PARTIAL"));
+
+        verify(tmdbClient, never()).getMovieFullDetails(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("[getYearInReview] Should Keep Runtime Ranking Rows When Card Metadata Is Unavailable")
+    void shouldKeepYearRuntimeRankingRowsWhenCardMetadataIsUnavailable() throws Exception {
+        RegisteredUser user = registerUser("yearreviewcardunavailable");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("year-review-card", ContentType.MOVIE, 181);
+        persistEntry(entity, movie, 9, false);
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/year")
+                        .param("type", "MOVIE")
+                        .param("year", "2026")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.watchCount").value(1))
+                .andExpect(jsonPath("$.minutesWatched").value(181))
+                .andExpect(jsonPath("$.longestWatched[0].totalMinutesWatched").value(181))
+                .andExpect(jsonPath("$.longestWatched[0].card.previewStatus").value("PARTIAL"))
+                .andExpect(jsonPath("$.topRated[0].card.previewStatus").value("PARTIAL"));
+
+        verify(tmdbClient, never()).getMovieFullDetails(anyString(), anyString());
     }
 
     @Test
