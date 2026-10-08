@@ -5,7 +5,6 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
-import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -23,7 +22,6 @@ import org.springframework.data.domain.PageImpl;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -55,16 +53,13 @@ class ProfileSummaryDataReaderImplTest {
     @Mock
     private UserMapper userMapper;
 
-    @Mock
-    private UserContentPosterService userContentPosterService;
-
     private ProfileSummaryDataReaderImpl reader;
     private UUID userId;
 
     @BeforeEach
     void setUp() {
         reader = new ProfileSummaryDataReaderImpl(queryRepository, droppedEntryRepository, contentRepository,
-                contentMapper, watchCompanionRepository, userMapper, userContentPosterService);
+                contentMapper, watchCompanionRepository, userMapper);
         userId = UUID.randomUUID();
         org.mockito.Mockito.lenient().when(queryRepository.findRecentReviews(any(), any(), any())).thenReturn(List.of());
         org.mockito.Mockito.lenient().when(queryRepository.findRecentTopLevelEntries(any(), any(), any())).thenReturn(List.of());
@@ -123,7 +118,7 @@ class ProfileSummaryDataReaderImplTest {
     }
 
     @Test
-    void shouldLoadPreviewPostersOnceAcrossEpisodesAndReviews() {
+    void shouldLeavePreviewPosterResolutionToTheVisualCardReader() {
         Content episodeContent = Content.builder().id(UUID.randomUUID()).tmdbId(null)
                 .seriesTmdbId("1399").seasonNumber(1).episodeNumber(1).type(ContentType.EPISODE).build();
         DiaryEntry episode = DiaryEntry.builder()
@@ -134,8 +129,6 @@ class ProfileSummaryDataReaderImplTest {
         when(queryRepository.findRecentEpisodes(eq(userId), any())).thenReturn(List.of(episode));
         when(queryRepository.findRecentReviews(eq(userId), any(), any())).thenReturn(List.of(episode));
         when(contentMapper.contentToContentRefDto(episodeContent)).thenReturn(contentRef);
-        when(userContentPosterService.findByUserAndContentIds(userId, List.of(episodeContent.getId())))
-                .thenReturn(Map.of());
         when(watchCompanionRepository.findByDiaryEntryIdIn(List.of(episode.getId())))
                 .thenReturn(List.of());
 
@@ -143,6 +136,6 @@ class ProfileSummaryDataReaderImplTest {
 
         assertThat(result.recentEpisodes()).hasSize(1);
         assertThat(result.recentReviews()).hasSize(1);
-        verify(userContentPosterService).findByUserAndContentIds(userId, List.of(episodeContent.getId()));
+        assertThat(result.recentEpisodes().get(0).customPosterUrl()).isNull();
     }
 }

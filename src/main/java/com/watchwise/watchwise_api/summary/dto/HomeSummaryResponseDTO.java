@@ -32,6 +32,16 @@ public record HomeSummaryResponseDTO(
     ) {
         this(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched, totalMoviesWatched,
                 totalEpisodesWatched, 0L, nextEpisodes, watchCountByDayLast30Days, genreCountsMoviesLast30Days,
-                genreCountsSeriesLast30Days, null, false, List.of(), List.of());
+                genreCountsSeriesLast30Days, null, false, toRecentlyWatched(recentlyWatched), List.of());
+    }
+
+    private static List<HomeRecentlyWatchedDTO> toRecentlyWatched(List<?> recentlyWatched) {
+        if (recentlyWatched == null || recentlyWatched.isEmpty()) {
+            return List.of();
+        }
+        return recentlyWatched.stream()
+                .filter(HomeRecentlyWatchedDTO.class::isInstance)
+                .map(HomeRecentlyWatchedDTO.class::cast)
+                .toList();
     }
 }

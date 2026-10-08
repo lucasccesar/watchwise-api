@@ -1,14 +1,22 @@
 package com.watchwise.watchwise_api.summary.service.impl;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
@@ -18,6 +26,8 @@ import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepositor
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
+import com.watchwise.watchwise_api.feed.dto.FeedEventType;
+import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
 import com.watchwise.watchwise_api.feed.service.FeedService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -53,6 +63,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
@@ -74,8 +85,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -137,6 +150,9 @@ class SummaryServiceImplTest {
     private HomeNextEpisodeAssembler homeNextEpisodeAssembler;
 
     @Mock
+    private ContentCardAssembler contentCardAssembler;
+
+    @Mock
     private com.watchwise.watchwise_api.summary.service.ProfileSummaryReader profileSummaryReader;
 
     @Mock
@@ -148,6 +164,9 @@ class SummaryServiceImplTest {
     private UUID lucasId;
     private UUID marinaId;
     private User lucas;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
 
     @Test
     @DisplayName("[getAllTimeStatsEdition] Should Delegate To The Reader - When Type Is Valid")
@@ -222,6 +241,18 @@ class SummaryServiceImplTest {
     }
 
     // ---------- getHomeSummary ----------
+
+    @Test
+    @DisplayName("[HomeSummaryResponseDTO] Should Preserve Legacy Recently Watched Rows")
+    void shouldPreserveLegacyRecentlyWatchedRowsWhenUsingCompatibilityConstructor() {
+        HomeRecentlyWatchedDTO recentlyWatched = new HomeRecentlyWatchedDTO(
+                UUID.randomUUID(), null, 8, LocalDate.of(2026, 10, 8), null, List.of());
+
+        HomeSummaryResponseDTO result = new HomeSummaryResponseDTO(
+                0L, 0L, 0L, 0L, List.of(), List.of(), List.of(), List.of(), List.of(recentlyWatched));
+
+        assertThat(result.recentlyWatched()).containsExactly(recentlyWatched);
+    }
 
     @Test
     @DisplayName("[getHomeSummary] Should Throw NotFoundException - When User Does Not Exist")
@@ -319,18 +350,58 @@ class SummaryServiceImplTest {
         DiaryEntry episodeEntry = buildDiaryEntry(episodeContent, now);
         when(diaryEntryRepository.findRecentHomeEntries(eq(lucasId), any(), any()))
                 .thenReturn(List.of(episodeEntry, movieEntry));
-        when(userContentPosterService.findByUserAndContentIds(eq(lucasId), any()))
-                .thenReturn(Map.of(
-                        movieContent.getId(), "https://image.tmdb.org/t/p/w342/lucas-movie.png",
-                        episodeContent.getId(), "https://image.tmdb.org/t/p/w342/lucas-episode.png"));
-
+        ContentCardDTO movieCard = cardFor(movieContent, "Fight Club", "https://image.tmdb.org/t/p/w342/lucas-movie.png");
+        ContentCardDTO episodeCard = cardFor(episodeContent, "Pilot", "https://image.tmdb.org/t/p/w342/lucas-episode.png");
+        ContentRefDTO socialContent = new ContentRefDTO(movieContent.getId(), movieContent.getTmdbId(),
+                movieContent.getType(), movieContent.getSeriesTmdbId(), movieContent.getSeasonNumber(),
+                movieContent.getEpisodeNumber(), false, false, now, now);
+        FeedItemDTO socialActivity = new FeedItemDTO(
+                FeedEventType.DIARY_ENTRY, UUID.randomUUID(),
+                new UserPreviewDTO(lucasId, "lucas", "Lucas", "https://default-image.png", true),
+                socialContent, null, 8, "review", 1, false, List.of(), null, null, now);
+        when(feedService.getFeed(eq(lucasId), any(), eq(3)))
+                .thenReturn(new CursorPageResponseDTO<>(List.of(socialActivity), 3, null, false));
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(movieContent), movieCard,
+                        ContentCoordinate.from(episodeContent), episodeCard));
         HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
 
         assertThat(result.recentlyWatched()).extracting(HomeRecentlyWatchedDTO::customPosterUrl)
                 .containsExactly(
                         "https://image.tmdb.org/t/p/w342/lucas-episode.png",
                         "https://image.tmdb.org/t/p/w342/lucas-movie.png");
-        verify(userContentPosterService).findByUserAndContentIds(eq(lucasId), any());
+
+        JsonNode json = serialize(result);
+        JsonNode recentlyWatchedCard = json.get("recentlyWatched").get(0).get("card");
+        assertThat(recentlyWatchedCard.get("title").asString()).isEqualTo("Pilot");
+        assertThat(recentlyWatchedCard.get("stats").isNull()).isTrue();
+        assertThat(recentlyWatchedCard.get("viewerState").isNull()).isTrue();
+        assertThat(json.get("socialActivities").get(0).get("card").get("title").asString())
+                .isEqualTo("Fight Club");
+
+        ArgumentCaptor<ContentCardContext> context = ArgumentCaptor.forClass(ContentCardContext.class);
+        ArgumentCaptor<Set<ContentCardFieldSet>> fields = ArgumentCaptor.forClass(Set.class);
+        verify(contentCardAssembler).assemble(anyCollection(), context.capture(), fields.capture());
+        assertThat(context.getValue().posterUserId()).isEqualTo(lucasId);
+        assertThat(context.getValue().viewerId()).isNull();
+        assertThat(fields.getValue()).containsExactlyInAnyOrder(
+                ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.SOCIAL_METADATA);
+    }
+
+    private ContentCardDTO cardFor(Content content, String title, String customPosterUrl) {
+        return new ContentCardDTO(content.getId(), content.getType(), content.getTmdbId(),
+                content.getSeriesTmdbId(), content.getSeasonNumber(), content.getEpisodeNumber(), title,
+                "/poster.jpg", customPosterUrl, LocalDate.of(1999, 10, 15), 1999,
+                content.getRuntimeMinutes(), null, null, null, null, null, null,
+                ContentPreviewStatus.AVAILABLE);
+    }
+
+    private JsonNode serialize(Object value) {
+        try {
+            return objectMapper.readTree(objectMapper.writeValueAsString(value));
+        } catch (Exception exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     @Test

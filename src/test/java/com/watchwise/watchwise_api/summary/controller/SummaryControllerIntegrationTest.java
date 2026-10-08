@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.summary.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
@@ -24,6 +26,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -40,6 +43,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -77,6 +83,9 @@ class SummaryControllerIntegrationTest {
 
     @Autowired
     private RequestThrottler requestThrottler;
+
+    @MockitoBean
+    private TmdbClient tmdbClient;
 
     @BeforeEach
     void setUp() {
@@ -284,6 +293,43 @@ class SummaryControllerIntegrationTest {
                 .andExpect(jsonPath("$.totalMoviesWatched").value(1))
                 .andExpect(jsonPath("$.totalEpisodesWatched").value(1))
                 .andExpect(jsonPath("$.distinctSeriesWatched").value(1));
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Keep Recently Watched Row When Card Metadata Is Unavailable")
+    void shouldKeepRecentlyWatchedRowWhenCardMetadataIsUnavailable() throws Exception {
+        when(tmdbClient.getCardMetadata(any(), anyString())).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        RegisteredUser user = registerUser("homesummarycardunavailable");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("unavailable-home-card", ContentType.MOVIE, 139);
+        persistEntry(entity, movie);
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/home").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recentlyWatched").isArray())
+                .andExpect(jsonPath("$.recentlyWatched[0].content.tmdbId").value("unavailable-home-card"))
+                .andExpect(jsonPath("$.recentlyWatched[0].card").exists())
+                .andExpect(jsonPath("$.recentlyWatched[0].card.previewStatus").value("PARTIAL"));
+    }
+
+    @Test
+    @DisplayName("[getSummary] Should Keep Recent Activity Row When Card Metadata Is Unavailable")
+    void shouldKeepRecentActivityRowWhenCardMetadataIsUnavailable() throws Exception {
+        when(tmdbClient.getCardMetadata(any(), anyString())).thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(tmdbClient.getMovieFullDetails(anyString(), anyString())).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        RegisteredUser user = registerUser("profilesummarycardunavailable");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        Content movie = persistContent("unavailable-profile-card", ContentType.MOVIE, 139);
+        persistEntry(entity, movie, 8, false);
+
+        mockMvc.perform(getSummaryRequest(user, user.id()).param("type", "MOVIE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recentActivity").isArray())
+                .andExpect(jsonPath("$.recentActivity[0].content.tmdbId").value("unavailable-profile-card"))
+                .andExpect(jsonPath("$.recentActivity[0].card").exists())
+                .andExpect(jsonPath("$.recentActivity[0].card.previewStatus").value("PARTIAL"));
     }
 
     @Test

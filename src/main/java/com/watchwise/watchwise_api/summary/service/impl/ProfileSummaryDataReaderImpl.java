@@ -5,7 +5,6 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
-import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -26,7 +25,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +50,6 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     private final ContentMapper contentMapper;
     private final WatchCompanionRepository watchCompanionRepository;
     private final UserMapper userMapper;
-    private final UserContentPosterService userContentPosterService;
 
     @Override
     @Transactional(readOnly = true)
@@ -89,10 +86,9 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toMap(DiaryEntry::getId, Function.identity(), (first, ignored) -> first))
                 .values().stream().toList();
-        Map<UUID, String> previewPosters = loadPosters(userId, allPreviewEntries);
         Map<UUID, List<UserPreviewDTO>> previewCompanions = loadCompanions(allPreviewEntries);
-        List<ProfileDiaryPreviewDTO> recentEpisodes = toPreviews(recentEpisodeEntries, previewPosters, previewCompanions);
-        List<ProfileDiaryPreviewDTO> recentReviews = toPreviews(recentReviewEntries, previewPosters, previewCompanions);
+        List<ProfileDiaryPreviewDTO> recentEpisodes = toPreviews(recentEpisodeEntries, previewCompanions);
+        List<ProfileDiaryPreviewDTO> recentReviews = toPreviews(recentReviewEntries, previewCompanions);
 
         List<DiaryEntry> completedEntries = queryRepository.findRecentTopLevelEntries(
                 userId, type, PageRequest.of(0, RECENT_ACTIVITY_LIMIT));
@@ -121,7 +117,7 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     }
 
     private List<ProfileDiaryPreviewDTO> toPreviews(
-            List<DiaryEntry> entries, Map<UUID, String> customPosters, Map<UUID, List<UserPreviewDTO>> companions) {
+            List<DiaryEntry> entries, Map<UUID, List<UserPreviewDTO>> companions) {
         if (entries == null || entries.isEmpty()) {
             return List.of();
         }
@@ -132,24 +128,9 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                         entry.getScore(),
                         entry.getWatchedDate(),
                         entry.getWatchNumber(),
-                        customPosters.get(entry.getContent().getId()),
+                        null,
                         companions.getOrDefault(entry.getId(), List.of())))
                 .toList();
-    }
-
-    private Map<UUID, String> loadPosters(UUID ownerId, Collection<DiaryEntry> entries) {
-        List<UUID> contentIds = entries.stream()
-                .map(DiaryEntry::getContent)
-                .filter(Objects::nonNull)
-                .map(Content::getId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-        if (contentIds.isEmpty()) {
-            return Map.of();
-        }
-        Map<UUID, String> posters = userContentPosterService.findByUserAndContentIds(ownerId, contentIds);
-        return posters == null ? Map.of() : posters;
     }
 
     private Map<UUID, List<UserPreviewDTO>> loadCompanions(List<DiaryEntry> entries) {

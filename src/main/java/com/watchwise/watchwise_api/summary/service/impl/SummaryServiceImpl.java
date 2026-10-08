@@ -7,8 +7,15 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
@@ -84,6 +91,8 @@ public class SummaryServiceImpl implements SummaryService {
     private static final int HOME_NEXT_EPISODES_LIMIT = 4;
     private static final int HOME_RECENTLY_WATCHED_LIMIT = 4;
     private static final Set<ContentType> HOME_WATCHED_CONTENT_TYPES = Set.of(ContentType.MOVIE, ContentType.EPISODE);
+    private static final Set<ContentCardFieldSet> HOME_CARD_FIELDS = Set.of(
+            ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.SOCIAL_METADATA);
     private static final int MONTH_TOP_LIMIT = 6;
     private static final int YEAR_TOP_LIMIT = 10;
     private static final int ALL_TIME_TOP_LIMIT = 10;
@@ -110,6 +119,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final NotificationRepository notificationRepository;
     private final FeedService feedService;
     private final HomeNextEpisodeAssembler homeNextEpisodeAssembler;
+    private final ContentCardAssembler contentCardAssembler;
     private final ProfileSummaryReader profileSummaryReader;
     private final AllTimeStatsReader allTimeStatsReader;
 
@@ -158,9 +168,12 @@ public class SummaryServiceImpl implements SummaryService {
                 .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
                 .toList();
 
-        List<HomeRecentlyWatchedDTO> recentlyWatched = computeHomeRecentlyWatched(userId);
-        List<HomeSocialActivityDTO> socialActivities = feedService.getFeed(userId, null, 3).content().stream()
-                .map(this::toHomeSocialActivity)
+        List<DiaryEntry> recentEntries = loadHomeRecentlyWatchedEntries(userId);
+        List<FeedItemDTO> feedItems = feedService.getFeed(userId, null, 3).content();
+        Map<ContentCoordinate, ContentCardDTO> cards = assembleHomeCards(userId, target, recentEntries, feedItems);
+        List<HomeRecentlyWatchedDTO> recentlyWatched = toHomeRecentlyWatched(recentEntries, cards);
+        List<HomeSocialActivityDTO> socialActivities = feedItems.stream()
+                .map(item -> toHomeSocialActivity(item, cards))
                 .toList();
         HomeViewerDTO viewer = new HomeViewerDTO(target.getName(), target.getUsername(), target.getProfilePicture());
 
@@ -171,31 +184,68 @@ public class SummaryServiceImpl implements SummaryService {
                 notificationRepository.existsByUserIdAndIsReadFalse(userId), recentlyWatched, socialActivities);
     }
 
-    private List<HomeRecentlyWatchedDTO> computeHomeRecentlyWatched(UUID userId) {
+    private List<DiaryEntry> loadHomeRecentlyWatchedEntries(UUID userId) {
         PageRequest topN = PageRequest.of(0, HOME_RECENTLY_WATCHED_LIMIT);
-        List<DiaryEntry> entries = diaryEntryRepository
-                .findRecentHomeEntries(userId, HOME_WATCHED_CONTENT_TYPES, topN);
-        Map<UUID, String> customPosters = loadPostersForOwner(userId, entries);
+        return diaryEntryRepository.findRecentHomeEntries(userId, HOME_WATCHED_CONTENT_TYPES, topN);
+    }
+
+    private List<HomeRecentlyWatchedDTO> toHomeRecentlyWatched(
+            List<DiaryEntry> entries, Map<ContentCoordinate, ContentCardDTO> cards) {
         Map<UUID, List<String>> companionPictures = watchCompanionRepository
                 .findByDiaryEntryIdIn(entries.stream().map(DiaryEntry::getId).toList()).stream()
                 .collect(Collectors.groupingBy(
                         companion -> companion.getDiaryEntry().getId(),
                         Collectors.mapping(companion -> companion.getUser().getProfilePicture(), Collectors.toList())));
         return entries.stream()
-                .map(entry -> new HomeRecentlyWatchedDTO(entry.getId(), new HomeContentReferenceDTO(
-                                entry.getContent().getId(), entry.getContent().getTmdbId(), entry.getContent().getType(),
-                                entry.getContent().getSeriesTmdbId(), entry.getContent().getSeasonNumber(),
-                                entry.getContent().getEpisodeNumber(), entry.getContent().getRuntimeMinutes()),
-                        entry.getScore(), entry.getWatchedDate(), customPosters.get(entry.getContent().getId()),
-                        companionPictures.getOrDefault(entry.getId(), List.of())))
+                .map(entry -> {
+                    Content content = entry.getContent();
+                    ContentCardDTO card = cards.get(ContentCoordinate.from(content));
+                    return new HomeRecentlyWatchedDTO(entry.getId(), new HomeContentReferenceDTO(
+                                    content.getId(), content.getTmdbId(), content.getType(),
+                                    content.getSeriesTmdbId(), content.getSeasonNumber(),
+                                    content.getEpisodeNumber(), content.getRuntimeMinutes()),
+                            entry.getScore(), entry.getWatchedDate(),
+                            card == null ? null : card.customPosterUrl(),
+                            companionPictures.getOrDefault(entry.getId(), List.of()), card);
+                })
                 .toList();
     }
 
-    private HomeSocialActivityDTO toHomeSocialActivity(FeedItemDTO item) {
+    private HomeSocialActivityDTO toHomeSocialActivity(
+            FeedItemDTO item, Map<ContentCoordinate, ContentCardDTO> cards) {
         String targetLabel = item.pick() != null ? "Pick" : item.picksTemplate() != null ? item.picksTemplate().name()
                 : item.top5Type() == null ? null : "Top 5 " + item.top5Type().name().toLowerCase();
+        ContentCardDTO card = item.content() == null ? null : cards.get(toCoordinate(item.content()));
         return new HomeSocialActivityDTO(item.eventType(), item.id(), item.user(), item.content(), targetLabel,
-                item.likesCount(), item.commentsCount(), item.createdAt());
+                item.likesCount(), item.commentsCount(), item.createdAt(), card);
+    }
+
+    private Map<ContentCoordinate, ContentCardDTO> assembleHomeCards(
+            UUID posterUserId, User target, List<DiaryEntry> recentEntries, List<FeedItemDTO> feedItems) {
+        List<ContentCardSpec> specs = Stream.concat(
+                        recentEntries.stream()
+                                .map(DiaryEntry::getContent)
+                                .filter(content -> content != null && content.getType() != null)
+                                .map(this::toCardSpec),
+                        feedItems.stream()
+                                .map(FeedItemDTO::content)
+                                .filter(content -> content != null && content.type() != null)
+                                .map(content -> new ContentCardSpec(toCoordinate(content), null, null, null, null)))
+                .toList();
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+                specs,
+                new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), posterUserId, null),
+                HOME_CARD_FIELDS);
+        return cards == null ? Map.of() : cards;
+    }
+
+    private ContentCardSpec toCardSpec(Content content) {
+        return new ContentCardSpec(ContentCoordinate.from(content), null, null, null, content.getRuntimeMinutes());
+    }
+
+    private ContentCoordinate toCoordinate(ContentRefDTO content) {
+        return new ContentCoordinate(content.type(), content.tmdbId(), content.seriesTmdbId(),
+                content.seasonNumber(), content.episodeNumber());
     }
 
     private List<DiaryEntryResponseDTO> computeRecentlyWatched(UUID userId) {
