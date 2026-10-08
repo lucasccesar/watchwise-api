@@ -10,7 +10,19 @@ public record CalendarSeasonSchedule(
         String language,
         String seriesTitle,
         String posterPath,
+        String network,
         List<CalendarEpisodeSchedule> episodes) {
+
+    public CalendarSeasonSchedule(
+            String seriesTmdbId,
+            Integer seasonNumber,
+            String region,
+            String language,
+            String seriesTitle,
+            String posterPath,
+            List<CalendarEpisodeSchedule> episodes) {
+        this(seriesTmdbId, seasonNumber, region, language, seriesTitle, posterPath, null, episodes);
+    }
 
     public CalendarSeasonSchedule {
         episodes = List.copyOf(episodes);
@@ -22,7 +34,7 @@ public record CalendarSeasonSchedule(
 
     public CalendarSeasonSchedule withCheckTimes(Instant checkedAt, CheckTimeResolver resolver) {
         return new CalendarSeasonSchedule(seriesTmdbId, seasonNumber, region, language, seriesTitle, posterPath,
-                episodes.stream()
+                network, episodes.stream()
                         .map(episode -> episode.withCheckTimes(checkedAt, resolver.nextCheckAt(episode.releaseDate())))
                         .toList());
     }

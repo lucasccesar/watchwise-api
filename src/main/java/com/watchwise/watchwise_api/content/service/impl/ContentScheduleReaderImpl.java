@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
+import com.watchwise.watchwise_api.common.tmdb.TmdbNetwork;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
@@ -54,45 +55,18 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
         TmdbMovieReleaseDates embeddedReleaseDates = details.value().releaseDates();
         if (embeddedReleaseDates != null) {
             return new ContentScheduleLookup.Found(
-                    new ContentSchedule(
-                            ContentScheduleKey.movie(tmdbId),
-                            CalendarMovieReleaseDateSelector.select(embeddedReleaseDates, region).orElse(null),
-                            details.value().status(),
-                            List.of(),
-                            true,
-                            false,
-                            nonBlankOr(details.value().title(), tmdbId),
-                            details.value().posterPath(),
-                            Map.of()),
+                    movieSchedule(tmdbId, region, details.value(), embeddedReleaseDates, false),
                     details.origin());
         }
 
         TmdbLookupResult<TmdbMovieReleaseDates> releaseLookup = tmdbClient.getMovieReleaseDates(tmdbId, language);
         if (releaseLookup instanceof TmdbLookupResult.Found<TmdbMovieReleaseDates> found) {
             return new ContentScheduleLookup.Found(
-                    new ContentSchedule(
-                            ContentScheduleKey.movie(tmdbId),
-                            CalendarMovieReleaseDateSelector.select(found.value(), region).orElse(null),
-                            details.value().status(),
-                            List.of(),
-                            true,
-                            false,
-                            nonBlankOr(details.value().title(), tmdbId),
-                            details.value().posterPath(),
-                            Map.of()),
+                    movieSchedule(tmdbId, region, details.value(), found.value(), false),
                     details.origin());
         }
         return new ContentScheduleLookup.Found(
-                new ContentSchedule(
-                        ContentScheduleKey.movie(tmdbId),
-                        null,
-                        details.value().status(),
-                        List.of(),
-                        true,
-                        true,
-                        nonBlankOr(details.value().title(), tmdbId),
-                        details.value().posterPath(),
-                        Map.of()),
+                movieSchedule(tmdbId, region, details.value(), null, true),
                 details.origin());
     }
 
@@ -140,6 +114,8 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
                 false,
                 nonBlankOr(series.value().name(), seriesTmdbId),
                 series.value().posterPath(),
+                null,
+                networkName(series.value().networks()),
                 Map.of());
         return new ContentScheduleLookup.Found(
                 schedule,
@@ -212,6 +188,8 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
                 false,
                 nonBlankOr(details.name(), seriesTmdbId),
                 details.posterPath(),
+                null,
+                networkName(details.networks()),
                 expectedCounts);
         return new ContentScheduleLookup.Found(schedule, series.origin(), seasonOrigins);
     }
@@ -292,6 +270,41 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
 
     private String fallbackEpisodeTitle(Integer episodeNumber) {
         return episodeNumber == null ? "Episode" : "Episode " + episodeNumber;
+    }
+
+    private ContentSchedule movieSchedule(
+            String tmdbId,
+            String region,
+            TmdbMovieFullDetails details,
+            TmdbMovieReleaseDates releaseDates,
+            boolean releaseDateLookupUnavailable) {
+        CalendarMovieReleaseDateSelector.SelectedRelease selected =
+                CalendarMovieReleaseDateSelector.selectRelease(releaseDates, region)
+                        .orElse(new CalendarMovieReleaseDateSelector.SelectedRelease(null, null));
+        return new ContentSchedule(
+                ContentScheduleKey.movie(tmdbId),
+                selected.date(),
+                details.status(),
+                List.of(),
+                true,
+                releaseDateLookupUnavailable,
+                nonBlankOr(details.title(), tmdbId),
+                details.posterPath(),
+                selected.time(),
+                null,
+                Map.of());
+    }
+
+    private String networkName(List<TmdbNetwork> networks) {
+        if (networks == null) {
+            return null;
+        }
+        return networks.stream()
+                .filter(Objects::nonNull)
+                .map(TmdbNetwork::name)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 
     private String nonBlankOr(String value, String fallback) {

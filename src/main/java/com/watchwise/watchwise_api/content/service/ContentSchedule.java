@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.content.service;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,6 +19,8 @@ public record ContentSchedule(
         boolean releaseDateLookupUnavailable,
         String title,
         String posterPath,
+        LocalTime releaseTime,
+        String network,
         Map<Integer, Integer> expectedEpisodeCountsBySeason) {
 
     public ContentSchedule {
@@ -35,7 +38,22 @@ public record ContentSchedule(
             List<ContentScheduleEpisode> episodes,
             boolean complete,
             boolean releaseDateLookupUnavailable) {
-        this(key, releaseDate, externalStatus, episodes, complete, releaseDateLookupUnavailable, null, null, Map.of());
+        this(key, releaseDate, externalStatus, episodes, complete, releaseDateLookupUnavailable,
+                null, null, null, null, Map.of());
+    }
+
+    public ContentSchedule(
+            ContentScheduleKey key,
+            LocalDate releaseDate,
+            String externalStatus,
+            List<ContentScheduleEpisode> episodes,
+            boolean complete,
+            boolean releaseDateLookupUnavailable,
+            String title,
+            String posterPath,
+            Map<Integer, Integer> expectedEpisodeCountsBySeason) {
+        this(key, releaseDate, externalStatus, episodes, complete, releaseDateLookupUnavailable,
+                title, posterPath, null, null, expectedEpisodeCountsBySeason);
     }
 
     public ContentType type() {

@@ -73,7 +73,9 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 region,
                 language,
                 schedule.releaseDate(),
+                schedule.releaseTime(),
                 nonBlankOr(schedule.title(), tmdbId),
+                schedule.network(),
                 schedule.posterPath(),
                 null,
                 null);
@@ -102,6 +104,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 language,
                 nonBlankOr(schedule.title(), seriesTmdbId),
                 schedule.posterPath(),
+                schedule.network(),
                 schedule.episodes().stream().map(this::toCalendarEpisode).toList());
         return new CalendarScheduleLookup.Found(CalendarScheduleBatch.season(
                 new CalendarScheduleKey(ContentType.SERIES, seriesTmdbId, language, region), found.origin(), season));
@@ -165,6 +168,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 language,
                 nonBlankOr(schedule.title(), schedule.seriesTmdbId()),
                 schedule.posterPath(),
+                schedule.network(),
                 sourceEpisodes.stream().map(this::toCalendarEpisode).toList());
         TmdbLookupOrigin origin = found.seasonOriginsByNumber().getOrDefault(seasonNumber, found.origin());
         return new CalendarSeriesSchedule.Season(season, expectedEpisodeCount, origin);
@@ -175,6 +179,7 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 episode.episodeNumber(),
                 nonBlankOr(episode.title(), fallbackEpisodeTitle(episode.episodeNumber())),
                 episode.releaseDate(),
+                episode.releaseTime(),
                 episode.stillPath(),
                 null,
                 null);

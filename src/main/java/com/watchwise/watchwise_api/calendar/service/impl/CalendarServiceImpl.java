@@ -208,7 +208,8 @@ public class CalendarServiceImpl implements CalendarService {
             return List.of(CalendarScheduleSnapshot.builder()
                     .eventType(CalendarScheduleSnapshot.EventType.MOVIE)
                     .tmdbId(movie.tmdbId()).region(movie.region()).language(movie.language())
-                    .releaseDate(movie.releaseDate()).title(movie.title()).posterPath(movie.posterPath())
+                    .releaseDate(movie.releaseDate()).releaseTime(movie.releaseTime()).title(movie.title())
+                    .network(movie.network()).posterPath(movie.posterPath())
                     .lastCheckedAt(LocalDateTime.ofInstant(batch.loadedAt(), ZoneOffset.UTC))
                     .nextCheckAt(LocalDateTime.MAX).presentInLastTmdbSnapshot(true).build());
         }
@@ -218,7 +219,8 @@ public class CalendarServiceImpl implements CalendarService {
                         .eventType(CalendarScheduleSnapshot.EventType.EPISODE)
                         .seriesTmdbId(season.seriesTmdbId()).seasonNumber(season.seasonNumber())
                         .episodeNumber(episode.episodeNumber()).region(season.region()).language(season.language())
-                        .releaseDate(episode.releaseDate()).title(episode.title()).seriesTitle(season.seriesTitle())
+                        .releaseDate(episode.releaseDate()).releaseTime(episode.releaseTime()).title(episode.title())
+                        .seriesTitle(season.seriesTitle()).network(season.network())
                         .posterPath(season.posterPath()).stillPath(episode.stillPath())
                         .lastCheckedAt(LocalDateTime.ofInstant(batch.loadedAt(), ZoneOffset.UTC))
                         .nextCheckAt(LocalDateTime.MAX).presentInLastTmdbSnapshot(true).build())

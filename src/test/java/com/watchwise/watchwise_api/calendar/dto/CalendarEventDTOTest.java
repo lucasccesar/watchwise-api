@@ -10,6 +10,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Method;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Set;
@@ -103,6 +104,34 @@ class CalendarEventDTOTest {
         assertThat(json.get("events").get(0).get("watchStatus").asText()).isEqualTo("UNWATCHED");
         assertThat(json.get("events").get(0).get("content").get("tmdbId").asText()).isEqualTo("603");
         assertThat(json.get("events").get(0).get("content").get("posterPath").isNull()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Should Serialize Source Backed Release Context And Preserve Missing Values")
+    void shouldSerializeSourceBackedReleaseContextAndPreserveMissingValues() throws Exception {
+        CalendarEventDTO event = new CalendarEventDTO(
+                LocalDate.of(2026, 9, 12),
+                CalendarEventType.EPISODE,
+                ReleaseStatus.UPCOMING,
+                WatchStatus.UNWATCHED,
+                Set.of(CalendarSource.IN_PROGRESS),
+                new EpisodeCalendarContentDTO("1396", 2, 3, "Four Days Out", "Breaking Bad", null, null),
+                new CalendarReleaseContext(LocalTime.of(22, 0), "AMC"));
+        CalendarEventDTO missingContext = new CalendarEventDTO(
+                LocalDate.of(2026, 9, 13),
+                CalendarEventType.MOVIE,
+                ReleaseStatus.UPCOMING,
+                WatchStatus.UNWATCHED,
+                Set.of(CalendarSource.WATCHLIST),
+                new MovieCalendarContentDTO("603", "The Matrix", null),
+                new CalendarReleaseContext(null, null));
+
+        JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(List.of(event, missingContext)));
+
+        assertThat(json.get(0).get("releaseContext").get("releaseTime").asText()).isEqualTo("22:00:00");
+        assertThat(json.get(0).get("releaseContext").get("network").asText()).isEqualTo("AMC");
+        assertThat(json.get(1).get("releaseContext").get("releaseTime").isNull()).isTrue();
+        assertThat(json.get(1).get("releaseContext").get("network").isNull()).isTrue();
     }
 
     @Test

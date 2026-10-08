@@ -585,7 +585,9 @@ public class CalendarScheduleSnapshotStore {
         LocalDate releaseDate = schedule.releaseDate() != null ? schedule.releaseDate() : existing.getReleaseDate();
         return existing.toBuilder()
                 .releaseDate(releaseDate)
+                .releaseTime(schedule.releaseTime())
                 .title(schedule.title())
+                .network(schedule.network())
                 .posterPath(schedule.posterPath())
                 .lastCheckedAt(toLocalDateTime(schedule.lastCheckedAt()))
                 .nextCheckAt(nextCheckAt(releaseDate, schedule.lastCheckedAt()))
@@ -600,7 +602,9 @@ public class CalendarScheduleSnapshotStore {
                 .region(schedule.region())
                 .language(schedule.language())
                 .releaseDate(schedule.releaseDate())
+                .releaseTime(schedule.releaseTime())
                 .title(schedule.title())
+                .network(schedule.network())
                 .posterPath(schedule.posterPath())
                 .lastCheckedAt(toLocalDateTime(schedule.lastCheckedAt()))
                 .nextCheckAt(nextCheckAt(schedule.releaseDate(), schedule.lastCheckedAt()))
@@ -613,8 +617,10 @@ public class CalendarScheduleSnapshotStore {
         LocalDate releaseDate = episode.releaseDate() != null ? episode.releaseDate() : existing.getReleaseDate();
         return existing.toBuilder()
                 .releaseDate(releaseDate)
+                .releaseTime(episode.releaseTime())
                 .title(episode.title())
                 .seriesTitle(season.seriesTitle())
+                .network(season.network())
                 .posterPath(season.posterPath())
                 .stillPath(episode.stillPath())
                 .lastCheckedAt(toLocalDateTime(episode.lastCheckedAt()))
@@ -632,8 +638,10 @@ public class CalendarScheduleSnapshotStore {
                 .region(season.region())
                 .language(season.language())
                 .releaseDate(episode.releaseDate())
+                .releaseTime(episode.releaseTime())
                 .title(episode.title())
                 .seriesTitle(season.seriesTitle())
+                .network(season.network())
                 .posterPath(season.posterPath())
                 .stillPath(episode.stillPath())
                 .lastCheckedAt(toLocalDateTime(episode.lastCheckedAt()))
@@ -644,7 +652,9 @@ public class CalendarScheduleSnapshotStore {
 
     private boolean movieFactsChanged(CalendarScheduleSnapshot existing, CalendarMovieSchedule schedule) {
         return !Objects.equals(existing.getReleaseDate(), schedule.releaseDate())
+                || !Objects.equals(existing.getReleaseTime(), schedule.releaseTime())
                 || !Objects.equals(existing.getTitle(), schedule.title())
+                || !Objects.equals(existing.getNetwork(), schedule.network())
                 || !Objects.equals(existing.getPosterPath(), schedule.posterPath())
                 || !Boolean.TRUE.equals(existing.getPresentInLastTmdbSnapshot());
     }
@@ -652,8 +662,10 @@ public class CalendarScheduleSnapshotStore {
     private boolean episodeFactsChanged(
             CalendarScheduleSnapshot existing, CalendarSeasonSchedule season, CalendarEpisodeSchedule episode) {
         return !Objects.equals(existing.getReleaseDate(), episode.releaseDate())
+                || !Objects.equals(existing.getReleaseTime(), episode.releaseTime())
                 || !Objects.equals(existing.getTitle(), episode.title())
                 || !Objects.equals(existing.getSeriesTitle(), season.seriesTitle())
+                || !Objects.equals(existing.getNetwork(), season.network())
                 || !Objects.equals(existing.getPosterPath(), season.posterPath())
                 || !Objects.equals(existing.getStillPath(), episode.stillPath())
                 || !Boolean.TRUE.equals(existing.getPresentInLastTmdbSnapshot());

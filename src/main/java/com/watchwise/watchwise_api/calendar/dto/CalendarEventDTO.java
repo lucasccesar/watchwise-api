@@ -12,5 +12,17 @@ public record CalendarEventDTO(
         ReleaseStatus releaseStatus,
         WatchStatus watchStatus,
         Set<CalendarSource> sources,
-        CalendarEventContentDTO content) {
+        CalendarEventContentDTO content,
+        CalendarReleaseContext releaseContext) {
+
+    public CalendarEventDTO(
+            LocalDate date,
+            CalendarEventType eventType,
+            ReleaseStatus releaseStatus,
+            WatchStatus watchStatus,
+            Set<CalendarSource> sources,
+            CalendarEventContentDTO content) {
+        this(date, eventType, releaseStatus, watchStatus, sources, content,
+                new CalendarReleaseContext(null, null));
+    }
 }

@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
+import com.watchwise.watchwise_api.calendar.dto.CalendarReleaseContext;
 import com.watchwise.watchwise_api.calendar.dto.EpisodeCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarResponseDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
@@ -26,6 +27,7 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -35,6 +37,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -330,6 +333,40 @@ class CalendarServiceImplTest {
                 .extracting(event -> event.eventType()).containsExactly(CalendarEventType.SERIES);
         assertThat(service().getMonth(USER_ID, YearMonth.of(2026, 9)).events())
                 .extracting(event -> event.eventType()).containsExactly(CalendarEventType.EPISODE, CalendarEventType.EPISODE);
+    }
+
+    @Test
+    @DisplayName("[getMonth] Should Return Snapshot Release Context - When Grouped And Episode Events Have Source Facts")
+    void shouldReturnSnapshotReleaseContextWhenGroupedAndEpisodeEventsHaveSourceFacts() {
+        CalendarScheduleKey movieKey = key(ContentType.MOVIE, "550");
+        CalendarScheduleKey seriesKey = key(ContentType.SERIES, "1396");
+        CalendarInterest interest = interest(Map.of(
+                movieKey, Set.of(CalendarSource.WATCHLIST),
+                seriesKey, Set.of(CalendarSource.IN_PROGRESS)));
+        CalendarScheduleSnapshot movie = movie("550", LocalDate.of(2026, 9, 15)).toBuilder()
+                .releaseTime(LocalTime.of(0, 0))
+                .build();
+        CalendarScheduleSnapshot firstEpisode = episode("1396", 1, 1, LocalDate.of(2026, 9, 16)).toBuilder()
+                .build();
+        CalendarScheduleSnapshot secondEpisode = episode("1396", 1, 2, LocalDate.of(2026, 9, 16)).toBuilder()
+                .network("AMC")
+                .build();
+        CalendarScheduleReadModel read = new CalendarScheduleReadModel(
+                List.of(movie, firstEpisode, secondEpisode),
+                new CalendarAssemblyInput.Completeness(
+                        Set.of(new CalendarAssemblyInput.CompleteSeasonKey("1396", 1)), Set.of()));
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
+        when(watchedReader.readWatchedKeys(any(), any())).thenReturn(Set.of());
+
+        CalendarResponseDTO response = service().getMonth(USER_ID, YearMonth.of(2026, 9));
+
+        assertThat(response.events()).hasSize(2);
+        assertThat(response.events().get(0).releaseContext())
+                .isEqualTo(new CalendarReleaseContext(LocalTime.of(0, 0), null));
+        assertThat(response.events().get(1).releaseContext())
+                .isEqualTo(new CalendarReleaseContext(null, "AMC"));
+        assertThat(response.events().get(1).sources()).containsExactly(CalendarSource.IN_PROGRESS);
     }
 
     private CalendarService service() {

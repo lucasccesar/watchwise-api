@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.calendar.service.impl;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
+import com.watchwise.watchwise_api.calendar.dto.CalendarReleaseContext;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.calendar.dto.EpisodeCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
@@ -18,6 +19,7 @@ import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -73,6 +75,7 @@ public class CalendarEventAssembler {
                             watched ? WatchStatus.WATCHED : WatchStatus.UNWATCHED,
                             sourcesForMovie(tmdbId, input),
                             new MovieCalendarContentDTO(tmdbId, snapshot.getTitle(), snapshot.getPosterPath()),
+                            releaseContext(snapshot),
                             tmdbId,
                             0,
                             0));
@@ -107,6 +110,7 @@ public class CalendarEventAssembler {
                             seriesEpisodes.size(),
                             representative.getSeriesTitle(),
                             representative.getPosterPath()),
+                    releaseContext(seriesEpisodes),
                     representative.getSeriesTmdbId(),
                     0,
                     0));
@@ -136,6 +140,7 @@ public class CalendarEventAssembler {
                             seasonEpisodes.size(),
                             representative.getSeriesTitle(),
                             representative.getPosterPath()),
+                    releaseContext(seasonEpisodes),
                     representative.getSeriesTmdbId(),
                     representative.getSeasonNumber(),
                     0));
@@ -164,6 +169,7 @@ public class CalendarEventAssembler {
                         snapshot.getSeriesTitle(),
                         snapshot.getPosterPath(),
                         snapshot.getStillPath()),
+                releaseContext(snapshot),
                 snapshot.getSeriesTmdbId(),
                 snapshot.getSeasonNumber(),
                 snapshot.getEpisodeNumber());
@@ -277,6 +283,7 @@ public class CalendarEventAssembler {
             WatchStatus watchStatus,
             Set<CalendarSource> sources,
             CalendarEventContentDTO content,
+            CalendarReleaseContext releaseContext,
             String externalId,
             int seasonNumber,
             int episodeNumber) {
@@ -286,7 +293,26 @@ public class CalendarEventAssembler {
                 externalId,
                 seasonNumber,
                 episodeNumber,
-                new CalendarEventDTO(date, eventType, releaseStatus, watchStatus, sources, content));
+                new CalendarEventDTO(date, eventType, releaseStatus, watchStatus, sources, content, releaseContext));
+    }
+
+    private CalendarReleaseContext releaseContext(CalendarScheduleSnapshot snapshot) {
+        return new CalendarReleaseContext(snapshot.getReleaseTime(), snapshot.getNetwork());
+    }
+
+    private CalendarReleaseContext releaseContext(List<CalendarScheduleSnapshot> snapshots) {
+        List<LocalTime> releaseTimes = snapshots.stream()
+                .map(CalendarScheduleSnapshot::getReleaseTime)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        LocalTime releaseTime = releaseTimes.size() == 1 ? releaseTimes.get(0) : null;
+        String network = snapshots.stream()
+                .map(CalendarScheduleSnapshot::getNetwork)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(null);
+        return new CalendarReleaseContext(releaseTime, network);
     }
 
     private static int eventTypeRank(CalendarEventType eventType) {

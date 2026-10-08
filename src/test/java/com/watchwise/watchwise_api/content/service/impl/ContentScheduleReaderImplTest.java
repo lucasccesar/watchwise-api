@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDate;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
+import com.watchwise.watchwise_api.common.tmdb.TmdbNetwork;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
@@ -22,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,6 +64,21 @@ class ContentScheduleReaderImplTest {
             assertThat(found.schedule().complete()).isTrue();
             assertThat(found.schedule().releaseDateLookupUnavailable()).isFalse();
         });
+    }
+
+    @Test
+    @DisplayName("[readMovie] Should Preserve The Source Release Time - When Regional Release Includes A Timestamp")
+    void shouldPreserveTheSourceReleaseTimeWhenRegionalReleaseIncludesATimestamp() {
+        when(tmdbClient.getMovieFullDetails("550", "pt-BR"))
+                .thenReturn(found(movie("550", "Fight Club", "Released")));
+        when(tmdbClient.getMovieReleaseDates("550", "pt-BR")).thenReturn(found(new TmdbMovieReleaseDates(
+                "550", List.of(new TmdbRegionReleaseDates("BR", List.of(
+                release("2026-10-08T22:30:00.000Z", 3)))))));
+
+        ContentScheduleLookup result = reader.readMovie("550", "BR", "pt-BR");
+
+        assertThat(((ContentScheduleLookup.Found) result).schedule().releaseTime())
+                .isEqualTo(LocalTime.of(22, 30));
     }
 
     @Test
@@ -152,6 +169,21 @@ class ContentScheduleReaderImplTest {
         });
         verify(tmdbClient).getSeasonFullDetails("1396", 2, "pt-BR");
         verify(tmdbClient, never()).getCalendarSeasonDetails("1396", 2, "pt-BR");
+    }
+
+    @Test
+    @DisplayName("[readSeason] Should Preserve The Source Network - When Series Details Include One")
+    void shouldPreserveTheSourceNetworkWhenSeriesDetailsIncludeOne() {
+        when(tmdbClient.getSeasonFullDetails("1396", 2, "pt-BR")).thenReturn(found(new TmdbSeasonFullDetails(
+                3572, "Season 2", null, "/season.jpg", "2026-09-01", 2,
+                List.of(episode(1, "Seven Thirty-Seven", "2026-10-01")), null, null)));
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR"))
+                .thenReturn(found(seriesWithNetwork("1396", "Breaking Bad", "Returning Series", "AMC")));
+
+        ContentScheduleLookup result = reader.readSeason("1396", 2, "BR", "pt-BR");
+
+        assertThat(((ContentScheduleLookup.Found) result).schedule().network()).isEqualTo("AMC");
+        assertThat(((ContentScheduleLookup.Found) result).schedule().episodes().get(0).releaseTime()).isNull();
     }
 
     @Test
@@ -278,6 +310,15 @@ class ContentScheduleReaderImplTest {
             String id, String name, String status, List<TmdbSeasonSummary> seasons) {
         return new TmdbTvFullDetails(id, name, null, null, "/breaking-bad.jpg", null, null, null,
                 null, null, null, seasons, null, null, null, null, null, null, null, null, status);
+    }
+
+    private static TmdbTvFullDetails seriesWithNetwork(
+            String id, String name, String status, String network) {
+        return new TmdbTvFullDetails(
+                id, name, null, null, "/breaking-bad.jpg", null, null, null,
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, status, null,
+                List.of(new TmdbNetwork(174, network, null, "US")));
     }
 
     private static TmdbEpisodeSummary episode(Integer number, String name, String airDate) {

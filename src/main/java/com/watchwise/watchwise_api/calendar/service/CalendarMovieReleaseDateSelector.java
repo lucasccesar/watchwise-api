@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieReleaseDates;
 import com.watchwise.watchwise_api.common.tmdb.TmdbRegionReleaseDates;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.List;
@@ -19,6 +21,10 @@ public final class CalendarMovieReleaseDateSelector {
     }
 
     public static Optional<LocalDate> select(TmdbMovieReleaseDates releases, String region) {
+        return selectRelease(releases, region).map(SelectedRelease::date);
+    }
+
+    public static Optional<SelectedRelease> selectRelease(TmdbMovieReleaseDates releases, String region) {
         if (releases == null || releases.results() == null) {
             return Optional.empty();
         }
@@ -28,7 +34,7 @@ public final class CalendarMovieReleaseDateSelector {
                 .flatMap(CalendarMovieReleaseDateSelector::selectFromRegion);
     }
 
-    private static Optional<LocalDate> selectFromRegion(TmdbRegionReleaseDates region) {
+    private static Optional<SelectedRelease> selectFromRegion(TmdbRegionReleaseDates region) {
         if (region.releaseDates() == null) {
             return Optional.empty();
         }
@@ -38,7 +44,8 @@ public final class CalendarMovieReleaseDateSelector {
                 .filter(candidate -> candidate.date() != null)
                 .sorted(Comparator.comparingInt((RankedReleaseDate candidate) -> releaseTypeRank(candidate.release().type()))
                         .thenComparing(RankedReleaseDate::date))
-                .map(RankedReleaseDate::date)
+                .map(candidate -> new SelectedRelease(
+                        candidate.date(), parseTime(candidate.release().releaseDate())))
                 .findFirst();
     }
 
@@ -58,6 +65,20 @@ public final class CalendarMovieReleaseDateSelector {
         }
     }
 
+    private static LocalTime parseTime(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value).toLocalTime();
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
     private record RankedReleaseDate(TmdbMovieReleaseDate release, LocalDate date) {
+    }
+
+    public record SelectedRelease(LocalDate date, LocalTime time) {
     }
 }

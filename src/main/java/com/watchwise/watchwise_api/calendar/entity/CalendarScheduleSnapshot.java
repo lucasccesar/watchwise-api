@@ -17,6 +17,7 @@ import lombok.Setter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.UUID;
 
 @Entity
@@ -57,11 +58,17 @@ public class CalendarScheduleSnapshot {
     @Column(name = "release_date")
     private LocalDate releaseDate;
 
+    @Column(name = "release_time")
+    private LocalTime releaseTime;
+
     @Column(name = "title", length = 500, nullable = false)
     private String title;
 
     @Column(name = "series_title", length = 500)
     private String seriesTitle;
+
+    @Column(name = "network", length = 200)
+    private String network;
 
     @Column(name = "poster_path", length = 500)
     private String posterPath;

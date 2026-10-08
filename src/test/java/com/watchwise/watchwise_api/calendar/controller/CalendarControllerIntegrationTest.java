@@ -1,12 +1,19 @@
 package com.watchwise.watchwise_api.calendar.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
+import com.watchwise.watchwise_api.calendar.dto.CalendarReleaseContext;
 import com.watchwise.watchwise_api.calendar.dto.CalendarResponseDTO;
+import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
+import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -28,10 +35,14 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.YearMonth;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -126,6 +137,33 @@ class CalendarControllerIntegrationTest {
                 .andExpect(jsonPath("$.region").value("BR"))
                 .andExpect(jsonPath("$.events").isArray())
                 .andExpect(jsonPath("$.events").isEmpty());
+
+        verify(calendarService).getMonth(user.id(), month);
+    }
+
+    @Test
+    @DisplayName("[getMonth] Should Serialize Source Backed Release Context - When Calendar Contains An Event")
+    void shouldSerializeSourceBackedReleaseContextWhenCalendarContainsAnEvent() throws Exception {
+        RegisteredUser user = registerUser("calendarcontext");
+        YearMonth month = YearMonth.of(2026, 9);
+        CalendarEventDTO event = new CalendarEventDTO(
+                LocalDate.of(2026, 9, 12),
+                CalendarEventType.MOVIE,
+                ReleaseStatus.UPCOMING,
+                WatchStatus.UNWATCHED,
+                Set.of(CalendarSource.WATCHLIST),
+                new MovieCalendarContentDTO("550", "Fight Club", null),
+                new CalendarReleaseContext(LocalTime.of(0, 0), null));
+        when(calendarService.getMonth(user.id(), month))
+                .thenReturn(new CalendarResponseDTO(month, "BR", List.of(event)));
+
+        mockMvc.perform(get("/users/me/calendar")
+                        .param("month", "2026-09")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.events[0].sources[0]").value("WATCHLIST"))
+                .andExpect(jsonPath("$.events[0].releaseContext.releaseTime").value("00:00:00"))
+                .andExpect(jsonPath("$.events[0].releaseContext.network").value(nullValue()));
 
         verify(calendarService).getMonth(user.id(), month);
     }
