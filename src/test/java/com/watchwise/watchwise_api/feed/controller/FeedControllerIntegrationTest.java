@@ -6,9 +6,13 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -47,6 +51,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -56,7 +61,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -65,6 +72,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -129,6 +138,9 @@ class FeedControllerIntegrationTest {
 
     @Autowired
     private RequestThrottler requestThrottler;
+
+    @MockitoBean
+    private ContentCardAssembler contentCardAssembler;
 
     @BeforeEach
     void setUp() {
@@ -543,6 +555,46 @@ class FeedControllerIntegrationTest {
                 .andExpect(jsonPath("$.hasNext").value(false))
                 .andExpect(jsonPath("$.followingCount").value(0))
                 .andExpect(jsonPath("$.followedUsersPreview.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("[GET /feed] Should Serialize Visual Event Projections - When Followed User Has Mixed Activity")
+    void shouldSerializeVisualEventProjectionsWhenFollowedUserHasMixedActivity() throws Exception {
+        RegisteredUser viewer = registerUser("feedviewviewer");
+        RegisteredUser followed = registerUser("feedviewfollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        LocalDateTime now = LocalDateTime.now();
+        Content movie = persistContent("550", ContentType.MOVIE);
+        persistDiaryEntry(followedEntity, movie, now.minusMinutes(2));
+        persistTop5Entry(followedEntity, movie, now);
+        PicksTemplate template = picksTemplateRepository.saveAndFlush(PicksTemplate.builder()
+                .creator(followedEntity).origin(PickOrigin.COMMUNITY).name("Weekend Picks")
+                .createdAt(now.minusMinutes(3)).updatedAt(now.minusMinutes(3)).build());
+        pickRepository.saveAndFlush(Pick.builder()
+                .picksTemplate(template).user(followedEntity).visibility(PickVisibility.PUBLIC)
+                .createdAt(now.minusMinutes(1)).updatedAt(now.minusMinutes(1)).build());
+
+        ContentCoordinate coordinate = ContentCoordinate.from(movie);
+        ContentCardDTO card = new ContentCardDTO(movie.getId(), ContentType.MOVIE, "550", null, null, null,
+                "Fight Club", "/fight-club.jpg", null, null, null, null, null, null, null, List.of(),
+                null, null, null);
+        when(contentCardAssembler.assemble(any(), any(ContentCardContext.class), any(Set.class)))
+                .thenReturn(Map.of(coordinate, card));
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.followingCount").value(1))
+                .andExpect(jsonPath("$.followedUsersPreview[0].username").value("feedviewfollowed"))
+                .andExpect(jsonPath("$.content[0].eventType").value("TOP5_UPDATE"))
+                .andExpect(jsonPath("$.content[0].top5Preview.entries.length()").value(1))
+                .andExpect(jsonPath("$.content[0].top5Preview.cards.length()").value(1))
+                .andExpect(jsonPath("$.content[0].top5Preview.cards[0].tmdbId").value("550"))
+                .andExpect(jsonPath("$.content[1].eventType").value("PICK_CREATED"))
+                .andExpect(jsonPath("$.content[1].pickTargetCards").isArray())
+                .andExpect(jsonPath("$.content[1].pickTargetCards.length()").value(0))
+                .andExpect(jsonPath("$.content[2].eventType").value("DIARY_ENTRY"))
+                .andExpect(jsonPath("$.content[2].card.tmdbId").value("550"));
     }
 
     @Test

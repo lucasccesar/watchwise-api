@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public record FeedTop5PreviewDTO(
@@ -12,7 +14,7 @@ public record FeedTop5PreviewDTO(
         List<ContentCardDTO> cards) {
 
     public FeedTop5PreviewDTO {
-        entries = entries == null ? List.of() : List.copyOf(entries);
-        cards = cards == null ? List.of() : List.copyOf(cards);
+        entries = entries == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(entries));
+        cards = cards == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(cards));
     }
 }

@@ -33,6 +33,7 @@ import com.watchwise.watchwise_api.feed.dto.FeedEventType;
 import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
 import com.watchwise.watchwise_api.feed.dto.FeedItemViewDTO;
 import com.watchwise.watchwise_api.feed.dto.FeedPageViewDTO;
+import com.watchwise.watchwise_api.feed.dto.FeedTop5PreviewDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
@@ -187,8 +188,6 @@ class FeedServiceImplTest {
         stubEmptyTop5PickAndTemplate(3);
         when(likeService.getLikedDiaryEntryIds(eq(viewerId), any())).thenReturn(Set.of());
         when(contentMapper.contentToContentRefDto(sharedContent)).thenReturn(contentRef(sharedContent));
-        when(contentMapper.contentToContentRefDto(discardedDiary.getContent()))
-                .thenReturn(contentRef(discardedDiary.getContent()));
 
         ContentCoordinate sharedCoordinate = ContentCoordinate.from(sharedContent);
         ContentCardDTO sharedCard = new ContentCardDTO(sharedContent.getId(), ContentType.MOVIE, "550", null,
@@ -208,6 +207,73 @@ class FeedServiceImplTest {
         assertThat(specs.getValue()).hasSize(1);
         assertThat(specs.getValue()).noneMatch(spec -> spec.coordinate().tmdbId().equals("680"));
         assertThat(context.getValue().viewerId()).isNull();
+    }
+
+    @Test
+    @DisplayName("[getFeedView] Should Enrich Only The Selected Page - When Every Source Has A Discarded Candidate")
+    void shouldEnrichOnlyTheSelectedPageWhenEverySourceHasADiscardedCandidate() {
+        stubFollowedIds();
+        UUID discardedUserId = UUID.randomUUID();
+        User discardedUser = User.builder().id(discardedUserId).username("discarded").name("Discarded").build();
+        when(followerRepository.findFollowedIdsByFollowerIdAndStatus(viewerId, FollowStatus.ACCEPTED))
+                .thenReturn(List.of(followedId, discardedUserId));
+
+        LocalDateTime now = LocalDateTime.now();
+        DiaryEntry selectedDiary = buildDiaryEntry(now);
+        DiaryEntry discardedDiary = buildDiaryEntry(now.minusMinutes(10));
+        DroppedEntry selectedDropped = buildDroppedEntry(now.minusMinutes(1));
+        DroppedEntry discardedDropped = buildDroppedEntry(now.minusMinutes(11));
+        Top5Entry selectedTop5 = buildTop5Entry(now.minusMinutes(2));
+        Top5Entry discardedTop5 = Top5Entry.builder()
+                .id(UUID.randomUUID()).user(discardedUser)
+                .content(Content.builder().id(UUID.randomUUID()).type(ContentType.MOVIE).tmdbId("301")
+                        .createdAt(now).updatedAt(now).build())
+                .type(ContentType.MOVIE).position(1).createdAt(now.minusMinutes(12))
+                .updatedAt(now.minusMinutes(12)).build();
+        PicksTemplate selectedTemplate = buildTemplate(now.minusMinutes(4));
+        PicksTemplate discardedTemplate = buildTemplate(now.minusMinutes(13));
+        Pick selectedPick = buildPick(selectedTemplate, now.minusMinutes(3));
+        Pick discardedPick = buildPick(discardedTemplate, now.minusMinutes(14));
+        int fetchLimit = 6;
+
+        when(diaryEntryRepository.findFeedCandidates(eq(List.of(followedId, discardedUserId)), isNull(), isNull(),
+                eq(PageRequest.of(0, fetchLimit)))).thenReturn(List.of(selectedDiary, discardedDiary));
+        when(droppedEntryRepository.findFeedCandidates(eq(List.of(followedId, discardedUserId)), isNull(), isNull(),
+                eq(PageRequest.of(0, fetchLimit)))).thenReturn(List.of(selectedDropped, discardedDropped));
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId, discardedUserId)), isNull(), isNull(),
+                eq(PageRequest.of(0, fetchLimit)))).thenReturn(List.of(selectedTop5, discardedTop5));
+        when(pickRepository.findFeedCandidates(eq(List.of(followedId, discardedUserId)), eq(viewerId), isNull(), isNull(),
+                eq(PageRequest.of(0, fetchLimit)))).thenReturn(List.of(selectedPick, discardedPick));
+        when(picksTemplateRepository.findFeedCandidates(eq(List.of(followedId, discardedUserId)), isNull(), isNull(),
+                eq(PageRequest.of(0, fetchLimit)))).thenReturn(List.of(selectedTemplate, discardedTemplate));
+        when(dailyGameResultRepository.findFeedCandidates(eq(List.of(followedId, discardedUserId)), isNull(), isNull(),
+                eq(PageRequest.of(0, fetchLimit)))).thenReturn(List.of());
+
+        when(likeService.getLikedDiaryEntryIds(eq(viewerId), any())).thenReturn(Set.of());
+        when(likeService.getLikedDroppedEntryIds(eq(viewerId), any())).thenReturn(Set.of());
+        when(commentPreviewAssembler.assembleDiaryEntryPreviews(any(), eq(viewerId))).thenReturn(Map.of());
+        when(commentPreviewAssembler.assembleDroppedEntryPreviews(any(), eq(viewerId))).thenReturn(Map.of());
+        when(pickPreviewAssembler.assembleForFeed(any(), eq(viewerId))).thenReturn(Map.of());
+        when(top5EntryRepository.findCurrentPreviewsByUserIdsAndType(any(), eq(ContentType.MOVIE)))
+                .thenReturn(List.of(selectedTop5));
+        when(top5EntryMapper.top5EntryToResponseDto(selectedTop5)).thenReturn(new Top5EntryResponseDTO(
+                selectedTop5.getId(), ContentType.MOVIE, null, 1, selectedTop5.getCreatedAt(), selectedTop5.getUpdatedAt()));
+        when(userContentPosterService.findByUserAndContentPairs(any())).thenReturn(Map.of());
+        when(picksTemplatePreviewAssembler.assembleForFeed(any(), eq(viewerId))).thenReturn(Map.of());
+
+        feedService.getFeedView(viewerId, null, 5);
+
+        verify(likeService).getLikedDiaryEntryIds(viewerId, List.of(selectedDiary.getId()));
+        verify(likeService).getLikedDroppedEntryIds(viewerId, List.of(selectedDropped.getId()));
+        verify(watchCompanionRepository).findByDiaryEntryIdIn(List.of(selectedDiary.getId()));
+        verify(commentPreviewAssembler).assembleDiaryEntryPreviews(List.of(selectedDiary.getId()), viewerId);
+        verify(commentPreviewAssembler).assembleDroppedEntryPreviews(List.of(selectedDropped.getId()), viewerId);
+        verify(top5EntryRepository).findCurrentPreviewsByUserIdsAndType(List.of(followedId), ContentType.MOVIE);
+        verify(pickPreviewAssembler).assembleForFeed(List.of(selectedPick), viewerId);
+        ArgumentCaptor<Collection<PicksTemplate>> templates = ArgumentCaptor.forClass(Collection.class);
+        verify(picksTemplatePreviewAssembler).assembleForFeed(templates.capture(), eq(viewerId));
+        assertThat(templates.getValue()).extracting(PicksTemplate::getId).containsExactly(selectedTemplate.getId());
+        assertThat(templates.getValue()).extracting(PicksTemplate::getId).doesNotContain(discardedTemplate.getId());
     }
 
     @Test
@@ -286,10 +352,16 @@ class FeedServiceImplTest {
         Pick pick = buildPick(template, now);
         Content targetContent = Content.builder().id(UUID.randomUUID()).type(ContentType.MOVIE).tmdbId("550")
                 .createdAt(now).updatedAt(now).build();
+        Content missingTargetContent = Content.builder().id(UUID.randomUUID()).type(ContentType.MOVIE).tmdbId("680")
+                .createdAt(now).updatedAt(now).build();
         ContentRefDTO targetRef = contentRef(targetContent);
+        ContentRefDTO missingTargetRef = contentRef(missingTargetContent);
         PickPreviewDTO pickPreview = new PickPreviewDTO(pick.getId(), null, PickVisibility.PUBLIC, now, 0, 0, false,
-                List.of(new PickAnsweredCategoryPreviewDTO(UUID.randomUUID(), "Movie", null, 1,
-                        new PickOptionSearchDTO(UUID.randomUUID(), targetRef, null, targetRef), true)));
+                List.of(
+                        new PickAnsweredCategoryPreviewDTO(UUID.randomUUID(), "Movie", null, 1,
+                                new PickOptionSearchDTO(UUID.randomUUID(), targetRef, null, null), true),
+                        new PickAnsweredCategoryPreviewDTO(UUID.randomUUID(), "Another movie", null, 2,
+                                new PickOptionSearchDTO(UUID.randomUUID(), missingTargetRef, null, null), true)));
         stubEmptyDiaryAndDropped(21);
         when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of());
@@ -303,6 +375,7 @@ class FeedServiceImplTest {
                 .thenReturn(Map.of(template.getId(), new PicksTemplatePreviewDTO(
                         template.getId(), PickOrigin.COMMUNITY, template.getName(), null, null)));
         ContentCoordinate coordinate = ContentCoordinate.from(targetContent);
+        ContentCoordinate missingCoordinate = ContentCoordinate.from(missingTargetContent);
         ContentCardDTO card = new ContentCardDTO(targetContent.getId(), ContentType.MOVIE, "550", null, null, null,
                 "Fight Club", "/fight-club.jpg", null, null, null, null, null, null, null, List.of(), null, null,
                 ContentPreviewStatus.PARTIAL);
@@ -312,10 +385,10 @@ class FeedServiceImplTest {
         FeedItemViewDTO item = feedService.getFeedView(viewerId, null, null).content().getFirst();
 
         assertThat(item.eventType()).isEqualTo(FeedEventType.PICK_CREATED);
-        assertThat(item.pickTargetCards()).containsExactly(card);
+        assertThat(item.pickTargetCards()).containsExactly(card, null);
         ArgumentCaptor<Collection<ContentCardSpec>> specs = ArgumentCaptor.forClass(Collection.class);
         verify(contentCardAssembler).assemble(specs.capture(), any(ContentCardContext.class), any(Set.class));
-        assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).containsExactly(coordinate);
+        assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).containsExactly(coordinate, missingCoordinate);
     }
 
     @Test
@@ -349,6 +422,44 @@ class FeedServiceImplTest {
         assertThat(item.top5Preview().type()).isEqualTo(ContentType.MOVIE);
         assertThat(item.top5Preview().entries()).containsExactly(entryPreview);
         assertThat(item.top5Preview().cards()).containsExactly(card);
+    }
+
+    @Test
+    @DisplayName("[getFeedView] Should Preserve Top5 Card Positions - When A Nested Card Is Unavailable")
+    void shouldPreserveTop5CardPositionsWhenANestedCardIsUnavailable() {
+        stubFollowedIds();
+        LocalDateTime now = LocalDateTime.now();
+        Top5Entry first = buildTop5Entry(now);
+        Content secondContent = Content.builder().id(UUID.randomUUID()).type(ContentType.MOVIE).tmdbId("301")
+                .createdAt(now).updatedAt(now).build();
+        Top5Entry second = Top5Entry.builder().id(UUID.randomUUID()).user(followedUser).content(secondContent)
+                .type(ContentType.MOVIE).position(2).createdAt(now.minusMinutes(1))
+                .updatedAt(now.minusMinutes(1)).build();
+        Top5EntryResponseDTO firstPreview = new Top5EntryResponseDTO(first.getId(), first.getType(),
+                contentRef(first.getContent()), first.getPosition(), first.getCreatedAt(), first.getUpdatedAt());
+        Top5EntryResponseDTO secondPreview = new Top5EntryResponseDTO(second.getId(), second.getType(),
+                contentRef(second.getContent()), second.getPosition(), second.getCreatedAt(), second.getUpdatedAt());
+        stubEmptyDiaryAndDropped(21);
+        when(top5EntryRepository.findFeedCandidates(eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(first));
+        when(top5EntryRepository.findCurrentPreviewsByUserIdsAndType(eq(List.of(followedId)), eq(ContentType.MOVIE)))
+                .thenReturn(List.of(first, second));
+        when(top5EntryMapper.top5EntryToResponseDto(first)).thenReturn(firstPreview);
+        when(top5EntryMapper.top5EntryToResponseDto(second)).thenReturn(secondPreview);
+        when(userContentPosterService.findByUserAndContentPairs(any())).thenReturn(Map.of());
+
+        ContentCoordinate firstCoordinate = ContentCoordinate.from(first.getContent());
+        ContentCardDTO firstCard = new ContentCardDTO(first.getContent().getId(), ContentType.MOVIE, "300", null,
+                null, null, "The Shawshank Redemption", "/shawshank.jpg", null, null, null, null, null, null,
+                null, List.of(), null, null, ContentPreviewStatus.AVAILABLE);
+        when(contentCardAssembler.assemble(any(), any(ContentCardContext.class), any(Set.class)))
+                .thenReturn(Map.of(firstCoordinate, firstCard));
+
+        FeedTop5PreviewDTO preview = feedService.getFeedView(viewerId, null, null)
+                .content().getFirst().top5Preview();
+
+        assertThat(preview.entries()).containsExactly(firstPreview, secondPreview);
+        assertThat(preview.cards()).containsExactly(firstCard, null);
     }
 
     @Test

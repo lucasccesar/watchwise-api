@@ -11,6 +11,8 @@ import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -40,7 +42,8 @@ public record FeedItemViewDTO(
         recentComments = recentComments == null ? null : List.copyOf(recentComments);
         watchedWith = watchedWith == null ? null : List.copyOf(watchedWith);
         top5 = top5 == null ? null : List.copyOf(top5);
-        pickTargetCards = pickTargetCards == null ? null : List.copyOf(pickTargetCards);
+        pickTargetCards = pickTargetCards == null
+                ? null : Collections.unmodifiableList(new ArrayList<>(pickTargetCards));
     }
 
     public FeedItemViewDTO(FeedItemDTO item, ContentCardDTO card, FeedTop5PreviewDTO top5Preview,
