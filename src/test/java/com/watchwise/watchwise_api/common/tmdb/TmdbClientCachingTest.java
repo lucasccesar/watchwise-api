@@ -24,6 +24,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.client.ResponseCreator;
 import org.springframework.web.client.RestClient;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -834,6 +836,63 @@ class TmdbClientCachingTest {
         assertThat(second.toOptional()).contains(new TmdbCardMetadata(
                 "Recovered title", "/recovered.jpg", "2026-01-02", 101));
         mockServer.verify();
+    }
+
+    @Test
+    void shouldShareNotFoundWithConcurrentCardMetadataLookupsWithoutRetainingIt() throws Exception {
+        String requestUrl = "https://api.themoviedb.org/3/movie/999999997?language=en-US";
+        CountDownLatch requestEntered = new CountDownLatch(1);
+        CountDownLatch releaseResponse = new CountDownLatch(1);
+        mockServer.expect(requestTo(requestUrl)).andRespond(request -> {
+            requestEntered.countDown();
+            try {
+                if (!releaseResponse.await(5, TimeUnit.SECONDS)) {
+                    throw new IOException("Timed out waiting to release TMDB response");
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException(interrupted);
+            }
+            return withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"status_message\":\"Not found\"}").createResponse(request);
+        });
+
+        TmdbCardMetadataKey key = new TmdbCardMetadataKey(
+                TmdbCardMetadataKey.Type.MOVIE, "999999997", null, null, null);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        AtomicReference<Thread> waitingCallerThread = new AtomicReference<>();
+        CountDownLatch waitingCallerStarted = new CountDownLatch(1);
+        try {
+            Future<TmdbLookupResult<TmdbCardMetadata>> loadingCaller =
+                    executor.submit(() -> tmdbClient.getCardMetadata(key, "en-US"));
+            assertThat(requestEntered.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<TmdbLookupResult<TmdbCardMetadata>> waitingCaller = executor.submit(() -> {
+                waitingCallerThread.set(Thread.currentThread());
+                waitingCallerStarted.countDown();
+                return tmdbClient.getCardMetadata(key, "en-US");
+            });
+            assertThat(waitingCallerStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitThreadState(waitingCallerThread.get(), Thread.State.BLOCKED);
+
+            releaseResponse.countDown();
+            assertThat(loadingCaller.get(5, TimeUnit.SECONDS).isNotFound()).isTrue();
+            assertThat(waitingCaller.get(5, TimeUnit.SECONDS).isNotFound()).isTrue();
+        } finally {
+            releaseResponse.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(tmdbCardMetadataCache.getIfPresent(key.cacheKey("en-US"))).isNull();
+        mockServer.verify();
+    }
+
+    private void awaitThreadState(Thread thread, Thread.State expectedState) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (thread.getState() != expectedState && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertThat(thread.getState()).isEqualTo(expectedState);
     }
 
     @Test

@@ -11,7 +11,6 @@ import org.springframework.web.client.RestClientException;
 
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -318,21 +317,19 @@ public class TmdbClient {
     private TmdbLookupResult<TmdbCardMetadata> cachedCardMetadataLookup(
             String cacheKey, Supplier<TmdbLookupResult<TmdbCardMetadata>> loader) {
         AtomicBoolean loadedFromRemote = new AtomicBoolean(false);
-        AtomicReference<TmdbLookupResult<TmdbCardMetadata>> loadedResult = new AtomicReference<>();
         TmdbLookupResult<TmdbCardMetadata> cached = tmdbCardMetadataCache.get(cacheKey, ignoredKey -> {
             loadedFromRemote.set(true);
-            TmdbLookupResult<TmdbCardMetadata> result = loader.get();
-            loadedResult.set(result);
-            return result instanceof TmdbLookupResult.Found<TmdbCardMetadata> ? result : null;
+            return loader.get();
         });
         if (cached == null) {
-            TmdbLookupResult<TmdbCardMetadata> result = loadedResult.get();
-            return result == null ? new TmdbLookupResult.Unavailable<>() : result;
+            return new TmdbLookupResult.Unavailable<>();
         }
         if (cached instanceof TmdbLookupResult.Found<TmdbCardMetadata> found) {
             TmdbLookupOrigin origin = loadedFromRemote.get() ? TmdbLookupOrigin.REMOTE : TmdbLookupOrigin.CACHE;
             return new TmdbLookupResult.Found<>(found.value(), origin);
         }
+        tmdbCardMetadataCache.asMap().computeIfPresent(
+                cacheKey, (ignoredKey, current) -> current == cached ? null : current);
         return cached;
     }
 
