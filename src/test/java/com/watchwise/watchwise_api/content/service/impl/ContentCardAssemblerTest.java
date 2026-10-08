@@ -1,7 +1,8 @@
 package com.watchwise.watchwise_api.content.service.impl;
 
-import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.watchwise.watchwise_api.common.tmdb.*;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentCardStatsDTO;
@@ -28,6 +29,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 
 import java.time.Clock;
 import java.time.LocalDate;
@@ -44,6 +48,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 @ExtendWith(MockitoExtension.class)
 class ContentCardAssemblerTest {
@@ -194,8 +200,8 @@ class ContentCardAssemblerTest {
     }
 
     @Test
-    @DisplayName("[assemble] Should Keep Basic Metadata Independent From Viewer Context")
-    void shouldKeepBasicMetadataIndependentFromViewerContext() {
+    @DisplayName("[assemble] Should Not Resolve Viewer State - When Only Basic Metadata Is Requested")
+    void shouldNotResolveViewerStateWhenOnlyBasicMetadataIsRequested() {
         ContentCoordinate coordinate = movie("550");
         ContentCardSpec spec = new ContentCardSpec(coordinate, null, null, null, null);
         when(contentViewerStateService.resolve(isNull(), eq(List.of(coordinate)), eq(Map.of())))
@@ -205,18 +211,59 @@ class ContentCardAssemblerTest {
                         new TmdbCardMetadata("Fight Club", "/fight-club.jpg", "1999-10-15", 139)));
 
         ContentCardAssembler assembler = assembler();
-        ContentCardDTO first = assembler.assemble(
+        ContentCardDTO card = assembler.assemble(
                 List.of(spec), new ContentCardContext("en-US", "US", null, VIEWER_ID),
                 Set.of(ContentCardFieldSet.BASIC_METADATA)).get(coordinate);
+
+        assertThat(card.title()).isEqualTo("Fight Club");
+        assertThat(card.viewerState()).isNull();
+        verify(contentViewerStateService)
+                .resolve(isNull(), eq(List.of(coordinate)), eq(Map.of()));
+        verifyNoInteractions(contentStatsService, userContentPosterService);
+    }
+
+    @Test
+    @DisplayName("[assemble] Should Reuse Canonical TMDB Metadata Across Viewers And Isolate Viewer State")
+    void shouldReuseCanonicalTmdbMetadataAcrossViewersAndIsolateViewerState() {
+        RestClient.Builder restClientBuilder = RestClient.builder().baseUrl("https://api.themoviedb.org/3");
+        MockRestServiceServer mockServer = MockRestServiceServer.bindTo(restClientBuilder).build();
+        TmdbClient tmdbClient = new TmdbClient(
+                restClientBuilder.build(),
+                cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(),
+                cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache(), cache());
+        TmdbCardMetadataResolver realResolver = new TmdbCardMetadataResolver(tmdbClient);
+
+        ContentCoordinate coordinate = movie("550");
+        UUID contentId = UUID.randomUUID();
+        ContentViewerStateDTO firstState = state(8, true);
+        ContentViewerStateDTO secondState = state(4, false);
+        when(contentViewerStateService.resolve(VIEWER_ID, List.of(coordinate), Map.of()))
+                .thenReturn(resolution(coordinate, contentId, firstState));
+        when(contentViewerStateService.resolve(OTHER_VIEWER_ID, List.of(coordinate), Map.of()))
+                .thenReturn(resolution(coordinate, contentId, secondState));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/movie/550?language=en-US"))
+                .andRespond(withSuccess("""
+                        {"id":550,"title":"Fight Club","poster_path":"/fight-club.jpg",
+                         "release_date":"1999-10-15","runtime":139}
+                        """, MediaType.APPLICATION_JSON));
+
+        ContentCardAssembler assembler = new ContentCardAssembler(
+                contentStatsService, contentViewerStateService, realResolver, userContentPosterService);
+        ContentCardSpec spec = new ContentCardSpec(coordinate, null, null, null, null);
+        ContentCardDTO first = assembler.assemble(
+                List.of(spec), new ContentCardContext("en-US", "US", null, VIEWER_ID),
+                Set.of(ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.VIEWER_STATE)).get(coordinate);
         ContentCardDTO second = assembler.assemble(
                 List.of(spec), new ContentCardContext("en-US", "US", null, OTHER_VIEWER_ID),
-                Set.of(ContentCardFieldSet.BASIC_METADATA)).get(coordinate);
+                Set.of(ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.VIEWER_STATE)).get(coordinate);
 
+        assertThat(first.title()).isEqualTo("Fight Club");
         assertThat(second.title()).isEqualTo(first.title());
-        assertThat(second.posterPath()).isEqualTo(first.posterPath());
-        assertThat(second.previewStatus()).isEqualTo(ContentPreviewStatus.AVAILABLE);
-        verify(contentViewerStateService, org.mockito.Mockito.times(2))
-                .resolve(isNull(), eq(List.of(coordinate)), eq(Map.of()));
+        assertThat(first.viewerState()).extracting(ContentCardViewerStateDTO::myRating)
+                .isEqualTo(8);
+        assertThat(second.viewerState()).extracting(ContentCardViewerStateDTO::myRating)
+                .isEqualTo(4);
+        mockServer.verify();
     }
 
     @Test
@@ -302,6 +349,10 @@ class ContentCardAssemblerTest {
     private ContentCardAssembler assembler() {
         return new ContentCardAssembler(
                 contentStatsService, contentViewerStateService, tmdbCardMetadataResolver, userContentPosterService);
+    }
+
+    private static <K, V> Cache<K, V> cache() {
+        return Caffeine.newBuilder().build();
     }
 
     private ContentCoordinate movie(String tmdbId) {
