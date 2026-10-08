@@ -345,16 +345,23 @@ class DiaryEntryServiceImplTest {
     void shouldReturnEnrichedEntryWhenEntryIsVisible() {
         DiaryEntry entry = buildEntry(lucas, fightClub);
         DiaryEntryResponseDTO mapped = buildResponseDto(entry);
+        ContentCardDTO card = cardFor(fightClub, "Fight Club", ContentPreviewStatus.AVAILABLE);
         when(diaryEntryRepository.findByIdWithContentAndUser(entry.getId())).thenReturn(Optional.of(entry));
         when(likeService.getLikedDiaryEntryIds(lucasId, List.of(entry.getId()))).thenReturn(Set.of(entry.getId()));
         when(commentPreviewAssembler.countDiaryEntries(List.of(entry.getId())))
                 .thenReturn(Map.of(entry.getId(), 7L));
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, true, List.of())).thenReturn(mapped);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(fightClub), card));
 
         DiaryEntryResponseDTO result = diaryEntryService.getDiaryEntry(lucasId, entry.getId());
 
         assertThat(result.commentsCount()).isEqualTo(7L);
+        assertThat(result.card()).isEqualTo(card);
         verify(diaryEntryRepository).findByIdWithContentAndUser(entry.getId());
+        verify(contentCardAssembler).assemble(anyCollection(), cardContextCaptor.capture(), anySet());
+        assertThat(cardContextCaptor.getValue().posterUserId()).isEqualTo(lucasId);
+        assertThat(cardContextCaptor.getValue().viewerId()).isEqualTo(lucasId);
     }
 
     @Test
@@ -1780,6 +1787,8 @@ class DiaryEntryServiceImplTest {
             assertThat(review.card()).isEqualTo(card);
             assertThat(review.comment()).isEqualTo("Great movie");
         });
+        verify(contentCardAssembler).assemble(anyCollection(), cardContextCaptor.capture(), anySet());
+        assertThat(cardContextCaptor.getValue().posterUserId()).isEqualTo(marinaId);
     }
 
     @Test
@@ -1928,8 +1937,8 @@ class DiaryEntryServiceImplTest {
     void shouldBatchPostersByAuthorAndContentWhenReviewsHaveMultipleAuthors() {
         DiaryEntry firstEntry = buildEntry(lucas, fightClub);
         DiaryEntry secondEntry = buildEntry(marina, fightClub);
-        DiaryEntryResponseDTO firstMapped = buildResponseDto(firstEntry);
-        DiaryEntryResponseDTO secondMapped = buildResponseDto(secondEntry);
+        DiaryEntryResponseDTO firstMapped = buildResponseDtoWithContent(firstEntry);
+        DiaryEntryResponseDTO secondMapped = buildResponseDtoWithContent(secondEntry);
         String firstPoster = "https://image.tmdb.org/t/p/w342/lucas.png";
         String secondPoster = "https://image.tmdb.org/t/p/w342/marina.png";
         UserContentPosterService.UserContentPosterKey firstKey =
@@ -1955,6 +1964,7 @@ class DiaryEntryServiceImplTest {
                 .containsExactly(firstPoster, secondPoster);
         verify(userContentPosterService).findByUserAndContentPairs(List.of(firstKey, secondKey));
         verify(userContentPosterService, never()).findByUserAndContentIds(any(), any());
+        verify(contentCardAssembler, times(2)).assemble(anyCollection(), any(ContentCardContext.class), anySet());
     }
 
     @Test

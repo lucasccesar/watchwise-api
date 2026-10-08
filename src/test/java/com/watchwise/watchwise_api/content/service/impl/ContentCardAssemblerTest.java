@@ -143,6 +143,27 @@ class ContentCardAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assemble] Should Resolve Canonical Genres - When Display Metadata Is Fully Prepopulated")
+    void shouldResolveCanonicalGenresWhenDisplayMetadataIsFullyPrepopulated() {
+        ContentCoordinate coordinate = movie("603");
+        when(contentViewerStateService.resolve(isNull(), eq(List.of(coordinate)), eq(Map.of())))
+                .thenReturn(resolution(coordinate, UUID.randomUUID(), emptyState()));
+        when(tmdbCardMetadataResolver.resolve(coordinate, "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbCardMetadata(
+                        "The Matrix", "/matrix.jpg", "1999-03-30", 136,
+                        List.of("Science Fiction", "Action"), null)));
+
+        ContentCardDTO card = assembler().assemble(
+                List.of(new ContentCardSpec(coordinate, "The Matrix", "/matrix.jpg",
+                        LocalDate.of(1999, 3, 30), 136)),
+                new ContentCardContext("en-US", "US", null, null),
+                Set.of(ContentCardFieldSet.BASIC_METADATA)).get(coordinate);
+
+        assertThat(card.genres()).containsExactly("Science Fiction", "Action");
+        verify(tmdbCardMetadataResolver).resolve(coordinate, "en-US");
+    }
+
+    @Test
     @DisplayName("[assemble] Should Resolve Public Stats In One Batch - When Stats Are Requested")
     void shouldResolvePublicStatsInOneBatchWhenStatsAreRequested() {
         ContentCoordinate coordinate = movie("550");
@@ -363,7 +384,7 @@ class ContentCardAssemblerTest {
         verify(contentRepository).findAllByCoordinates(List.of(coordinate));
         verify(contentRepository, never()).save(any(Content.class));
         verifyNoInteractions(diaryEntryRepository, watchlistEntryRepository, droppedEntryRepository,
-                userListItemRepository, contentStatsService, tmdbCardMetadataResolver, userContentPosterService);
+                userListItemRepository, contentStatsService, userContentPosterService);
     }
 
     private ContentCardAssembler assembler() {

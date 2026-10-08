@@ -211,6 +211,19 @@ class CalendarEventAssemblerTest {
     }
 
     @Test
+    void shouldNormalizeBlankLegacyNetworkToNull() {
+        CalendarScheduleSnapshot snapshot = movie("550", RELEASE_DATE).toBuilder()
+                .network("   ")
+                .build();
+
+        List<CalendarEventDTO> events = assemble(List.of(snapshot));
+
+        assertThat(events).singleElement()
+                .extracting(CalendarEventDTO::releaseContext)
+                .isEqualTo(new CalendarReleaseContext(null, null));
+    }
+
+    @Test
     void shouldGroupCompleteSeriesAcrossRegularSeasonsIntoOneEvent() {
         List<CalendarEventDTO> events = assemble(List.of(
                 episode("1396", 2, 1, RELEASE_DATE),

@@ -252,11 +252,14 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .getOrDefault(diaryEntryId, 0L);
         List<UserPreviewDTO> watchedWith = loadWatchedWith(List.of(diaryEntryId))
                 .getOrDefault(diaryEntryId, List.of());
-        String customPosterUrl = loadPostersForOwner(owner.getId(), List.of(entry))
-                .get(entry.getContent().getId());
+        Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate = assembleDiaryCards(viewerId, owner, List.of(entry));
+        ContentCardDTO card = cardFor(entry.getContent(), cardsByCoordinate);
+        String customPosterUrl = card == null
+                ? loadPostersForOwner(owner.getId(), List.of(entry)).get(entry.getContent().getId())
+                : card.customPosterUrl();
 
         return enrichDiaryEntryResponse(entry, likedEntryIds.contains(diaryEntryId), commentsCount,
-                watchedWith, customPosterUrl);
+                watchedWith, customPosterUrl, card);
     }
 
     @Override
@@ -667,9 +670,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         commentCountsByDiaryId, commentCountsByDroppedId, watchedWithByEntryId,
                         customPosterByAuthorAndContent))
                 .toList();
-        Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate = assembleReviewCards(viewerId, reviews);
+        Map<UUID, ContentCardDTO> cardsByReviewId = assembleReviewCards(viewerId, reviews);
         reviews = reviews.stream()
-                .map(review -> review.withCard(cardFor(review.content(), cardsByCoordinate)))
+                .map(review -> review.withCard(cardsByReviewId.get(review.id())))
                 .toList();
 
         return new PageImpl<>(reviews, pageRequest, reviewKeys.getTotalElements());
@@ -708,15 +711,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 likedDroppedIds.contains(entry.getId()), List.of(), null);
     }
 
-    private Map<ContentCoordinate, ContentCardDTO> assembleReviewCards(
+    private Map<UUID, ContentCardDTO> assembleReviewCards(
             UUID viewerId, Collection<ContentReviewResponseDTO> reviews) {
-        List<ContentCardSpec> specs = distinctCardSpecs(reviews.stream()
-                .map(ContentReviewResponseDTO::content)
-                .filter(content -> content != null && content.type() != null)
-                .map(content -> new ContentCardSpec(
-                        toCoordinate(content), null, null, null, content.runtimeMinutes()))
-                .toList());
-        if (specs.isEmpty()) {
+        if (reviews == null || reviews.isEmpty()) {
             return Map.of();
         }
 
@@ -725,11 +722,38 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 ? TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE
                 : viewer.getPreferredLanguage();
         String region = viewer == null ? null : viewer.getPreferredRegion();
-        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
-                specs,
-                new ContentCardContext(language, region, null, viewerId),
-                cardFields(false, viewerId));
-        return cards == null ? Map.of() : cards;
+        Map<UUID, List<ContentReviewResponseDTO>> reviewsByOwner = reviews.stream()
+                .filter(review -> review != null && review.id() != null && review.userId() != null)
+                .collect(Collectors.groupingBy(
+                        ContentReviewResponseDTO::userId,
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+        Map<UUID, ContentCardDTO> cardsByReviewId = new LinkedHashMap<>();
+        for (Map.Entry<UUID, List<ContentReviewResponseDTO>> ownerGroup : reviewsByOwner.entrySet()) {
+            List<ContentCardSpec> specs = distinctCardSpecs(ownerGroup.getValue().stream()
+                    .map(ContentReviewResponseDTO::content)
+                    .filter(content -> content != null && content.type() != null)
+                    .map(content -> new ContentCardSpec(
+                            toCoordinate(content), null, null, null, content.runtimeMinutes()))
+                    .toList());
+            if (specs.isEmpty()) {
+                continue;
+            }
+            Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+                    specs,
+                    new ContentCardContext(language, region, ownerGroup.getKey(), viewerId),
+                    cardFields(false, viewerId));
+            if (cards == null) {
+                continue;
+            }
+            ownerGroup.getValue().forEach(review -> {
+                ContentRefDTO content = review.content();
+                if (content != null && content.type() != null) {
+                    cardsByReviewId.put(review.id(), cards.get(toCoordinate(content)));
+                }
+            });
+        }
+        return cardsByReviewId;
     }
 
     private List<ContentCardSpec> distinctCardSpecs(Collection<ContentCardSpec> specs) {

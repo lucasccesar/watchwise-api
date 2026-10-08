@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
@@ -100,13 +102,17 @@ class DiaryEntryControllerTest {
     @DisplayName("[getDiaryEntry] Should Return The Enriched Entry - When Called")
     void shouldReturnTheEnrichedEntryWhenGettingDiaryEntry() {
         UUID diaryEntryId = UUID.randomUUID();
-        DiaryEntryResponseDTO dto = buildResponseDto();
+        DiaryEntryResponseDTO dto = buildResponseDto().withCard(new ContentCardDTO(
+                UUID.randomUUID(), ContentType.MOVIE, "550", null, null, null,
+                "Fight Club", "/fight-club.jpg", null, null, null, 139,
+                null, null, null, null, null, null, ContentPreviewStatus.AVAILABLE));
         when(diaryEntryService.getDiaryEntry(currentUserId, diaryEntryId)).thenReturn(dto);
 
         ResponseEntity<DiaryEntryResponseDTO> result = diaryEntryController.getDiaryEntry(diaryEntryId);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
+        assertThat(result.getBody().card()).isNotNull();
         verify(diaryEntryService).getDiaryEntry(currentUserId, diaryEntryId);
     }
 

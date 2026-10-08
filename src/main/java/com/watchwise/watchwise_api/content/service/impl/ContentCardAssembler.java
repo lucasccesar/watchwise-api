@@ -185,6 +185,7 @@ public class ContentCardAssembler {
         return spec.title() != null
                 && spec.posterPath() != null
                 && spec.releaseDate() != null
+                && spec.genres() != null
                 && (spec.runtimeMinutes() != null || spec.coordinate().type() == ContentType.SEASON);
     }
 
@@ -192,7 +193,8 @@ public class ContentCardAssembler {
         return spec.title() != null
                 || spec.posterPath() != null
                 || spec.releaseDate() != null
-                || spec.runtimeMinutes() != null;
+                || spec.runtimeMinutes() != null
+                || spec.genres() != null;
     }
 
     private ContentPreviewStatus metadataStatus(ContentCardSpec spec, TmdbCardMetadata metadata) {
@@ -224,7 +226,9 @@ public class ContentCardAssembler {
                 ? spec.runtimeMinutes()
                 : metadata == null ? null : metadata.runtimeMinutes();
         Integer numberOfSeasons = metadata == null ? null : metadata.numberOfSeasons();
-        List<String> genres = metadata == null ? null : metadata.genres();
+        List<String> genres = spec.genres() != null
+                ? spec.genres()
+                : metadata == null ? null : metadata.genres();
         ContentCardStatsDTO stats = requestedFields.contains(ContentCardFieldSet.STATS)
                 ? toStats(data.contentId(), data.contentId() == null
                         ? null

@@ -51,6 +51,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -160,7 +161,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         Map<ContentCoordinate, ContentCardDTO> sortCards = materializedSortCards(
                 target, userId, filtered, effectiveSort);
         List<ViewCandidate> sorted = sortCandidates(filtered, effectiveSort, descending, sortCards);
-        WatchlistAggregateDTO aggregate = aggregate(filtered);
+        WatchlistAggregateDTO aggregate = aggregate(filtered, sortCards);
 
         Page<ViewCandidate> page = page(sorted, pageRequest);
         Map<ContentCoordinate, ContentCardDTO> pageCards = assemblePageCards(target, userId, page.getContent());
@@ -271,13 +272,27 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
 
     private Map<ContentCoordinate, ContentCardDTO> materializedSortCards(
             User target, UUID ownerId, List<ViewCandidate> candidates, WatchlistSort sort) {
-        if (!requiresMaterializedSort(sort) || candidates.isEmpty()) {
+        if (candidates.isEmpty()) {
             return Map.of();
         }
-        Set<ContentCardFieldSet> fields = sort == WatchlistSort.TITLE
-                ? Set.of(ContentCardFieldSet.BASIC_METADATA)
-                : Set.of(ContentCardFieldSet.STATS);
+        EnumSet<ContentCardFieldSet> fields = EnumSet.noneOf(ContentCardFieldSet.class);
+        if (sort == WatchlistSort.TITLE || hasMissingRuntime(candidates)) {
+            fields.add(ContentCardFieldSet.BASIC_METADATA);
+        }
+        if (sort == WatchlistSort.RATING) {
+            fields.add(ContentCardFieldSet.STATS);
+        }
+        if (fields.isEmpty()) {
+            return Map.of();
+        }
         return assembleCards(target, ownerId, candidates, fields);
+    }
+
+    private boolean hasMissingRuntime(List<ViewCandidate> candidates) {
+        return candidates.stream()
+                .map(ViewCandidate::entry)
+                .map(WatchlistEntry::getContent)
+                .anyMatch(content -> runtimeMinutes(content) == null);
     }
 
     private List<ViewCandidate> sortCandidates(
@@ -292,7 +307,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 case RELEASE_DATE -> compareNullable(
                         left.releaseDate(), right.releaseDate(), descending);
                 case RUNTIME -> compareNullable(
-                        runtimeMinutes(left.entry().getContent()), runtimeMinutes(right.entry().getContent()), descending);
+                        runtimeMinutes(sortCards, left), runtimeMinutes(sortCards, right), descending);
                 case RATING -> compareNullable(
                         rating(sortCards, left), rating(sortCards, right), descending);
                 case TITLE -> compareNullable(
@@ -350,7 +365,8 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         return card == null || card.title() == null ? null : card.title().toLowerCase(Locale.ROOT);
     }
 
-    private WatchlistAggregateDTO aggregate(List<ViewCandidate> candidates) {
+    private WatchlistAggregateDTO aggregate(
+            List<ViewCandidate> candidates, Map<ContentCoordinate, ContentCardDTO> cards) {
         long movieCount = candidates.stream()
                 .filter(candidate -> candidate.entry().getType() == ContentType.MOVIE)
                 .count();
@@ -358,14 +374,23 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 .filter(candidate -> candidate.entry().getType() == ContentType.SERIES)
                 .count();
         long runtime = candidates.stream()
-                .map(ViewCandidate::entry)
-                .map(WatchlistEntry::getContent)
-                .mapToLong(content -> runtimeMinutes(content) == null ? 0L : runtimeMinutes(content))
+                .mapToLong(candidate -> runtimeMinutes(cards, candidate) == null
+                        ? 0L : runtimeMinutes(cards, candidate))
                 .sum();
         long upcomingCount = candidates.stream()
                 .filter(candidate -> candidate.status() == WatchlistStatus.UPCOMING)
                 .count();
         return new WatchlistAggregateDTO(candidates.size(), movieCount, seriesCount, runtime, upcomingCount);
+    }
+
+    private Long runtimeMinutes(
+            Map<ContentCoordinate, ContentCardDTO> cards, ViewCandidate candidate) {
+        Long persisted = runtimeMinutes(candidate.entry().getContent());
+        if (persisted != null) {
+            return persisted;
+        }
+        ContentCardDTO card = cards.get(ContentCoordinate.from(candidate.entry().getContent()));
+        return card == null || card.runtimeMinutes() == null ? null : card.runtimeMinutes().longValue();
     }
 
     private Page<ViewCandidate> page(List<ViewCandidate> sorted, PageRequest pageRequest) {
@@ -394,13 +419,19 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                         null,
                         null,
                         candidate.releaseDate(),
-                        candidate.entry().getContent().getRuntimeMinutes()))
+                        knownRuntimeForCard(candidate.entry().getContent()),
+                        candidate.entry().getContent().getGenres()))
                 .toList();
         Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
                 specs,
                 new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), ownerId, null),
                 fields);
         return cards == null ? Map.of() : cards;
+    }
+
+    private Integer knownRuntimeForCard(Content content) {
+        Long runtime = runtimeMinutes(content);
+        return runtime == null ? null : Math.toIntExact(runtime);
     }
 
     private record ViewCandidate(

@@ -142,7 +142,7 @@ class TrendingControllerIntegrationTest {
                 .andExpect(jsonPath("$.movies[0].year").value(1999))
                 .andExpect(jsonPath("$.movies[0].tmdbVoteAverage").value(8.7))
                 .andExpect(jsonPath("$.movies[0].popularity").value(123.4))
-                .andExpect(jsonPath("$.movies[0].genres[0]").value(28))
+                .andExpect(jsonPath("$.movies[0].genres[0]").value("Science Fiction"))
                 .andExpect(jsonPath("$.series").isArray())
                 .andExpect(jsonPath("$.series[0].tmdbId").value("1396"))
                 .andExpect(jsonPath("$.series[0].type").value("SERIES"))

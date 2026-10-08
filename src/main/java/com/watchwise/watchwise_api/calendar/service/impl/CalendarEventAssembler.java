@@ -297,7 +297,7 @@ public class CalendarEventAssembler {
     }
 
     private CalendarReleaseContext releaseContext(CalendarScheduleSnapshot snapshot) {
-        return new CalendarReleaseContext(snapshot.getReleaseTime(), snapshot.getNetwork());
+        return new CalendarReleaseContext(snapshot.getReleaseTime(), normalizeNetwork(snapshot.getNetwork()));
     }
 
     private CalendarReleaseContext releaseContext(List<CalendarScheduleSnapshot> snapshots) {
@@ -306,11 +306,17 @@ public class CalendarEventAssembler {
                 .allMatch(snapshot -> Objects.equals(first.getReleaseTime(), snapshot.getReleaseTime()))
                 ? first.getReleaseTime()
                 : null;
+        String firstNetwork = normalizeNetwork(first.getNetwork());
         String network = snapshots.stream()
-                .allMatch(snapshot -> Objects.equals(first.getNetwork(), snapshot.getNetwork()))
-                ? first.getNetwork()
+                .map(snapshot -> normalizeNetwork(snapshot.getNetwork()))
+                .allMatch(value -> Objects.equals(firstNetwork, value))
+                ? firstNetwork
                 : null;
         return new CalendarReleaseContext(releaseTime, network);
+    }
+
+    private String normalizeNetwork(String network) {
+        return network == null || network.isBlank() ? null : network;
     }
 
     private static int eventTypeRank(CalendarEventType eventType) {

@@ -108,6 +108,8 @@ public class SummaryServiceImpl implements SummaryService {
             ContentCardFieldSet.BASIC_METADATA);
     private static final Set<ContentCardFieldSet> SUMMARY_CARD_FIELDS_WITH_STATS = Set.of(
             ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.STATS);
+    private static final Set<ContentCardFieldSet> ALL_TIME_LEGACY_CARD_FIELDS = Set.of(
+            ContentCardFieldSet.BASIC_METADATA, ContentCardFieldSet.STATS, ContentCardFieldSet.SOCIAL_METADATA);
 
     private final UserRepository userRepository;
     private final FollowerRepository followerRepository;
@@ -528,9 +530,24 @@ public class SummaryServiceImpl implements SummaryService {
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository.findBottomRatedByUserId(userId, PageRequest.of(0, ALL_TIME_TOP_LIMIT));
         Map<UUID, String> customPosterByContentId = loadPostersForOwner(userId,
                 collectDiaryEntries(topRatedRaw, bottomRatedRaw));
+        List<ContentCardSpec> legacyCardSpecs = distinctCardSpecs(Stream.concat(
+                        Stream.of(topRatedRaw, bottomRatedRaw)
+                                .flatMap(Collection::stream)
+                                .map(this::toCardSpec),
+                        mostLoggedContent.stream()
+                                .map(ContentWatchCountDTO::content)
+                                .filter(Objects::nonNull)
+                                .map(this::toCardSpec))
+                .toList());
+        Map<ContentCoordinate, ContentCardDTO> legacyCards = assembleLegacyAllTimeCards(
+                target, userId, legacyCardSpecs);
         List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId,
-                List.of(ContentType.MOVIE, ContentType.SERIES), customPosterByContentId);
-        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosterByContentId);
+                List.of(ContentType.MOVIE, ContentType.SERIES), customPosterByContentId, legacyCards);
+        List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(
+                bottomRatedRaw, customPosterByContentId, legacyCards);
+        mostLoggedContent = mostLoggedContent.stream()
+                .map(item -> item.withCard(cardFor(item.content(), legacyCards)))
+                .toList();
 
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanionsAllTime(userId);
 
@@ -707,6 +724,13 @@ public class SummaryServiceImpl implements SummaryService {
                 entry.getContent().getRuntimeMinutes());
     }
 
+    private ContentCardSpec toCardSpec(ContentRefDTO content) {
+        return new ContentCardSpec(
+                new ContentCoordinate(content.type(), content.tmdbId(), content.seriesTmdbId(),
+                        content.seasonNumber(), content.episodeNumber()),
+                null, null, null, content.runtimeMinutes());
+    }
+
     private ContentCardSpec toCardSpec(SeriesWatchTimeDTO item) {
         return new ContentCardSpec(
                 new ContentCoordinate(ContentType.SERIES, item.seriesTmdbId(), null, null, null),
@@ -744,11 +768,31 @@ public class SummaryServiceImpl implements SummaryService {
         return cards == null ? Map.of() : cards;
     }
 
+    private Map<ContentCoordinate, ContentCardDTO> assembleLegacyAllTimeCards(
+            User target, UUID ownerId, Collection<ContentCardSpec> specs) {
+        if (specs.isEmpty()) {
+            return Map.of();
+        }
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+                specs,
+                new ContentCardContext(target.getPreferredLanguage(), target.getPreferredRegion(), ownerId, null),
+                ALL_TIME_LEGACY_CARD_FIELDS);
+        return cards == null ? Map.of() : cards;
+    }
+
     private ContentCardDTO cardFor(Content content, Map<ContentCoordinate, ContentCardDTO> cards) {
         if (content == null || content.getType() == null) {
             return null;
         }
         return cards.get(ContentCoordinate.from(content));
+    }
+
+    private ContentCardDTO cardFor(ContentRefDTO content, Map<ContentCoordinate, ContentCardDTO> cards) {
+        if (content == null || content.type() == null) {
+            return null;
+        }
+        return cards.get(new ContentCoordinate(content.type(), content.tmdbId(), content.seriesTmdbId(),
+                content.seasonNumber(), content.episodeNumber()));
     }
 
     private ContentCardDTO cardFor(SeriesWatchTimeDTO item, Map<ContentCoordinate, ContentCardDTO> cards) {

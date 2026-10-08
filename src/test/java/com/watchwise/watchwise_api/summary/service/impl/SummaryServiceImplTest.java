@@ -1102,6 +1102,67 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getAllTimeStats] Should Add Cards To Legacy Rankings Without Changing Raw Fields")
+    void shouldAddCardsToLegacyRankingsWithoutChangingRawFields() {
+        Content movie = Content.builder()
+                .id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE).runtimeMinutes(139)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        DiaryEntry topRatedEntry = DiaryEntry.builder()
+                .id(UUID.randomUUID()).content(movie).score(9)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        DiaryEntry bottomRatedEntry = DiaryEntry.builder()
+                .id(UUID.randomUUID()).content(movie).score(4)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        ContentRefDTO contentRef = new ContentRefDTO(
+                movie.getId(), "550", ContentType.MOVIE, null, null, null, null, null,
+                movie.getCreatedAt(), movie.getUpdatedAt());
+        DiaryEntryRepository.ContentWatchCount mostLoggedRow = new DiaryEntryRepository.ContentWatchCount() {
+            @Override
+            public UUID getContentId() {
+                return movie.getId();
+            }
+
+            @Override
+            public Long getCount() {
+                return 3L;
+            }
+        };
+        ContentCardDTO card = new ContentCardDTO(
+                movie.getId(), ContentType.MOVIE, "550", null, null, null,
+                "Fight Club", "/fight-club.jpg", "https://image.tmdb.org/t/p/w342/custom.jpg",
+                LocalDate.of(1999, 10, 15), 1999, 139, null, null, null, List.of("Drama"),
+                null, null, ContentPreviewStatus.AVAILABLE);
+        DiaryEntryResponseDTO topResponse = buildDiaryEntryResponseDto(topRatedEntry);
+        DiaryEntryResponseDTO bottomResponse = buildDiaryEntryResponseDto(bottomRatedEntry);
+
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(diaryEntryRepository.countDiaryEntriesGroupByContentId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(List.of(mostLoggedRow));
+        when(contentRepository.findAllById(List.of(movie.getId()))).thenReturn(List.of(movie));
+        when(contentMapper.contentToContentRefDto(movie)).thenReturn(contentRef);
+        when(diaryEntryRepository.findTopRatedByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(List.of(topRatedEntry));
+        when(diaryEntryRepository.findBottomRatedByUserId(eq(lucasId), any(PageRequest.class)))
+                .thenReturn(List.of(bottomRatedEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(topRatedEntry, false)).thenReturn(topResponse);
+        when(diaryEntryMapper.diaryEntryToResponseDto(bottomRatedEntry, false)).thenReturn(bottomResponse);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(ContentCoordinate.from(movie), card));
+
+        AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
+
+        assertThat(result.mostLoggedContent().getFirst().card()).isEqualTo(card);
+        assertThat(result.topRated().getFirst().card()).isEqualTo(card);
+        assertThat(result.bottomRated().getFirst().card()).isEqualTo(card);
+        assertThat(result.mostLoggedContent().getFirst().count()).isEqualTo(3L);
+        assertThat(result.topRated().getFirst().score()).isEqualTo(9);
+        assertThat(result.bottomRated().getFirst().score()).isEqualTo(4);
+        verify(contentCardAssembler).assemble(anyCollection(),
+                eq(new ContentCardContext(lucas.getPreferredLanguage(), lucas.getPreferredRegion(), lucasId, null)),
+                anySet());
+    }
+
+    @Test
     @DisplayName("[getAllTimeStats] Should Use The Distinct Series Genre Query")
     void shouldUseTheDistinctSeriesGenreQueryInAllTimeStats() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
