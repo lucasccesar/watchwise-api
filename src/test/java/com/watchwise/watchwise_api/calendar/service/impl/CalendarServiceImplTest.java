@@ -347,6 +347,7 @@ class CalendarServiceImplTest {
                 .releaseTime(LocalTime.of(0, 0))
                 .build();
         CalendarScheduleSnapshot firstEpisode = episode("1396", 1, 1, LocalDate.of(2026, 9, 16)).toBuilder()
+                .network("AMC")
                 .build();
         CalendarScheduleSnapshot secondEpisode = episode("1396", 1, 2, LocalDate.of(2026, 9, 16)).toBuilder()
                 .network("AMC")

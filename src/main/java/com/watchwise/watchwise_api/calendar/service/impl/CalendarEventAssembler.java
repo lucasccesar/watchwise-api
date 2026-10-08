@@ -301,17 +301,15 @@ public class CalendarEventAssembler {
     }
 
     private CalendarReleaseContext releaseContext(List<CalendarScheduleSnapshot> snapshots) {
-        List<LocalTime> releaseTimes = snapshots.stream()
-                .map(CalendarScheduleSnapshot::getReleaseTime)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-        LocalTime releaseTime = releaseTimes.size() == 1 ? releaseTimes.get(0) : null;
+        CalendarScheduleSnapshot first = snapshots.get(0);
+        LocalTime releaseTime = snapshots.stream()
+                .allMatch(snapshot -> Objects.equals(first.getReleaseTime(), snapshot.getReleaseTime()))
+                ? first.getReleaseTime()
+                : null;
         String network = snapshots.stream()
-                .map(CalendarScheduleSnapshot::getNetwork)
-                .filter(value -> value != null && !value.isBlank())
-                .findFirst()
-                .orElse(null);
+                .allMatch(snapshot -> Objects.equals(first.getNetwork(), snapshot.getNetwork()))
+                ? first.getNetwork()
+                : null;
         return new CalendarReleaseContext(releaseTime, network);
     }
 

@@ -38,15 +38,27 @@ public final class CalendarMovieReleaseDateSelector {
         if (region.releaseDates() == null) {
             return Optional.empty();
         }
-        return region.releaseDates().stream()
+        List<RankedReleaseDate> ranked = region.releaseDates().stream()
                 .filter(Objects::nonNull)
                 .map(release -> new RankedReleaseDate(release, parseDate(release.releaseDate())))
                 .filter(candidate -> candidate.date() != null)
                 .sorted(Comparator.comparingInt((RankedReleaseDate candidate) -> releaseTypeRank(candidate.release().type()))
                         .thenComparing(RankedReleaseDate::date))
-                .map(candidate -> new SelectedRelease(
-                        candidate.date(), parseTime(candidate.release().releaseDate())))
-                .findFirst();
+                .toList();
+        if (ranked.isEmpty()) {
+            return Optional.empty();
+        }
+        RankedReleaseDate selected = ranked.get(0);
+        List<RankedReleaseDate> samePriorityAndDate = ranked.stream()
+                .filter(candidate -> releaseTypeRank(candidate.release().type())
+                        == releaseTypeRank(selected.release().type()))
+                .filter(candidate -> selected.date().equals(candidate.date()))
+                .toList();
+        LocalTime candidateTime = parseTime(samePriorityAndDate.get(0).release().releaseDate());
+        boolean conflictingTime = samePriorityAndDate.stream()
+                .map(candidate -> parseTime(candidate.release().releaseDate()))
+                .anyMatch(releaseTime -> !Objects.equals(candidateTime, releaseTime));
+        return Optional.of(new SelectedRelease(selected.date(), conflictingTime ? null : candidateTime));
     }
 
     private static int releaseTypeRank(Integer type) {

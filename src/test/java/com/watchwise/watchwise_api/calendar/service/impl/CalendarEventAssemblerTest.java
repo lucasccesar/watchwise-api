@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.calendar.service.impl;
 
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
+import com.watchwise.watchwise_api.calendar.dto.CalendarReleaseContext;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.calendar.dto.EpisodeCalendarContentDTO;
 import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
@@ -20,6 +21,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.YearMonth;
 import java.util.TimeZone;
@@ -184,6 +186,28 @@ class CalendarEventAssemblerTest {
             assertThat(event.content()).isEqualTo(
                     new SeasonCalendarContentDTO("1396", 2, 2, "Series 1396", "/series-1396.jpg"));
         });
+    }
+
+    @Test
+    void shouldClearGroupedReleaseContextWhenSnapshotValuesConflict() {
+        CalendarScheduleSnapshot first = episode("1396", 2, 1, RELEASE_DATE).toBuilder()
+                .releaseTime(LocalTime.of(21, 0))
+                .network("AMC")
+                .build();
+        CalendarScheduleSnapshot second = episode("1396", 2, 2, RELEASE_DATE).toBuilder()
+                .releaseTime(LocalTime.of(22, 0))
+                .network("HBO")
+                .build();
+
+        List<CalendarEventDTO> events = assemble(
+                List.of(first, second),
+                Map.of(),
+                Set.of(),
+                completeness(Set.of(season("1396", 2)), Set.of()));
+
+        assertThat(events).singleElement()
+                .extracting(CalendarEventDTO::releaseContext)
+                .isEqualTo(new CalendarReleaseContext(null, null));
     }
 
     @Test

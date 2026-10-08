@@ -299,12 +299,13 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
         if (networks == null) {
             return null;
         }
-        return networks.stream()
+        List<String> distinctNames = networks.stream()
                 .filter(Objects::nonNull)
                 .map(TmdbNetwork::name)
                 .filter(value -> value != null && !value.isBlank())
-                .findFirst()
-                .orElse(null);
+                .distinct()
+                .toList();
+        return distinctNames.size() == 1 ? distinctNames.get(0) : null;
     }
 
     private String nonBlankOr(String value, String fallback) {
