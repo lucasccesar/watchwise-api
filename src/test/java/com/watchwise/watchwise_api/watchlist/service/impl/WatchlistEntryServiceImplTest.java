@@ -454,6 +454,37 @@ class WatchlistEntryServiceImplTest {
     }
 
     @Test
+    void shouldKeepUnknownSeriesTotalRuntimeOutOfSortAndAggregateWhenCanonicalAverageExists() {
+        WatchlistEntry seriesEntry = entry(
+                content("1396", ContentType.SERIES, null, List.of("Drama"), null), ContentType.SERIES, 1);
+        WatchlistEntry movieEntry = entry(
+                content("550", ContentType.MOVIE, 60, List.of("Drama")), ContentType.MOVIE, 2);
+        List<WatchlistEntry> candidates = List.of(seriesEntry, movieEntry);
+        stubViewCandidates(candidates);
+        stubViewDates(candidates, Map.of());
+        stubSeriesProgress(candidates);
+        ContentCardDTO seriesCard = new ContentCardDTO(
+                seriesEntry.getContent().getId(), ContentType.SERIES, "1396", null, null, null,
+                "Breaking Bad", "/breaking-bad.jpg", null, LocalDate.of(2008, 1, 20), 2008,
+                47, null, 5, null, List.of("Drama"), null, null, ContentPreviewStatus.AVAILABLE);
+        ContentCardDTO movieCard = card(
+                movieEntry.getContent(), "550", "Fight Club", ContentPreviewStatus.AVAILABLE, 8.0);
+        when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
+                .thenReturn(Map.of(
+                        ContentCoordinate.from(seriesEntry.getContent()), seriesCard,
+                        ContentCoordinate.from(movieEntry.getContent()), movieCard));
+
+        WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
+                userId, userId, null, null, WatchlistStatus.ALL,
+                WatchlistSort.RUNTIME, "DESC", 1, 10);
+
+        assertThat(result.content()).extracting(card -> card.card().tmdbId())
+                .containsExactly("550", "1396");
+        assertThat(result.aggregate().totalRuntimeMinutes()).isEqualTo(60L);
+        assertThat(result.content().get(1).card().runtimeMinutes()).isEqualTo(47);
+    }
+
+    @Test
     void shouldRejectMaterializedSortWhenFilteredCandidatesExceedConfiguredCap() {
         org.springframework.test.util.ReflectionTestUtils.setField(
                 watchlistEntryService, "maxMaterializedSortCandidates", 1);

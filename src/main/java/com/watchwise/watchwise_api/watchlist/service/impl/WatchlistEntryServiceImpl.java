@@ -389,6 +389,9 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
         if (persisted != null) {
             return persisted;
         }
+        if (candidate.entry().getContent().getType() != ContentType.MOVIE) {
+            return null;
+        }
         ContentCardDTO card = cards.get(ContentCoordinate.from(candidate.entry().getContent()));
         return card == null || card.runtimeMinutes() == null ? null : card.runtimeMinutes().longValue();
     }
@@ -430,8 +433,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     }
 
     private Integer knownRuntimeForCard(Content content) {
-        Long runtime = runtimeMinutes(content);
-        return runtime == null ? null : Math.toIntExact(runtime);
+        return content.getType() == ContentType.MOVIE ? content.getRuntimeMinutes() : null;
     }
 
     private record ViewCandidate(
