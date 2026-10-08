@@ -119,6 +119,59 @@ class ContentCardDTOTest {
     }
 
     @Test
+    @DisplayName("Should preserve legacy Watchlist JSON when an optional card is added")
+    void shouldPreserveLegacyWatchlistJsonWhenOptionalCardIsAdded() throws Exception {
+        UUID contentId = UUID.fromString("bd072932-47a6-4ef2-9752-475c228107d4");
+        UUID entryId = UUID.fromString("c261c2aa-25de-47e8-a82b-06544f0647a5");
+        LocalDateTime createdAt = LocalDateTime.of(2026, 1, 2, 3, 4);
+        LocalDateTime updatedAt = LocalDateTime.of(2026, 1, 3, 4, 5);
+        ContentRefDTO content = new ContentRefDTO(
+                contentId, "550", ContentType.MOVIE, null, null, null, null, null, createdAt, updatedAt);
+        WatchlistEntryResponseDTO legacyEntry = new WatchlistEntryResponseDTO(
+                entryId, ContentType.MOVIE, content, 2, createdAt, updatedAt, LocalDate.of(2026, 2, 1));
+        WatchlistPageResponseDTO legacyResponse = new WatchlistPageResponseDTO(
+                List.of(legacyEntry), 3, 20, 41, 3, false, 7);
+
+        ContentCardDTO card = new ContentCardDTO(
+                contentId, ContentType.MOVIE, "550", null, null, null, "Fight Club", "/fight-club.jpg",
+                null, LocalDate.of(1999, 10, 15), 1999, 139, null, null, null, null, null, null,
+                ContentPreviewStatus.AVAILABLE);
+        CardEnrichedWatchlistEntryResponseDTO enrichedEntry = new CardEnrichedWatchlistEntryResponseDTO(
+                legacyEntry.id(), legacyEntry.type(), legacyEntry.content(), legacyEntry.position(),
+                legacyEntry.createdAt(), legacyEntry.updatedAt(), legacyEntry.releaseDate(), card);
+        CardEnrichedWatchlistPageResponseDTO enrichedResponse = new CardEnrichedWatchlistPageResponseDTO(
+                List.of(enrichedEntry), legacyResponse.page(), legacyResponse.size(), legacyResponse.totalElements(),
+                legacyResponse.totalPages(), legacyResponse.hasNext(), legacyResponse.upcomingCount());
+
+        JsonNode legacyJson = objectMapper.readTree(objectMapper.writeValueAsString(legacyResponse));
+        JsonNode enrichedJson = objectMapper.readTree(objectMapper.writeValueAsString(enrichedResponse));
+        JsonNode legacyEntryJson = legacyJson.get("content").get(0);
+        JsonNode enrichedEntryJson = enrichedJson.get("content").get(0);
+
+        assertThat(fieldNames(enrichedJson)).containsExactlyInAnyOrder(
+                "content", "page", "size", "totalElements", "totalPages", "hasNext", "upcomingCount");
+        assertThat(fieldNames(enrichedJson)).isEqualTo(fieldNames(legacyJson));
+        for (String field : List.of("page", "size", "totalElements", "totalPages", "hasNext", "upcomingCount")) {
+            assertThat(enrichedJson.get(field)).as("legacy pagination/domain field %s", field)
+                    .isEqualTo(legacyJson.get(field));
+        }
+        assertThat(fieldNames(enrichedEntryJson)).containsExactlyInAnyOrder(
+                "id", "type", "content", "position", "createdAt", "updatedAt", "releaseDate", "card");
+        for (String field : List.of("id", "type", "content", "position", "createdAt", "updatedAt", "releaseDate")) {
+            assertThat(enrichedEntryJson.get(field)).as("legacy entry field %s", field)
+                    .isEqualTo(legacyEntryJson.get(field));
+        }
+        assertThat(enrichedEntryJson.get("id").asString()).isEqualTo("c261c2aa-25de-47e8-a82b-06544f0647a5");
+        assertThat(enrichedEntryJson.get("position").asInt()).isEqualTo(2);
+        assertThat(enrichedEntryJson.get("content").get("id").asString())
+                .isEqualTo("bd072932-47a6-4ef2-9752-475c228107d4");
+        assertThat(enrichedEntryJson.get("content").get("tmdbId").asString()).isEqualTo("550");
+        assertThat(enrichedEntryJson.get("card").get("title").asString()).isEqualTo("Fight Club");
+        assertThat(enrichedEntryJson.get("card").get("stats").isNull()).isTrue();
+        assertThat(enrichedEntryJson.get("card").get("viewerState").isNull()).isTrue();
+    }
+
+    @Test
     @DisplayName("Should retain content-card identity and context contract values")
     void shouldRetainContentCardIdentityAndContextContractValues() {
         ContentCoordinate coordinate = new ContentCoordinate(ContentType.EPISODE, null, "1399", 1, 2);
@@ -148,6 +201,27 @@ class ContentCardDTOTest {
                 ContentCardFieldSet.VIEWER_STATE,
                 ContentCardFieldSet.WATCHLIST_PROGRESS,
                 ContentCardFieldSet.SOCIAL_METADATA);
+    }
+
+    private record CardEnrichedWatchlistEntryResponseDTO(
+            UUID id,
+            ContentType type,
+            ContentRefDTO content,
+            Integer position,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt,
+            LocalDate releaseDate,
+            ContentCardDTO card) {
+    }
+
+    private record CardEnrichedWatchlistPageResponseDTO(
+            List<CardEnrichedWatchlistEntryResponseDTO> content,
+            int page,
+            int size,
+            long totalElements,
+            int totalPages,
+            boolean hasNext,
+            long upcomingCount) {
     }
 
     private Set<String> fieldNames(JsonNode json) {
