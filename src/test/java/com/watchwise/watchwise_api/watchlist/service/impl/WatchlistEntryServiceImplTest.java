@@ -9,10 +9,8 @@ import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
-import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
-import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -20,7 +18,6 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
-import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentreleasedatesnapshot.service.ContentReleaseDateSnapshotService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -52,6 +49,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -90,7 +88,7 @@ class WatchlistEntryServiceImplTest {
     @Mock private AdvisoryLock advisoryLock;
     @Mock private ContentReleaseDateSnapshotService releaseDateSnapshotService;
     @Mock private ContentCardAssembler contentCardAssembler;
-    @Mock private ContentViewerStateService contentViewerStateService;
+    @Mock private SeriesProgressReadRepository seriesProgressReadRepository;
     @Spy private PageRequestFactory pageRequestFactory = new PageRequestFactory();
     @InjectMocks private WatchlistEntryServiceImpl watchlistEntryService;
 
@@ -317,7 +315,7 @@ class WatchlistEntryServiceImplTest {
         stubViewCandidates(candidates);
         stubViewDates(List.of(dramaMovie), Map.of(
                 dramaMovie.getId(), LocalDate.now().minusDays(2)));
-        stubOwnerStates(candidates, Map.of());
+        stubSeriesProgress(candidates);
         stubCards(candidates);
 
         WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
@@ -342,7 +340,7 @@ class WatchlistEntryServiceImplTest {
         stubViewDates(candidates, Map.of(
                 upcoming.getId(), LocalDate.now().plusDays(5),
                 released.getId(), LocalDate.now().minusDays(5)));
-        stubOwnerStates(candidates, Map.of());
+        stubSeriesProgress(candidates);
         stubCards(candidates);
 
         WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
@@ -354,7 +352,7 @@ class WatchlistEntryServiceImplTest {
     }
 
     @Test
-    void shouldFilterInProgressSeriesUsingOwnerState() {
+    void shouldFilterInProgressSeriesUsingEpisodeDiaryProgress() {
         WatchlistEntry inProgress = entry(content("1396", ContentType.SERIES, null, List.of("Drama"), 480), ContentType.SERIES, 1);
         WatchlistEntry newSeries = entry(content("1399", ContentType.SERIES, null, List.of("Drama"), 360), ContentType.SERIES, 2);
         List<WatchlistEntry> candidates = List.of(inProgress, newSeries);
@@ -362,8 +360,11 @@ class WatchlistEntryServiceImplTest {
         stubViewDates(candidates, Map.of(
                 inProgress.getId(), LocalDate.now().minusDays(5),
                 newSeries.getId(), LocalDate.now().minusDays(4)));
-        stubOwnerStates(candidates, Map.of(
-                ContentCoordinate.from(inProgress.getContent()), ownerState(WatchStatus.PARTIALLY_WATCHED, 2)));
+        SeriesProgressReadRepository.SeriesProgressCandidate progress = org.mockito.Mockito.mock(
+                SeriesProgressReadRepository.SeriesProgressCandidate.class);
+        when(progress.getSeriesTmdbId()).thenReturn("1396");
+        when(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(
+                eq(userId), anyCollection())).thenReturn(List.of(progress));
         stubCards(candidates);
 
         WatchlistViewResponseDTO result = watchlistEntryService.getWatchlistView(
@@ -373,6 +374,9 @@ class WatchlistEntryServiceImplTest {
         assertThat(result.content()).extracting(card -> card.card().tmdbId()).containsExactly("1396");
         assertThat(result.content()).singleElement().extracting(WatchlistCardDTO::status)
                 .isEqualTo(WatchlistStatus.IN_PROGRESS);
+        verify(seriesProgressReadRepository).findProgressByUserIdAndSeriesTmdbIds(
+                eq(userId), org.mockito.ArgumentMatchers.argThat(ids ->
+                        ids.size() == 2 && ids.containsAll(List.of("1396", "1399"))));
     }
 
     @Test
@@ -390,7 +394,7 @@ class WatchlistEntryServiceImplTest {
                 first.getId(), LocalDate.of(2026, 1, 1),
                 second.getId(), LocalDate.of(2027, 1, 1),
                 third.getId(), LocalDate.of(2026, 6, 1)));
-        stubOwnerStates(candidates, Map.of());
+        stubSeriesProgress(candidates);
         stubCards(candidates);
 
         assertThat(viewIds(WatchlistSort.DATE_ADDED, "ASC")).containsExactly("1", "2", "3");
@@ -412,7 +416,7 @@ class WatchlistEntryServiceImplTest {
         stubViewDates(candidates, Map.of(
                 higherId.getId(), sameReleaseDate,
                 lowerId.getId(), sameReleaseDate));
-        stubOwnerStates(candidates, Map.of());
+        stubSeriesProgress(candidates);
         stubCards(candidates);
 
         assertThat(viewIds(WatchlistSort.RUNTIME, "ASC")).containsExactly("lower", "higher");
@@ -426,10 +430,7 @@ class WatchlistEntryServiceImplTest {
         WatchlistEntry second = entry(content("2", ContentType.MOVIE, 100, List.of("Drama")), ContentType.MOVIE, 2);
         List<WatchlistEntry> candidates = List.of(first, second);
         stubViewCandidates(candidates);
-        stubViewDates(candidates, Map.of(
-                first.getId(), LocalDate.now().minusDays(2),
-                second.getId(), LocalDate.now().minusDays(1)));
-        stubOwnerStates(candidates, Map.of());
+        stubSeriesProgress(candidates);
 
         assertThatThrownBy(() -> watchlistEntryService.getWatchlistView(
                 userId, userId, null, null, WatchlistStatus.ALL,
@@ -440,7 +441,7 @@ class WatchlistEntryServiceImplTest {
                 userId, userId, null, null, WatchlistStatus.ALL,
                 WatchlistSort.RATING, "ASC", 1, 10))
                 .isInstanceOf(BadRequestException.class);
-        verifyNoInteractions(contentCardAssembler);
+        verifyNoInteractions(releaseDateSnapshotService, contentCardAssembler, seriesProgressReadRepository);
     }
 
     @Test
@@ -475,7 +476,7 @@ class WatchlistEntryServiceImplTest {
         WatchlistEntry candidate = entry(content("550", ContentType.MOVIE, 120, List.of("Drama")), ContentType.MOVIE, 1);
         stubViewCandidates(List.of(candidate));
         stubViewDates(List.of(candidate), Map.of(candidate.getId(), LocalDate.now().minusDays(1)));
-        stubOwnerStates(List.of(candidate), Map.of());
+        stubSeriesProgress(List.of(candidate));
         ContentCardDTO partial = card(candidate.getContent(), "550", null, ContentPreviewStatus.PARTIAL, null);
         when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
                 .thenReturn(Map.of(ContentCoordinate.from(candidate.getContent()), partial));
@@ -719,15 +720,9 @@ class WatchlistEntryServiceImplTest {
                 .thenReturn(new ContentReleaseDateSnapshotService.WatchlistDateResolution(dates));
     }
 
-    private void stubOwnerStates(
-            List<WatchlistEntry> candidates,
-            Map<ContentCoordinate, ContentViewerStateDTO> states) {
-        List<ContentCoordinate> coordinates = candidates.stream()
-                .map(WatchlistEntry::getContent)
-                .map(ContentCoordinate::from)
-                .toList();
-        when(contentViewerStateService.resolve(eq(userId), anyList(), eq(Map.of())))
-                .thenReturn(new ContentViewerStateService.Resolution(states, Map.of()));
+    private void stubSeriesProgress(List<WatchlistEntry> candidates) {
+        lenient().when(seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(
+                eq(userId), anyList())).thenReturn(List.of());
     }
 
     private void stubCards(List<WatchlistEntry> candidates) {
@@ -761,12 +756,6 @@ class WatchlistEntryServiceImplTest {
                 .content().stream()
                 .map(card -> card.card().tmdbId())
                 .toList();
-    }
-
-    private ContentViewerStateDTO ownerState(WatchStatus status, int playsCount) {
-        return new ContentViewerStateDTO(
-                status, null, null, null, null, null, playsCount, null,
-                false, null, false, null, List.of(), null, null);
     }
 
     private ContentCardDTO card(

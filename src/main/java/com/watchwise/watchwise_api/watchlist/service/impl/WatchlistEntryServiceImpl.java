@@ -8,8 +8,6 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
-import com.watchwise.watchwise_api.content.dto.ContentViewerStateDTO;
-import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
@@ -19,7 +17,6 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
-import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentreleasedatesnapshot.service.ContentReleaseDateSnapshotService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -39,6 +36,7 @@ import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.mapper.WatchlistEntryMapper;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -54,12 +52,14 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -75,7 +75,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private final AdvisoryLock advisoryLock;
     private final ContentReleaseDateSnapshotService releaseDateSnapshotService;
     private final ContentCardAssembler contentCardAssembler;
-    private final ContentViewerStateService contentViewerStateService;
+    private final SeriesProgressReadRepository seriesProgressReadRepository;
 
     @Value("${app.watchlist.view.max-materialized-sort-candidates:1000}")
     private int maxMaterializedSortCandidates = 1000;
@@ -138,24 +138,24 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 .filter(entry -> matchesGenre(entry.getContent(), normalizedGenre))
                 .toList();
 
-        Map<UUID, LocalDate> releaseDates = candidates.isEmpty()
-                ? Map.of()
-                : safeReleaseDates(target, candidates);
-        Map<ContentCoordinate, ContentViewerStateDTO> ownerStates = ownerStates(userId, candidates);
-
-        List<ViewCandidate> filtered = candidates.stream()
-                .map(entry -> toViewCandidate(entry, releaseDates, ownerStates))
-                .filter(candidate -> effectiveStatus == WatchlistStatus.ALL
-                        || candidate.status() == effectiveStatus)
-                .toList();
-
         if (requiresMaterializedSort(effectiveSort)
-                && filtered.size() > maxMaterializedSortCandidates) {
+                && candidates.size() > maxMaterializedSortCandidates) {
             throw new BadRequestException(
                     "Sort " + effectiveSort
                             + " supports at most " + maxMaterializedSortCandidates
                             + " candidates; restrict type, genre or status");
         }
+
+        Map<UUID, LocalDate> releaseDates = candidates.isEmpty()
+                ? Map.of()
+                : safeReleaseDates(target, candidates);
+        Set<String> inProgressSeriesIds = inProgressSeriesIds(userId, candidates);
+
+        List<ViewCandidate> filtered = candidates.stream()
+                .map(entry -> toViewCandidate(entry, releaseDates, inProgressSeriesIds))
+                .filter(candidate -> effectiveStatus == WatchlistStatus.ALL
+                        || candidate.status() == effectiveStatus)
+                .toList();
 
         Map<ContentCoordinate, ContentCardDTO> sortCards = materializedSortCards(
                 target, userId, filtered, effectiveSort);
@@ -228,50 +228,41 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
                 : resolution.releaseDates();
     }
 
-    private Map<ContentCoordinate, ContentViewerStateDTO> ownerStates(
-            UUID ownerId, List<WatchlistEntry> candidates) {
-        if (candidates.isEmpty()) {
-            return Map.of();
-        }
-        List<ContentCoordinate> coordinates = candidates.stream()
+    private Set<String> inProgressSeriesIds(UUID ownerId, List<WatchlistEntry> candidates) {
+        Set<String> seriesIds = candidates.stream()
                 .map(WatchlistEntry::getContent)
-                .map(ContentCoordinate::from)
-                .toList();
-        ContentViewerStateService.Resolution resolution = contentViewerStateService.resolve(
-                ownerId, coordinates, Map.of());
-        return resolution == null || resolution.statesByCoordinate() == null
-                ? Map.of()
-                : resolution.statesByCoordinate();
+                .filter(content -> content.getType() == ContentType.SERIES)
+                .map(Content::getTmdbId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (seriesIds.isEmpty()) {
+            return Set.of();
+        }
+        return seriesProgressReadRepository.findProgressByUserIdAndSeriesTmdbIds(ownerId, seriesIds).stream()
+                .map(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private ViewCandidate toViewCandidate(
             WatchlistEntry entry,
             Map<UUID, LocalDate> releaseDates,
-            Map<ContentCoordinate, ContentViewerStateDTO> ownerStates) {
-        ContentCoordinate coordinate = ContentCoordinate.from(entry.getContent());
+            Set<String> inProgressSeriesIds) {
         LocalDate releaseDate = releaseDates.get(entry.getId());
-        ContentViewerStateDTO ownerState = ownerStates.get(coordinate);
-        WatchlistStatus status = statusFor(entry.getContent(), releaseDate, ownerState);
+        WatchlistStatus status = statusFor(entry.getContent(), releaseDate, inProgressSeriesIds);
         return new ViewCandidate(entry, releaseDate, status);
     }
 
     private WatchlistStatus statusFor(
-            Content content, LocalDate releaseDate, ContentViewerStateDTO ownerState) {
+            Content content, LocalDate releaseDate, Set<String> inProgressSeriesIds) {
         if (releaseDate != null && releaseDate.isAfter(LocalDate.now())) {
             return WatchlistStatus.UPCOMING;
         }
-        if (content.getType() == ContentType.SERIES && ownerState != null
-                && ownerState.watchStatus() != WatchStatus.WATCHED
-                && (ownerState.watchStatus() == WatchStatus.PARTIALLY_WATCHED
-                    || positive(ownerState.playsCount())
-                    || positive(ownerState.watchedEpisodeCount()))) {
+        if (content.getType() == ContentType.SERIES
+                && inProgressSeriesIds.contains(content.getTmdbId())) {
             return WatchlistStatus.IN_PROGRESS;
         }
         return WatchlistStatus.NEW;
-    }
-
-    private boolean positive(Integer value) {
-        return value != null && value > 0;
     }
 
     private boolean requiresMaterializedSort(WatchlistSort sort) {
