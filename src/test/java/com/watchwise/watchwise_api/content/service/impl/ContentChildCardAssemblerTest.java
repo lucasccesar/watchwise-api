@@ -395,21 +395,15 @@ class ContentChildCardAssemblerTest {
     }
 
     @Test
-    @DisplayName("[assembleNavigation] Should Not Invent Next Without A Parent Season Boundary")
+    @DisplayName("[assembleNavigation] Should Return No Navigation Without A Parent Season Boundary")
     void shouldNotInventNextWithoutAParentSeasonBoundary() {
-        ContentCoordinate previous = episode(1, 1);
-        when(contentViewerStateService.resolve(VIEWER_ID, List.of(previous), Map.of()))
-                .thenReturn(new ContentViewerStateService.Resolution(Map.of(previous, emptyState()), Map.of()));
-
         ContentNavigationDTO result = assembler.assembleNavigation(
                 details(ContentType.EPISODE, List.of(), List.of()),
                 new ContentCoordinate(ContentType.EPISODE, null, SERIES_TMDB_ID, 1, 2),
                 VIEWER_ID);
 
-        assertThat(result.previousEpisode()).isNotNull();
-        assertThat(result.nextEpisode()).isNull();
-        verify(contentViewerStateService).resolve(VIEWER_ID, List.of(previous), Map.of());
-        verifyNoMoreInteractions(contentViewerStateService, contentStatsService);
+        assertThat(result).isNull();
+        verifyNoInteractions(contentViewerStateService, contentStatsService);
     }
 
     private ContentCoordinate season(int seasonNumber) {

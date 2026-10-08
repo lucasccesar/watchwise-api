@@ -13,6 +13,11 @@ public record ContentPageMetadataDTO(
         List<CrewMemberDTO> presentationCrew,
         Boolean crewInherited) {
 
+    public ContentPageMetadataDTO {
+        watchProviders = watchProviders == null ? List.of() : List.copyOf(watchProviders);
+        presentationCrew = presentationCrew == null ? List.of() : List.copyOf(presentationCrew);
+    }
+
     public ContentPageMetadataDTO(
             String originalLanguage,
             String certification,
@@ -24,15 +29,10 @@ public record ContentPageMetadataDTO(
                 null, List.of(), false);
     }
 
-    public ContentPageMetadataDTO {
-        watchProviders = watchProviders == null ? List.of() : List.copyOf(watchProviders);
-        presentationCrew = presentationCrew == null ? List.of() : List.copyOf(presentationCrew);
-    }
-
-    public ContentPageMetadataDTO withEpisodePresentation(
-            String posterPath, List<CrewMemberDTO> crew) {
+    public ContentPageMetadataDTO withPresentation(
+            String posterPath, List<CrewMemberDTO> crew, boolean inherited) {
         return new ContentPageMetadataDTO(
                 originalLanguage, certification, homepageUrl, tmdbUrl, imdbUrl, watchProviders,
-                posterPath, crew, true);
+                posterPath, crew, inherited);
     }
 }

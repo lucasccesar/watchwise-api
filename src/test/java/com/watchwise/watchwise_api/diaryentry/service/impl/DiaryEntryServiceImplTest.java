@@ -45,6 +45,7 @@ import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryReadRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
+import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
@@ -1672,6 +1673,7 @@ class DiaryEntryServiceImplTest {
         DiaryEntry entry = buildEntry(marina, fightClub);
         entry.setComment("Great movie");
         DiaryEntryResponseDTO dto = buildResponseDto(entry);
+        UserPreviewDTO reviewer = new UserPreviewDTO(marinaId, "marina", "marina.png", true);
         when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
         DiaryEntryRepository.ContentReviewKey reviewKey = reviewKey(entry, ContentReviewSource.DIARY);
         when(diaryEntryRepository.findContentReviewKeys(eq(fightClub.getId()), eq(lucasId), any(PageRequest.class)))
@@ -1679,10 +1681,41 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findByIdInWithContentAndUser(List.of(entry.getId())))
                 .thenReturn(List.of(entry));
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(dto);
+        when(userMapper.userToUserPreviewDto(marina)).thenReturn(reviewer);
 
         Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), 1, 10);
 
-        assertThat(result.getContent()).containsExactly(ContentReviewResponseDTO.fromDiary(dto));
+        assertThat(result.getContent()).containsExactly(ContentReviewResponseDTO.fromDiary(dto, reviewer));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Use The Popular Review Query - When Popular Sort Is Selected")
+    void shouldUseThePopularReviewQueryWhenPopularSortIsSelected() {
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        when(diaryEntryRepository.findContentReviewKeys(
+                eq(fightClub.getId()), eq(lucasId), eq(ContentReviewSort.POPULAR.name()), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), ContentReviewSort.POPULAR, 1, 10);
+
+        verify(diaryEntryRepository).findContentReviewKeys(
+                eq(fightClub.getId()), eq(lucasId), eq(ContentReviewSort.POPULAR.name()), any(PageRequest.class));
+        verify(diaryEntryRepository, never()).findContentReviewKeys(
+                eq(fightClub.getId()), eq(lucasId), any(PageRequest.class));
+    }
+
+    @Test
+    @DisplayName("[getReviewsForContent] Should Use Recent Sort - When Sort Is Null")
+    void shouldUseRecentSortWhenSortIsNull() {
+        when(contentRepository.existsById(fightClub.getId())).thenReturn(true);
+        when(diaryEntryRepository.findContentReviewKeys(
+                eq(fightClub.getId()), eq(lucasId), eq(ContentReviewSort.RECENT.name()), any(PageRequest.class)))
+                .thenReturn(Page.empty());
+
+        diaryEntryService.getReviewsForContent(lucasId, fightClub.getId(), null, 1, 10);
+
+        verify(diaryEntryRepository).findContentReviewKeys(
+                eq(fightClub.getId()), eq(lucasId), eq(ContentReviewSort.RECENT.name()), any(PageRequest.class));
     }
 
     @Test
@@ -1713,6 +1746,8 @@ class DiaryEntryServiceImplTest {
         when(contentMapper.contentToContentRefDto(fightClub)).thenReturn(contentRef);
         when(likeService.getLikedDroppedEntryIds(lucasId, List.of(droppedEntryId)))
                 .thenReturn(Set.of(droppedEntryId));
+        when(userMapper.userToUserPreviewDto(marina))
+                .thenReturn(new UserPreviewDTO(marinaId, "marina", "marina.png", true));
 
         Page<ContentReviewResponseDTO> result = diaryEntryService.getReviewsForContent(
                 lucasId, fightClub.getId(), 1, 10);
@@ -1724,6 +1759,7 @@ class DiaryEntryServiceImplTest {
             assertThat(review.likesCount()).isEqualTo(2);
             assertThat(review.likedByMe()).isTrue();
             assertThat(review.score()).isNull();
+            assertThat(review.reviewer()).isEqualTo(new UserPreviewDTO(marinaId, "marina", "marina.png", true));
         });
     }
 

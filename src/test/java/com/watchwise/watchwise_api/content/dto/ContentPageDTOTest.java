@@ -60,6 +60,8 @@ class ContentPageDTOTest {
                 "posterPath", "releaseDate", "runtimeMinutes", "stats", "viewerState");
         assertThat(json.get("sections").get("seasons").get(0).get("contentId").isNull()).isTrue();
         assertThat(json.get("metadata").get("watchProviders")).isEmpty();
+        assertThat(json.get("metadata").get("presentationCrew")).isEmpty();
+        assertThat(json.get("metadata").get("crewInherited").asBoolean()).isFalse();
         assertThat(json.get("stats").get("ratingsDistribution")).isEmpty();
         assertThat(json.get("viewerState").get("lists")).isEmpty();
         assertThat(json.get("sections").get("episodes")).isEmpty();
