@@ -220,7 +220,7 @@ class TmdbClientTest {
     @Test
     @DisplayName("[getTrendingMovies] Should Parse Movie Page - When TMDB Responds")
     void shouldParseTrendingMoviePageWhenTmdbResponds() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR&page=1"))
                 .andRespond(withSuccess("""
                         {"page":1,"total_pages":5,"total_results":90,"results":[
                           {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
@@ -238,7 +238,7 @@ class TmdbClientTest {
     @Test
     @DisplayName("[getTrendingSeries] Should Parse Series Page - When TMDB Responds")
     void shouldParseTrendingSeriesPageWhenTmdbResponds() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/week?language=de-DE"))
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/week?language=de-DE&page=1"))
                 .andRespond(withSuccess("""
                         {"page":1,"total_pages":8,"total_results":120,"results":[
                           {"id":1396,"name":"Breaking Bad","poster_path":"/breaking-bad.jpg","first_air_date":"2008-01-20"}]}
@@ -256,11 +256,11 @@ class TmdbClientTest {
     @Test
     @DisplayName("[trending] Should Not Cache Unavailable Results - When TMDB Fails Twice")
     void shouldNotCacheUnavailableTrendingResultWhenTmdbFailsTwice() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR&page=1"))
                 .andRespond(withServerError());
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR&page=1"))
                 .andRespond(withServerError());
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR&page=1"))
                 .andRespond(withSuccess("""
                         {"page":1,"total_pages":1,"total_results":1,"results":[
                           {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}

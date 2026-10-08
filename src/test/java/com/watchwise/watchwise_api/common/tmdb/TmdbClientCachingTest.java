@@ -555,54 +555,68 @@ class TmdbClientCachingTest {
     }
 
     @Test
-    @DisplayName("[trending movies] Should Cache By Window And Language - When The Same Lookup Repeats")
-    void shouldCacheTrendingMoviesByWindowAndLanguageWhenTheSameLookupRepeats() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR"))
-                .andRespond(trendingMovieSuccess());
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/week?language=pt-BR"))
-                .andRespond(trendingMovieSuccess());
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=en-US"))
-                .andRespond(trendingMovieSuccess());
+    @DisplayName("[trending movies] Should Cache By Window Page And Language - When Lookups Repeat")
+    void shouldCacheTrendingMoviesByWindowPageAndLanguageWhenLookupsRepeat() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR&page=1"))
+                .andRespond(trendingMovieSuccess(1));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=pt-BR&page=2"))
+                .andRespond(trendingMovieSuccess(2));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/week?language=pt-BR&page=1"))
+                .andRespond(trendingMovieSuccess(1));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/movie/day?language=en-US&page=1"))
+                .andRespond(trendingMovieSuccess(1));
 
-        var first = tmdbClient.getTrendingMovies("day", "pt-BR");
-        var sameKey = tmdbClient.getTrendingMovies("day", "pt-BR");
-        var otherWindow = tmdbClient.getTrendingMovies("week", "pt-BR");
-        var otherLanguage = tmdbClient.getTrendingMovies("day", "en-US");
+        var first = tmdbClient.getTrendingMovies("day", "pt-BR", 1);
+        var sameKey = tmdbClient.getTrendingMovies("day", "pt-BR", 1);
+        var otherPage = tmdbClient.getTrendingMovies("day", "pt-BR", 2);
+        var otherWindow = tmdbClient.getTrendingMovies("week", "pt-BR", 1);
+        var otherLanguage = tmdbClient.getTrendingMovies("day", "en-US", 1);
 
         assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(sameKey).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(otherPage).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(otherWindow).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(otherLanguage).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(tmdbTrendingMovieCache.getIfPresent("day|1|pt-BR")).isNotNull();
+        assertThat(tmdbTrendingMovieCache.getIfPresent("day|2|pt-BR")).isNotNull();
         mockServer.verify();
     }
 
     @Test
-    @DisplayName("[trending series] Should Cache By Window And Language - When The Same Lookup Repeats")
-    void shouldCacheTrendingSeriesByWindowAndLanguageWhenTheSameLookupRepeats() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/day?language=pt-BR"))
-                .andRespond(trendingTvSuccess());
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/week?language=pt-BR"))
-                .andRespond(trendingTvSuccess());
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/day?language=en-US"))
-                .andRespond(trendingTvSuccess());
+    @DisplayName("[trending series] Should Cache By Window Page And Language - When Lookups Repeat")
+    void shouldCacheTrendingSeriesByWindowPageAndLanguageWhenLookupsRepeat() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/day?language=pt-BR&page=1"))
+                .andRespond(trendingTvSuccess(1));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/day?language=pt-BR&page=2"))
+                .andRespond(trendingTvSuccess(2));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/week?language=pt-BR&page=1"))
+                .andRespond(trendingTvSuccess(1));
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/trending/tv/day?language=en-US&page=1"))
+                .andRespond(trendingTvSuccess(1));
 
-        var first = tmdbClient.getTrendingSeries("day", "pt-BR");
-        var sameKey = tmdbClient.getTrendingSeries("day", "pt-BR");
-        var otherWindow = tmdbClient.getTrendingSeries("week", "pt-BR");
-        var otherLanguage = tmdbClient.getTrendingSeries("day", "en-US");
+        var first = tmdbClient.getTrendingSeries("day", "pt-BR", 1);
+        var sameKey = tmdbClient.getTrendingSeries("day", "pt-BR", 1);
+        var otherPage = tmdbClient.getTrendingSeries("day", "pt-BR", 2);
+        var otherWindow = tmdbClient.getTrendingSeries("week", "pt-BR", 1);
+        var otherLanguage = tmdbClient.getTrendingSeries("day", "en-US", 1);
 
         assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(sameKey).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(otherPage).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(otherWindow).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(otherLanguage).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
+        assertThat(tmdbTrendingTvCache.getIfPresent("day|1|pt-BR")).isNotNull();
+        assertThat(tmdbTrendingTvCache.getIfPresent("day|2|pt-BR")).isNotNull();
         mockServer.verify();
     }
 
@@ -708,16 +722,16 @@ class TmdbClientCachingTest {
                 """.formatted(page, title), MediaType.APPLICATION_JSON);
     }
 
-    private ResponseCreator trendingMovieSuccess() {
+    private ResponseCreator trendingMovieSuccess(int page) {
         return withSuccess("""
-                {"page":1,"total_pages":1,"total_results":0,"results":[]}
-                """, MediaType.APPLICATION_JSON);
+                {"page":%d,"total_pages":2,"total_results":21,"results":[]}
+                """.formatted(page), MediaType.APPLICATION_JSON);
     }
 
-    private ResponseCreator trendingTvSuccess() {
+    private ResponseCreator trendingTvSuccess(int page) {
         return withSuccess("""
-                {"page":1,"total_pages":1,"total_results":0,"results":[]}
-                """, MediaType.APPLICATION_JSON);
+                {"page":%d,"total_pages":2,"total_results":21,"results":[]}
+                """.formatted(page), MediaType.APPLICATION_JSON);
     }
 
     @Test

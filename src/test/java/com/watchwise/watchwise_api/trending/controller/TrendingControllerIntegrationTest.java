@@ -5,8 +5,9 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
-import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
+import com.watchwise.watchwise_api.trending.dto.TrendingCardDTO;
 import com.watchwise.watchwise_api.trending.dto.TrendingResponseDTO;
 import com.watchwise.watchwise_api.trending.service.TrendingService;
 import com.watchwise.watchwise_api.trending.service.TrendingTimeWindow;
@@ -116,12 +117,16 @@ class TrendingControllerIntegrationTest {
     void shouldReturnTrendingSectionsWhenRequestIsAuthenticated() throws Exception {
         RegisteredUser user = registerUser("trendingvalid");
         TrendingResponseDTO expected = new TrendingResponseDTO(
-                List.of(new SearchContentDTO(
+                List.of(new TrendingCardDTO(
                         "603", MovieOrSeriesType.MOVIE, "The Matrix",
-                        "https://image.tmdb.org/t/p/w500/matrix.jpg", 1999)),
-                List.of(new SearchContentDTO(
+                        "https://image.tmdb.org/t/p/w500/matrix.jpg", 1999,
+                        List.of(28, 878), 8.7, 123.4, 136, null, null,
+                        ContentPreviewStatus.AVAILABLE)),
+                List.of(new TrendingCardDTO(
                         "1396", MovieOrSeriesType.SERIES, "Breaking Bad",
-                        "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", 2008)));
+                        "https://image.tmdb.org/t/p/w500/breaking-bad.jpg", 2008,
+                        List.of(18, 80), 9.1, 456.7, 47, 5, null,
+                        ContentPreviewStatus.AVAILABLE)));
         when(trendingService.getTrending(user.id(), TrendingTimeWindow.DAY, 21)).thenReturn(expected);
 
         mockMvc.perform(get("/trending")
@@ -135,14 +140,50 @@ class TrendingControllerIntegrationTest {
                 .andExpect(jsonPath("$.movies[0].title").value("The Matrix"))
                 .andExpect(jsonPath("$.movies[0].posterUrl").value("https://image.tmdb.org/t/p/w500/matrix.jpg"))
                 .andExpect(jsonPath("$.movies[0].year").value(1999))
+                .andExpect(jsonPath("$.movies[0].tmdbVoteAverage").value(8.7))
+                .andExpect(jsonPath("$.movies[0].popularity").value(123.4))
+                .andExpect(jsonPath("$.movies[0].genres[0]").value(28))
                 .andExpect(jsonPath("$.series").isArray())
                 .andExpect(jsonPath("$.series[0].tmdbId").value("1396"))
                 .andExpect(jsonPath("$.series[0].type").value("SERIES"))
                 .andExpect(jsonPath("$.series[0].title").value("Breaking Bad"))
                 .andExpect(jsonPath("$.series[0].posterUrl").value("https://image.tmdb.org/t/p/w500/breaking-bad.jpg"))
-                .andExpect(jsonPath("$.series[0].year").value(2008));
+                .andExpect(jsonPath("$.series[0].year").value(2008))
+                .andExpect(jsonPath("$.series[0].numberOfSeasons").value(5));
 
         verify(trendingService).getTrending(user.id(), TrendingTimeWindow.DAY, 21);
+    }
+
+    @Test
+    @DisplayName("[GET /trending/{type}] Should Return Independent Continuation - When Movie Page Is Requested")
+    void shouldReturnIndependentContinuationWhenMoviePageIsRequested() throws Exception {
+        RegisteredUser user = registerUser("trendingcontinuation");
+        TrendingResponseDTO expected = new TrendingResponseDTO(
+                List.of(new TrendingCardDTO(
+                        "604", MovieOrSeriesType.MOVIE, "The Matrix Reloaded", null, 2003,
+                        null, 7.2, 90.0, null, null, null, ContentPreviewStatus.UNAVAILABLE)),
+                List.of(),
+                new TrendingResponseDTO.SectionPage(2, 12, 4, 80, true),
+                null);
+        when(trendingService.getTrendingSection(user.id(), MovieOrSeriesType.MOVIE,
+                TrendingTimeWindow.DAY, 2, 12)).thenReturn(expected);
+
+        mockMvc.perform(get("/trending/movie")
+                        .param("timeWindow", "day")
+                        .param("page", "2")
+                        .param("size", "12")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.movies").isArray())
+                .andExpect(jsonPath("$.movies[0].tmdbId").value("604"))
+                .andExpect(jsonPath("$.moviesPage.page").value(2))
+                .andExpect(jsonPath("$.moviesPage.hasNext").value(true))
+                .andExpect(jsonPath("$.series").isArray())
+                .andExpect(jsonPath("$.series").isEmpty());
+
+        verify(trendingService).getTrendingSection(user.id(),
+                MovieOrSeriesType.MOVIE,
+                TrendingTimeWindow.DAY, 2, 12);
     }
 
     @Test

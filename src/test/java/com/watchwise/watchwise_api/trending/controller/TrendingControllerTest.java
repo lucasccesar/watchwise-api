@@ -103,6 +103,23 @@ class TrendingControllerTest {
     }
 
     @Test
+    @DisplayName("[getTrendingSection] Should Delegate Independent Movie Page - When Parameters Are Valid")
+    void shouldDelegateIndependentMoviePageWhenParametersAreValid() {
+        TrendingResponseDTO expected = new TrendingResponseDTO(List.of(), List.of());
+        when(trendingService.getTrendingSection(viewerId, com.watchwise.watchwise_api.content.entity.MovieOrSeriesType.MOVIE,
+                TrendingTimeWindow.DAY, 2, 12)).thenReturn(expected);
+
+        ResponseEntity<TrendingResponseDTO> response = trendingController.getTrendingSection("movie", "day", 2, 12);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isEqualTo(expected);
+        verify(requestThrottler).checkAllowed("trending|" + viewerId, 30, Duration.ofMinutes(5));
+        verify(trendingService).getTrendingSection(viewerId,
+                com.watchwise.watchwise_api.content.entity.MovieOrSeriesType.MOVIE,
+                TrendingTimeWindow.DAY, 2, 12);
+    }
+
+    @Test
     @DisplayName("[getTrending] Should Reject Invalid Time Window Before Rate Limit")
     void shouldRejectInvalidTimeWindowBeforeRateLimit() {
         assertThatThrownBy(() -> trendingController.getTrending("month", 12))
@@ -122,6 +139,26 @@ class TrendingControllerTest {
         assertThatThrownBy(() -> trendingController.getTrending("day", 0))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("size must be one of: 12, 21");
+
+        verifyNoInteractions(requestThrottler, trendingService);
+    }
+
+    @Test
+    @DisplayName("[getTrendingSection] Should Reject Invalid Page Before Rate Limit")
+    void shouldRejectInvalidPageBeforeRateLimit() {
+        assertThatThrownBy(() -> trendingController.getTrendingSection("movie", "day", 0, 12))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("page must be greater than 0");
+
+        verifyNoInteractions(requestThrottler, trendingService);
+    }
+
+    @Test
+    @DisplayName("[getTrendingSection] Should Reject Invalid Type Before Rate Limit")
+    void shouldRejectInvalidTypeBeforeRateLimit() {
+        assertThatThrownBy(() -> trendingController.getTrendingSection("people", "day", 1, 12))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("type must be one of: movie, series");
 
         verifyNoInteractions(requestThrottler, trendingService);
     }

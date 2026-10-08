@@ -194,26 +194,38 @@ public class TmdbClient {
 
     public TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>> getTrendingMovies(
             String timeWindow, String language) {
-        return cachedLookup(tmdbTrendingMovieCache, timeWindow + "|" + language,
+        return getTrendingMovies(timeWindow, language, 1);
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>> getTrendingMovies(
+            String timeWindow, String language, int page) {
+        return cachedLookup(tmdbTrendingMovieCache, trendingCacheKey(timeWindow, page, language),
                 () -> callWithRetry(() -> tmdbRestClient.get()
                                 .uri(uriBuilder -> uriBuilder.path("/trending/movie/{timeWindow}")
                                         .queryParam("language", language)
+                                        .queryParam("page", page)
                                         .build(timeWindow))
                                 .retrieve()
                                 .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbTrendingMovieResult>>() {}),
-                        "trending movies " + timeWindow));
+                        "trending movies " + timeWindow + " page " + page));
     }
 
     public TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>> getTrendingSeries(
             String timeWindow, String language) {
-        return cachedLookup(tmdbTrendingTvCache, timeWindow + "|" + language,
+        return getTrendingSeries(timeWindow, language, 1);
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>> getTrendingSeries(
+            String timeWindow, String language, int page) {
+        return cachedLookup(tmdbTrendingTvCache, trendingCacheKey(timeWindow, page, language),
                 () -> callWithRetry(() -> tmdbRestClient.get()
                                 .uri(uriBuilder -> uriBuilder.path("/trending/tv/{timeWindow}")
                                         .queryParam("language", language)
+                                        .queryParam("page", page)
                                         .build(timeWindow))
                                 .retrieve()
                                 .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbTrendingTvResult>>() {}),
-                        "trending series " + timeWindow));
+                        "trending series " + timeWindow + " page " + page));
     }
 
     public TmdbLookupResult<TmdbTvContentRatings> getTvContentRatings(String tmdbId, String language) {
@@ -550,6 +562,10 @@ public class TmdbClient {
 
     private static String discoveryCacheKey(String endpointFamily, int page, String language) {
         return endpointFamily + "|" + page + "|" + language;
+    }
+
+    private static String trendingCacheKey(String timeWindow, int page, String language) {
+        return timeWindow + "|" + page + "|" + language;
     }
 
     private <K, T> TmdbLookupResult<T> cachedLookup(
