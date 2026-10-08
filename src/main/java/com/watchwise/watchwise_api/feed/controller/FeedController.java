@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.feed.controller;
 
-import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
-import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
+import com.watchwise.watchwise_api.feed.dto.FeedPageViewDTO;
 import com.watchwise.watchwise_api.feed.service.FeedService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -19,11 +18,11 @@ public class FeedController {
     private final FeedService feedService;
 
     @GetMapping("/feed")
-    public ResponseEntity<CursorPageResponseDTO<FeedItemDTO>> getFeed(
+    public ResponseEntity<FeedPageViewDTO> getFeed(
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) Integer size
     ) {
-        CursorPageResponseDTO<FeedItemDTO> feed = feedService.getFeed(getCurrentUserId(), cursor, size);
+        FeedPageViewDTO feed = feedService.getFeedView(getCurrentUserId(), cursor, size);
         return ResponseEntity.ok(feed);
     }
 

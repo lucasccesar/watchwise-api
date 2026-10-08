@@ -5,8 +5,15 @@ import com.watchwise.watchwise_api.comment.service.CommentPreviewData;
 import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
-import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
+import com.watchwise.watchwise_api.content.service.ContentCardSpec;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
+import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameResultPreviewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
@@ -23,6 +30,9 @@ import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.feed.dto.FeedEventType;
 import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
+import com.watchwise.watchwise_api.feed.dto.FeedItemViewDTO;
+import com.watchwise.watchwise_api.feed.dto.FeedPageViewDTO;
+import com.watchwise.watchwise_api.feed.dto.FeedTop5PreviewDTO;
 import com.watchwise.watchwise_api.feed.service.FeedService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -40,7 +50,9 @@ import com.watchwise.watchwise_api.top5entry.dto.Top5EntryResponseDTO;
 import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
+import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -55,6 +67,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -66,6 +79,9 @@ public class FeedServiceImpl implements FeedService {
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 50;
     private static final String CURSOR_SEPARATOR = "|";
+    private static final String DEFAULT_LANGUAGE = "en-US";
+    private static final String DEFAULT_REGION = "US";
+    private static final Set<ContentCardFieldSet> FEED_CARD_FIELDS = Set.of(ContentCardFieldSet.BASIC_METADATA);
 
     private final FollowerRepository followerRepository;
     private final DiaryEntryRepository diaryEntryRepository;
@@ -77,6 +93,7 @@ public class FeedServiceImpl implements FeedService {
     private final WatchCompanionRepository watchCompanionRepository;
     private final LikeService likeService;
     private final ContentMapper contentMapper;
+    private final ContentCardAssembler contentCardAssembler;
     private final Top5EntryMapper top5EntryMapper;
     private final UserContentPosterService userContentPosterService;
     private final UserMapper userMapper;
@@ -84,17 +101,36 @@ public class FeedServiceImpl implements FeedService {
     private final PickPreviewAssembler pickPreviewAssembler;
     private final PicksTemplatePreviewAssembler picksTemplatePreviewAssembler;
     private final CommentPreviewAssembler commentPreviewAssembler;
+    private final UserRepository userRepository;
 
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponseDTO<FeedItemDTO> getFeed(UUID userId, String cursor, Integer size) {
+        List<UUID> followedIds = followerRepository.findFollowedIdsByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
+        return readFeed(userId, cursor, size, followedIds);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public FeedPageViewDTO getFeedView(UUID userId, String cursor, Integer size) {
+        List<UUID> followedIds = followerRepository.findFollowedIdsByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
+        CursorPageResponseDTO<FeedItemDTO> rawFeed = readFeed(userId, cursor, size, followedIds);
+        Map<ContentCoordinate, ContentCardDTO> cards = assembleCards(rawFeed.content(), userId);
+        List<FeedItemViewDTO> content = rawFeed.content().stream()
+                .map(item -> toFeedItemView(item, cards))
+                .toList();
+        return new FeedPageViewDTO(content, rawFeed.size(), rawFeed.nextCursor(), rawFeed.hasNext(),
+                followedIds.size(), loadFollowedUserPreviews(followedIds));
+    }
+
+    private CursorPageResponseDTO<FeedItemDTO> readFeed(
+            UUID userId, String cursor, Integer size, List<UUID> followedIds) {
         int effectiveSize = resolveSize(size);
         FeedCursor decodedCursor = decodeCursor(cursor);
         LocalDateTime cursorCreatedAt = decodedCursor == null ? null : decodedCursor.createdAt();
         UUID cursorId = decodedCursor == null ? null : decodedCursor.id();
 
-        List<UUID> followedIds = followerRepository.findFollowedIdsByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
-        if (followedIds.isEmpty()) {
+        if (followedIds == null || followedIds.isEmpty()) {
             return new CursorPageResponseDTO<>(List.of(), effectiveSize, null, false);
         }
 
@@ -184,6 +220,120 @@ public class FeedServiceImpl implements FeedService {
         List<FeedItemDTO> content = page.stream().map(FeedCandidate::item).toList();
 
         return new CursorPageResponseDTO<>(content, effectiveSize, nextCursor, hasNext);
+    }
+
+    private List<UserPreviewDTO> loadFollowedUserPreviews(List<UUID> followedIds) {
+        if (followedIds == null || followedIds.isEmpty() || userRepository == null) {
+            return List.of();
+        }
+        Map<UUID, User> usersById = new LinkedHashMap<>();
+        Iterable<User> users = userRepository.findAllById(followedIds);
+        if (users != null) {
+            for (User user : users) {
+                if (user != null && user.getId() != null) {
+                    usersById.putIfAbsent(user.getId(), user);
+                }
+            }
+        }
+        if (userMapper == null) {
+            return List.of();
+        }
+        return followedIds.stream()
+                .map(usersById::get)
+                .filter(Objects::nonNull)
+                .map(userMapper::userToUserPreviewDto)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private List<ContentCardSpec> cardSpecs(List<FeedItemDTO> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        Map<ContentCoordinate, ContentCardSpec> specsByCoordinate = new LinkedHashMap<>();
+        for (FeedItemDTO item : items) {
+            if (item == null) {
+                continue;
+            }
+            addCardSpec(specsByCoordinate, item.content());
+            if (item.top5() != null) {
+                item.top5().stream()
+                        .map(Top5EntryResponseDTO::content)
+                        .forEach(content -> addCardSpec(specsByCoordinate, content));
+            }
+            if (item.pick() != null) {
+                safeAnsweredCategories(item.pick()).stream()
+                        .filter(Objects::nonNull)
+                        .map(answered -> answered.target())
+                        .filter(Objects::nonNull)
+                        .forEach(target -> {
+                            addCardSpec(specsByCoordinate, target.content());
+                            addCardSpec(specsByCoordinate, target.contextContent());
+                        });
+            }
+        }
+        return List.copyOf(specsByCoordinate.values());
+    }
+
+    private void addCardSpec(Map<ContentCoordinate, ContentCardSpec> specsByCoordinate, ContentRefDTO content) {
+        if (content == null || content.type() == null) {
+            return;
+        }
+        ContentCoordinate coordinate = new ContentCoordinate(content.type(), content.tmdbId(), content.seriesTmdbId(),
+                content.seasonNumber(), content.episodeNumber());
+        specsByCoordinate.putIfAbsent(coordinate,
+                new ContentCardSpec(coordinate, null, null, null, content.runtimeMinutes()));
+    }
+
+    private Map<ContentCoordinate, ContentCardDTO> assembleCards(List<FeedItemDTO> items, UUID viewerId) {
+        List<ContentCardSpec> specs = cardSpecs(items);
+        if (specs.isEmpty() || contentCardAssembler == null) {
+            return Map.of();
+        }
+        User viewer = userRepository == null ? null : userRepository.findById(viewerId).orElse(null);
+        String language = viewer == null || viewer.getPreferredLanguage() == null
+                ? DEFAULT_LANGUAGE : viewer.getPreferredLanguage();
+        String region = viewer == null || viewer.getPreferredRegion() == null
+                ? DEFAULT_REGION : viewer.getPreferredRegion();
+        Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
+                specs, new ContentCardContext(language, region, null, null), FEED_CARD_FIELDS);
+        return cards == null ? Map.of() : cards;
+    }
+
+    private FeedItemViewDTO toFeedItemView(
+            FeedItemDTO item, Map<ContentCoordinate, ContentCardDTO> cards) {
+        ContentCardDTO contentCard = cardFor(item.content(), cards);
+        FeedTop5PreviewDTO top5Preview = item.top5() == null ? null
+                : new FeedTop5PreviewDTO(item.top5Type(), item.top5(), item.top5().stream()
+                        .map(Top5EntryResponseDTO::content)
+                        .map(content -> cardFor(content, cards))
+                        .filter(Objects::nonNull)
+                        .toList());
+        List<ContentCardDTO> pickTargetCards = item.pick() == null ? null
+                : safeAnsweredCategories(item.pick()).stream()
+                        .filter(Objects::nonNull)
+                        .map(answered -> answered.target())
+                        .filter(Objects::nonNull)
+                        .flatMap(target -> java.util.stream.Stream.of(target.content(), target.contextContent()))
+                        .map(content -> cardFor(content, cards))
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList();
+        return new FeedItemViewDTO(item, contentCard, top5Preview, pickTargetCards);
+    }
+
+    private ContentCardDTO cardFor(ContentRefDTO content, Map<ContentCoordinate, ContentCardDTO> cards) {
+        if (content == null || content.type() == null || cards == null || cards.isEmpty()) {
+            return null;
+        }
+        ContentCoordinate coordinate = new ContentCoordinate(content.type(), content.tmdbId(), content.seriesTmdbId(),
+                content.seasonNumber(), content.episodeNumber());
+        return cards.get(coordinate);
+    }
+
+    private List<com.watchwise.watchwise_api.pick.dto.PickAnsweredCategoryPreviewDTO> safeAnsweredCategories(
+            PickPreviewDTO pick) {
+        return pick.answeredCategories() == null ? List.of() : pick.answeredCategories();
     }
 
     private int resolveSize(Integer size) {

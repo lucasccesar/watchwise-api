@@ -537,7 +537,12 @@ class FeedControllerIntegrationTest {
 
         mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content.length()").value(0));
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.nextCursor").value(nullValue()))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.followingCount").value(0))
+                .andExpect(jsonPath("$.followedUsersPreview.length()").value(0));
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.feed.controller;
 
-import com.watchwise.watchwise_api.common.dto.CursorPageResponseDTO;
-import com.watchwise.watchwise_api.feed.dto.FeedItemDTO;
+import com.watchwise.watchwise_api.feed.dto.FeedPageViewDTO;
 import com.watchwise.watchwise_api.feed.service.FeedService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,10 +50,10 @@ class FeedControllerTest {
     @Test
     @DisplayName("[getFeed] Should Return Ok With The Service Result - When Called")
     void shouldReturnOkWithTheServiceResultWhenCalled() {
-        CursorPageResponseDTO<FeedItemDTO> dto = new CursorPageResponseDTO<>(List.of(), 20, null, false);
-        when(feedService.getFeed(currentUserId, "abc", 10)).thenReturn(dto);
+        FeedPageViewDTO dto = new FeedPageViewDTO(List.of(), 20, null, false, 0, List.of());
+        when(feedService.getFeedView(currentUserId, "abc", 10)).thenReturn(dto);
 
-        ResponseEntity<CursorPageResponseDTO<FeedItemDTO>> result = feedController.getFeed("abc", 10);
+        ResponseEntity<FeedPageViewDTO> result = feedController.getFeed("abc", 10);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(result.getBody()).isEqualTo(dto);
@@ -63,11 +62,11 @@ class FeedControllerTest {
     @Test
     @DisplayName("[getFeed] Should Resolve The Current User Id From The Security Context - When Called")
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenCalled() {
-        when(feedService.getFeed(currentUserId, null, null))
-                .thenReturn(new CursorPageResponseDTO<>(List.of(), 20, null, false));
+        when(feedService.getFeedView(currentUserId, null, null))
+                .thenReturn(new FeedPageViewDTO(List.of(), 20, null, false, 0, List.of()));
 
         feedController.getFeed(null, null);
 
-        verify(feedService).getFeed(currentUserId, null, null);
+        verify(feedService).getFeedView(currentUserId, null, null);
     }
 }
