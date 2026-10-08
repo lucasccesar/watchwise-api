@@ -32,10 +32,17 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.pick.entity.Pick;
+import com.watchwise.watchwise_api.pick.entity.PickSelection;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
+import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryGroup;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryOptionMode;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplateCategory;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
+import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.top5entry.entity.Top5Entry;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
@@ -122,7 +129,13 @@ class FeedControllerIntegrationTest {
     private PickRepository pickRepository;
 
     @Autowired
+    private PickSelectionRepository pickSelectionRepository;
+
+    @Autowired
     private PicksTemplateRepository picksTemplateRepository;
+
+    @Autowired
+    private PicksTemplateCategoryRepository picksTemplateCategoryRepository;
 
     @Autowired
     private CommentRepository commentRepository;
@@ -148,6 +161,8 @@ class FeedControllerIntegrationTest {
         commentRepository.deleteAll();
         userDailyGameResultRepository.deleteAll();
         dailyChallengeRepository.deleteAll();
+        pickSelectionRepository.deleteAll();
+        picksTemplateCategoryRepository.deleteAll();
         pickRepository.deleteAll();
         picksTemplateRepository.deleteAll();
         top5EntryRepository.deleteAll();
@@ -571,8 +586,15 @@ class FeedControllerIntegrationTest {
         PicksTemplate template = picksTemplateRepository.saveAndFlush(PicksTemplate.builder()
                 .creator(followedEntity).origin(PickOrigin.COMMUNITY).name("Weekend Picks")
                 .createdAt(now.minusMinutes(3)).updatedAt(now.minusMinutes(3)).build());
-        pickRepository.saveAndFlush(Pick.builder()
+        Pick pick = pickRepository.saveAndFlush(Pick.builder()
                 .picksTemplate(template).user(followedEntity).visibility(PickVisibility.PUBLIC)
+                .createdAt(now.minusMinutes(1)).updatedAt(now.minusMinutes(1)).build());
+        PicksTemplateCategory category = picksTemplateCategoryRepository.saveAndFlush(PicksTemplateCategory.builder()
+                .picksTemplate(template).name("Best movie").group(PickCategoryGroup.PRIMARY)
+                .displayOrder(1).allowedType(PickAllowedType.MOVIE).optionMode(PickCategoryOptionMode.OPEN)
+                .createdAt(now.minusMinutes(3)).updatedAt(now.minusMinutes(3)).build());
+        pickSelectionRepository.saveAndFlush(PickSelection.builder()
+                .pick(pick).category(category).content(movie)
                 .createdAt(now.minusMinutes(1)).updatedAt(now.minusMinutes(1)).build());
 
         ContentCoordinate coordinate = ContentCoordinate.from(movie);
@@ -592,7 +614,9 @@ class FeedControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].top5Preview.cards[0].tmdbId").value("550"))
                 .andExpect(jsonPath("$.content[1].eventType").value("PICK_CREATED"))
                 .andExpect(jsonPath("$.content[1].pickTargetCards").isArray())
-                .andExpect(jsonPath("$.content[1].pickTargetCards.length()").value(0))
+                .andExpect(jsonPath("$.content[1].pickTargetCards.length()").value(1))
+                .andExpect(jsonPath("$.content[1].pickTargetCards[0].tmdbId").value("550"))
+                .andExpect(jsonPath("$.content[1].pickTargetCards[0].type").value("MOVIE"))
                 .andExpect(jsonPath("$.content[2].eventType").value("DIARY_ENTRY"))
                 .andExpect(jsonPath("$.content[2].card.tmdbId").value("550"));
     }
