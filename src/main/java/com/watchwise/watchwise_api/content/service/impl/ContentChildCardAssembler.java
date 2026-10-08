@@ -82,6 +82,9 @@ public class ContentChildCardAssembler {
         }
 
         EpisodeBoundary boundary = episodeBoundary(parentSeasonDetails);
+        if (boundary == null) {
+            return null;
+        }
         CardSpec previous = adjacentEpisode(boundary, rootCoordinate, -1);
         CardSpec next = adjacentEpisode(boundary, rootCoordinate, 1);
         List<CardSpec> adjacent = new ArrayList<>();
@@ -169,10 +172,6 @@ public class ContentChildCardAssembler {
                 || rootCoordinate.seasonNumber() == null
                 || rootCoordinate.episodeNumber() == null
                 || rootCoordinate.episodeNumber() <= 0) {
-            return null;
-        }
-
-        if (offset > 0 && boundary == null) {
             return null;
         }
 
