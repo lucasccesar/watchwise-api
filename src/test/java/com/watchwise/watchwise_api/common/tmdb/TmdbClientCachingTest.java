@@ -840,7 +840,21 @@ class TmdbClientCachingTest {
 
     @Test
     void shouldShareNotFoundWithConcurrentCardMetadataLookupsWithoutRetainingIt() throws Exception {
-        String requestUrl = "https://api.themoviedb.org/3/movie/999999997?language=en-US";
+        assertConcurrentCardMetadataFailureIsShared(
+                "999999997", HttpStatus.NOT_FOUND, TmdbLookupResult::isNotFound);
+    }
+
+    @Test
+    void shouldShareUnavailableWithConcurrentCardMetadataLookupsWithoutRetainingIt() throws Exception {
+        assertConcurrentCardMetadataFailureIsShared(
+                "999999996", HttpStatus.SERVICE_UNAVAILABLE, TmdbLookupResult::isUnavailable);
+    }
+
+    private void assertConcurrentCardMetadataFailureIsShared(
+            String tmdbId,
+            HttpStatus status,
+            java.util.function.Predicate<TmdbLookupResult<TmdbCardMetadata>> expectedOutcome) throws Exception {
+        String requestUrl = "https://api.themoviedb.org/3/movie/" + tmdbId + "?language=en-US";
         CountDownLatch requestEntered = new CountDownLatch(1);
         CountDownLatch releaseResponse = new CountDownLatch(1);
         mockServer.expect(requestTo(requestUrl)).andRespond(request -> {
@@ -853,31 +867,43 @@ class TmdbClientCachingTest {
                 Thread.currentThread().interrupt();
                 throw new IOException(interrupted);
             }
-            return withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"status_message\":\"Not found\"}").createResponse(request);
+            return withStatus(status).contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"status_message\":\"TMDB failure\"}").createResponse(request);
         });
+        if (status == HttpStatus.SERVICE_UNAVAILABLE) {
+            mockServer.expect(requestTo(requestUrl)).andRespond(withStatus(status));
+        }
 
         TmdbCardMetadataKey key = new TmdbCardMetadataKey(
-                TmdbCardMetadataKey.Type.MOVIE, "999999997", null, null, null);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        AtomicReference<Thread> waitingCallerThread = new AtomicReference<>();
-        CountDownLatch waitingCallerStarted = new CountDownLatch(1);
+                TmdbCardMetadataKey.Type.MOVIE, tmdbId, null, null, null);
+        int callers = 8;
+        ExecutorService executor = Executors.newFixedThreadPool(callers);
+        List<AtomicReference<Thread>> waitingCallerThreads = new ArrayList<>();
+        CountDownLatch waitingCallersStarted = new CountDownLatch(callers - 1);
         try {
             Future<TmdbLookupResult<TmdbCardMetadata>> loadingCaller =
                     executor.submit(() -> tmdbClient.getCardMetadata(key, "en-US"));
             assertThat(requestEntered.await(5, TimeUnit.SECONDS)).isTrue();
 
-            Future<TmdbLookupResult<TmdbCardMetadata>> waitingCaller = executor.submit(() -> {
-                waitingCallerThread.set(Thread.currentThread());
-                waitingCallerStarted.countDown();
-                return tmdbClient.getCardMetadata(key, "en-US");
-            });
-            assertThat(waitingCallerStarted.await(5, TimeUnit.SECONDS)).isTrue();
-            awaitThreadState(waitingCallerThread.get(), Thread.State.BLOCKED);
+            List<Future<TmdbLookupResult<TmdbCardMetadata>>> waitingCallers = new ArrayList<>();
+            for (int index = 1; index < callers; index++) {
+                AtomicReference<Thread> callerThread = new AtomicReference<>();
+                waitingCallerThreads.add(callerThread);
+                waitingCallers.add(executor.submit(() -> {
+                    callerThread.set(Thread.currentThread());
+                    waitingCallersStarted.countDown();
+                    return tmdbClient.getCardMetadata(key, "en-US");
+                }));
+            }
+            assertThat(waitingCallersStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            waitingCallerThreads.forEach(callerThread -> awaitBlockedOrWaiting(callerThread.get()));
 
             releaseResponse.countDown();
-            assertThat(loadingCaller.get(5, TimeUnit.SECONDS).isNotFound()).isTrue();
-            assertThat(waitingCaller.get(5, TimeUnit.SECONDS).isNotFound()).isTrue();
+            TmdbLookupResult<TmdbCardMetadata> first = loadingCaller.get(5, TimeUnit.SECONDS);
+            assertThat(expectedOutcome.test(first)).isTrue();
+            for (Future<TmdbLookupResult<TmdbCardMetadata>> waitingCaller : waitingCallers) {
+                assertThat(waitingCaller.get(5, TimeUnit.SECONDS)).isSameAs(first);
+            }
         } finally {
             releaseResponse.countDown();
             executor.shutdownNow();
@@ -887,12 +913,15 @@ class TmdbClientCachingTest {
         mockServer.verify();
     }
 
-    private void awaitThreadState(Thread thread, Thread.State expectedState) {
+    private void awaitBlockedOrWaiting(Thread thread) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (thread.getState() != expectedState && System.nanoTime() < deadline) {
+        while (thread.getState() != Thread.State.BLOCKED
+                && thread.getState() != Thread.State.WAITING
+                && thread.getState() != Thread.State.TIMED_WAITING
+                && System.nanoTime() < deadline) {
             Thread.onSpinWait();
         }
-        assertThat(thread.getState()).isEqualTo(expectedState);
+        assertThat(thread.getState()).isIn(Thread.State.BLOCKED, Thread.State.WAITING, Thread.State.TIMED_WAITING);
     }
 
     @Test

@@ -10,6 +10,10 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -41,6 +45,11 @@ public class TmdbClient {
     private final Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingMovieResult>>> tmdbTrendingMovieCache;
     private final Cache<String, TmdbLookupResult<TmdbSearchPage<TmdbTrendingTvResult>>> tmdbTrendingTvCache;
     private final Cache<String, TmdbLookupResult<TmdbCardMetadata>> tmdbCardMetadataCache;
+    private final ConcurrentMap<TmdbCardMetadataFlightKey,
+            CompletableFuture<TmdbLookupResult<TmdbCardMetadata>>> cardMetadataFlights = new ConcurrentHashMap<>();
+
+    private record TmdbCardMetadataFlightKey(TmdbCardMetadataKey key, String language) {
+    }
 
     public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> searchMovies(
             String query, String language, int page) {
@@ -240,8 +249,7 @@ public class TmdbClient {
     }
 
     public TmdbLookupResult<TmdbCardMetadata> getCardMetadata(TmdbCardMetadataKey key, String language) {
-        String cacheKey = key.cacheKey(language);
-        return cachedCardMetadataLookup(cacheKey, () -> loadCardMetadata(key, language));
+        return cachedCardMetadataLookup(key, language, () -> loadCardMetadata(key, language));
     }
 
     private TmdbLookupResult<TmdbCardMetadata> loadCardMetadata(TmdbCardMetadataKey key, String language) {
@@ -315,22 +323,52 @@ public class TmdbClient {
     }
 
     private TmdbLookupResult<TmdbCardMetadata> cachedCardMetadataLookup(
-            String cacheKey, Supplier<TmdbLookupResult<TmdbCardMetadata>> loader) {
-        AtomicBoolean loadedFromRemote = new AtomicBoolean(false);
-        TmdbLookupResult<TmdbCardMetadata> cached = tmdbCardMetadataCache.get(cacheKey, ignoredKey -> {
-            loadedFromRemote.set(true);
-            return loader.get();
-        });
-        if (cached == null) {
-            return new TmdbLookupResult.Unavailable<>();
-        }
+            TmdbCardMetadataKey key,
+            String language,
+            Supplier<TmdbLookupResult<TmdbCardMetadata>> loader) {
+        String cacheKey = key.cacheKey(language);
+        TmdbLookupResult<TmdbCardMetadata> cached = tmdbCardMetadataCache.getIfPresent(cacheKey);
         if (cached instanceof TmdbLookupResult.Found<TmdbCardMetadata> found) {
-            TmdbLookupOrigin origin = loadedFromRemote.get() ? TmdbLookupOrigin.REMOTE : TmdbLookupOrigin.CACHE;
-            return new TmdbLookupResult.Found<>(found.value(), origin);
+            return new TmdbLookupResult.Found<>(found.value(), TmdbLookupOrigin.CACHE);
         }
-        tmdbCardMetadataCache.asMap().computeIfPresent(
-                cacheKey, (ignoredKey, current) -> current == cached ? null : current);
-        return cached;
+
+        TmdbCardMetadataFlightKey flightKey = new TmdbCardMetadataFlightKey(key, language);
+        CompletableFuture<TmdbLookupResult<TmdbCardMetadata>> newFlight = new CompletableFuture<>();
+        CompletableFuture<TmdbLookupResult<TmdbCardMetadata>> activeFlight =
+                cardMetadataFlights.putIfAbsent(flightKey, newFlight);
+        if (activeFlight != null) {
+            return awaitCardMetadataFlight(activeFlight);
+        }
+
+        try {
+            TmdbLookupResult<TmdbCardMetadata> result = loader.get();
+            if (result instanceof TmdbLookupResult.Found<TmdbCardMetadata>) {
+                tmdbCardMetadataCache.put(cacheKey, result);
+            }
+            newFlight.complete(result);
+            return result;
+        } catch (RuntimeException | Error failure) {
+            newFlight.completeExceptionally(failure);
+            throw failure;
+        } finally {
+            cardMetadataFlights.remove(flightKey, newFlight);
+        }
+    }
+
+    private TmdbLookupResult<TmdbCardMetadata> awaitCardMetadataFlight(
+            CompletableFuture<TmdbLookupResult<TmdbCardMetadata>> flight) {
+        try {
+            return flight.join();
+        } catch (CompletionException failure) {
+            Throwable cause = failure.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw failure;
+        }
     }
 
     public TmdbLookupResult<TmdbMovieFullDetails> getMovieFullDetails(String tmdbId, String language) {
