@@ -323,6 +323,17 @@ class SummaryServiceImplTest {
     }
 
     @Test
+    void shouldPropagateUnexpectedCalendarErrors() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(calendarService.getUpcoming(lucasId, 6))
+                .thenThrow(new IllegalStateException("unexpected calendar failure"));
+
+        assertThatThrownBy(() -> summaryService.getHomeSummary(lucasId, lucasId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("unexpected calendar failure");
+    }
+
+    @Test
     @DisplayName("[getHomeSummary] Should Return Totals, Next Episodes, Rolling 30-Day Stats And Genre Counts From The Repository")
     void shouldReturnTotalsNextEpisodesRollingStatsAndGenreCountsForHomeSummary() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
