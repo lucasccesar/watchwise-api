@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.calendar.service.impl;
 
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarResponseDTO;
+import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
 import com.watchwise.watchwise_api.calendar.repository.CalendarScheduleSnapshotStore;
 import com.watchwise.watchwise_api.calendar.service.CalendarAssemblyInput;
@@ -25,8 +27,10 @@ import org.springframework.stereotype.Service;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.ArrayList;
@@ -51,12 +55,32 @@ public class CalendarServiceImpl implements CalendarService {
 
     @Override
     public CalendarResponseDTO getMonth(UUID userId, YearMonth month) {
+        CalendarReadResult read = readCalendar(userId);
+        return new CalendarResponseDTO(
+                month,
+                read.interest().preferredRegion(),
+                eventAssembler.assemble(assemblyInput(read, month)));
+    }
+
+    @Override
+    public List<CalendarEventDTO> getUpcoming(UUID userId, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        CalendarReadResult read = readCalendar(userId);
+        LocalDate today = LocalDate.now(clock.withZone(ZoneId.systemDefault()));
+        return eventAssembler.assembleUpcoming(
+                assemblyInput(read, YearMonth.from(today)), today, limit);
+    }
+
+    private CalendarReadResult readCalendar(UUID userId) {
         CalendarInterest interest = interestReader.read(userId);
         String region = interest.preferredRegion();
         String language = interest.preferredLanguage();
         Set<CalendarScheduleKey> activeKeys = interest.sourcesByKey().keySet();
         if (activeKeys.isEmpty()) {
-            return new CalendarResponseDTO(month, region, List.of());
+            return new CalendarReadResult(interest, List.of(), Map.of(), Set.of(),
+                    CalendarAssemblyInput.Completeness.empty());
         }
 
         CalendarScheduleReadModel readModel = snapshotStore.findForInterest(interest, region, language);
@@ -83,7 +107,7 @@ public class CalendarServiceImpl implements CalendarService {
                 .toList();
         Set<WatchedCalendarKey> requestedWatchedKeys = watchedKeysFor(snapshots);
         Set<WatchedCalendarKey> watchedKeys = watchedContentReader.readWatchedKeys(userId, requestedWatchedKeys);
-        Map<CalendarScheduleKey, Set<com.watchwise.watchwise_api.calendar.dto.CalendarSource>> sources = new LinkedHashMap<>();
+        Map<CalendarScheduleKey, Set<CalendarSource>> sources = new LinkedHashMap<>();
         interest.sourcesByKey().forEach((key, value) -> {
             if (!omittedKeys.contains(key)) {
                 sources.put(key, value);
@@ -91,15 +115,32 @@ public class CalendarServiceImpl implements CalendarService {
         });
         CalendarAssemblyInput.Completeness completeness = filterUncertainCompleteness(
                 readModel.completeness(), requestLookups);
-        return new CalendarResponseDTO(month, region, eventAssembler.assemble(new CalendarAssemblyInput(
-                month,
-                clock,
+        return new CalendarReadResult(
+                interest,
                 snapshots,
                 sources,
                 watchedKeys,
-                region,
-                language,
-                completeness)));
+                completeness);
+    }
+
+    private CalendarAssemblyInput assemblyInput(CalendarReadResult read, YearMonth month) {
+        return new CalendarAssemblyInput(
+                month,
+                clock,
+                read.snapshots(),
+                read.sourcesByKey(),
+                read.watchedKeys(),
+                read.interest().preferredRegion(),
+                read.interest().preferredLanguage(),
+                read.completeness());
+    }
+
+    private record CalendarReadResult(
+            CalendarInterest interest,
+            List<CalendarScheduleSnapshot> snapshots,
+            Map<CalendarScheduleKey, Set<CalendarSource>> sourcesByKey,
+            Set<WatchedCalendarKey> watchedKeys,
+            CalendarAssemblyInput.Completeness completeness) {
     }
 
     private boolean refreshSchedules(

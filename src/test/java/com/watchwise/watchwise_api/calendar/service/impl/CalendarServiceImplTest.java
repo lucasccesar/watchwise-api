@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.calendar.service.impl;
 import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
 import com.watchwise.watchwise_api.calendar.dto.CalendarReleaseContext;
 import com.watchwise.watchwise_api.calendar.dto.EpisodeCalendarContentDTO;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarResponseDTO;
 import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
 import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleSnapshot;
@@ -48,6 +49,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -73,6 +75,35 @@ class CalendarServiceImplTest {
 
         assertThat(response.events()).isEmpty();
         assertThat(response.region()).isEqualTo("BR");
+        verifyNoInteractions(snapshotStore, scheduleProvider, synchronizer, watchedReader);
+    }
+
+    @Test
+    void returnsUpcomingEventsFromTodayWithTheRequestedLimit() {
+        CalendarScheduleKey firstKey = key(ContentType.MOVIE, "550");
+        CalendarScheduleKey secondKey = key(ContentType.MOVIE, "551");
+        CalendarInterest interest = interest(Map.of(
+                firstKey, Set.of(CalendarSource.WATCHLIST),
+                secondKey, Set.of(CalendarSource.WATCHLIST)));
+        CalendarScheduleReadModel read = new CalendarScheduleReadModel(
+                List.of(movie("550", LocalDate.of(2026, 9, 12)), movie("551", LocalDate.of(2026, 9, 13))),
+                CalendarAssemblyInput.Completeness.empty());
+        when(interestReader.read(USER_ID)).thenReturn(interest);
+        when(snapshotStore.findForInterest(interest, "BR", "pt-BR")).thenReturn(read);
+        when(watchedReader.readWatchedKeys(eq(USER_ID), any())).thenReturn(Set.of());
+
+        List<CalendarEventDTO> result = service().getUpcoming(USER_ID, 6);
+
+        assertThat(result).extracting(CalendarEventDTO::date)
+                .containsExactly(LocalDate.of(2026, 9, 12), LocalDate.of(2026, 9, 13));
+    }
+
+    @Test
+    void returnsEmptyUpcomingWithoutScheduleReadsWhenInterestIsEmpty() {
+        when(interestReader.read(USER_ID)).thenReturn(interest(Map.of()));
+
+        assertThat(service().getUpcoming(USER_ID, 6)).isEmpty();
+
         verifyNoInteractions(snapshotStore, scheduleProvider, synchronizer, watchedReader);
     }
 
