@@ -1,6 +1,11 @@
 package com.watchwise.watchwise_api.summary.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
+import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
+import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
+import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
@@ -8,6 +13,8 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -45,6 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -89,6 +97,9 @@ class SummaryControllerIntegrationTest {
     @MockitoBean
     private TmdbClient tmdbClient;
 
+    @MockitoBean
+    private CalendarService calendarService;
+
     @BeforeEach
     void setUp() {
         diaryEntryRepository.deleteAll();
@@ -98,6 +109,7 @@ class SummaryControllerIntegrationTest {
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
         when(tmdbClient.getCardMetadata(any(), anyString())).thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(calendarService.getUpcoming(any(), eq(6))).thenReturn(java.util.List.of());
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {
@@ -295,7 +307,31 @@ class SummaryControllerIntegrationTest {
                 .andExpect(jsonPath("$.totalMinutesWatchedEpisodes").value(55))
                 .andExpect(jsonPath("$.totalMoviesWatched").value(1))
                 .andExpect(jsonPath("$.totalEpisodesWatched").value(1))
-                .andExpect(jsonPath("$.distinctSeriesWatched").value(1));
+                .andExpect(jsonPath("$.distinctSeriesWatched").value(1))
+                .andExpect(jsonPath("$.upcomingReleases").isArray())
+                .andExpect(jsonPath("$.upcomingReleases").isEmpty());
+    }
+
+    @Test
+    @DisplayName("[getHomeSummary] Should Serialize Upcoming Releases")
+    void shouldSerializeUpcomingReleasesWhenCalendarReturnsEvents() throws Exception {
+        RegisteredUser user = registerUser("homesummaryupcoming");
+        CalendarEventDTO event = new CalendarEventDTO(
+                LocalDate.of(2026, 10, 20),
+                CalendarEventType.MOVIE,
+                ReleaseStatus.UPCOMING,
+                WatchStatus.UNWATCHED,
+                java.util.Set.of(CalendarSource.WATCHLIST),
+                new MovieCalendarContentDTO("550", "Movie 550", "/movie-550.jpg"));
+        when(calendarService.getUpcoming(user.id(), 6)).thenReturn(java.util.List.of(event));
+
+        mockMvc.perform(get("/users/" + user.id() + "/summary/home").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.upcomingReleases").isArray())
+                .andExpect(jsonPath("$.upcomingReleases[0].eventType").value("MOVIE"))
+                .andExpect(jsonPath("$.upcomingReleases[0].date").value("2026-10-20"))
+                .andExpect(jsonPath("$.upcomingReleases[0].content.tmdbId").value("550"))
+                .andExpect(jsonPath("$.upcomingReleases[0].sources[0]").value("WATCHLIST"));
     }
 
     @Test
