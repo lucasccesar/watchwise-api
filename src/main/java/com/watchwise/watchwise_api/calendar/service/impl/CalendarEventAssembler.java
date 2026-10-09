@@ -40,6 +40,26 @@ public class CalendarEventAssembler {
             .thenComparingInt(AssembledEvent::episodeNumber);
 
     public List<CalendarEventDTO> assemble(CalendarAssemblyInput input) {
+        return assembleEvents(input).stream()
+                .filter(event -> input.month().equals(java.time.YearMonth.from(event.date())))
+                .map(AssembledEvent::event)
+                .toList();
+    }
+
+    public List<CalendarEventDTO> assembleUpcoming(
+            CalendarAssemblyInput input, LocalDate fromInclusive, int limit) {
+        Objects.requireNonNull(fromInclusive, "fromInclusive is required");
+        if (limit <= 0) {
+            return List.of();
+        }
+        return assembleEvents(input).stream()
+                .filter(event -> !event.date().isBefore(fromInclusive))
+                .limit(limit)
+                .map(AssembledEvent::event)
+                .toList();
+    }
+
+    private List<AssembledEvent> assembleEvents(CalendarAssemblyInput input) {
         Objects.requireNonNull(input, "input is required");
 
         List<CalendarScheduleSnapshot> validSnapshots = input.snapshots().stream()
@@ -52,9 +72,7 @@ public class CalendarEventAssembler {
         addEpisodeEvents(validSnapshots, input, events);
 
         return events.stream()
-                .filter(event -> input.month().equals(java.time.YearMonth.from(event.date())))
                 .sorted(EVENT_ORDER)
-                .map(AssembledEvent::event)
                 .toList();
     }
 

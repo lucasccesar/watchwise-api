@@ -44,6 +44,62 @@ class CalendarEventAssemblerTest {
     private final CalendarEventAssembler assembler = new CalendarEventAssembler();
 
     @Test
+    void shouldReturnAtMostSixEventsFromTodayInCalendarOrder() {
+        List<CalendarEventDTO> events = assembler.assembleUpcoming(
+                assemblyInput(
+                        movie("1", LocalDate.of(2026, 9, 14)),
+                        movie("2", LocalDate.of(2026, 9, 15)),
+                        movie("3", LocalDate.of(2026, 9, 16)),
+                        movie("4", LocalDate.of(2026, 9, 17)),
+                        movie("5", LocalDate.of(2026, 9, 18)),
+                        movie("6", LocalDate.of(2026, 9, 19)),
+                        movie("7", LocalDate.of(2026, 9, 20)),
+                        movie("8", LocalDate.of(2026, 9, 21))),
+                LocalDate.of(2026, 9, 15),
+                6);
+
+        assertThat(events).hasSize(6);
+        assertThat(events).extracting(CalendarEventDTO::date)
+                .containsExactly(
+                        LocalDate.of(2026, 9, 15),
+                        LocalDate.of(2026, 9, 16),
+                        LocalDate.of(2026, 9, 17),
+                        LocalDate.of(2026, 9, 18),
+                        LocalDate.of(2026, 9, 19),
+                        LocalDate.of(2026, 9, 20));
+    }
+
+    @Test
+    void shouldPreserveCalendarGroupingWhenSelectingUpcomingEvents() {
+        List<CalendarEventDTO> events = assembler.assembleUpcoming(
+                new CalendarAssemblyInput(
+                        MONTH,
+                        CLOCK,
+                        List.of(
+                                episode("1396", 1, 1, LocalDate.of(2026, 9, 16)),
+                                episode("1396", 1, 2, LocalDate.of(2026, 9, 16))),
+                        Map.of(),
+                        Set.of(),
+                        "BR",
+                        "pt-BR",
+                        completeness(Set.of(season("1396", 1)), Set.of())),
+                LocalDate.of(2026, 9, 15),
+                6);
+
+        assertThat(events).singleElement()
+                .extracting(CalendarEventDTO::eventType)
+                .isEqualTo(CalendarEventType.SEASON);
+    }
+
+    @Test
+    void shouldReturnEmptyWhenUpcomingLimitIsNotPositive() {
+        assertThat(assembler.assembleUpcoming(
+                assemblyInput(movie("550", LocalDate.of(2026, 9, 16))),
+                LocalDate.of(2026, 9, 15),
+                0)).isEmpty();
+    }
+
+    @Test
     void shouldReturnOnlyEventsFromRequestedMonthAfterEvaluatingCompleteSchedules() {
         CalendarScheduleSnapshot septemberEpisode = episode("1396", 1, 1, RELEASE_DATE);
         CalendarScheduleSnapshot octoberEpisode = episode("1396", 1, 2, LocalDate.of(2026, 10, 12));
@@ -421,6 +477,12 @@ class CalendarEventAssemblerTest {
 
     private List<CalendarEventDTO> assemble(List<CalendarScheduleSnapshot> snapshots) {
         return assemble(snapshots, Map.of(), Set.of());
+    }
+
+    private CalendarAssemblyInput assemblyInput(CalendarScheduleSnapshot... snapshots) {
+        return new CalendarAssemblyInput(
+                MONTH, CLOCK, List.of(snapshots), Map.of(), Set.of(), "BR", "pt-BR",
+                completeness(Set.of(), Set.of()));
     }
 
     private List<CalendarEventDTO> assemble(
