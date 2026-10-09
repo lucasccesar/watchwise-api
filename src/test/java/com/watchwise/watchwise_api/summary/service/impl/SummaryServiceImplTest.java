@@ -6,10 +6,18 @@ import com.watchwise.watchwise_api.common.dto.GenreCountDTO;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventType;
+import com.watchwise.watchwise_api.calendar.dto.CalendarSource;
+import com.watchwise.watchwise_api.calendar.dto.MovieCalendarContentDTO;
+import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
+import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
+import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
@@ -149,6 +157,9 @@ class SummaryServiceImplTest {
     private FeedService feedService;
 
     @Mock
+    private CalendarService calendarService;
+
+    @Mock
     private HomeNextEpisodeAssembler homeNextEpisodeAssembler;
 
     @Mock
@@ -220,6 +231,7 @@ class SummaryServiceImplTest {
         lenient().when(notificationRepository.existsByUserIdAndIsReadFalse(any())).thenReturn(false);
         lenient().when(feedService.getFeed(any(), any(), any()))
                 .thenReturn(new CursorPageResponseDTO<>(List.of(), 3, null, false));
+        lenient().when(calendarService.getUpcoming(any(), eq(6))).thenReturn(List.of());
         lenient().when(homeNextEpisodeAssembler.assemble(any(), any())).thenReturn(List.of());
         lenient().when(top5EntryRepository.findByUserIdAndTypeWithContentOrderByPositionAsc(any(), any()))
                 .thenReturn(List.of());
@@ -279,6 +291,35 @@ class SummaryServiceImplTest {
         assertThatThrownBy(() -> summaryService.getHomeSummary(marinaId, lucasId))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
+    }
+
+    @Test
+    void shouldLoadUpcomingReleasesForTheViewerNotTheTargetProfile() {
+        CalendarEventDTO event = new CalendarEventDTO(
+                LocalDate.of(2026, 9, 20),
+                CalendarEventType.MOVIE,
+                ReleaseStatus.UPCOMING,
+                WatchStatus.UNWATCHED,
+                Set.of(CalendarSource.WATCHLIST),
+                new MovieCalendarContentDTO("550", "Movie 550", "/movie-550.jpg"));
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(calendarService.getUpcoming(marinaId, 6)).thenReturn(List.of(event));
+
+        HomeSummaryResponseDTO result = summaryService.getHomeSummary(marinaId, lucasId);
+
+        assertThat(result.upcomingReleases()).containsExactly(event);
+        verify(calendarService).getUpcoming(marinaId, 6);
+    }
+
+    @Test
+    void shouldReturnEmptyUpcomingReleasesWhenCalendarIsUnavailable() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(calendarService.getUpcoming(lucasId, 6))
+                .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
+
+        HomeSummaryResponseDTO result = summaryService.getHomeSummary(lucasId, lucasId);
+
+        assertThat(result.upcomingReleases()).isEmpty();
     }
 
     @Test

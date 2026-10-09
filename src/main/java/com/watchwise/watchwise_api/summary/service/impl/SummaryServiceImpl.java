@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.calendar.dto.CalendarEventDTO;
+import com.watchwise.watchwise_api.calendar.service.CalendarService;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
@@ -90,6 +92,7 @@ public class SummaryServiceImpl implements SummaryService {
 
     private static final int WATCH_TIME_WINDOW_DAYS = 30;
     private static final int HOME_NEXT_EPISODES_LIMIT = 4;
+    private static final int HOME_UPCOMING_RELEASES_LIMIT = 6;
     private static final int HOME_RECENTLY_WATCHED_LIMIT = 4;
     private static final Set<ContentType> HOME_WATCHED_CONTENT_TYPES = Set.of(ContentType.MOVIE, ContentType.EPISODE);
     private static final Set<ContentCardFieldSet> HOME_CARD_FIELDS = Set.of(
@@ -125,6 +128,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final UserContentPosterService userContentPosterService;
     private final NotificationRepository notificationRepository;
     private final FeedService feedService;
+    private final CalendarService calendarService;
     private final HomeNextEpisodeAssembler homeNextEpisodeAssembler;
     private final ContentCardAssembler contentCardAssembler;
     private final ProfileSummaryReader profileSummaryReader;
@@ -158,6 +162,13 @@ public class SummaryServiceImpl implements SummaryService {
         }
         List<SeriesInProgressPreviewDTO> nextEpisodes = homeNextEpisodeAssembler.assemble(target, progress);
 
+        List<CalendarEventDTO> upcomingReleases;
+        try {
+            upcomingReleases = calendarService.getUpcoming(viewerId, HOME_UPCOMING_RELEASES_LIMIT);
+        } catch (TmdbUnavailableException exception) {
+            upcomingReleases = List.of();
+        }
+
         LocalDate windowEnd = LocalDate.now();
         LocalDate windowStart = windowEnd.minusDays(WATCH_TIME_WINDOW_DAYS - 1L);
 
@@ -185,7 +196,7 @@ public class SummaryServiceImpl implements SummaryService {
         HomeViewerDTO viewer = new HomeViewerDTO(target.getName(), target.getUsername(), target.getProfilePicture());
 
         return new HomeSummaryResponseDTO(totalMinutesWatchedMovies, totalMinutesWatchedEpisodes, totalMoviesWatched,
-                totalDistinctMoviesWatched, totalEpisodesWatched, distinctSeriesWatched, nextEpisodes,
+                totalDistinctMoviesWatched, totalEpisodesWatched, distinctSeriesWatched, nextEpisodes, upcomingReleases,
                 watchCountByDayLast30Days,
                 genreCountsMoviesLast30Days, genreCountsEpisodesLast30Days, viewer,
                 notificationRepository.existsByUserIdAndIsReadFalse(userId), recentlyWatched, socialActivities);
