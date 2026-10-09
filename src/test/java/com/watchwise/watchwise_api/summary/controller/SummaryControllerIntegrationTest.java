@@ -109,6 +109,10 @@ class SummaryControllerIntegrationTest {
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
         when(tmdbClient.getCardMetadata(any(), anyString())).thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(tmdbClient.getMovieFullDetails(anyString(), anyString()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(tmdbClient.getTvFullDetails(anyString(), anyString()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
         when(calendarService.getUpcoming(any(), eq(6))).thenReturn(java.util.List.of());
     }
 
@@ -341,13 +345,13 @@ class SummaryControllerIntegrationTest {
 
         RegisteredUser user = registerUser("homesummarycardunavailable");
         User entity = userRepository.findById(user.id()).orElseThrow();
-        Content movie = persistContent("unavailable-home-card", ContentType.MOVIE, 139);
+        Content movie = persistContent("home-card-unavail", ContentType.MOVIE, 139);
         persistEntry(entity, movie);
 
         mockMvc.perform(get("/users/" + user.id() + "/summary/home").cookie(user.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recentlyWatched").isArray())
-                .andExpect(jsonPath("$.recentlyWatched[0].content.tmdbId").value("unavailable-home-card"))
+                .andExpect(jsonPath("$.recentlyWatched[0].content.tmdbId").value("home-card-unavail"))
                 .andExpect(jsonPath("$.recentlyWatched[0].card").exists())
                 .andExpect(jsonPath("$.recentlyWatched[0].card.previewStatus").value("PARTIAL"));
     }
@@ -360,15 +364,15 @@ class SummaryControllerIntegrationTest {
 
         RegisteredUser user = registerUser("profilesummarycardunavailable");
         User entity = userRepository.findById(user.id()).orElseThrow();
-        Content movie = persistContent("unavailable-profile-card", ContentType.MOVIE, 139);
+        Content movie = persistContent("profile-card-unavail", ContentType.MOVIE, 139);
         persistEntry(entity, movie, 8, false);
 
         mockMvc.perform(getSummaryRequest(user, user.id()).param("type", "MOVIE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recentActivity").isArray())
-                .andExpect(jsonPath("$.recentActivity[0].content.tmdbId").value("unavailable-profile-card"))
+                .andExpect(jsonPath("$.recentActivity[0].content.tmdbId").value("profile-card-unavail"))
                 .andExpect(jsonPath("$.recentActivity[0].card").exists())
-                .andExpect(jsonPath("$.recentActivity[0].card.previewStatus").value("PARTIAL"));
+                .andExpect(jsonPath("$.recentActivity[0].card.previewStatus").value("UNAVAILABLE"));
     }
 
     @Test
