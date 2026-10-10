@@ -401,18 +401,29 @@ class FeedControllerIntegrationTest {
     }
 
     private void persistSharedDailyGameResult(User user, DailyChallenge challenge, LocalDateTime sharedAt) {
+        persistDailyGameResult(user, challenge, sharedAt, DailyGameResultStatus.COMPLETED, true);
+    }
+
+    private void persistDailyGameResult(
+            User user,
+            DailyChallenge challenge,
+            LocalDateTime resultAt,
+            DailyGameResultStatus status,
+            boolean shared) {
         UserDailyGameResult result = UserDailyGameResult.builder()
                 .user(user)
                 .dailyChallenge(challenge)
                 .attemptsUsed(1)
                 .score(10)
-                .status(DailyGameResultStatus.COMPLETED)
-                .completedAt(sharedAt)
-                .createdAt(sharedAt.minusMinutes(5))
-                .updatedAt(sharedAt)
+                .status(status)
+                .completedAt(status == DailyGameResultStatus.IN_PROGRESS ? null : resultAt)
+                .createdAt(resultAt.minusMinutes(5))
+                .updatedAt(resultAt)
                 .build();
-        result.setShareOnCompletion(true);
-        result.markSharedAt(sharedAt);
+        if (shared) {
+            result.setShareOnCompletion(true);
+            result.markSharedAt(resultAt);
+        }
         userDailyGameResultRepository.saveAndFlush(result);
     }
 
@@ -522,10 +533,31 @@ class FeedControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].user.username").value("feeddailyaccepted"))
                 .andExpect(jsonPath("$.content[0].dailyGameResult.gameType").value("MOVIE_BY_INFO"))
                 .andExpect(jsonPath("$.content[0].dailyGameResult.status").value("COMPLETED"))
-                .andExpect(jsonPath("$.content[0].dailyGameResult.answer.title").value("Fight Club"))
+                .andExpect(jsonPath("$.content[0].dailyGameResult.answer").value(nullValue()))
                 .andExpect(jsonPath("$.content[0].content").value(nullValue()))
                 .andExpect(jsonPath("$.content[0].likesCount").value(nullValue()))
                 .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Serialize Answer - When Viewer Has A Terminal Result For The Same Challenge")
+    void shouldSerializeAnswerWhenViewerHasATerminalResultForTheSameChallenge() throws Exception {
+        RegisteredUser viewer = registerUser("feeddailycompletedviewer");
+        RegisteredUser followed = registerUser("feeddailycompletedfollowed");
+        persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
+
+        User viewerEntity = userRepository.findById(viewer.id()).orElseThrow();
+        User followedEntity = userRepository.findById(followed.id()).orElseThrow();
+        DailyChallenge challenge = persistDailyGameChallenge();
+        LocalDateTime resultAt = LocalDateTime.of(2026, 9, 29, 12, 0);
+        persistSharedDailyGameResult(followedEntity, challenge, resultAt);
+        persistDailyGameResult(viewerEntity, challenge, resultAt, DailyGameResultStatus.COMPLETED, false);
+
+        mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].eventType").value("DAILY_GAME_RESULT"))
+                .andExpect(jsonPath("$.content[0].dailyGameResult.answer.title").value("Fight Club"));
     }
 
     @Test

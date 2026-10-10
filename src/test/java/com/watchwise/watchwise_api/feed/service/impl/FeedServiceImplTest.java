@@ -297,24 +297,33 @@ class FeedServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getFeedView] Should Keep DailyGameResult Explicit And Skip Content Cards - When A Shared Result Is Returned")
-    void shouldKeepDailyGameResultExplicitAndSkipContentCardsWhenASharedResultIsReturned() {
+    @DisplayName("[getFeedView] Should Hide Answer Without Viewer Result And Keep Source Metadata - When A Shared Result Is Returned")
+    void shouldHideAnswerWithoutViewerResultAndKeepSourceMetadataWhenASharedResultIsReturned() {
         stubFollowedIds();
         DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
         UserDailyGameResult result = buildDailyGameResult(
-                challenge, LocalDateTime.of(2026, 9, 29, 12, 0), 1, 10, DailyGameResultStatus.COMPLETED);
+                followedUser, challenge, LocalDateTime.of(2026, 9, 29, 12, 0), 1, 10,
+                DailyGameResultStatus.COMPLETED, true);
         stubEmptySources(21);
         when(dailyGameResultRepository.findFeedCandidates(
                 eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of(result));
+        lenient().when(dailyGameResultRepository.findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())))).thenReturn(List.of());
 
         FeedPageViewDTO feed = feedService.getFeedView(viewerId, null, null);
 
         FeedItemViewDTO item = feed.content().getFirst();
         assertThat(item.eventType()).isEqualTo(FeedEventType.DAILY_GAME_RESULT);
         assertThat(item.dailyGameResult()).isNotNull();
+        assertThat(item.dailyGameResult().status()).isEqualTo(DailyGameViewStatus.COMPLETED);
+        assertThat(item.dailyGameResult().attemptsUsed()).isEqualTo(1);
+        assertThat(item.dailyGameResult().score()).isEqualTo(10);
+        assertThat(item.dailyGameResult().answer()).isNull();
         assertThat(item.content()).isNull();
         assertThat(item.card()).isNull();
+        verify(dailyGameResultRepository, times(1)).findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())));
         verify(contentCardAssembler, never()).assemble(any(), any(ContentCardContext.class), any(Set.class));
     }
 
@@ -521,7 +530,7 @@ class FeedServiceImplTest {
         LocalDateTime sharedAt = LocalDateTime.of(2026, 9, 29, 12, 0);
         DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
         UserDailyGameResult sharedResult = buildDailyGameResult(
-                challenge, sharedAt, 4, 0, DailyGameResultStatus.FAILED);
+                followedUser, challenge, sharedAt, 4, 0, DailyGameResultStatus.FAILED, true);
         DiaryEntry diaryEntry = buildDiaryEntry(sharedAt.minusMinutes(1));
 
         stubEmptySources(21);
@@ -530,6 +539,8 @@ class FeedServiceImplTest {
         when(dailyGameResultRepository.findFeedCandidates(
                 eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
                 .thenReturn(List.of(sharedResult));
+        lenient().when(dailyGameResultRepository.findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())))).thenReturn(List.of());
         when(likeService.getLikedDiaryEntryIds(eq(viewerId), eq(List.of(diaryEntry.getId())))).thenReturn(Set.of());
 
         CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, null);
@@ -544,7 +555,7 @@ class FeedServiceImplTest {
         assertThat(item.dailyGameResult().status()).isEqualTo(DailyGameViewStatus.FAILED);
         assertThat(item.dailyGameResult().attemptsUsed()).isEqualTo(4);
         assertThat(item.dailyGameResult().score()).isZero();
-        assertThat(item.dailyGameResult().answer().title()).isEqualTo("Fight Club");
+        assertThat(item.dailyGameResult().answer()).isNull();
         assertThat(item.content()).isNull();
         assertThat(item.score()).isNull();
         assertThat(item.comment()).isNull();
@@ -557,6 +568,90 @@ class FeedServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getFeed] Should Expose Answer - When Viewer Has Completed The Same Challenge")
+    void shouldExposeAnswerWhenViewerHasCompletedTheSameChallenge() {
+        stubFollowedIds();
+        LocalDateTime resultAt = LocalDateTime.of(2026, 9, 29, 12, 0);
+        DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult sharedResult = buildDailyGameResult(
+                followedUser, challenge, resultAt, 2, 7, DailyGameResultStatus.FAILED, true);
+        UserDailyGameResult viewerResult = buildDailyGameResult(
+                User.builder().id(viewerId).username("viewer").build(), challenge, resultAt,
+                1, 10, DailyGameResultStatus.COMPLETED, false);
+
+        stubEmptySources(21);
+        when(dailyGameResultRepository.findFeedCandidates(
+                eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(sharedResult));
+        lenient().when(dailyGameResultRepository.findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())))).thenReturn(List.of(viewerResult));
+
+        FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().getFirst();
+
+        assertThat(item.dailyGameResult().status()).isEqualTo(DailyGameViewStatus.FAILED);
+        assertThat(item.dailyGameResult().attemptsUsed()).isEqualTo(2);
+        assertThat(item.dailyGameResult().score()).isEqualTo(7);
+        assertThat(item.dailyGameResult().answer().title()).isEqualTo("Fight Club");
+        verify(dailyGameResultRepository, times(1)).findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Hide Answer - When Viewer Is Still Playing The Same Challenge")
+    void shouldHideAnswerWhenViewerIsStillPlayingTheSameChallenge() {
+        stubFollowedIds();
+        LocalDateTime resultAt = LocalDateTime.of(2026, 9, 29, 12, 0);
+        DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult sharedResult = buildDailyGameResult(
+                followedUser, challenge, resultAt, 3, 4, DailyGameResultStatus.COMPLETED, true);
+        UserDailyGameResult viewerResult = buildDailyGameResult(
+                User.builder().id(viewerId).username("viewer").build(), challenge, resultAt,
+                2, 0, DailyGameResultStatus.IN_PROGRESS, false);
+
+        stubEmptySources(21);
+        when(dailyGameResultRepository.findFeedCandidates(
+                eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(sharedResult));
+        lenient().when(dailyGameResultRepository.findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())))).thenReturn(List.of(viewerResult));
+
+        FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().getFirst();
+
+        assertThat(item.dailyGameResult().status()).isEqualTo(DailyGameViewStatus.COMPLETED);
+        assertThat(item.dailyGameResult().attemptsUsed()).isEqualTo(3);
+        assertThat(item.dailyGameResult().score()).isEqualTo(4);
+        assertThat(item.dailyGameResult().answer()).isNull();
+        verify(dailyGameResultRepository, times(1)).findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())));
+    }
+
+    @Test
+    @DisplayName("[getFeed] Should Expose Answer - When Viewer Has Failed The Same Challenge")
+    void shouldExposeAnswerWhenViewerHasFailedTheSameChallenge() {
+        stubFollowedIds();
+        LocalDateTime resultAt = LocalDateTime.of(2026, 9, 29, 12, 0);
+        DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
+        UserDailyGameResult sharedResult = buildDailyGameResult(
+                followedUser, challenge, resultAt, 1, 10, DailyGameResultStatus.COMPLETED, true);
+        UserDailyGameResult viewerResult = buildDailyGameResult(
+                User.builder().id(viewerId).username("viewer").build(), challenge, resultAt,
+                5, 0, DailyGameResultStatus.FAILED, false);
+
+        stubEmptySources(21);
+        when(dailyGameResultRepository.findFeedCandidates(
+                eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(sharedResult));
+        lenient().when(dailyGameResultRepository.findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())))).thenReturn(List.of(viewerResult));
+
+        FeedItemDTO item = feedService.getFeed(viewerId, null, null).content().getFirst();
+
+        assertThat(item.dailyGameResult().answer().title()).isEqualTo("Fight Club");
+        verify(dailyGameResultRepository, times(1)).findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(List.of(challenge.getId())));
+    }
+
+    @Test
     @DisplayName("[getFeed] Should Report HasNext - When DailyGame Source Has More Candidates")
     void shouldReportHasNextWhenDailyGameSourceHasMoreCandidates() {
         stubFollowedIds();
@@ -564,9 +659,9 @@ class FeedServiceImplTest {
         LocalDateTime now = LocalDateTime.of(2026, 9, 29, 12, 0);
         DailyChallenge challenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
         UserDailyGameResult first = buildDailyGameResult(
-                challenge, now, 1, 9, DailyGameResultStatus.COMPLETED);
+                followedUser, challenge, now, 1, 9, DailyGameResultStatus.COMPLETED, true);
         UserDailyGameResult beyondLimit = buildDailyGameResult(
-                challenge, now.minusMinutes(1), 2, 8, DailyGameResultStatus.COMPLETED);
+                followedUser, challenge, now.minusMinutes(1), 2, 8, DailyGameResultStatus.COMPLETED, true);
 
         stubEmptySources(2);
         when(dailyGameResultRepository.findFeedCandidates(
@@ -1233,24 +1328,28 @@ class FeedServiceImplTest {
     }
 
     private UserDailyGameResult buildDailyGameResult(
+            User resultOwner,
             DailyChallenge challenge,
             LocalDateTime sharedAt,
             int attemptsUsed,
             int score,
-            DailyGameResultStatus status) {
+            DailyGameResultStatus status,
+            boolean shared) {
         UserDailyGameResult result = UserDailyGameResult.builder()
                 .id(UUID.randomUUID())
-                .user(followedUser)
+                .user(resultOwner)
                 .dailyChallenge(challenge)
                 .attemptsUsed(attemptsUsed)
                 .score(score)
                 .status(status)
-                .completedAt(sharedAt)
+                .completedAt(status == DailyGameResultStatus.IN_PROGRESS ? null : sharedAt)
                 .createdAt(sharedAt.minusMinutes(5))
                 .updatedAt(sharedAt)
                 .build();
-        result.setShareOnCompletion(true);
-        result.markSharedAt(sharedAt);
+        if (shared) {
+            result.setShareOnCompletion(true);
+            result.markSharedAt(sharedAt);
+        }
         return result;
     }
 
