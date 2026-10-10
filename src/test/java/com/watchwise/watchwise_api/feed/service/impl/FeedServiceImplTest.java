@@ -652,6 +652,33 @@ class FeedServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getFeed] Should Load Viewer Results In One Batch - When Multiple Shared Challenges Are Selected")
+    void shouldLoadViewerResultsInOneBatchWhenMultipleSharedChallengesAreSelected() {
+        stubFollowedIds();
+        LocalDateTime firstSharedAt = LocalDateTime.of(2026, 9, 29, 12, 0);
+        LocalDateTime secondSharedAt = firstSharedAt.minusMinutes(1);
+        DailyChallenge firstChallenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "550");
+        DailyChallenge secondChallenge = buildChallenge(DailyGameType.MOVIE_BY_INFO, "680");
+        UserDailyGameResult firstResult = buildDailyGameResult(
+                followedUser, firstChallenge, firstSharedAt, 1, 10, DailyGameResultStatus.COMPLETED, true);
+        UserDailyGameResult secondResult = buildDailyGameResult(
+                followedUser, secondChallenge, secondSharedAt, 2, 8, DailyGameResultStatus.COMPLETED, true);
+        List<UUID> challengeIds = List.of(firstChallenge.getId(), secondChallenge.getId());
+
+        stubEmptySources(21);
+        when(dailyGameResultRepository.findFeedCandidates(
+                eq(List.of(followedId)), isNull(), isNull(), eq(PageRequest.of(0, 21))))
+                .thenReturn(List.of(firstResult, secondResult));
+
+        CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, null);
+
+        assertThat(result.content()).extracting(FeedItemDTO::id)
+                .containsExactly(firstResult.getId(), secondResult.getId());
+        verify(dailyGameResultRepository, times(1)).findByUserIdAndDailyChallengeIdIn(
+                eq(viewerId), eq(challengeIds));
+    }
+
+    @Test
     @DisplayName("[getFeed] Should Report HasNext - When DailyGame Source Has More Candidates")
     void shouldReportHasNextWhenDailyGameSourceHasMoreCandidates() {
         stubFollowedIds();
