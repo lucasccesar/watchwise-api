@@ -63,6 +63,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -208,7 +209,7 @@ public class FeedServiceImpl implements FeedService {
                     toPicksTemplateFeedItem(entry, picksTemplatePreviews.get(entry.getId()))));
         }
         for (UserDailyGameResult entry : dailyGameEntries) {
-            candidates.add(new FeedCandidate(entry.getSharedAt(), entry.getId(), toDailyGameFeedItem(entry)));
+            candidates.add(new FeedCandidate(entry.getSharedAt(), entry.getId(), toDailyGameFeedItem(entry, false)));
         }
 
         candidates.sort(Comparator.comparing(FeedCandidate::createdAt).reversed()
@@ -219,8 +220,29 @@ public class FeedServiceImpl implements FeedService {
         boolean hasNext = hasMoreBeyondPage || diaryHasMore || droppedHasMore || top5HasMore
                 || pickHasMore || picksTemplateHasMore || dailyGameHasMore;
 
+        Set<UUID> selectedDailyGameResultIds = page.stream()
+                .filter(candidate -> candidate.item().eventType() == FeedEventType.DAILY_GAME_RESULT)
+                .map(FeedCandidate::id)
+                .collect(Collectors.toSet());
+        List<UserDailyGameResult> selectedDailyGameEntries = dailyGameEntries.stream()
+                .filter(entry -> selectedDailyGameResultIds.contains(entry.getId()))
+                .toList();
+        Set<UUID> viewerTerminalDailyChallengeIds = loadViewerTerminalDailyChallengeIds(
+                userId, selectedDailyGameEntries);
+        Map<UUID, UserDailyGameResult> selectedDailyGameEntriesById = new LinkedHashMap<>();
+        selectedDailyGameEntries.forEach(entry -> selectedDailyGameEntriesById.put(entry.getId(), entry));
+
         String nextCursor = hasNext && !page.isEmpty() ? encodeCursor(page.get(page.size() - 1)) : null;
-        List<FeedItemDTO> content = page.stream().map(FeedCandidate::item).toList();
+        List<FeedItemDTO> content = page.stream()
+                .map(candidate -> {
+                    if (candidate.item().eventType() != FeedEventType.DAILY_GAME_RESULT) {
+                        return candidate.item();
+                    }
+                    UserDailyGameResult entry = selectedDailyGameEntriesById.get(candidate.id());
+                    return toDailyGameFeedItem(entry,
+                            viewerTerminalDailyChallengeIds.contains(entry.getDailyChallenge().getId()));
+                })
+                .toList();
 
         return new CursorPageResponseDTO<>(content, effectiveSize, nextCursor, hasNext);
     }
@@ -293,6 +315,9 @@ public class FeedServiceImpl implements FeedService {
         List<Pick> pickEntries = sources(rawPage.candidates(), FeedEventType.PICK_CREATED, Pick.class);
         List<PicksTemplate> picksTemplateEntries = sources(
                 rawPage.candidates(), FeedEventType.PICKS_TEMPLATE_CREATED, PicksTemplate.class);
+        List<UserDailyGameResult> dailyGameEntries = sources(
+                rawPage.candidates(), FeedEventType.DAILY_GAME_RESULT, UserDailyGameResult.class);
+        Set<UUID> viewerTerminalDailyChallengeIds = loadViewerTerminalDailyChallengeIds(userId, dailyGameEntries);
 
         Map<Top5Key, List<Top5EntryResponseDTO>> currentTop5ByKey = loadCurrentTop5Previews(top5Entries);
         Set<UUID> likedDiaryEntryIds = diaryEntries.isEmpty() ? Set.of() : likeService.getLikedDiaryEntryIds(
@@ -320,7 +345,7 @@ public class FeedServiceImpl implements FeedService {
         List<FeedItemDTO> content = rawPage.candidates().stream()
                 .map(candidate -> toEnrichedFeedItem(candidate, likedDiaryEntryIds, likedDroppedEntryIds,
                         watchedWithByEntryId, diaryCommentPreviews, droppedCommentPreviews, currentTop5ByKey,
-                        pickPreviews, picksTemplatePreviews))
+                        pickPreviews, picksTemplatePreviews, viewerTerminalDailyChallengeIds))
                 .toList();
         return new CursorPageResponseDTO<>(content, rawPage.size(), rawPage.nextCursor(), rawPage.hasNext());
     }
@@ -342,7 +367,8 @@ public class FeedServiceImpl implements FeedService {
             Map<UUID, CommentPreviewData> droppedCommentPreviews,
             Map<Top5Key, List<Top5EntryResponseDTO>> currentTop5ByKey,
             Map<UUID, PickPreviewDTO> pickPreviews,
-            Map<UUID, PicksTemplatePreviewDTO> picksTemplatePreviews) {
+            Map<UUID, PicksTemplatePreviewDTO> picksTemplatePreviews,
+            Set<UUID> viewerTerminalDailyChallengeIds) {
         return switch (candidate.eventType()) {
             case DIARY_ENTRY -> {
                 DiaryEntry entry = (DiaryEntry) candidate.source();
@@ -368,7 +394,11 @@ public class FeedServiceImpl implements FeedService {
                 PicksTemplate entry = (PicksTemplate) candidate.source();
                 yield toPicksTemplateFeedItem(entry, picksTemplatePreviews.get(entry.getId()));
             }
-            case DAILY_GAME_RESULT -> toDailyGameFeedItem((UserDailyGameResult) candidate.source());
+            case DAILY_GAME_RESULT -> {
+                UserDailyGameResult result = (UserDailyGameResult) candidate.source();
+                yield toDailyGameFeedItem(result,
+                        viewerTerminalDailyChallengeIds.contains(result.getDailyChallenge().getId()));
+            }
         };
     }
 
@@ -647,7 +677,23 @@ public class FeedServiceImpl implements FeedService {
                 entry.getCreatedAt());
     }
 
-    private FeedItemDTO toDailyGameFeedItem(UserDailyGameResult result) {
+    private Set<UUID> loadViewerTerminalDailyChallengeIds(
+            UUID viewerId, Collection<UserDailyGameResult> dailyGameEntries) {
+        List<UUID> challengeIds = dailyGameEntries.stream()
+                .map(result -> result.getDailyChallenge().getId())
+                .distinct()
+                .toList();
+        if (challengeIds.isEmpty()) {
+            return Set.of();
+        }
+        return dailyGameResultRepository.findByUserIdAndDailyChallengeIdIn(viewerId, challengeIds).stream()
+                .filter(result -> result.getStatus() == DailyGameResultStatus.COMPLETED
+                        || result.getStatus() == DailyGameResultStatus.FAILED)
+                .map(result -> result.getDailyChallenge().getId())
+                .collect(Collectors.toSet());
+    }
+
+    private FeedItemDTO toDailyGameFeedItem(UserDailyGameResult result, boolean viewerCanSeeAnswer) {
         DailyChallenge challenge = result.getDailyChallenge();
         DailyGameResultPreviewDTO preview = new DailyGameResultPreviewDTO(
                 challenge.getChallengeDate(),
@@ -657,7 +703,7 @@ public class FeedServiceImpl implements FeedService {
                 toViewStatus(result.getStatus()),
                 result.getAttemptsUsed(),
                 result.getScore(),
-                dailyChallengeResponseAssembler.toAnswer(challenge));
+                viewerCanSeeAnswer ? dailyChallengeResponseAssembler.toAnswer(challenge) : null);
         return new FeedItemDTO(
                 FeedEventType.DAILY_GAME_RESULT,
                 result.getId(),
