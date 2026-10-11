@@ -14,6 +14,41 @@ import java.util.UUID;
 
 public interface UserListItemRepository extends JpaRepository<UserListItem, UUID> {
 
+    @Query(value = """
+            SELECT parent_id AS parentId, child_id AS childId, owner_id AS ownerId,
+                   username AS username, owner_name AS ownerName, profile_picture AS profilePicture,
+                   is_profile_public AS profilePublic, child_name AS childName, visibility AS visibility
+            FROM (
+                SELECT item.user_list_id AS parent_id, child.id AS child_id, owner.id AS owner_id,
+                       owner.username, owner.name AS owner_name, owner.profile_picture,
+                       owner.is_profile_public, child.name AS child_name, child.visibility,
+                       ROW_NUMBER() OVER (PARTITION BY item.user_list_id ORDER BY item.position ASC) AS position_rank
+                FROM user_list_items item
+                JOIN user_lists child ON child.id = item.child_list_id
+                JOIN users owner ON owner.id = child.user_id
+                WHERE item.user_list_id IN :parentIds
+                AND (child.user_id = :viewerId OR child.visibility = 'PUBLIC'
+                    OR (child.visibility = 'FOLLOWERS' AND EXISTS (
+                        SELECT 1 FROM followers f WHERE f.follower_id = :viewerId
+                        AND f.followed_id = child.user_id AND f.status = 'ACCEPTED')))
+            ) ranked WHERE position_rank <= 5
+            ORDER BY parent_id ASC, position_rank ASC
+            """, nativeQuery = true)
+    List<NestedPreview> findNestedPreviewsByParentIdIn(
+            @Param("parentIds") Collection<UUID> parentIds, @Param("viewerId") UUID viewerId);
+
+    interface NestedPreview {
+        UUID getParentId();
+        UUID getChildId();
+        UUID getOwnerId();
+        String getUsername();
+        String getOwnerName();
+        String getProfilePicture();
+        Boolean getProfilePublic();
+        String getChildName();
+        String getVisibility();
+    }
+
     long countByUserListId(UUID userListId);
 
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);

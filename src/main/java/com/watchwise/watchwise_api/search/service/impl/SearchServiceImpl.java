@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.search.service.impl;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.search.SearchTextNormalizer;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -149,7 +150,7 @@ public class SearchServiceImpl implements SearchService {
 
     private List<SearchUserListDTO> searchLists(UUID viewerId, String query, PageRequest pageRequest) {
         Slice<UserList> lists = userListRepository.findVisibleByNameContainingIgnoreCase(
-                viewerId, escapeLikeWildcards(query), pageRequest);
+                viewerId, SearchTextNormalizer.escapeLikeWildcards(query), pageRequest);
         List<UUID> listIds = lists.stream().map(UserList::getId).toList();
         Map<UUID, List<ContentRefDTO>> previewsByListId = userListItemService.getPreviewItemsByListIds(listIds);
         Map<UUID, Long> nestedCountsByListId = userListItemService.countNestedListsByListIds(listIds);
@@ -164,7 +165,7 @@ public class SearchServiceImpl implements SearchService {
     }
 
     private List<UserPreviewDTO> searchUsers(String query, PageRequest pageRequest) {
-        return userRepository.findByUsernameStartingWithIgnoreCaseForSearch(query, escapeLikeWildcards(query), pageRequest)
+        return userRepository.findByUsernameStartingWithIgnoreCaseForSearch(query, SearchTextNormalizer.escapeLikeWildcards(query), pageRequest)
                 .stream()
                 .map(this::toUserPreviewDto)
                 .toList();
@@ -192,7 +193,4 @@ public class SearchServiceImpl implements SearchService {
         }
     }
 
-    private String escapeLikeWildcards(String value) {
-        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-    }
 }
