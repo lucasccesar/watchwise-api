@@ -1395,6 +1395,7 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
                 "400", 1, 2, ContentType.EPISODE)).thenReturn(Optional.empty());
         when(contentRepository.findByTmdbIdAndType("400", ContentType.SERIES)).thenReturn(Optional.of(existingSeries));
+        when(contentRepository.findByIdForUpdate(existingSeries.getId())).thenReturn(Optional.of(existingSeries));
         when(tmdbClient.getTvFullDetails("400", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
 
         contentService.getOrCreateReference(dto);
@@ -1402,6 +1403,33 @@ class ContentServiceImplTest {
         assertThat(existingSeries.getGenres()).containsExactly("Comedy");
         assertThat(existingSeries.getReleaseYear()).isEqualTo(2015);
         assertThat(existingSeries.getCountries()).containsExactly("GB");
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Preserve Locked Parent Metadata - When The Earlier Lookup Was Missing Metadata")
+    void shouldPreserveLockedParentMetadataWhenEarlierLookupWasMissingMetadata() {
+        UUID seriesId = UUID.randomUUID();
+        Content staleSeries = Content.builder().id(seriesId).tmdbId("401").type(ContentType.SERIES).build();
+        Content lockedSeries = Content.builder().id(seriesId).tmdbId("401").type(ContentType.SERIES)
+                .genres(List.of("Comedy")).releaseYear(2015).countries(List.of("GB")).build();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "401", 1, 2, null, null);
+        TmdbTvFullDetails details = new TmdbTvFullDetails(
+                "401", null, null, null, null, null, "2010-03-14", null,
+                List.of(new TmdbGenre(1, "Drama")),
+                List.of(new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null, null, null, null, null);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "401", 1, 2, ContentType.EPISODE)).thenReturn(Optional.empty());
+        when(contentRepository.findByTmdbIdAndType("401", ContentType.SERIES)).thenReturn(Optional.of(staleSeries));
+        when(contentRepository.findByIdForUpdate(seriesId)).thenReturn(Optional.of(lockedSeries));
+        when(tmdbClient.getTvFullDetails("401", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
+
+        contentService.getOrCreateReference(dto);
+
+        assertThat(lockedSeries.getGenres()).containsExactly("Comedy");
+        assertThat(lockedSeries.getReleaseYear()).isEqualTo(2015);
+        assertThat(lockedSeries.getCountries()).containsExactly("GB");
+        verify(contentRepository).findByIdForUpdate(seriesId);
     }
 
     @Test

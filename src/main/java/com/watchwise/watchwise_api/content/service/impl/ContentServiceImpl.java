@@ -308,13 +308,35 @@ public class ContentServiceImpl implements ContentService {
     }
 
     private void reconcileMissingSeriesMetadata(Content existing, ContentRefCreationDTO seriesReference) {
-        ContentRefCreationDTO missingMetadata = new ContentRefCreationDTO(
-                seriesReference.tmdbId(), ContentType.SERIES, null, null, null, null, null,
-                existing.getRuntimeMinutes() == null ? seriesReference.runtimeMinutes() : null,
-                existing.getGenres() == null || existing.getGenres().isEmpty() ? seriesReference.genres() : null,
-                existing.getReleaseYear() == null ? seriesReference.releaseYear() : null,
-                existing.getCountries() == null || existing.getCountries().isEmpty() ? seriesReference.countries() : null);
-        reconcileExisting(existing, missingMetadata, false);
+        try {
+            newTransactionExecutor.runInNewTransaction(() -> {
+                Content current = contentRepository.findByIdForUpdate(existing.getId()).orElseThrow();
+                boolean backfillRuntime = current.getRuntimeMinutes() == null && seriesReference.runtimeMinutes() != null;
+                boolean backfillGenres = (current.getGenres() == null || current.getGenres().isEmpty())
+                        && seriesReference.genres() != null && !seriesReference.genres().isEmpty();
+                boolean backfillReleaseYear = current.getReleaseYear() == null && seriesReference.releaseYear() != null;
+                boolean backfillCountries = (current.getCountries() == null || current.getCountries().isEmpty())
+                        && seriesReference.countries() != null && !seriesReference.countries().isEmpty();
+                if (!backfillRuntime && !backfillGenres && !backfillReleaseYear && !backfillCountries) {
+                    return current;
+                }
+                if (backfillRuntime) {
+                    current.setRuntimeMinutes(seriesReference.runtimeMinutes());
+                }
+                if (backfillGenres) {
+                    current.setGenres(seriesReference.genres());
+                }
+                if (backfillReleaseYear) {
+                    current.setReleaseYear(seriesReference.releaseYear());
+                }
+                if (backfillCountries) {
+                    current.setCountries(seriesReference.countries());
+                }
+                current.setUpdatedAt(LocalDateTime.now());
+                return contentRepository.saveAndFlush(current);
+            });
+        } catch (DataIntegrityViolationException ignored) {
+        }
     }
 
     private record ResolvedContentReference(ContentRefCreationDTO content, ContentRefCreationDTO parentSeries) {

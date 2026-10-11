@@ -264,12 +264,20 @@ class ContentControllerIntegrationTest {
         Content existing = contentRepository
                 .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("1396", 2, null, ContentType.SEASON)
                 .orElseThrow();
+        Content parent = contentRepository.findByTmdbIdAndType("1396", ContentType.SERIES).orElseThrow();
 
         mockMvc.perform(referenceRequest(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(existing.getId().toString()));
 
-        assertThat(contentRepository.findAll()).hasSize(1);
+        Content parentAfterRepeat = contentRepository.findByTmdbIdAndType("1396", ContentType.SERIES).orElseThrow();
+        assertThat(parentAfterRepeat.getId()).isEqualTo(parent.getId());
+        assertThat(contentRepository.findAll()).extracting(Content::getType)
+                .containsExactlyInAnyOrder(ContentType.SERIES, ContentType.SEASON);
+        assertThat(contentRepository.findByTmdbIdAndType("1396", ContentType.SERIES))
+                .get().extracting(Content::getId).isEqualTo(parent.getId());
+        assertThat(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "1396", 2, null, ContentType.SEASON)).get().extracting(Content::getId).isEqualTo(existing.getId());
     }
 
     @Test

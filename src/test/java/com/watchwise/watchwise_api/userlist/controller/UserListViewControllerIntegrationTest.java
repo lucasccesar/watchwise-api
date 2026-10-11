@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadataKey;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.comment.entity.Comment;
@@ -96,7 +97,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getMyListView] Should Return A Deduplicated Visual Page Envelope - When Source Is All")
-    void sourceAllReturnsDeduplicatedPageEnvelope() throws Exception {
+    void shouldReturnDeduplicatedVisualPageEnvelopeWhenSourceIsAll() throws Exception {
         RegisteredUser owner = register("viewallowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
         UserList list = persistList(ownerEntity, "Shared list", UserListVisibility.PUBLIC);
@@ -123,7 +124,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getDiscoverListView] Should Omit Nonpublic Lists And Accept Public Sorts - When Discovering Lists")
-    void discoverHidesNonPublicListsAndAcceptsPublicSorts() throws Exception {
+    void shouldOmitNonpublicListsAndAcceptPublicSortsWhenDiscoveringLists() throws Exception {
         RegisteredUser viewer = register("viewdiscoverviewer");
         RegisteredUser owner = register("viewdiscoverowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
@@ -141,7 +142,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getDiscoverListView] Should Accept Omitted And Blank Queries - When Searching Lists")
-    void discoverAcceptsOmittedAndWhitespaceQuery() throws Exception {
+    void shouldAcceptOmittedAndBlankQueriesWhenSearchingLists() throws Exception {
         RegisteredUser viewer = register("viewqueryviewer");
         RegisteredUser owner = register("viewqueryowner");
         persistList(users.findById(owner.id()).orElseThrow(), "Visible", UserListVisibility.PUBLIC);
@@ -154,7 +155,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getDiscoverListView] Should Require Authentication And Reject Invalid Query Values - When Calling Visual Routes")
-    void visualRoutesRequireAuthenticationAndReturnApiErrorsForInvalidParameters() throws Exception {
+    void shouldRequireAuthenticationAndRejectInvalidQueryValuesWhenCallingVisualRoutes() throws Exception {
         mockMvc.perform(get("/lists/discover/view"))
                 .andExpect(status().isUnauthorized());
 
@@ -176,7 +177,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getUserLists] Should Keep The Existing DTO Shape - When Calling A Raw List Route")
-    void rawListRoutesKeepTheirExistingDtos() throws Exception {
+    void shouldKeepTheExistingDtoShapeWhenCallingARawListRoute() throws Exception {
         RegisteredUser owner = register("viewrawowner");
         RegisteredUser viewer = register("viewrawviewer");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
@@ -190,7 +191,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getUserListView] Should Apply Item Type And Genre Filters - When Reading User Lists")
-    void userViewAppliesItemTypeAndGenreFilters() throws Exception {
+    void shouldApplyItemTypeAndGenreFiltersWhenReadingUserLists() throws Exception {
         RegisteredUser viewer = register("viewfilterviewer");
         RegisteredUser owner = register("viewfilterowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
@@ -208,8 +209,39 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getUserListView] Should Filter Every Content Type And Nested Lists - When Item Type Is Selected")
+    void shouldFilterEveryContentTypeAndNestedListsWhenItemTypeIsSelected() throws Exception {
+        RegisteredUser viewer = register("viewtypesviewer");
+        RegisteredUser owner = register("viewtypesowner");
+        User ownerEntity = users.findById(owner.id()).orElseThrow();
+        UserList movie = persistList(ownerEntity, "Movie only", UserListVisibility.PUBLIC);
+        UserList series = persistList(ownerEntity, "Series only", UserListVisibility.PUBLIC);
+        UserList season = persistList(ownerEntity, "Season only", UserListVisibility.PUBLIC);
+        UserList episode = persistList(ownerEntity, "Episode only", UserListVisibility.PUBLIC);
+        UserList nested = persistList(ownerEntity, "Nested only", UserListVisibility.PUBLIC);
+        persistItem(movie, ContentType.MOVIE, null);
+        persistItem(series, ContentType.SERIES, null);
+        persistItem(season, ContentType.SEASON, null);
+        persistItem(episode, ContentType.EPISODE, null);
+        UserList child = persistList(ownerEntity, "Child list", UserListVisibility.PUBLIC);
+        persistNestedItem(nested, child, 1);
+
+        for (var expected : List.of(
+                new Object[]{"MOVIE", movie}, new Object[]{"SERIES", series},
+                new Object[]{"SEASON", season}, new Object[]{"EPISODE", episode},
+                new Object[]{"LIST", nested})) {
+            String itemType = (String) expected[0];
+            UserList expectedList = (UserList) expected[1];
+            mockMvc.perform(userView(viewer, owner.id()).param("itemType", itemType))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content.length()").value(1))
+                    .andExpect(jsonPath("$.content[0].id").value(expectedList.getId().toString()));
+        }
+    }
+
+    @Test
     @DisplayName("[getDiscoverListView] Should Apply Name Likes Item And Comment Ordering In Both Directions - When Multiple Public Lists Exist")
-    void discoverViewAppliesNameLikesItemAndCommentOrderingInBothDirectionsWhenMultiplePublicListsExist() throws Exception {
+    void shouldApplyNameLikesItemAndCommentOrderingInBothDirectionsWhenMultiplePublicListsExist() throws Exception {
         RegisteredUser viewer = register("vieworderviewer");
         RegisteredUser owner = register("vieworderowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
@@ -258,7 +290,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getMyListView] Should Omit A Private Nested Child And Keep A Later Public Child - When Assembling Previews")
-    void myViewOmitsPrivateNestedChildAndKeepsLaterPublicChildWhenAssemblingPreviews() throws Exception {
+    void shouldOmitPrivateNestedChildAndKeepLaterPublicChildWhenAssemblingPreviews() throws Exception {
         RegisteredUser owner = register("viewnestedowner");
         RegisteredUser childOwner = register("viewnestedchildowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
@@ -280,7 +312,7 @@ class UserListViewControllerIntegrationTest {
 
     @Test
     @DisplayName("[getMyListView] Should Return An Unavailable Preview Card - When TMDB Metadata Cannot Be Loaded")
-    void myViewReturnsUnavailablePreviewCardWhenTmdbMetadataCannotBeLoaded() throws Exception {
+    void shouldReturnAnUnavailablePreviewCardWhenTmdbMetadataCannotBeLoaded() throws Exception {
         RegisteredUser owner = register("viewtmdbowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
         UserList list = persistList(ownerEntity, "With content", UserListVisibility.PUBLIC);
@@ -292,6 +324,23 @@ class UserListViewControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].previewCards.length()").value(1))
                 .andExpect(jsonPath("$.content[0].previewCards[0].previewStatus").value("UNAVAILABLE"));
+    }
+
+    @Test
+    @DisplayName("[getMyListView] Should Return A Partial Preview Card - When TMDB Returns Incomplete Metadata")
+    void shouldReturnAPartialPreviewCardWhenTmdbReturnsIncompleteMetadata() throws Exception {
+        RegisteredUser owner = register("viewpartialowner");
+        User ownerEntity = users.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Partial card", UserListVisibility.PUBLIC);
+        persistItem(list, ContentType.MOVIE, null);
+        when(tmdbClient.getCardMetadata(any(TmdbCardMetadataKey.class), eq("en-US")))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbCardMetadata("Known title", null, null, null)));
+
+        mockMvc.perform(myView(owner).param("source", "OWNED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].previewCards.length()").value(1))
+                .andExpect(jsonPath("$.content[0].previewCards[0].previewStatus").value("PARTIAL"))
+                .andExpect(jsonPath("$.content[0].previewCards[0].title").value("Known title"));
     }
 
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {}
@@ -320,9 +369,18 @@ class UserListViewControllerIntegrationTest {
     private void persistItem(UserList list, ContentType type, String genre) {
         LocalDateTime now = LocalDateTime.now();
         String tmdbId = UUID.randomUUID().toString().substring(0, 20);
-        Content content = contents.save(Content.builder().type(type)
-                .tmdbId(tmdbId)
-                .genres(genre == null ? null : List.of(genre)).createdAt(now).updatedAt(now).build());
+        String seriesTmdbId = UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+        Content.ContentBuilder contentBuilder = Content.builder().type(type)
+                .genres(genre == null ? null : List.of(genre)).createdAt(now).updatedAt(now);
+        if (type == ContentType.MOVIE || type == ContentType.SERIES) {
+            contentBuilder.tmdbId(tmdbId);
+        } else {
+            contentBuilder.seriesTmdbId(seriesTmdbId).seasonNumber(2);
+            if (type == ContentType.EPISODE) {
+                contentBuilder.episodeNumber(3);
+            }
+        }
+        Content content = contents.save(contentBuilder.build());
         int position = items.findByUserListIdOrderByPositionAsc(list.getId()).size() + 1;
         items.save(UserListItem.builder().userList(list).content(content).position(position)
                 .createdAt(now).updatedAt(now).build());
