@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.userlist.repository;
 
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.userlist.dto.*;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import jakarta.persistence.EntityManager;
@@ -28,12 +29,15 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
         Query count = entityManager.createNativeQuery("SELECT COUNT(*) FROM user_lists ul WHERE " + where);
         bind(count, params);
         long total = ((Number) count.getSingleResult()).longValue();
-        if (total == 0) return new PageImpl<>(java.util.List.of(), request.pageable(), 0);
+        long offset = request.pageable().getOffset();
+        if (offset >= total) return new PageImpl<>(java.util.List.of(), request.pageable(), total);
+        if (offset > Integer.MAX_VALUE)
+            throw new BadRequestException("Page offset is too large");
 
         Query select = entityManager.createNativeQuery(
                 "SELECT ul.* FROM user_lists ul WHERE " + where + orderBy(request), UserList.class);
         bind(select, params);
-        select.setFirstResult(Math.toIntExact(request.pageable().getOffset()));
+        select.setFirstResult((int) offset);
         select.setMaxResults(request.pageable().getPageSize());
         return new PageImpl<>(select.getResultList(), request.pageable(), total);
     }

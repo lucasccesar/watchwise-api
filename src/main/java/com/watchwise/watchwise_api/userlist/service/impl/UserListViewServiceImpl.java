@@ -88,10 +88,12 @@ public class UserListViewServiceImpl implements UserListViewService {
     private UserListViewQuery validateAndBuild(UserListViewRequest request) {
         if (request == null || request.viewerId() == null || request.mode() == null)
             throw new BadRequestException("Viewer and mode are required");
+        UserListViewSource source = request.mode() == UserListViewQueryMode.MY && request.source() == null
+                ? UserListViewSource.ALL : request.source();
         switch (request.mode()) {
             case MY -> {
-                if (request.source() == null || request.ownerId() != null)
-                    throw new BadRequestException("MY requires source and rejects ownerId");
+                if (request.ownerId() != null)
+                    throw new BadRequestException("MY rejects ownerId");
             }
             case USER -> {
                 if (request.ownerId() == null || request.source() != null)
@@ -106,14 +108,14 @@ public class UserListViewServiceImpl implements UserListViewService {
             throw new BadRequestException("sortDirection must be one of: asc, desc");
         UserListViewSort sort = request.sortBy() == null ? null : UserListViewSort.fromApiValue(request.sortBy());
         if (sort != null && (sort == UserListViewSort.UPDATED_AT || sort == UserListViewSort.RANK)
-                && !(request.mode() == UserListViewQueryMode.MY && request.source() == UserListViewSource.OWNED))
+                && !(request.mode() == UserListViewQueryMode.MY && source == UserListViewSource.OWNED))
             throw new BadRequestException("Sort is unavailable for this list view");
         if (request.size() != null && request.size() < 10)
             throw new BadRequestException("Page size must be at least 10");
         PageRequest pageable = pages.build(request.page(), request.size(), 10);
         String normalizedQuery = SearchTextNormalizer.normalizeOptionalQuery(request.query());
         String genre = request.genre() == null || request.genre().isBlank() ? null : request.genre().trim();
-        return new UserListViewQuery(request.viewerId(), request.ownerId(), request.mode(), request.source(),
+        return new UserListViewQuery(request.viewerId(), request.ownerId(), request.mode(), source,
                 normalizedQuery, request.itemType(), genre, sort,
                 "desc".equals(request.sortDirection()) ? Sort.Direction.DESC : Sort.Direction.ASC, pageable);
     }

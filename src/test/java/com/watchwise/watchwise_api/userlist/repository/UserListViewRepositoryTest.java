@@ -31,6 +31,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -78,6 +79,40 @@ class UserListViewRepositoryTest {
         Page<UserList> all = views.findPage(query(UserListViewQueryMode.MY, UserListViewSource.ALL));
         assertThat(all.getTotalElements()).isEqualTo(3);
         assertThat(all.map(UserList::getId).getContent()).containsExactly(both.getId(), mine.getId(), liked.getId());
+    }
+
+    @Test void allSourcePaginatesOwnedAndLikedUnionWithoutDuplicatingAnOwnedLike() {
+        UserList oldest = list(owner, "liked", UserListVisibility.PRIVATE, 0, 1, null);
+        UserList middle = list(viewer, "owned", UserListVisibility.PRIVATE, 0, 2, null);
+        UserList newest = list(viewer, "owned-liked", UserListVisibility.PUBLIC, 0, 3, null);
+        like(viewer, oldest, 1);
+        like(viewer, newest, 2);
+        em.flush(); em.clear();
+
+        UserListViewQuery base = query(UserListViewQueryMode.MY, UserListViewSource.ALL);
+        for (int page = 0; page < 3; page++) {
+            UserListViewQuery paged = new UserListViewQuery(base.viewerId(), base.ownerId(), base.mode(),
+                    base.source(), base.query(), base.itemType(), base.genre(), base.sortBy(),
+                    base.direction(), PageRequest.of(page, 1));
+            Page<UserList> result = views.findPage(paged);
+            assertThat(result.getTotalElements()).isEqualTo(3);
+            assertThat(result.getContent()).extracting(UserList::getId)
+                    .containsExactly(List.of(newest, middle, oldest).get(page).getId());
+        }
+    }
+
+    @Test void hugePositivePageBeyondCountReturnsEmptyPageWithRealTotal() {
+        list(viewer, "only", UserListVisibility.PUBLIC, 0, 1, null);
+        em.flush(); em.clear();
+        UserListViewQuery base = query(UserListViewQueryMode.MY, UserListViewSource.OWNED);
+        UserListViewQuery huge = new UserListViewQuery(base.viewerId(), null, base.mode(), base.source(),
+                null, null, null, null, Sort.Direction.ASC, PageRequest.of(Integer.MAX_VALUE - 1, 10));
+
+        Page<UserList> result = views.findPage(huge);
+
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getNumber()).isEqualTo(Integer.MAX_VALUE - 1);
     }
 
     @Test void userModeHonorsPrivateProfileBarrierAndAcceptedFollow() {
@@ -209,6 +244,72 @@ class UserListViewRepositoryTest {
                 .containsExactly(high.getId(), low.getId());
     }
 
+    @Test void likedDefaultOrderUsesLikeIdWhenCreationTimestampsTie() {
+        UserList first = list(owner, "first", UserListVisibility.PUBLIC, 0, 1, null);
+        UserList second = list(owner, "second", UserListVisibility.PUBLIC, 0, 2, null);
+        Like firstLike = like(viewer, first, 1);
+        Like secondLike = like(viewer, second, 1);
+        em.flush(); em.clear();
+        List<UUID> expected = firstLike.getId().toString().compareTo(secondLike.getId().toString()) > 0
+                ? List.of(first.getId(), second.getId()) : List.of(second.getId(), first.getId());
+
+        assertThat(ids(query(UserListViewQueryMode.MY, UserListViewSource.LIKED)))
+                .containsExactlyElementsOf(expected);
+    }
+
+    @Test void ownedUpdatedAtSortRespectsBothDirections() {
+        UserList old = list(viewer, "old", UserListVisibility.PUBLIC, 0, 1, null);
+        UserList recent = list(viewer, "recent", UserListVisibility.PUBLIC, 0, 2, null);
+        em.flush(); em.clear();
+        assertThat(ids(sorted(UserListViewSort.UPDATED_AT, Sort.Direction.ASC)))
+                .containsExactly(old.getId(), recent.getId());
+        assertThat(ids(sorted(UserListViewSort.UPDATED_AT, Sort.Direction.DESC)))
+                .containsExactly(recent.getId(), old.getId());
+    }
+
+    @Test void uuidTieBreakIsStableForBothDirectionsAndDiscoveryDefault() {
+        UserList a = list(viewer, "same", UserListVisibility.PUBLIC, 2, 1, null);
+        UserList b = list(viewer, "same", UserListVisibility.PUBLIC, 2, 1, null);
+        em.flush(); em.clear();
+        List<UUID> expected = List.of(a.getId(), b.getId()).stream()
+                .sorted(Comparator.comparing(UUID::toString).reversed()).toList();
+        assertThat(ids(sorted(UserListViewSort.NAME, Sort.Direction.ASC))).containsExactlyElementsOf(expected);
+        assertThat(ids(sorted(UserListViewSort.NAME, Sort.Direction.DESC))).containsExactlyElementsOf(expected);
+        assertThat(ids(query(UserListViewQueryMode.DISCOVER, null))).containsExactlyElementsOf(expected);
+    }
+
+    @Test void communitySortsSupportBothDirectionsInUserAndDiscoveryModes() {
+        owner.setIsProfilePublic(true);
+        users.save(owner);
+        UserList low = list(owner, "Alpha", UserListVisibility.PUBLIC, 1, 1, null);
+        UserList high = list(owner, "Beta", UserListVisibility.PUBLIC, 2, 2, null);
+        item(low, content(ContentType.MOVIE, "410", "Drama"), null, 1);
+        item(high, content(ContentType.MOVIE, "411", "Drama"), null, 1);
+        item(high, content(ContentType.MOVIE, "412", "Drama"), null, 2);
+        comments.save(Comment.builder().user(viewer).list(low).text("one")
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        comments.save(Comment.builder().user(viewer).list(high).text("two")
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        comments.save(Comment.builder().user(viewer).list(high).text("three")
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        em.flush(); em.clear();
+
+        for (UserListViewQueryMode mode : List.of(UserListViewQueryMode.USER, UserListViewQueryMode.DISCOVER)) {
+            for (UserListViewSort sort : List.of(UserListViewSort.NAME, UserListViewSort.LIKES_COUNT,
+                    UserListViewSort.ITEMS_COUNT, UserListViewSort.COMMENTS_COUNT)) {
+                UserListViewQuery base = query(mode, null);
+                UserListViewQuery ascending = new UserListViewQuery(base.viewerId(), base.ownerId(), mode,
+                        null, null, null, null, sort, Sort.Direction.ASC, PageRequest.of(0, 10));
+                UserListViewQuery descending = new UserListViewQuery(base.viewerId(), base.ownerId(), mode,
+                        null, null, null, null, sort, Sort.Direction.DESC, PageRequest.of(0, 10));
+                assertThat(ids(ascending)).as("%s %s ascending", mode, sort)
+                        .containsExactly(low.getId(), high.getId());
+                assertThat(ids(descending)).as("%s %s descending", mode, sort)
+                        .containsExactly(high.getId(), low.getId());
+            }
+        }
+    }
+
     @Test void invalidModeSourceCombinationsAreRejected() {
         assertThatThrownBy(() -> views.findPage(query(UserListViewQueryMode.MY, null))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> views.findPage(query(UserListViewQueryMode.USER, UserListViewSource.ALL))).isInstanceOf(IllegalArgumentException.class);
@@ -249,7 +350,8 @@ class UserListViewRepositoryTest {
         items.save(UserListItem.builder().userList(parent).content(content).childList(child).position(position)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
     }
-    private void like(User user, UserList list, int minute) {
-        likes.save(Like.builder().user(user).list(list).createdAt(LocalDateTime.of(2026, 1, 3, 0, minute)).build());
+    private Like like(User user, UserList list, int minute) {
+        return likes.save(Like.builder().user(user).list(list)
+                .createdAt(LocalDateTime.of(2026, 1, 3, 0, minute)).build());
     }
 }

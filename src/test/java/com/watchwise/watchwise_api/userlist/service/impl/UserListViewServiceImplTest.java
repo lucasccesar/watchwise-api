@@ -62,7 +62,6 @@ class UserListViewServiceImplTest {
 
     @Test void validatesModeSourceOwnerSortDirectionAndPageSizeBeforeQuerying() {
         assertBad(request(null, null, null, null, null, null, 1, 10));
-        assertBad(request(UserListViewQueryMode.MY, null, null, null, null, null, 1, 10));
         assertBad(request(UserListViewQueryMode.USER, UserListViewSource.OWNED, viewer, null, null, null, 1, 10));
         assertBad(request(UserListViewQueryMode.USER, null, null, null, null, null, 1, 10));
         assertBad(request(UserListViewQueryMode.DISCOVER, null, viewer, null, null, null, 1, 10));
@@ -73,6 +72,22 @@ class UserListViewServiceImplTest {
         assertBad(request(UserListViewQueryMode.MY, UserListViewSource.OWNED, null, null, null, null, 1, 9));
         assertBad(request(UserListViewQueryMode.DISCOVER, null, null, "x".repeat(101), null, null, 1, 10));
         verifyNoInteractions(repository);
+    }
+
+    @Test void omittedMySourceDefaultsToAllBeforeRepositoryQuery() {
+        when(repository.findPage(any())).thenAnswer(invocation -> {
+            UserListViewQuery query = invocation.getArgument(0);
+            return new PageImpl<UserList>(List.of(), query.pageable(), 21);
+        });
+
+        var result = service.getView(request(UserListViewQueryMode.MY, null, null,
+                null, null, null, 2, 10));
+
+        ArgumentCaptor<UserListViewQuery> captor = ArgumentCaptor.forClass(UserListViewQuery.class);
+        verify(repository).findPage(captor.capture());
+        assertThat(captor.getValue().source()).isEqualTo(UserListViewSource.ALL);
+        assertThat(captor.getValue().pageable().getPageNumber()).isEqualTo(1);
+        assertThat(result.getTotalElements()).isEqualTo(21);
     }
 
     @Test void translatesPaginationAndEscapedSearchWhilePreservingPageMetadata() {
