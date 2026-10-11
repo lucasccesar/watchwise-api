@@ -88,23 +88,39 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
             where.append(" AND LOWER(ul.name) LIKE '%' || LOWER(:nameQuery) || '%' ESCAPE '\\'");
             params.put("nameQuery", request.query());
         }
-        boolean directType = request.itemType() != null && request.itemType() != UserListViewItemType.LIST;
         boolean hasGenre = request.genre() != null && !request.genre().isBlank();
         if (request.itemType() != null) {
             if (request.itemType() == UserListViewItemType.LIST) {
                 where.append(" AND EXISTS (SELECT 1 FROM user_list_items item WHERE item.user_list_id = ul.id AND item.child_list_id IS NOT NULL)");
+                if (hasGenre) where.append(" AND 1 = 0");
             } else {
                 where.append(" AND EXISTS (SELECT 1 FROM user_list_items item JOIN contents c ON c.id = item.content_id WHERE item.user_list_id = ul.id AND c.type = :itemType");
-                if (hasGenre) where.append(" AND EXISTS (SELECT 1 FROM unnest(c.genres) genre WHERE LOWER(genre) = LOWER(:genre))");
+                if (hasGenre) where.append(" AND ").append(genrePredicate("c", request.itemType()));
                 where.append(')');
                 params.put("itemType", request.itemType().name());
             }
         }
-        if (hasGenre && !directType) {
-            where.append(" AND EXISTS (SELECT 1 FROM user_list_items item JOIN contents c ON c.id = item.content_id CROSS JOIN LATERAL unnest(c.genres) genre WHERE item.user_list_id = ul.id AND LOWER(genre) = LOWER(:genre))");
+        if (hasGenre && request.itemType() == null) {
+            where.append(" AND EXISTS (SELECT 1 FROM user_list_items item JOIN contents c ON c.id = item.content_id WHERE item.user_list_id = ul.id AND ")
+                    .append(genrePredicate("c", null)).append(')');
         }
         if (hasGenre) params.put("genre", request.genre().trim());
         return where.toString();
+    }
+
+    private String genrePredicate(String contentAlias, UserListViewItemType itemType) {
+        String directGenreMatch = "EXISTS (SELECT 1 FROM unnest(" + contentAlias
+                + ".genres) genre WHERE LOWER(genre) = LOWER(:genre))";
+        String seriesGenreMatch = "EXISTS (SELECT 1 FROM contents series WHERE series.type = 'SERIES' AND series.tmdb_id = "
+                + contentAlias + ".series_tmdb_id AND EXISTS (SELECT 1 FROM unnest(series.genres) genre WHERE LOWER(genre) = LOWER(:genre)))";
+        if (itemType == UserListViewItemType.MOVIE || itemType == UserListViewItemType.SERIES) {
+            return directGenreMatch;
+        }
+        if (itemType == UserListViewItemType.SEASON || itemType == UserListViewItemType.EPISODE) {
+            return seriesGenreMatch;
+        }
+        return "((" + contentAlias + ".type IN ('MOVIE', 'SERIES') AND " + directGenreMatch + ") OR ("
+                + contentAlias + ".type IN ('SEASON', 'EPISODE') AND " + seriesGenreMatch + "))";
     }
 
     private String orderBy(UserListViewQuery request) {

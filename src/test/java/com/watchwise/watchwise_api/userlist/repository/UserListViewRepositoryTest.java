@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.userlist.dto.*;
 import com.watchwise.watchwise_api.userlist.entity.*;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -146,7 +147,9 @@ class UserListViewRepositoryTest {
                 .getContent()).extracting(UserList::getId).containsExactly(second.getId());
     }
 
-    @Test void directContentTypesAndNestedListTypeDoNotCrossMatch() {
+    @Test
+    @DisplayName("[findPage] Should Match Direct Genres And Keep Nested Lists Separate - When Filtering Content And List Items")
+    void directContentTypesAndNestedListTypeDoNotCrossMatch() {
         UserList parent = list(viewer, "parent", UserListVisibility.PUBLIC, 1, 1, null);
         UserList child = list(viewer, "child", UserListVisibility.PUBLIC, 1, 2, null);
         item(parent, content(ContentType.SEASON, "2", "Drama"), null, 1);
@@ -155,7 +158,38 @@ class UserListViewRepositoryTest {
         assertThat(ids(filter(UserListViewItemType.SEASON, null))).contains(parent.getId());
         assertThat(ids(filter(UserListViewItemType.LIST, null))).contains(parent.getId());
         assertThat(ids(filter(UserListViewItemType.MOVIE, null))).doesNotContain(parent.getId());
-        assertThat(ids(filter(null, "Drama"))).contains(parent.getId()).doesNotContain(child.getId());
+        assertThat(ids(filter(null, "Drama"))).doesNotContain(parent.getId(), child.getId());
+        assertThat(ids(filter(UserListViewItemType.LIST, "Drama"))).doesNotContain(parent.getId());
+    }
+
+    @Test
+    @DisplayName("[findPage] Should Resolve Season And Episode Genres Through Their Series - When Child Content Has No Genres")
+    void shouldResolveSeasonAndEpisodeGenresThroughTheirSeriesWhenChildContentHasNoGenres() {
+        UserList matching = list(viewer, "matching", UserListVisibility.PUBLIC, 0, 1, null);
+        UserList differentSeries = list(viewer, "different-series", UserListVisibility.PUBLIC, 0, 2, null);
+        UserList nestedOnly = list(viewer, "nested-only", UserListVisibility.PUBLIC, 0, 3, null);
+        UserList child = list(viewer, "child", UserListVisibility.PUBLIC, 0, 4, null);
+
+        contents.save(Content.builder().type(ContentType.SERIES).tmdbId("100")
+                .genres(List.of("Drama")).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        contents.save(Content.builder().type(ContentType.SERIES).tmdbId("200")
+                .genres(List.of("Comedy")).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Content season = contentWithoutGenres(ContentType.SEASON, "100");
+        Content episode = contentWithoutGenres(ContentType.EPISODE, "100");
+        Content unrelatedEpisode = contentWithoutGenres(ContentType.EPISODE, "200");
+        item(matching, season, null, 1);
+        item(matching, episode, null, 2);
+        item(differentSeries, unrelatedEpisode, null, 1);
+        item(nestedOnly, null, child, 1);
+        em.flush();
+        em.clear();
+
+        UserListViewQuery anyDrama = filter(null, "Drama");
+        assertThat(views.findPage(anyDrama).getTotalElements()).isEqualTo(1);
+        assertThat(ids(anyDrama)).containsExactly(matching.getId());
+        assertThat(ids(filter(UserListViewItemType.SEASON, "Drama"))).containsExactly(matching.getId());
+        assertThat(ids(filter(UserListViewItemType.EPISODE, "Drama"))).containsExactly(matching.getId());
+        assertThat(ids(filter(UserListViewItemType.LIST, "Drama"))).isEmpty();
     }
 
     @Test void allFourContentTypesMatchOnlyTheirOwnDirectItems() {
@@ -345,6 +379,11 @@ class UserListViewRepositoryTest {
                 .seasonNumber(type == ContentType.SEASON || type == ContentType.EPISODE ? 1 : null)
                 .episodeNumber(type == ContentType.EPISODE ? 1 : null)
                 .genres(List.of(genre)).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+    }
+    private Content contentWithoutGenres(ContentType type, String seriesTmdbId) {
+        return contents.save(Content.builder().type(type).seriesTmdbId(seriesTmdbId).seasonNumber(1)
+                .episodeNumber(type == ContentType.EPISODE ? 1 : null)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
     }
     private void item(UserList parent, Content content, UserList child, int position) {
         items.save(UserListItem.builder().userList(parent).content(content).childList(child).position(position)
