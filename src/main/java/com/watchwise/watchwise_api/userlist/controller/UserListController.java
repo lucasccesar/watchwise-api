@@ -8,7 +8,13 @@ import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListCardDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewItemType;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewQueryMode;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewRequest;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewSource;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
+import com.watchwise.watchwise_api.userlist.service.UserListViewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -24,6 +30,53 @@ import java.util.UUID;
 public class UserListController {
 
     private final UserListService userListService;
+    private final UserListViewService userListViewService;
+
+    @GetMapping("/users/me/lists/view")
+    public ResponseEntity<PageResponseDTO<UserListCardDTO>> getMyListView(
+            @RequestParam(required = false) UserListViewSource source,
+            @RequestParam(required = false) UserListViewItemType itemType,
+            @RequestParam(required = false) String genre,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortDirection,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        return getListView(new UserListViewRequest(getCurrentUserId(), null, UserListViewQueryMode.MY,
+                source, null, itemType, genre, sortBy, sortDirection, page, size));
+    }
+
+    @GetMapping("/users/{userId}/lists/view")
+    public ResponseEntity<PageResponseDTO<UserListCardDTO>> getUserListView(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) UserListViewItemType itemType,
+            @RequestParam(required = false) String genre,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortDirection,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        return getListView(new UserListViewRequest(getCurrentUserId(), userId, UserListViewQueryMode.USER,
+                null, null, itemType, genre, sortBy, sortDirection, page, size));
+    }
+
+    @GetMapping("/lists/discover/view")
+    public ResponseEntity<PageResponseDTO<UserListCardDTO>> getDiscoverListView(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) UserListViewItemType itemType,
+            @RequestParam(required = false) String genre,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortDirection,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        return getListView(new UserListViewRequest(getCurrentUserId(), null, UserListViewQueryMode.DISCOVER,
+                null, q, itemType, genre, sortBy, sortDirection, page, size));
+    }
+
+    private ResponseEntity<PageResponseDTO<UserListCardDTO>> getListView(UserListViewRequest request) {
+        return ResponseEntity.ok(PageResponseDTO.of(userListViewService.getView(request)));
+    }
 
     @GetMapping("/users/{userId}/lists")
     public ResponseEntity<PageResponseDTO<UserListResponseDTO>> getUserLists(

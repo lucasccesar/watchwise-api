@@ -11,6 +11,11 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewItemType;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewQueryMode;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewRequest;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewSource;
+import com.watchwise.watchwise_api.userlist.service.UserListViewService;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
 import org.junit.jupiter.api.AfterEach;
@@ -23,6 +28,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -34,6 +40,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,6 +48,9 @@ class UserListControllerTest {
 
     @Mock
     private UserListService userListService;
+
+    @Mock
+    private UserListViewService userListViewService;
 
     @InjectMocks
     private UserListController userListController;
@@ -142,6 +152,58 @@ class UserListControllerTest {
         userListController.getDiscoverLists(null, null);
 
         verify(userListService).getDiscoverLists(currentUserId, null, null);
+    }
+
+    @Test
+    void myViewPassesAllParametersAndAuthenticatedViewer() {
+        when(userListViewService.getView(any())).thenReturn(Page.empty());
+        userListController.getMyListView(UserListViewSource.ALL, UserListViewItemType.SERIES,
+                "Drama", "likesCount", "desc", 2, 25);
+
+        ArgumentCaptor<UserListViewRequest> request = ArgumentCaptor.forClass(UserListViewRequest.class);
+        verify(userListViewService).getView(request.capture());
+        assertThat(request.getValue()).isEqualTo(new UserListViewRequest(currentUserId, null,
+                UserListViewQueryMode.MY, UserListViewSource.ALL, null, UserListViewItemType.SERIES,
+                "Drama", "likesCount", "desc", 2, 25));
+    }
+
+    @Test
+    void myViewLeavesOmittedSourceNull() {
+        when(userListViewService.getView(any())).thenReturn(Page.empty());
+        userListController.getMyListView(null, null, null, null, null, null, null);
+
+        ArgumentCaptor<UserListViewRequest> request = ArgumentCaptor.forClass(UserListViewRequest.class);
+        verify(userListViewService).getView(request.capture());
+        assertThat(request.getValue().viewerId()).isEqualTo(currentUserId);
+        assertThat(request.getValue().mode()).isEqualTo(UserListViewQueryMode.MY);
+        assertThat(request.getValue().source()).isNull();
+    }
+
+    @Test
+    void userViewUsesTargetAsOwnerAndAuthenticatedViewer() {
+        when(userListViewService.getView(any())).thenReturn(Page.empty());
+        UUID ownerId = UUID.randomUUID();
+        userListController.getUserListView(ownerId, UserListViewItemType.MOVIE, "Drama",
+                "name", "asc", 3, 15);
+
+        ArgumentCaptor<UserListViewRequest> request = ArgumentCaptor.forClass(UserListViewRequest.class);
+        verify(userListViewService).getView(request.capture());
+        assertThat(request.getValue()).isEqualTo(new UserListViewRequest(currentUserId, ownerId,
+                UserListViewQueryMode.USER, null, null, UserListViewItemType.MOVIE,
+                "Drama", "name", "asc", 3, 15));
+    }
+
+    @Test
+    void discoverViewPassesQueryFiltersSortAndPagination() {
+        when(userListViewService.getView(any())).thenReturn(Page.empty());
+        userListController.getDiscoverListView("  space  ", UserListViewItemType.SERIES, "Drama",
+                "commentsCount", "desc", 4, 20);
+
+        ArgumentCaptor<UserListViewRequest> request = ArgumentCaptor.forClass(UserListViewRequest.class);
+        verify(userListViewService).getView(request.capture());
+        assertThat(request.getValue()).isEqualTo(new UserListViewRequest(currentUserId, null,
+                UserListViewQueryMode.DISCOVER, null, "  space  ", UserListViewItemType.SERIES,
+                "Drama", "commentsCount", "desc", 4, 20));
     }
 
     @Test
