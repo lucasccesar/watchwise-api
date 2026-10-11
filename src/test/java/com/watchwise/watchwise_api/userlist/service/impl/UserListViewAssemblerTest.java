@@ -98,6 +98,29 @@ class UserListViewAssemblerTest {
     }
 
     @Test
+    void preservesRepeatedContentCardReferencesInEachListsOriginalOrder() {
+        User owner = user(UUID.randomUUID(), "owner");
+        UserList first = list(UUID.randomUUID(), owner, "first");
+        UserList second = list(UUID.randomUUID(), owner, "second");
+        ContentCardDTO repeatedCoordinate = contentCard(21);
+        ContentCardDTO firstOnly = contentCard(22);
+        ContentCardDTO secondOnly = contentCard(23);
+
+        List<UserListCardDTO> cards = UserListViewAssembler.assemble(List.of(first, second),
+                Map.of(owner.getId(), preview(owner)),
+                Map.of(first.getId(), List.of(repeatedCoordinate, firstOnly),
+                        second.getId(), List.of(secondOnly, repeatedCoordinate)),
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Map.of(), UUID.randomUUID());
+
+        assertEquals(2, cards.size());
+        assertEquals(List.of(repeatedCoordinate, firstOnly), cards.get(0).previewCards());
+        assertEquals(List.of(secondOnly, repeatedCoordinate), cards.get(1).previewCards());
+        assertSame(repeatedCoordinate, cards.get(0).previewCards().get(0));
+        assertSame(repeatedCoordinate, cards.get(1).previewCards().get(1));
+        assertNotSame(cards.get(0).previewCards(), cards.get(1).previewCards());
+    }
+
+    @Test
     void overviewDoesNotAddProgressOrRuntimeToCallerSuppliedCards() {
         User owner = user(UUID.randomUUID(), "owner");
         UserList list = list(UUID.randomUUID(), owner, "list");
