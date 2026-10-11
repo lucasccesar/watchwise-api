@@ -16,7 +16,8 @@ import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
 import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -27,11 +28,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class ContentCardAssembler {
 
     private static final int MAX_STATS_BATCH_SIZE = 100;
@@ -40,6 +43,30 @@ public class ContentCardAssembler {
     private final ContentViewerStateService contentViewerStateService;
     private final TmdbCardMetadataResolver tmdbCardMetadataResolver;
     private final UserContentPosterService userContentPosterService;
+    private final Executor metadataResolutionExecutor;
+
+    @Autowired
+    public ContentCardAssembler(
+            ContentStatsService contentStatsService,
+            ContentViewerStateService contentViewerStateService,
+            TmdbCardMetadataResolver tmdbCardMetadataResolver,
+            UserContentPosterService userContentPosterService,
+            @Qualifier("contentCardMetadataResolutionExecutor") Executor metadataResolutionExecutor) {
+        this.contentStatsService = contentStatsService;
+        this.contentViewerStateService = contentViewerStateService;
+        this.tmdbCardMetadataResolver = tmdbCardMetadataResolver;
+        this.userContentPosterService = userContentPosterService;
+        this.metadataResolutionExecutor = metadataResolutionExecutor;
+    }
+
+    public ContentCardAssembler(
+            ContentStatsService contentStatsService,
+            ContentViewerStateService contentViewerStateService,
+            TmdbCardMetadataResolver tmdbCardMetadataResolver,
+            UserContentPosterService userContentPosterService) {
+        this(contentStatsService, contentViewerStateService, tmdbCardMetadataResolver,
+                userContentPosterService, Runnable::run);
+    }
 
     public Map<ContentCoordinate, ContentCardDTO> assemble(
             Collection<ContentCardSpec> specs,
@@ -90,12 +117,15 @@ public class ContentCardAssembler {
                         context.posterUserId(), existingContentIds)
                 : Map.of();
 
+        Map<ContentCoordinate, CardMetadata> metadataByCoordinate = metadataByCoordinate(
+                distinctSpecs, context, requestedFields);
+
         Map<ContentCoordinate, CardData> cardDataByCoordinate = distinctSpecs.stream()
                 .collect(Collectors.toMap(
                         ContentCardSpec::coordinate,
                         spec -> new CardData(
                                 spec,
-                                metadata(spec, context, requestedFields),
+                                metadataByCoordinate.get(spec.coordinate()),
                                 resolution.existingContentIdsByCoordinate().get(spec.coordinate()),
                                 resolution.statesByCoordinate().get(spec.coordinate()),
                                 statsByContentId,
@@ -113,6 +143,34 @@ public class ContentCardAssembler {
                 ? new LinkedHashMap<>(resolution.statesByCoordinate())
                 : Map.of();
         return new AssemblyResult(cards, fullViewerStates);
+    }
+
+    private Map<ContentCoordinate, CardMetadata> metadataByCoordinate(
+            List<ContentCardSpec> specs,
+            ContentCardContext context,
+            Set<ContentCardFieldSet> requestedFields) {
+        Map<ContentCoordinate, CardMetadata> metadataByCoordinate = new LinkedHashMap<>();
+        if (!requestedFields.contains(ContentCardFieldSet.BASIC_METADATA)) {
+            specs.forEach(spec -> metadataByCoordinate.put(
+                    spec.coordinate(), new CardMetadata(null, ContentPreviewStatus.AVAILABLE)));
+            return metadataByCoordinate;
+        }
+
+        List<CompletableFuture<CardMetadata>> futures = specs.stream()
+                .map(spec -> CompletableFuture.supplyAsync(
+                        () -> metadata(spec, context, requestedFields), metadataResolutionExecutor))
+                .toList();
+        for (int index = 0; index < specs.size(); index++) {
+            try {
+                metadataByCoordinate.put(specs.get(index).coordinate(), futures.get(index).join());
+            } catch (CompletionException exception) {
+                Throwable cause = exception.getCause();
+                if (cause instanceof RuntimeException runtimeException) throw runtimeException;
+                if (cause instanceof Error error) throw error;
+                throw exception;
+            }
+        }
+        return metadataByCoordinate;
     }
 
     private List<ContentCardSpec> distinctSpecs(Collection<ContentCardSpec> specs) {

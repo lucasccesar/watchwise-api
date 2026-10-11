@@ -39,6 +39,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -350,6 +354,51 @@ class ContentCardAssemblerTest {
         assertThat(result.get(partialCoordinate).previewStatus()).isEqualTo(ContentPreviewStatus.PARTIAL);
         assertThat(result.get(partialCoordinate).title()).isEqualTo("One");
         assertThat(result.get(unavailableCoordinate).previewStatus()).isEqualTo(ContentPreviewStatus.UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("[assemble] Should Resolve Missing Metadata Concurrently And Preserve Coordinate Order - When Basic Metadata Is Requested")
+    void shouldResolveMissingMetadataConcurrentlyAndPreserveCoordinateOrderWhenBasicMetadataIsRequested() throws Exception {
+        ContentCoordinate firstCoordinate = movie("first");
+        ContentCoordinate secondCoordinate = movie("second");
+        when(contentViewerStateService.resolve(isNull(), eq(List.of(firstCoordinate, secondCoordinate)), eq(Map.of())))
+                .thenReturn(new ContentViewerStateService.Resolution(
+                        Map.of(firstCoordinate, emptyState(), secondCoordinate, emptyState()), Map.of()));
+        CountDownLatch bothLookupsStarted = new CountDownLatch(2);
+        CountDownLatch secondLookupCompleted = new CountDownLatch(1);
+        when(tmdbCardMetadataResolver.resolve(firstCoordinate, "en-US")).thenAnswer(invocation -> {
+            bothLookupsStarted.countDown();
+            assertThat(bothLookupsStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(secondLookupCompleted.await(5, TimeUnit.SECONDS)).isTrue();
+            return new TmdbLookupResult.Found<>(new TmdbCardMetadata("First", "/first.jpg", "2020-01-01", 90));
+        });
+        when(tmdbCardMetadataResolver.resolve(secondCoordinate, "en-US")).thenAnswer(invocation -> {
+            bothLookupsStarted.countDown();
+            assertThat(bothLookupsStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            secondLookupCompleted.countDown();
+            return new TmdbLookupResult.Found<>(new TmdbCardMetadata("Second", "/second.jpg", "2021-01-01", 95));
+        });
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            ContentCardAssembler assembler = new ContentCardAssembler(
+                    contentStatsService, contentViewerStateService, tmdbCardMetadataResolver,
+                    userContentPosterService, executor);
+
+            Map<ContentCoordinate, ContentCardDTO> result = assembler.assemble(
+                    List.of(
+                            new ContentCardSpec(firstCoordinate, null, null, null, null),
+                            new ContentCardSpec(secondCoordinate, null, null, null, null)),
+                    new ContentCardContext("en-US", "US", null, null),
+                    Set.of(ContentCardFieldSet.BASIC_METADATA));
+
+            assertThat(new java.util.ArrayList<>(result.keySet()))
+                    .containsExactly(firstCoordinate, secondCoordinate);
+            assertThat(result.get(firstCoordinate).title()).isEqualTo("First");
+            assertThat(result.get(secondCoordinate).title()).isEqualTo("Second");
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test

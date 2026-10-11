@@ -7,8 +7,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @Configuration
 public class TmdbCacheConfig {
@@ -18,6 +21,8 @@ public class TmdbCacheConfig {
     private static final int CONTENT_RELEASE_DATE_SNAPSHOT_REFRESH_THREAD_POOL_SIZE = 4;
     private static final int CONTENT_RELEASE_DATE_SNAPSHOT_RESOLUTION_THREAD_POOL_SIZE = 4;
     private static final int HOME_NEXT_EPISODE_THREAD_POOL_SIZE = 4;
+    private static final int CONTENT_CARD_METADATA_RESOLUTION_THREAD_POOL_SIZE = 8;
+    private static final int CONTENT_CARD_METADATA_RESOLUTION_QUEUE_CAPACITY = 50;
 
     @Bean
     public Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache(
@@ -195,5 +200,16 @@ public class TmdbCacheConfig {
     @Bean(destroyMethod = "shutdown")
     public ExecutorService homeNextEpisodeExecutor() {
         return Executors.newFixedThreadPool(HOME_NEXT_EPISODE_THREAD_POOL_SIZE);
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public ExecutorService contentCardMetadataResolutionExecutor() {
+        return new ThreadPoolExecutor(
+                CONTENT_CARD_METADATA_RESOLUTION_THREAD_POOL_SIZE,
+                CONTENT_CARD_METADATA_RESOLUTION_THREAD_POOL_SIZE,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(CONTENT_CARD_METADATA_RESOLUTION_QUEUE_CAPACITY),
+                new ThreadPoolExecutor.CallerRunsPolicy());
     }
 }

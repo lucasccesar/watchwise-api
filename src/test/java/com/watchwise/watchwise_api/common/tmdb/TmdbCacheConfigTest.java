@@ -1,15 +1,31 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TmdbCacheConfigTest {
+
+    @Test
+    @DisplayName("[contentCardMetadataResolutionExecutor] Should Use Eight Workers And A Bounded Queue - When Created")
+    void shouldUseEightWorkersAndABoundedQueueWhenCreated() {
+        ExecutorService executor = new TmdbCacheConfig().contentCardMetadataResolutionExecutor();
+        try {
+            ThreadPoolExecutor pool = (ThreadPoolExecutor) executor;
+            assertThat(pool.getCorePoolSize()).isEqualTo(8);
+            assertThat(pool.getMaximumPoolSize()).isEqualTo(8);
+            assertThat(pool.getQueue().remainingCapacity()).isEqualTo(50);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
 
     @Test
     void keepsSeasonFetchesRunnableWhenTheBoundedRefreshExecutorIsSaturated() throws Exception {
