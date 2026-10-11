@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.content.service.TmdbSeriesHierarchyService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -25,6 +26,7 @@ class ContentSelectionServiceImplTest {
     @Mock private TmdbSeriesHierarchyService hierarchyService;
 
     @Test
+    @DisplayName("[listSeasons] Should Use The Viewer's Preferred Language Or Independent Fallback - When Delegating To TMDB")
     void delegatesUsingViewerLanguageAndIndependentFallback() {
         UUID viewerId = UUID.randomUUID();
         when(userRepository.findById(viewerId)).thenReturn(Optional.of(User.builder().preferredLanguage("pt-BR").build()));
@@ -34,6 +36,7 @@ class ContentSelectionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[listEpisodes] Should Use The Viewer's Preferred Language Or Independent Fallback - When Delegating To TMDB")
     void delegatesEpisodeOptionsAndUsesFallbackWhenViewerMissing() {
         UUID viewerId = UUID.randomUUID();
         when(userRepository.findById(viewerId)).thenReturn(Optional.empty());

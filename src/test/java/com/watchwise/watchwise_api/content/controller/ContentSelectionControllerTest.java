@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.content.dto.ContentSeasonSelectionDTO;
 import com.watchwise.watchwise_api.content.service.ContentSelectionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -53,6 +54,7 @@ class ContentSelectionControllerTest {
     }
 
     @Test
+    @DisplayName("[listSeasons] Should Return The Service Result And Apply Rate Limiting - When Specials Are Requested")
     void listsSeasonsUsingViewerAndRequestedSpecialsFlag() {
         List<ContentSeasonSelectionDTO> expected = List.of(
                 new ContentSeasonSelectionDTO("1399", 0, "Specials", 2, null, null));
@@ -67,6 +69,7 @@ class ContentSelectionControllerTest {
     }
 
     @Test
+    @DisplayName("[listSeasons] Should Exclude Specials - When The Default Flag Is False")
     void listsSeasonsWithoutSpecialsByDefault() {
         when(contentSelectionService.listSeasons(viewerId, "1399", false)).thenReturn(List.of());
 
@@ -78,6 +81,7 @@ class ContentSelectionControllerTest {
     }
 
     @Test
+    @DisplayName("[listEpisodes] Should Include Unreleased Episodes And Specials - When Using Default Behavior")
     void listsEpisodesIncludingUnreleasedByDefaultAndAcceptsSpecialsSeason() {
         List<ContentEpisodeSelectionDTO> expected = List.of(
                 new ContentEpisodeSelectionDTO("1399", 0, 1, "Special", null, null));
@@ -92,6 +96,7 @@ class ContentSelectionControllerTest {
     }
 
     @Test
+    @DisplayName("[listEpisodes] Should Forward The Explicit Unreleased Flag - When A Season Is Requested")
     void forwardsExplicitUnreleasedFlag() {
         when(contentSelectionService.listEpisodes(viewerId, "1399", 2, false)).thenReturn(List.of());
 

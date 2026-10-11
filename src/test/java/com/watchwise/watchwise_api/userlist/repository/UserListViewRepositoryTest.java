@@ -67,7 +67,9 @@ class UserListViewRepositoryTest {
         owner = users.save(user("owner", false));
     }
 
-    @Test void mySourcesAndDefaultOrdersPreservePrivateLikedListsAndDistinctUnion() {
+    @Test
+    @DisplayName("[findPage] Should Preserve Private Owned And Liked Lists Without Duplicating The Union - When Reading My Sources")
+    void mySourcesAndDefaultOrdersPreservePrivateLikedListsAndDistinctUnion() {
         UserList mine = list(viewer, "mine", UserListVisibility.PRIVATE, 1, 2, null);
         UserList liked = list(owner, "liked", UserListVisibility.PRIVATE, 2, 1, null);
         UserList both = list(viewer, "both", UserListVisibility.PUBLIC, 3, 3, null);
@@ -82,7 +84,9 @@ class UserListViewRepositoryTest {
         assertThat(all.map(UserList::getId).getContent()).containsExactly(both.getId(), mine.getId(), liked.getId());
     }
 
-    @Test void allSourcePaginatesOwnedAndLikedUnionWithoutDuplicatingAnOwnedLike() {
+    @Test
+    @DisplayName("[findPage] Should Paginate The Owned And Liked Union Without Duplicates - When A List Is Both Owned And Liked")
+    void allSourcePaginatesOwnedAndLikedUnionWithoutDuplicatingAnOwnedLike() {
         UserList oldest = list(owner, "liked", UserListVisibility.PRIVATE, 0, 1, null);
         UserList middle = list(viewer, "owned", UserListVisibility.PRIVATE, 0, 2, null);
         UserList newest = list(viewer, "owned-liked", UserListVisibility.PUBLIC, 0, 3, null);
@@ -102,7 +106,9 @@ class UserListViewRepositoryTest {
         }
     }
 
-    @Test void hugePositivePageBeyondCountReturnsEmptyPageWithRealTotal() {
+    @Test
+    @DisplayName("[findPage] Should Return An Empty Page With The Real Total - When Offset Exceeds The Count")
+    void hugePositivePageBeyondCountReturnsEmptyPageWithRealTotal() {
         list(viewer, "only", UserListVisibility.PUBLIC, 0, 1, null);
         em.flush(); em.clear();
         UserListViewQuery base = query(UserListViewQueryMode.MY, UserListViewSource.OWNED);
@@ -116,7 +122,9 @@ class UserListViewRepositoryTest {
         assertThat(result.getNumber()).isEqualTo(Integer.MAX_VALUE - 1);
     }
 
-    @Test void userModeHonorsPrivateProfileBarrierAndAcceptedFollow() {
+    @Test
+    @DisplayName("[findPage] Should Enforce The Private Profile Barrier And Accepted Follow - When Reading User Lists")
+    void userModeHonorsPrivateProfileBarrierAndAcceptedFollow() {
         UserList publicList = list(owner, "public", UserListVisibility.PUBLIC, 1, 1, null);
         UserList followersList = list(owner, "followers", UserListVisibility.FOLLOWERS, 1, 2, null);
         list(owner, "private", UserListVisibility.PRIVATE, 1, 3, null);
@@ -128,7 +136,9 @@ class UserListViewRepositoryTest {
         assertThat(ids(query(UserListViewQueryMode.USER, null))).containsExactlyInAnyOrder(publicList.getId(), followersList.getId());
     }
 
-    @Test void discoveryAppliesPublicAndItemFiltersBeforePagination() {
+    @Test
+    @DisplayName("[findPage] Should Apply Public Visibility And Item Filters Before Pagination - When Discovering Lists")
+    void discoveryAppliesPublicAndItemFiltersBeforePagination() {
         UserList hidden = list(owner, "a hidden", UserListVisibility.PRIVATE, 100, 1, null);
         UserList first = list(viewer, "b public", UserListVisibility.PUBLIC, 5, 2, null);
         UserList second = list(owner, "c public", UserListVisibility.PUBLIC, 4, 3, null);
@@ -192,7 +202,9 @@ class UserListViewRepositoryTest {
         assertThat(ids(filter(UserListViewItemType.LIST, "Drama"))).isEmpty();
     }
 
-    @Test void allFourContentTypesMatchOnlyTheirOwnDirectItems() {
+    @Test
+    @DisplayName("[findPage] Should Match Each Content Type Only To Its Own Items - When Filtering By Type")
+    void allFourContentTypesMatchOnlyTheirOwnDirectItems() {
         for (ContentType type : ContentType.values()) {
             UserList list = list(viewer, type.name(), UserListVisibility.PUBLIC, 1, type.ordinal() + 1, null);
             item(list, content(type, String.valueOf(100 + type.ordinal()), "Drama"), null, 1);
@@ -205,7 +217,9 @@ class UserListViewRepositoryTest {
         }
     }
 
-    @Test void typeAndGenreMustMatchTheSameDirectItem() {
+    @Test
+    @DisplayName("[findPage] Should Require Type And Genre On The Same Direct Item - When Both Filters Are Supplied")
+    void typeAndGenreMustMatchTheSameDirectItem() {
         UserList mixed = list(viewer, "mixed", UserListVisibility.PUBLIC, 1, 1, null);
         item(mixed, content(ContentType.MOVIE, "11", "Drama"), null, 1);
         item(mixed, content(ContentType.SERIES, "12", "Comedy"), null, 2);
@@ -216,7 +230,9 @@ class UserListViewRepositoryTest {
         assertThat(ids(query)).doesNotContain(mixed.getId());
     }
 
-    @Test void escapedNameQueryMatchesLiteralWildcardCharacters() {
+    @Test
+    @DisplayName("[findPage] Should Match Wildcard Characters Literally - When The Name Query Is Escaped")
+    void escapedNameQueryMatchesLiteralWildcardCharacters() {
         UserList literal = list(viewer, "100%_\\", UserListVisibility.PUBLIC, 1, 1, null);
         list(viewer, "100ABC", UserListVisibility.PUBLIC, 2, 2, null);
         em.flush(); em.clear();
@@ -225,7 +241,9 @@ class UserListViewRepositoryTest {
         assertThat(ids(query)).containsExactly(literal.getId());
     }
 
-    @Test void nestedPreviewProjectionKeepsPositionAndChildOwnerFields() {
+    @Test
+    @DisplayName("[findNestedPreviewsByParentIdIn] Should Preserve Position And Child Owner Fields - When Projecting Nested Previews")
+    void nestedPreviewProjectionKeepsPositionAndChildOwnerFields() {
         UserList parent = list(viewer, "parent", UserListVisibility.PUBLIC, 0, 1, null);
         UserList second = list(owner, "second", UserListVisibility.PRIVATE, 0, 2, null);
         UserList first = list(owner, "first", UserListVisibility.PUBLIC, 0, 3, null);
@@ -239,7 +257,9 @@ class UserListViewRepositoryTest {
         assertThat(rows.get(0).getOwnerName()).isEqualTo("owner");
     }
 
-    @Test void privateChildrenDoNotConsumeFiveVisiblePreviewSlots() {
+    @Test
+    @DisplayName("[findNestedPreviewsByParentIdIn] Should Exclude Private Children Before The Preview Limit - When Later Public Children Exist")
+    void privateChildrenDoNotConsumeFiveVisiblePreviewSlots() {
         UserList parent = list(viewer, "parent", UserListVisibility.PUBLIC, 0, 1, null);
         for (int position = 1; position <= 5; position++) {
             item(parent, null, list(owner, "hidden-" + position, UserListVisibility.PRIVATE,
@@ -252,7 +272,9 @@ class UserListViewRepositoryTest {
                 .extracting(UserListItemRepository.NestedPreview::getChildId).containsExactly(visible.getId());
     }
 
-    @Test void sortsAscendingDescendingAndNullRankDeterministically() {
+    @Test
+    @DisplayName("[findPage] Should Sort Both Directions And Place Null Rank Last - When Sorting By Name Or Rank")
+    void sortsAscendingDescendingAndNullRankDeterministically() {
         UserList a = list(viewer, "Alpha", UserListVisibility.PUBLIC, 1, 1, null);
         UserList b = list(viewer, "Beta", UserListVisibility.PUBLIC, 2, 2, 1);
         em.flush(); em.clear();
@@ -261,7 +283,9 @@ class UserListViewRepositoryTest {
         assertThat(ids(sorted(UserListViewSort.RANK, Sort.Direction.ASC))).containsExactly(b.getId(), a.getId());
     }
 
-    @Test void aggregateSortsUseDirectItemAndCommentCounts() {
+    @Test
+    @DisplayName("[findPage] Should Sort By Direct Item And Comment Counts - When Aggregate Sorts Are Requested")
+    void aggregateSortsUseDirectItemAndCommentCounts() {
         UserList low = list(viewer, "low", UserListVisibility.PUBLIC, 0, 1, null);
         UserList high = list(viewer, "high", UserListVisibility.PUBLIC, 0, 2, null);
         item(high, content(ContentType.MOVIE, "81", "Drama"), null, 1);
@@ -278,7 +302,9 @@ class UserListViewRepositoryTest {
                 .containsExactly(high.getId(), low.getId());
     }
 
-    @Test void likedDefaultOrderUsesLikeIdWhenCreationTimestampsTie() {
+    @Test
+    @DisplayName("[findPage] Should Use Like ID As The Stable Tie Breaker - When Like Timestamps Tie")
+    void likedDefaultOrderUsesLikeIdWhenCreationTimestampsTie() {
         UserList first = list(owner, "first", UserListVisibility.PUBLIC, 0, 1, null);
         UserList second = list(owner, "second", UserListVisibility.PUBLIC, 0, 2, null);
         Like firstLike = like(viewer, first, 1);
@@ -291,7 +317,9 @@ class UserListViewRepositoryTest {
                 .containsExactlyElementsOf(expected);
     }
 
-    @Test void ownedUpdatedAtSortRespectsBothDirections() {
+    @Test
+    @DisplayName("[findPage] Should Respect Both Sort Directions - When Sorting Owned Lists By Updated Time")
+    void ownedUpdatedAtSortRespectsBothDirections() {
         UserList old = list(viewer, "old", UserListVisibility.PUBLIC, 0, 1, null);
         UserList recent = list(viewer, "recent", UserListVisibility.PUBLIC, 0, 2, null);
         em.flush(); em.clear();
@@ -301,7 +329,9 @@ class UserListViewRepositoryTest {
                 .containsExactly(recent.getId(), old.getId());
     }
 
-    @Test void uuidTieBreakIsStableForBothDirectionsAndDiscoveryDefault() {
+    @Test
+    @DisplayName("[findPage] Should Use A Stable UUID Tie Breaker - When Sort Values And Discovery Defaults Tie")
+    void uuidTieBreakIsStableForBothDirectionsAndDiscoveryDefault() {
         UserList a = list(viewer, "same", UserListVisibility.PUBLIC, 2, 1, null);
         UserList b = list(viewer, "same", UserListVisibility.PUBLIC, 2, 1, null);
         em.flush(); em.clear();
@@ -312,7 +342,9 @@ class UserListViewRepositoryTest {
         assertThat(ids(query(UserListViewQueryMode.DISCOVER, null))).containsExactlyElementsOf(expected);
     }
 
-    @Test void communitySortsSupportBothDirectionsInUserAndDiscoveryModes() {
+    @Test
+    @DisplayName("[findPage] Should Support Both Directions For Community Sorts - In User And Discovery Modes")
+    void communitySortsSupportBothDirectionsInUserAndDiscoveryModes() {
         owner.setIsProfilePublic(true);
         users.save(owner);
         UserList low = list(owner, "Alpha", UserListVisibility.PUBLIC, 1, 1, null);
@@ -344,7 +376,9 @@ class UserListViewRepositoryTest {
         }
     }
 
-    @Test void invalidModeSourceCombinationsAreRejected() {
+    @Test
+    @DisplayName("[findPage] Should Reject Invalid Mode And Source Combinations - When A Query Is Submitted")
+    void invalidModeSourceCombinationsAreRejected() {
         assertThatThrownBy(() -> views.findPage(query(UserListViewQueryMode.MY, null))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> views.findPage(query(UserListViewQueryMode.USER, UserListViewSource.ALL))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> views.findPage(query(UserListViewQueryMode.DISCOVER, UserListViewSource.OWNED))).isInstanceOf(IllegalArgumentException.class);

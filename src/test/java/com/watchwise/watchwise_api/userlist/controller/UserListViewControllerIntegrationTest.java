@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadataKey;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -41,6 +43,9 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -198,6 +203,71 @@ class UserListViewControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].name").value("Drama series"));
     }
 
+    @Test
+    @DisplayName("[getDiscoverListView] Should Apply Name And Likes Ordering In Both Directions - When Multiple Public Lists Exist")
+    void discoverViewAppliesNameAndLikesOrderingInBothDirectionsWhenMultiplePublicListsExist() throws Exception {
+        RegisteredUser viewer = register("vieworderviewer");
+        RegisteredUser owner = register("vieworderowner");
+        User ownerEntity = users.findById(owner.id()).orElseThrow();
+        persistList(ownerEntity, "Alpha", UserListVisibility.PUBLIC, 3);
+        persistList(ownerEntity, "Beta", UserListVisibility.PUBLIC, 8);
+
+        mockMvc.perform(discoverView(viewer).param("sortBy", "name").param("sortDirection", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Alpha"))
+                .andExpect(jsonPath("$.content[1].name").value("Beta"));
+        mockMvc.perform(discoverView(viewer).param("sortBy", "name").param("sortDirection", "desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Beta"))
+                .andExpect(jsonPath("$.content[1].name").value("Alpha"));
+        mockMvc.perform(discoverView(viewer).param("sortBy", "likesCount").param("sortDirection", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Alpha"))
+                .andExpect(jsonPath("$.content[1].name").value("Beta"));
+        mockMvc.perform(discoverView(viewer).param("sortBy", "likesCount").param("sortDirection", "desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Beta"))
+                .andExpect(jsonPath("$.content[1].name").value("Alpha"));
+    }
+
+    @Test
+    @DisplayName("[getMyListView] Should Omit A Private Nested Child And Keep A Later Public Child - When Assembling Previews")
+    void myViewOmitsPrivateNestedChildAndKeepsLaterPublicChildWhenAssemblingPreviews() throws Exception {
+        RegisteredUser owner = register("viewnestedowner");
+        RegisteredUser childOwner = register("viewnestedchildowner");
+        User ownerEntity = users.findById(owner.id()).orElseThrow();
+        User childOwnerEntity = users.findById(childOwner.id()).orElseThrow();
+        UserList parent = persistList(ownerEntity, "Parent", UserListVisibility.PUBLIC);
+        UserList privateChild = persistList(childOwnerEntity, "Private child", UserListVisibility.PRIVATE);
+        UserList publicChild = persistList(childOwnerEntity, "Public child", UserListVisibility.PUBLIC);
+        persistNestedItem(parent, privateChild, 1);
+        persistNestedItem(parent, publicChild, 2);
+
+        mockMvc.perform(myView(owner).param("source", "OWNED")
+                        .param("sortBy", "name").param("sortDirection", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(parent.getId().toString()))
+                .andExpect(jsonPath("$.content[0].nestedListPreviews.length()").value(1))
+                .andExpect(jsonPath("$.content[0].nestedListPreviews[0].id").value(publicChild.getId().toString()))
+                .andExpect(jsonPath("$.content[0].nestedListPreviews[0].name").value("Public child"));
+    }
+
+    @Test
+    @DisplayName("[getMyListView] Should Return An Unavailable Preview Card - When TMDB Metadata Cannot Be Loaded")
+    void myViewReturnsUnavailablePreviewCardWhenTmdbMetadataCannotBeLoaded() throws Exception {
+        RegisteredUser owner = register("viewtmdbowner");
+        User ownerEntity = users.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "With content", UserListVisibility.PUBLIC);
+        persistItem(list, ContentType.MOVIE, null);
+        when(tmdbClient.getCardMetadata(any(TmdbCardMetadataKey.class), eq("en-US")))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(myView(owner).param("source", "OWNED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].previewCards.length()").value(1))
+                .andExpect(jsonPath("$.content[0].previewCards[0].previewStatus").value("UNAVAILABLE"));
+    }
+
     private record RegisteredUser(UUID id, Cookie accessToken, Cookie csrfToken) {}
 
     private RegisteredUser register(String username) throws Exception {
@@ -212,9 +282,13 @@ class UserListViewControllerIntegrationTest {
     }
 
     private UserList persistList(User user, String name, UserListVisibility visibility) {
+        return persistList(user, name, visibility, 0);
+    }
+
+    private UserList persistList(User user, String name, UserListVisibility visibility, int likesCount) {
         LocalDateTime now = LocalDateTime.now();
         return lists.save(UserList.builder().user(user).name(name).visibility(visibility)
-                .createdAt(now).updatedAt(now).build());
+                .likesCount(likesCount).createdAt(now).updatedAt(now).build());
     }
 
     private void persistItem(UserList list, ContentType type, String genre) {
@@ -222,8 +296,14 @@ class UserListViewControllerIntegrationTest {
         String tmdbId = UUID.randomUUID().toString().substring(0, 20);
         Content content = contents.save(Content.builder().type(type)
                 .tmdbId(tmdbId)
-                .genres(List.of(genre)).createdAt(now).updatedAt(now).build());
+                .genres(genre == null ? null : List.of(genre)).createdAt(now).updatedAt(now).build());
         items.save(UserListItem.builder().userList(list).content(content).position(1)
+                .createdAt(now).updatedAt(now).build());
+    }
+
+    private void persistNestedItem(UserList parent, UserList child, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        items.save(UserListItem.builder().userList(parent).childList(child).position(position)
                 .createdAt(now).updatedAt(now).build());
     }
 

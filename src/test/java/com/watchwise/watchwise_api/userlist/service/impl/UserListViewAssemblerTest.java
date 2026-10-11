@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -28,6 +29,7 @@ class UserListViewAssemblerTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    @DisplayName("[fromApiValue] Should Map Supported Sort Values And Reject Unknown Values - When Parsing Public Sort Names")
     void visualEnumsMapApiSortValuesAndRejectUnknownValues() {
         assertArrayEquals(new UserListViewSource[]{UserListViewSource.OWNED, UserListViewSource.LIKED, UserListViewSource.ALL}, UserListViewSource.values());
         assertArrayEquals(new UserListViewItemType[]{UserListViewItemType.MOVIE, UserListViewItemType.SERIES, UserListViewItemType.SEASON, UserListViewItemType.EPISODE, UserListViewItemType.LIST}, UserListViewItemType.values());
@@ -43,6 +45,7 @@ class UserListViewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[UserListCardDTO] Should Preserve Exact JSON Components And Immutable Collections - When Collections Are Null")
     void cardHasExactVisualJsonComponentsAndImmutableNullSafeCollections() throws Exception {
         UserListCardDTO card = new UserListCardDTO(UUID.randomUUID(), null, "n", null, null, null, null,
                 null, null, 0, 0, false, 0, 0, null, null, false);
@@ -59,6 +62,7 @@ class UserListViewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assemble] Should Preserve List Order And Cap Previews - When Batch Values Are Supplied")
     void assemblesListsInInputOrderWithCappedSuppliedPreviewsAndBatchValues() {
         UUID viewerId = UUID.randomUUID();
         User ownerA = user(UUID.randomUUID(), "owner-a");
@@ -98,6 +102,7 @@ class UserListViewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assemble] Should Preserve Repeated Content Cards And Their Original Order - When Lists Share Coordinates")
     void preservesRepeatedContentCardReferencesInEachListsOriginalOrder() {
         User owner = user(UUID.randomUUID(), "owner");
         UserList first = list(UUID.randomUUID(), owner, "first");
@@ -121,6 +126,7 @@ class UserListViewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assemble] Should Omit Progress And Runtime Fields - When Building Overview Cards")
     void overviewDoesNotAddProgressOrRuntimeToCallerSuppliedCards() {
         User owner = user(UUID.randomUUID(), "owner");
         UserList list = list(UUID.randomUUID(), owner, "list");

@@ -155,6 +155,7 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getMyListView] Should Forward All Filters And The Authenticated Viewer - When Parameters Are Supplied")
     void myViewPassesAllParametersAndAuthenticatedViewer() {
         when(userListViewService.getView(any())).thenReturn(Page.empty());
         userListController.getMyListView(UserListViewSource.ALL, UserListViewItemType.SERIES,
@@ -168,6 +169,7 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getMyListView] Should Leave Source Unset - When It Is Omitted")
     void myViewLeavesOmittedSourceNull() {
         when(userListViewService.getView(any())).thenReturn(Page.empty());
         userListController.getMyListView(null, null, null, null, null, null, null);
@@ -180,6 +182,7 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getUserListView] Should Use The Target As Owner And The Authenticated Viewer - When Reading A User")
     void userViewUsesTargetAsOwnerAndAuthenticatedViewer() {
         when(userListViewService.getView(any())).thenReturn(Page.empty());
         UUID ownerId = UUID.randomUUID();
@@ -194,6 +197,7 @@ class UserListControllerTest {
     }
 
     @Test
+    @DisplayName("[getDiscoverListView] Should Forward Query Filters Sort And Pagination - When Parameters Are Supplied")
     void discoverViewPassesQueryFiltersSortAndPagination() {
         when(userListViewService.getView(any())).thenReturn(Page.empty());
         userListController.getDiscoverListView("  space  ", UserListViewItemType.SERIES, "Drama",

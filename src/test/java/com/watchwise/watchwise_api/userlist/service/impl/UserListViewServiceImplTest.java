@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListViewRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -60,7 +61,9 @@ class UserListViewServiceImplTest {
                 likes, users, followers, contentCards, new PageRequestFactory());
     }
 
-    @Test void validatesModeSourceOwnerSortDirectionAndPageSizeBeforeQuerying() {
+    @Test
+    @DisplayName("[getView] Should Validate Mode Source Owner Sort Direction And Page Size - Before Querying")
+    void validatesModeSourceOwnerSortDirectionAndPageSizeBeforeQuerying() {
         assertBad(request(null, null, null, null, null, null, 1, 10));
         assertBad(request(UserListViewQueryMode.USER, UserListViewSource.OWNED, viewer, null, null, null, 1, 10));
         assertBad(request(UserListViewQueryMode.USER, null, null, null, null, null, 1, 10));
@@ -74,7 +77,9 @@ class UserListViewServiceImplTest {
         verifyNoInteractions(repository);
     }
 
-    @Test void omittedMySourceDefaultsToAllBeforeRepositoryQuery() {
+    @Test
+    @DisplayName("[getView] Should Default An Omitted My Source To All - Before Querying The Repository")
+    void omittedMySourceDefaultsToAllBeforeRepositoryQuery() {
         when(repository.findPage(any())).thenAnswer(invocation -> {
             UserListViewQuery query = invocation.getArgument(0);
             return new PageImpl<UserList>(List.of(), query.pageable(), 21);
@@ -90,7 +95,9 @@ class UserListViewServiceImplTest {
         assertThat(result.getTotalElements()).isEqualTo(21);
     }
 
-    @Test void translatesPaginationAndEscapedSearchWhilePreservingPageMetadata() {
+    @Test
+    @DisplayName("[getView] Should Translate Pagination And Escape Search - While Preserving Page Metadata")
+    void translatesPaginationAndEscapedSearchWhilePreservingPageMetadata() {
         when(repository.findPage(any())).thenAnswer(inv -> {
             UserListViewQuery query = inv.getArgument(0);
             return new PageImpl<UserList>(List.of(), query.pageable(), 31);
@@ -110,7 +117,9 @@ class UserListViewServiceImplTest {
         verifyNoInteractions(itemService, comments, likes, contentCards);
     }
 
-    @Test void defaultsBlankDiscoveryQueryAndZeroPageWithoutNameFilter() {
+    @Test
+    @DisplayName("[getView] Should Omit Blank Discovery Query And Normalize Zero Page - When Building The Repository Query")
+    void defaultsBlankDiscoveryQueryAndZeroPageWithoutNameFilter() {
         when(repository.findPage(any())).thenAnswer(inv -> {
             UserListViewQuery query = inv.getArgument(0);
             return new PageImpl<UserList>(List.of(), query.pageable(), 0);
@@ -125,7 +134,9 @@ class UserListViewServiceImplTest {
         assertThat(captor.getValue().direction()).isEqualTo(Sort.Direction.DESC);
     }
 
-    @Test void privateProfileBlocksUserModeBeforeRepositoryQuery() {
+    @Test
+    @DisplayName("[getView] Should Block A Private Profile - Before Querying The Repository")
+    void privateProfileBlocksUserModeBeforeRepositoryQuery() {
         UUID ownerId = UUID.randomUUID();
         when(users.findById(ownerId)).thenReturn(Optional.of(com.watchwise.watchwise_api.user.entity.User.builder()
                 .id(ownerId).isProfilePublic(false).build()));
@@ -134,7 +145,9 @@ class UserListViewServiceImplTest {
         verifyNoInteractions(repository);
     }
 
-    @Test void batchesOverviewCollaboratorsAndKeepsOrder() {
+    @Test
+    @DisplayName("[getView] Should Batch Overview Collaborators And Preserve Order - When Assembling A Page")
+    void batchesOverviewCollaboratorsAndKeepsOrder() {
         UserList list = UserList.builder().id(UUID.randomUUID()).user(com.watchwise.watchwise_api.user.entity.User.builder()
                 .id(viewer).username("viewer").name("Viewer").isProfilePublic(true).preferredLanguage("pt-BR")
                 .preferredRegion("BR").build()).name("one").visibility(UserListVisibility.PUBLIC)
@@ -156,7 +169,9 @@ class UserListViewServiceImplTest {
         verify(comments).countByListIdIn(List.of(list.getId()));
     }
 
-    @Test void reusesOneBasicMetadataLookupForRepeatedCoordinatesAcrossLists() {
+    @Test
+    @DisplayName("[getView] Should Reuse Basic Metadata For Repeated Coordinates - Across Lists")
+    void reusesOneBasicMetadataLookupForRepeatedCoordinatesAcrossLists() {
         var owner = com.watchwise.watchwise_api.user.entity.User.builder().id(viewer).username("v")
                 .name("Viewer").isProfilePublic(true).preferredLanguage("pt-BR").preferredRegion("BR").build();
         UserList first = UserList.builder().id(UUID.randomUUID()).user(owner).name("first")
@@ -188,7 +203,9 @@ class UserListViewServiceImplTest {
         assertThat(specs.getValue()).extracting(ContentCardSpec::coordinate).containsExactly(coordinate);
     }
 
-    @Test void removesPrivateNestedPreviewsBeforeAssemblingCard() {
+    @Test
+    @DisplayName("[getView] Should Remove Private Nested Previews - Before Assembling A Card")
+    void removesPrivateNestedPreviewsBeforeAssemblingCard() {
         var owner = com.watchwise.watchwise_api.user.entity.User.builder().id(viewer).username("v")
                 .name("Viewer").isProfilePublic(true).build();
         UserList parent = UserList.builder().id(UUID.randomUUID()).user(owner).name("parent")

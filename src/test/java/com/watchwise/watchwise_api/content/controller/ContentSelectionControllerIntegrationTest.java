@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.content.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.content.dto.ContentEpisodeSelectionDTO;
 import com.watchwise.watchwise_api.content.dto.ContentSeasonSelectionDTO;
@@ -9,6 +10,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -93,6 +95,7 @@ class ContentSelectionControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[listSeasons] Should Return Seasons And Use The False Default - When Specials Are Omitted")
     void returnsSeasonsAndUsesFalseDefault() throws Exception {
         RegisteredUser user = registerUser("selectionseasons");
         when(contentSelectionService.listSeasons(user.id(), "1399", false))
@@ -107,6 +110,7 @@ class ContentSelectionControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[listEpisodes] Should Return Specials And Use The True Default - When Unreleased Flag Is Omitted")
     void returnsSpecialsEpisodesAndUsesTrueDefault() throws Exception {
         RegisteredUser user = registerUser("selectionepisodes");
         when(contentSelectionService.listEpisodes(user.id(), "1399", 0, true))
@@ -122,6 +126,7 @@ class ContentSelectionControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[listSeasons] Should Return ApiError - When The Boolean Query Value Is Invalid")
     void returnsApiErrorForInvalidBooleanQueryValue() throws Exception {
         RegisteredUser user = registerUser("selectioninvalidbool");
 
@@ -135,6 +140,7 @@ class ContentSelectionControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[listEpisodes] Should Return ApiError - When The Season Path Value Is Invalid")
     void returnsApiErrorForInvalidSeasonPathValue() throws Exception {
         RegisteredUser user = registerUser("selectioninvalidpath");
 
@@ -147,8 +153,24 @@ class ContentSelectionControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[listSeasons] Should Require Authentication - When The Route Is Accessed Anonymously")
     void requiresAuthentication() throws Exception {
         mockMvc.perform(get("/contents/selection/series/1399/seasons"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[listSeasons] Should Return A 502 ApiError - When Content Selection Reports TMDB Unavailable")
+    void listSeasonsReturns502ApiErrorWhenContentSelectionReportsTmdbUnavailable() throws Exception {
+        RegisteredUser user = registerUser("selectiontmdbunavailable");
+        when(contentSelectionService.listSeasons(user.id(), "1399", false))
+                .thenThrow(new TmdbUnavailableException("TMDB is unavailable"));
+
+        mockMvc.perform(get("/contents/selection/series/1399/seasons").cookie(user.accessToken()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.status").value(502))
+                .andExpect(jsonPath("$.error").value("Bad Gateway"))
+                .andExpect(jsonPath("$.message").value("TMDB is unavailable"))
+                .andExpect(jsonPath("$.path").value("/contents/selection/series/1399/seasons"));
     }
 }

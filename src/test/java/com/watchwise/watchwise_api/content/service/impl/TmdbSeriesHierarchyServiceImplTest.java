@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.dto.ContentEpisodeSelectionDTO;
 import com.watchwise.watchwise_api.content.dto.ContentSeasonSelectionDTO;
 import com.watchwise.watchwise_api.content.service.TmdbSeriesHierarchyService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -33,6 +34,7 @@ class TmdbSeriesHierarchyServiceImplTest {
     @Mock private TmdbClient tmdbClient;
 
     @Test
+    @DisplayName("[listSeasons] Should Normalize Seasons And Include Specials When Requested - When TMDB Returns A Series")
     void listsNormalizedSeasonsAndCanIncludeSpecials() {
         when(tmdbClient.getTvFullDetails("1399", "pt-BR")).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbTvFullDetails("1399", "Series", null, null, null, null, null, List.of(), List.of(),
@@ -52,6 +54,7 @@ class TmdbSeriesHierarchyServiceImplTest {
     }
 
     @Test
+    @DisplayName("[listEpisodes] Should Include Only Released Valid Episodes By Default - When Future Episodes Are Not Requested")
     void listsOnlyReleasedValidEpisodesUnlessFutureEpisodesRequested() {
         when(tmdbClient.getSeasonFullDetails("1399", 1, "en-US")).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbSeasonFullDetails(1, "Season 1", null, null, null, 1, List.of(
@@ -67,6 +70,7 @@ class TmdbSeriesHierarchyServiceImplTest {
     }
 
     @Test
+    @DisplayName("[listSeasons] Should Reject Invalid Coordinates And Map TMDB Errors - When Series Or Season Lookup Fails")
     void rejectsInvalidCoordinatesAndMapsMissingOrUnavailable() {
         assertThatThrownBy(() -> service().listSeasons("0", false, "en-US"))
                 .isInstanceOf(BadRequestException.class);
@@ -79,6 +83,7 @@ class TmdbSeriesHierarchyServiceImplTest {
     }
 
     @Test
+    @DisplayName("[listEpisodes] Should Accept Season Zero - When Looking Up Specials")
     void allowsSpecialSeasonZero() {
         when(tmdbClient.getSeasonFullDetails("1", 0, "en-US"))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
