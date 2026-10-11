@@ -148,27 +148,28 @@ public class ContentServiceImpl implements ContentService {
     }
 
     private Content reconcileExisting(Content existing, ContentRefCreationDTO normalized, boolean trustedRuntimeMinutes) {
-        assertNoMetadataMismatch(existing, normalized, trustedRuntimeMinutes);
-
-        boolean backfillSeasonFinale = existing.getIsSeasonFinale() == null && Boolean.TRUE.equals(normalized.isSeasonFinale());
-        boolean backfillSeriesFinale = existing.getIsSeriesFinale() == null && Boolean.TRUE.equals(normalized.isSeriesFinale());
-        boolean updateRuntimeMinutes = normalized.runtimeMinutes() != null
-                && (existing.getRuntimeMinutes() == null
-                        || (trustedRuntimeMinutes && !normalized.runtimeMinutes().equals(existing.getRuntimeMinutes())));
-        boolean backfillGenres = (existing.getGenres() == null || existing.getGenres().isEmpty())
-                && normalized.genres() != null && !normalized.genres().isEmpty();
-        boolean backfillReleaseYear = existing.getReleaseYear() == null && normalized.releaseYear() != null;
-        boolean backfillCountries = (existing.getCountries() == null || existing.getCountries().isEmpty())
-                && normalized.countries() != null && !normalized.countries().isEmpty();
-        if (!backfillSeasonFinale && !backfillSeriesFinale && !updateRuntimeMinutes
-                && !backfillGenres && !backfillReleaseYear && !backfillCountries) {
+        if (!hasMetadataToReconcile(normalized)) {
             return existing;
         }
-
         UUID existingId = existing.getId();
         try {
             return newTransactionExecutor.runInNewTransaction(() -> {
-                Content fresh = contentRepository.findById(existingId).orElseThrow();
+                Content fresh = contentRepository.findByIdForUpdate(existingId).orElseThrow();
+                assertNoMetadataMismatch(fresh, normalized, trustedRuntimeMinutes);
+                boolean backfillSeasonFinale = fresh.getIsSeasonFinale() == null && Boolean.TRUE.equals(normalized.isSeasonFinale());
+                boolean backfillSeriesFinale = fresh.getIsSeriesFinale() == null && Boolean.TRUE.equals(normalized.isSeriesFinale());
+                boolean updateRuntimeMinutes = normalized.runtimeMinutes() != null
+                        && (fresh.getRuntimeMinutes() == null
+                                || (trustedRuntimeMinutes && !normalized.runtimeMinutes().equals(fresh.getRuntimeMinutes())));
+                boolean backfillGenres = (fresh.getGenres() == null || fresh.getGenres().isEmpty())
+                        && normalized.genres() != null && !normalized.genres().isEmpty();
+                boolean backfillReleaseYear = fresh.getReleaseYear() == null && normalized.releaseYear() != null;
+                boolean backfillCountries = (fresh.getCountries() == null || fresh.getCountries().isEmpty())
+                        && normalized.countries() != null && !normalized.countries().isEmpty();
+                if (!backfillSeasonFinale && !backfillSeriesFinale && !updateRuntimeMinutes
+                        && !backfillGenres && !backfillReleaseYear && !backfillCountries) {
+                    return fresh;
+                }
                 if (backfillSeasonFinale) {
                     clearPreviousSeasonFinale(normalized.seriesTmdbId(), normalized.seasonNumber(), normalized.episodeNumber());
                     fresh.setIsSeasonFinale(true);
@@ -197,6 +198,15 @@ public class ContentServiceImpl implements ContentService {
         } catch (DataIntegrityViolationException e) {
             return existing;
         }
+    }
+
+    private boolean hasMetadataToReconcile(ContentRefCreationDTO normalized) {
+        return normalized.isSeasonFinale() != null
+                || normalized.isSeriesFinale() != null
+                || normalized.runtimeMinutes() != null
+                || (normalized.genres() != null && !normalized.genres().isEmpty())
+                || normalized.releaseYear() != null
+                || (normalized.countries() != null && !normalized.countries().isEmpty());
     }
 
     private void assertNoMetadataMismatch(Content existing, ContentRefCreationDTO normalized, boolean trustedRuntimeMinutes) {

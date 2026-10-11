@@ -79,6 +79,8 @@ class ContentServiceImplTest {
                 });
         lenient().when(contentRepository.saveAndFlush(any(Content.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(contentRepository.findByIdForUpdate(any()))
+                .thenAnswer(invocation -> contentRepository.findById(invocation.getArgument(0)));
         lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
@@ -802,6 +804,7 @@ class ContentServiceImplTest {
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 3, ContentType.EPISODE))
                 .thenReturn(Optional.of(existing));
+        doReturn(Optional.of(existing)).when(contentRepository).findByIdForUpdate(existing.getId());
 
         assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
                 .isInstanceOf(ConflictException.class)
@@ -818,6 +821,7 @@ class ContentServiceImplTest {
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 4, null, ContentType.SEASON))
                 .thenReturn(Optional.of(existing));
+        doReturn(Optional.of(existing)).when(contentRepository).findByIdForUpdate(existing.getId());
 
         assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
                 .isInstanceOf(ConflictException.class)
@@ -919,6 +923,7 @@ class ContentServiceImplTest {
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 3, ContentType.EPISODE))
                 .thenReturn(Optional.empty(), Optional.of(existing));
+        doReturn(Optional.of(existing)).when(contentRepository).findByIdForUpdate(existing.getId());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
         when(contentRepository.saveAndFlush(mapped))
                 .thenThrow(buildDataIntegrityViolationException("uq_contents_tmdb_id_type"));
@@ -978,6 +983,7 @@ class ContentServiceImplTest {
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 5, ContentType.EPISODE))
                 .thenReturn(Optional.empty(), Optional.of(existing));
+        doReturn(Optional.of(existing)).when(contentRepository).findByIdForUpdate(existing.getId());
         when(contentMapper.contentRefCreationDtoToContent(dto)).thenReturn(mapped);
         when(contentRepository.saveAndFlush(mapped))
                 .thenThrow(buildDataIntegrityViolationException("uq_contents_season_finale"));
@@ -1137,6 +1143,59 @@ class ContentServiceImplTest {
         assertThat(existing.getReleaseYear()).isEqualTo(1999);
         assertThat(existing.getCountries()).containsExactly("US");
         verify(contentRepository).saveAndFlush(existing);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Reject Conflicting Locked Movie Metadata - When A Concurrent Backfill Wins")
+    void shouldRejectConflictingLockedMovieMetadataWhenConcurrentBackfillWins() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO("100", ContentType.MOVIE, null, null, null, null, null);
+        Content earlierRead = Content.builder().id(existingId).tmdbId("100").type(ContentType.MOVIE).build();
+        Content lockedMovie = Content.builder().id(existingId).tmdbId("100").type(ContentType.MOVIE)
+                .runtimeMinutes(211).genres(List.of("Crime", "Thriller")).releaseYear(1998).countries(List.of("CA", "GB")).build();
+        TmdbMovieFullDetails details = new TmdbMovieFullDetails(
+                "100", null, null, null, null, null, "1999-05-20", 139,
+                List.of(new TmdbGenre(1, "Drama")), List.of(new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null);
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, "100", ContentType.MOVIE, null, null, null, null, null, null, null,
+                211, List.of("Crime", "Thriller"));
+
+        when(contentRepository.findByTmdbIdAndType("100", ContentType.MOVIE)).thenReturn(Optional.of(earlierRead));
+        when(tmdbClient.getMovieFullDetails("100", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
+        doReturn(Optional.of(lockedMovie)).when(contentRepository).findByIdForUpdate(existingId);
+
+        assertThatThrownBy(() -> contentService.getOrCreateReference(dto))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This content is already registered with a different runtimeMinutes value");
+
+        assertThat(lockedMovie.getRuntimeMinutes()).isEqualTo(211);
+        assertThat(lockedMovie.getGenres()).containsExactly("Crime", "Thriller");
+        assertThat(lockedMovie.getReleaseYear()).isEqualTo(1998);
+        assertThat(lockedMovie.getCountries()).containsExactly("CA", "GB");
+        verify(contentRepository).findByIdForUpdate(existingId);
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Accept Matching Finale Metadata From The Locked Episode - When The Earlier Read Conflicts")
+    void shouldAcceptMatchingFinaleMetadataFromLockedEpisodeWhenEarlierReadConflicts() {
+        UUID existingId = UUID.randomUUID();
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "200", 1, 3, true, null);
+        Content earlierRead = Content.builder().id(existingId).type(ContentType.EPISODE).seriesTmdbId("200")
+                .seasonNumber(1).episodeNumber(3).isSeasonFinale(false).runtimeMinutes(25).build();
+        Content lockedEpisode = Content.builder().id(existingId).type(ContentType.EPISODE).seriesTmdbId("200")
+                .seasonNumber(1).episodeNumber(3).isSeasonFinale(true).runtimeMinutes(25).build();
+        ContentRefDTO responseDto = new ContentRefDTO(existingId, null, ContentType.EPISODE, "200", 1, 3, true, null, null, null);
+
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType("200", 1, 3, ContentType.EPISODE))
+                .thenReturn(Optional.of(earlierRead));
+        doReturn(Optional.of(lockedEpisode)).when(contentRepository).findByIdForUpdate(existingId);
+        when(contentMapper.contentToContentRefDto(lockedEpisode)).thenReturn(responseDto);
+
+        ContentRefDTO result = contentService.getOrCreateReference(dto);
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(lockedEpisode.getIsSeasonFinale()).isTrue();
+        verify(contentRepository).findByIdForUpdate(existingId);
     }
 
     @Test
@@ -1421,7 +1480,7 @@ class ContentServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
                 "401", 1, 2, ContentType.EPISODE)).thenReturn(Optional.empty());
         when(contentRepository.findByTmdbIdAndType("401", ContentType.SERIES)).thenReturn(Optional.of(staleSeries));
-        when(contentRepository.findByIdForUpdate(seriesId)).thenReturn(Optional.of(lockedSeries));
+        doReturn(Optional.of(lockedSeries)).when(contentRepository).findByIdForUpdate(seriesId);
         when(tmdbClient.getTvFullDetails("401", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
 
         contentService.getOrCreateReference(dto);
