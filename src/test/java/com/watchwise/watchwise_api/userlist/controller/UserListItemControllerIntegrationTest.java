@@ -6,8 +6,10 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbGenre;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbProductionCountry;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -52,7 +54,9 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -339,6 +343,39 @@ class UserListItemControllerIntegrationTest {
                 .andExpect(jsonPath("$.contentState.watchStatus").value("UNWATCHED"));
 
         assertThat(userListItemRepository.findByUserListIdOrderByPositionAsc(list.getId())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[addItem] Should Persist Parent Series Genres For Filtering - When Adding A New Episode")
+    void shouldPersistParentSeriesGenresForFilteringWhenAddingANewEpisode() throws Exception {
+        RegisteredUser user = registerUser("additemepisodegenre");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Drama episodes", true);
+        when(tmdbClient.getTvFullDetails("1396", "en-US"))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
+                        "1396", null, null, null, null, null, "2008-01-20", null,
+                        List.of(new TmdbGenre(18, "Drama")),
+                        List.of(new TmdbProductionCountry("us", "United States")),
+                        null, null, null, null, null, null, null, null, null, null, null)));
+        String episodeBody = """
+                {
+                    "content": { "type": "EPISODE", "seriesTmdbId": "1396", "seasonNumber": 1, "episodeNumber": 1 }
+                }
+                """;
+
+        mockMvc.perform(addItemRequest(user, list.getId(), episodeBody))
+                .andExpect(status().isCreated());
+
+        assertThat(contentRepository.findByTmdbIdAndType("1396", ContentType.SERIES))
+                .get()
+                .extracting(Content::getGenres)
+                .asList()
+                .containsExactly("Drama");
+        mockMvc.perform(get("/users/" + user.id() + "/lists/view").cookie(user.accessToken())
+                        .param("itemType", "EPISODE").param("genre", "Drama"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].name").value("Drama episodes"));
     }
 
     @Test

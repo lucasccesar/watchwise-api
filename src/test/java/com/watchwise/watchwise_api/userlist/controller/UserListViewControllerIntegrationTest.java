@@ -7,6 +7,8 @@ import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadataKey;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.comment.entity.Comment;
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -70,6 +72,7 @@ class UserListViewControllerIntegrationTest {
     @Autowired UserRepository users;
     @Autowired UserListRepository lists;
     @Autowired UserListItemRepository items;
+    @Autowired CommentRepository comments;
     @Autowired ContentRepository contents;
     @Autowired LikeRepository likes;
     @Autowired FollowerRepository followers;
@@ -81,6 +84,7 @@ class UserListViewControllerIntegrationTest {
     @BeforeEach
     void cleanDatabase() {
         likes.deleteAll();
+        comments.deleteAll();
         items.deleteAll();
         lists.deleteAll();
         contents.deleteAll();
@@ -91,7 +95,7 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("My source ALL returns a deduplicated visual page envelope")
+    @DisplayName("[getMyListView] Should Return A Deduplicated Visual Page Envelope - When Source Is All")
     void sourceAllReturnsDeduplicatedPageEnvelope() throws Exception {
         RegisteredUser owner = register("viewallowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
@@ -118,7 +122,7 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("Discovery omits private and follower-only lists and accepts each public sort")
+    @DisplayName("[getDiscoverListView] Should Omit Nonpublic Lists And Accept Public Sorts - When Discovering Lists")
     void discoverHidesNonPublicListsAndAcceptsPublicSorts() throws Exception {
         RegisteredUser viewer = register("viewdiscoverviewer");
         RegisteredUser owner = register("viewdiscoverowner");
@@ -136,7 +140,7 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("Discovery accepts omitted and whitespace-only queries")
+    @DisplayName("[getDiscoverListView] Should Accept Omitted And Blank Queries - When Searching Lists")
     void discoverAcceptsOmittedAndWhitespaceQuery() throws Exception {
         RegisteredUser viewer = register("viewqueryviewer");
         RegisteredUser owner = register("viewqueryowner");
@@ -149,7 +153,7 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("Visual routes require authentication and reject invalid query values as ApiError")
+    @DisplayName("[getDiscoverListView] Should Require Authentication And Reject Invalid Query Values - When Calling Visual Routes")
     void visualRoutesRequireAuthenticationAndReturnApiErrorsForInvalidParameters() throws Exception {
         mockMvc.perform(get("/lists/discover/view"))
                 .andExpect(status().isUnauthorized());
@@ -171,7 +175,7 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("Existing raw list endpoints continue returning their original DTO shape")
+    @DisplayName("[getUserLists] Should Keep The Existing DTO Shape - When Calling A Raw List Route")
     void rawListRoutesKeepTheirExistingDtos() throws Exception {
         RegisteredUser owner = register("viewrawowner");
         RegisteredUser viewer = register("viewrawviewer");
@@ -185,7 +189,7 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("User view forwards item type and genre filters")
+    @DisplayName("[getUserListView] Should Apply Item Type And Genre Filters - When Reading User Lists")
     void userViewAppliesItemTypeAndGenreFilters() throws Exception {
         RegisteredUser viewer = register("viewfilterviewer");
         RegisteredUser owner = register("viewfilterowner");
@@ -204,13 +208,19 @@ class UserListViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getDiscoverListView] Should Apply Name And Likes Ordering In Both Directions - When Multiple Public Lists Exist")
-    void discoverViewAppliesNameAndLikesOrderingInBothDirectionsWhenMultiplePublicListsExist() throws Exception {
+    @DisplayName("[getDiscoverListView] Should Apply Name Likes Item And Comment Ordering In Both Directions - When Multiple Public Lists Exist")
+    void discoverViewAppliesNameLikesItemAndCommentOrderingInBothDirectionsWhenMultiplePublicListsExist() throws Exception {
         RegisteredUser viewer = register("vieworderviewer");
         RegisteredUser owner = register("vieworderowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
-        persistList(ownerEntity, "Alpha", UserListVisibility.PUBLIC, 3);
-        persistList(ownerEntity, "Beta", UserListVisibility.PUBLIC, 8);
+        UserList alpha = persistList(ownerEntity, "Alpha", UserListVisibility.PUBLIC, 3);
+        UserList beta = persistList(ownerEntity, "Beta", UserListVisibility.PUBLIC, 8);
+        persistItem(alpha, ContentType.MOVIE, null);
+        persistItem(beta, ContentType.MOVIE, null);
+        persistItem(beta, ContentType.MOVIE, null);
+        persistComment(alpha, ownerEntity, "Alpha comment");
+        persistComment(beta, ownerEntity, "Beta comment one");
+        persistComment(beta, ownerEntity, "Beta comment two");
 
         mockMvc.perform(discoverView(viewer).param("sortBy", "name").param("sortDirection", "asc"))
                 .andExpect(status().isOk())
@@ -225,6 +235,22 @@ class UserListViewControllerIntegrationTest {
                 .andExpect(jsonPath("$.content[0].name").value("Alpha"))
                 .andExpect(jsonPath("$.content[1].name").value("Beta"));
         mockMvc.perform(discoverView(viewer).param("sortBy", "likesCount").param("sortDirection", "desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Beta"))
+                .andExpect(jsonPath("$.content[1].name").value("Alpha"));
+        mockMvc.perform(discoverView(viewer).param("sortBy", "itemsCount").param("sortDirection", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Alpha"))
+                .andExpect(jsonPath("$.content[1].name").value("Beta"));
+        mockMvc.perform(discoverView(viewer).param("sortBy", "itemsCount").param("sortDirection", "desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Beta"))
+                .andExpect(jsonPath("$.content[1].name").value("Alpha"));
+        mockMvc.perform(discoverView(viewer).param("sortBy", "commentsCount").param("sortDirection", "asc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("Alpha"))
+                .andExpect(jsonPath("$.content[1].name").value("Beta"));
+        mockMvc.perform(discoverView(viewer).param("sortBy", "commentsCount").param("sortDirection", "desc"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].name").value("Beta"))
                 .andExpect(jsonPath("$.content[1].name").value("Alpha"));
@@ -297,7 +323,14 @@ class UserListViewControllerIntegrationTest {
         Content content = contents.save(Content.builder().type(type)
                 .tmdbId(tmdbId)
                 .genres(genre == null ? null : List.of(genre)).createdAt(now).updatedAt(now).build());
-        items.save(UserListItem.builder().userList(list).content(content).position(1)
+        int position = items.findByUserListIdOrderByPositionAsc(list.getId()).size() + 1;
+        items.save(UserListItem.builder().userList(list).content(content).position(position)
+                .createdAt(now).updatedAt(now).build());
+    }
+
+    private void persistComment(UserList list, User user, String text) {
+        LocalDateTime now = LocalDateTime.now();
+        comments.save(Comment.builder().user(user).list(list).text(text)
                 .createdAt(now).updatedAt(now).build());
     }
 

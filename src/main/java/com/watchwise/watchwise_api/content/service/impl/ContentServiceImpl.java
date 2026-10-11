@@ -57,7 +57,11 @@ public class ContentServiceImpl implements ContentService {
             return contentMapper.contentToContentRefDto(reconcileExisting(existing.get(), enriched, trustedRuntimeMinutes));
         }
 
-        ContentRefCreationDTO enriched = resolveNewContentMetadata(normalized, trustedRuntimeMinutes);
+        ResolvedContentReference resolved = resolveNewContentMetadata(normalized, trustedRuntimeMinutes);
+        if (resolved.parentSeries() != null) {
+            ensureSeriesReference(resolved.parentSeries());
+        }
+        ContentRefCreationDTO enriched = resolved.content();
 
         try {
             Content saved = newTransactionExecutor.runInNewTransaction(() -> {
@@ -248,26 +252,72 @@ public class ContentServiceImpl implements ContentService {
         return null;
     }
 
-    private ContentRefCreationDTO resolveNewContentMetadata(ContentRefCreationDTO dto, boolean trustedRuntimeMinutes) {
+    private ResolvedContentReference resolveNewContentMetadata(ContentRefCreationDTO dto, boolean trustedRuntimeMinutes) {
         return switch (dto.type()) {
-            case MOVIE -> withMovieMetadata(dto,
-                    requireFound(tmdbClient.getMovieFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "movie"));
-            case SERIES -> withSeriesMetadata(dto,
-                    requireFound(tmdbClient.getTvFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series"));
+            case MOVIE -> new ResolvedContentReference(withMovieMetadata(dto,
+                    requireFound(tmdbClient.getMovieFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "movie")), null);
+            case SERIES -> new ResolvedContentReference(withSeriesMetadata(dto,
+                    requireFound(tmdbClient.getTvFullDetails(dto.tmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series")), null);
             case SEASON -> {
-                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series");
-                yield dto;
+                TmdbTvFullDetails series = requireFound(
+                        tmdbClient.getTvFullDetails(dto.seriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series");
+                yield new ResolvedContentReference(dto, parentSeriesReference(dto.seriesTmdbId(), series));
             }
             case EPISODE -> {
-                requireFound(tmdbClient.getTvFullDetails(dto.seriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series");
+                TmdbTvFullDetails series = requireFound(
+                        tmdbClient.getTvFullDetails(dto.seriesTmdbId(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "series");
+                ContentRefCreationDTO parentSeries = parentSeriesReference(dto.seriesTmdbId(), series);
                 if (trustedRuntimeMinutes) {
-                    yield dto;
+                    yield new ResolvedContentReference(dto, parentSeries);
                 }
                 TmdbEpisodeFullDetails episode = requireFound(tmdbClient.getEpisodeFullDetails(
                         dto.seriesTmdbId(), dto.seasonNumber(), dto.episodeNumber(), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE), "episode");
-                yield withEpisodeRuntime(dto, episode.runtime());
+                yield new ResolvedContentReference(withEpisodeRuntime(dto, episode.runtime()), parentSeries);
             }
         };
+    }
+
+    private ContentRefCreationDTO parentSeriesReference(String seriesTmdbId, TmdbTvFullDetails details) {
+        ContentRefCreationDTO seriesReference = new ContentRefCreationDTO(
+                seriesTmdbId, ContentType.SERIES, null, null, null, null, null);
+        return withSeriesMetadata(seriesReference, details);
+    }
+
+    private void ensureSeriesReference(ContentRefCreationDTO seriesReference) {
+        Optional<Content> existing = contentRepository.findByTmdbIdAndType(seriesReference.tmdbId(), ContentType.SERIES);
+        if (existing.isPresent()) {
+            reconcileMissingSeriesMetadata(existing.get(), seriesReference);
+            return;
+        }
+
+        try {
+            newTransactionExecutor.runInNewTransaction(() -> {
+                Content series = contentMapper.contentRefCreationDtoToContent(seriesReference);
+                LocalDateTime now = LocalDateTime.now();
+                series.setCreatedAt(now);
+                series.setUpdatedAt(now);
+                return contentRepository.saveAndFlush(series);
+            });
+        } catch (DataIntegrityViolationException e) {
+            Optional<Content> concurrent = contentRepository.findByTmdbIdAndType(seriesReference.tmdbId(), ContentType.SERIES);
+            if (concurrent.isEmpty()) {
+                throw e;
+            }
+            reconcileMissingSeriesMetadata(concurrent.get(), seriesReference);
+        }
+    }
+
+    private void reconcileMissingSeriesMetadata(Content existing, ContentRefCreationDTO seriesReference) {
+        ContentRefCreationDTO missingMetadata = new ContentRefCreationDTO(
+                seriesReference.tmdbId(), ContentType.SERIES, null, null, null, null, null,
+                existing.getRuntimeMinutes() == null ? seriesReference.runtimeMinutes() : null,
+                existing.getGenres() == null || existing.getGenres().isEmpty() ? seriesReference.genres() : null,
+                existing.getReleaseYear() == null ? seriesReference.releaseYear() : null,
+                existing.getCountries() == null || existing.getCountries().isEmpty() ? seriesReference.countries() : null);
+        reconcileExisting(existing, missingMetadata, false);
+    }
+
+    private record ResolvedContentReference(ContentRefCreationDTO content, ContentRefCreationDTO parentSeries) {
     }
 
     private ContentRefCreationDTO backfillMissingTmdbMetadata(ContentRefCreationDTO dto, Content existing) {

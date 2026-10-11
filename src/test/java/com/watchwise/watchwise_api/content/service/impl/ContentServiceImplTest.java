@@ -68,6 +68,17 @@ class ContentServiceImplTest {
     void setUp() {
         lenient().when(newTransactionExecutor.runInNewTransaction(any()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+        lenient().when(contentMapper.contentRefCreationDtoToContent(any(ContentRefCreationDTO.class)))
+                .thenAnswer(invocation -> {
+                    ContentRefCreationDTO dto = invocation.getArgument(0);
+                    return Content.builder().tmdbId(dto.tmdbId()).type(dto.type())
+                            .seriesTmdbId(dto.seriesTmdbId()).seasonNumber(dto.seasonNumber())
+                            .episodeNumber(dto.episodeNumber()).isSeasonFinale(dto.isSeasonFinale())
+                            .isSeriesFinale(dto.isSeriesFinale()).runtimeMinutes(dto.runtimeMinutes())
+                            .genres(dto.genres()).releaseYear(dto.releaseYear()).countries(dto.countries()).build();
+                });
+        lenient().when(contentRepository.saveAndFlush(any(Content.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(tmdbClient.getMovieFullDetails(any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbMovieFullDetails(
                         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)));
@@ -1269,8 +1280,16 @@ class ContentServiceImplTest {
 
         assertThat(result).isEqualTo(responseDto);
         ArgumentCaptor<ContentRefCreationDTO> captor = ArgumentCaptor.forClass(ContentRefCreationDTO.class);
-        verify(contentMapper).contentRefCreationDtoToContent(captor.capture());
-        assertThat(captor.getValue().runtimeMinutes()).isEqualTo(42);
+        verify(contentMapper, org.mockito.Mockito.times(2)).contentRefCreationDtoToContent(captor.capture());
+        assertThat(captor.getAllValues())
+                .anySatisfy(reference -> {
+                    assertThat(reference.type()).isEqualTo(ContentType.SERIES);
+                    assertThat(reference.tmdbId()).isEqualTo("200");
+                })
+                .anySatisfy(reference -> {
+                    assertThat(reference.type()).isEqualTo(ContentType.EPISODE);
+                    assertThat(reference.runtimeMinutes()).isEqualTo(42);
+                });
     }
 
     @Test
@@ -1317,6 +1336,72 @@ class ContentServiceImplTest {
         assertThat(captor.getValue().genres()).containsExactly("Drama", "Thriller");
         assertThat(captor.getValue().releaseYear()).isEqualTo(2010);
         assertThat(captor.getValue().countries()).containsExactly("US");
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Persist Parent Series Metadata - When Creating An Episode Reference")
+    void shouldPersistParentSeriesMetadataWhenCreatingAnEpisodeReference() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "300", 1, 2, null, null);
+        TmdbTvFullDetails details = new TmdbTvFullDetails(
+                "300", null, null, null, null, null, "2010-03-14", null,
+                List.of(new TmdbGenre(1, "Drama")),
+                List.of(new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null, null, null, null, null);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "300", 1, 2, ContentType.EPISODE)).thenReturn(Optional.empty());
+        when(tmdbClient.getTvFullDetails("300", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
+        when(contentMapper.contentRefCreationDtoToContent(any(ContentRefCreationDTO.class)))
+                .thenAnswer(invocation -> {
+                    ContentRefCreationDTO creation = invocation.getArgument(0);
+                    return Content.builder().tmdbId(creation.tmdbId()).type(creation.type())
+                            .seriesTmdbId(creation.seriesTmdbId()).seasonNumber(creation.seasonNumber())
+                            .episodeNumber(creation.episodeNumber()).genres(creation.genres())
+                            .releaseYear(creation.releaseYear()).countries(creation.countries()).build();
+                });
+        when(contentRepository.saveAndFlush(any(Content.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        contentService.getOrCreateReference(dto);
+
+        ArgumentCaptor<Content> savedContents = ArgumentCaptor.forClass(Content.class);
+        verify(contentRepository, org.mockito.Mockito.times(2)).saveAndFlush(savedContents.capture());
+        assertThat(savedContents.getAllValues())
+                .anySatisfy(content -> {
+                    assertThat(content.getType()).isEqualTo(ContentType.SERIES);
+                    assertThat(content.getTmdbId()).isEqualTo("300");
+                    assertThat(content.getGenres()).containsExactly("Drama");
+                    assertThat(content.getReleaseYear()).isEqualTo(2010);
+                    assertThat(content.getCountries()).containsExactly("US");
+                })
+                .anySatisfy(content -> {
+                    assertThat(content.getType()).isEqualTo(ContentType.EPISODE);
+                    assertThat(content.getSeriesTmdbId()).isEqualTo("300");
+                });
+        org.mockito.Mockito.verify(tmdbClient, org.mockito.Mockito.times(1))
+                .getTvFullDetails("300", "en-US");
+    }
+
+    @Test
+    @DisplayName("[getOrCreateReference] Should Keep Existing Parent Metadata - When TMDB Metadata Has Changed")
+    void shouldKeepExistingParentMetadataWhenTmdbMetadataHasChanged() {
+        ContentRefCreationDTO dto = new ContentRefCreationDTO(null, ContentType.EPISODE, "400", 1, 2, null, null);
+        Content existingSeries = Content.builder().id(UUID.randomUUID()).tmdbId("400").type(ContentType.SERIES)
+                .genres(List.of("Comedy")).releaseYear(2015).countries(List.of("GB")).build();
+        TmdbTvFullDetails details = new TmdbTvFullDetails(
+                "400", null, null, null, null, null, "2020-01-01", null,
+                List.of(new TmdbGenre(1, "Drama")),
+                List.of(new TmdbProductionCountry("us", "United States")),
+                null, null, null, null, null, null, null, null, null, null, null);
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "400", 1, 2, ContentType.EPISODE)).thenReturn(Optional.empty());
+        when(contentRepository.findByTmdbIdAndType("400", ContentType.SERIES)).thenReturn(Optional.of(existingSeries));
+        when(tmdbClient.getTvFullDetails("400", "en-US")).thenReturn(new TmdbLookupResult.Found<>(details));
+
+        contentService.getOrCreateReference(dto);
+
+        assertThat(existingSeries.getGenres()).containsExactly("Comedy");
+        assertThat(existingSeries.getReleaseYear()).isEqualTo(2015);
+        assertThat(existingSeries.getCountries()).containsExactly("GB");
     }
 
     @Test
