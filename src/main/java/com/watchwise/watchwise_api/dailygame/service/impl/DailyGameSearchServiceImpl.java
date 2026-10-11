@@ -1,20 +1,16 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
-import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
-import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
-import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
-import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.content.service.TmdbSeriesHierarchyService;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
@@ -26,7 +22,6 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
-import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -45,15 +40,15 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
 
     private final TmdbClient tmdbClient;
     private final PageRequestFactory pageRequestFactory;
-    private final Clock clock;
+    private final TmdbSeriesHierarchyService seriesHierarchyService;
 
     public DailyGameSearchServiceImpl(
             TmdbClient tmdbClient,
             PageRequestFactory pageRequestFactory,
-            Clock clock) {
+            TmdbSeriesHierarchyService seriesHierarchyService) {
         this.tmdbClient = tmdbClient;
         this.pageRequestFactory = pageRequestFactory;
-        this.clock = clock;
+        this.seriesHierarchyService = seriesHierarchyService;
     }
 
     @Override
@@ -87,14 +82,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
     @Override
     public List<DailyGameSeasonOptionDTO> listEpisodeSeasons(UUID userId, String seriesTmdbId) {
         String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
-        TmdbTvFullDetails series = requireFound(
-                tmdbClient.getTvFullDetails(normalizedSeriesTmdbId, LANGUAGE), "series");
-        if (series.seasons() == null) {
-            return List.of();
-        }
-
-        return series.seasons().stream()
-                .filter(this::isRegularSeason)
+        return seriesHierarchyService.listSeasons(normalizedSeriesTmdbId, false, LANGUAGE).stream()
                 .map(season -> new DailyGameSeasonOptionDTO(
                         season.seasonNumber(), season.name(), season.episodeCount()))
                 .toList();
@@ -105,25 +93,11 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
             UUID userId, String seriesTmdbId, Integer seasonNumber) {
         String normalizedSeriesTmdbId = normalizePositiveIdentifier(seriesTmdbId);
         int normalizedSeasonNumber = normalizePositiveSeasonNumber(seasonNumber);
-        TmdbLookupResult<TmdbSeasonFullDetails> lookup = tmdbClient.getSeasonFullDetails(
-                normalizedSeriesTmdbId, normalizedSeasonNumber, LANGUAGE);
-        if (lookup == null || lookup.isUnavailable()) {
-            throw tmdbUnavailable();
-        }
-        TmdbSeasonFullDetails season = requireFound(lookup, "season");
-        if (season.episodes() == null) {
-            return List.of();
-        }
-
-        LocalDate today = LocalDate.now(clock);
-        return season.episodes().stream()
-                .filter(episode -> isReleasedEpisode(episode, today))
+        return seriesHierarchyService.listEpisodes(
+                        normalizedSeriesTmdbId, normalizedSeasonNumber, false, LANGUAGE).stream()
                 .map(episode -> new DailyGameEpisodeOptionDTO(
-                        normalizedSeriesTmdbId,
-                        normalizedSeasonNumber,
-                        episode.episodeNumber(),
-                        episode.name(),
-                        parseDate(episode.airDate())))
+                        episode.seriesTmdbId(), episode.seasonNumber(), episode.episodeNumber(),
+                        episode.name(), episode.airDate()))
                 .toList();
     }
 
@@ -173,32 +147,6 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
                         person.name(),
                         TmdbImageUrlBuilder.profileUrl(person.profilePath()),
                         null));
-    }
-
-    private <T> T requireFound(TmdbLookupResult<T> lookup, String subject) {
-        if (lookup == null || lookup.isUnavailable()) {
-            throw tmdbUnavailable();
-        }
-        if (lookup instanceof TmdbLookupResult.NotFound<T>) {
-            throw new NotFoundException("No " + subject + " found on TMDB for the given id");
-        }
-        if (lookup instanceof TmdbLookupResult.Found<T> found && found.value() != null) {
-            return found.value();
-        }
-        throw tmdbUnavailable();
-    }
-
-    private boolean isRegularSeason(TmdbSeasonSummary season) {
-        return season != null && season.seasonNumber() != null && season.seasonNumber() > 0;
-    }
-
-    private boolean isReleasedEpisode(TmdbEpisodeSummary episode, LocalDate today) {
-        if (episode == null || episode.episodeNumber() == null || episode.episodeNumber() < 1
-                || episode.name() == null || episode.name().isBlank()) {
-            return false;
-        }
-        LocalDate airDate = parseDate(episode.airDate());
-        return airDate != null && !airDate.isAfter(today);
     }
 
     private <T> TmdbSearchPage<T> searchPageOrEmpty(

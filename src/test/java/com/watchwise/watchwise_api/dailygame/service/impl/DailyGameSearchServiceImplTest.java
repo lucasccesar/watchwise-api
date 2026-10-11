@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.content.service.impl.TmdbSeriesHierarchyServiceImpl;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
@@ -429,7 +430,8 @@ class DailyGameSearchServiceImplTest {
     }
 
     private DailyGameSearchServiceImpl service() {
-        return new DailyGameSearchServiceImpl(tmdbClient, new PageRequestFactory(), CLOCK);
+        return new DailyGameSearchServiceImpl(
+                tmdbClient, new PageRequestFactory(), new TmdbSeriesHierarchyServiceImpl(tmdbClient, CLOCK));
     }
 
     private TmdbMovieSearchResult movie(String id, String title) {
