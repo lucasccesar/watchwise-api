@@ -37,9 +37,11 @@ import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -56,6 +58,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -162,7 +165,7 @@ class PickPreviewAssemblerTest {
     }
 
     @Test
-    @org.junit.jupiter.api.DisplayName("[assembleViewPage] Should Count Only Valid Answers And Batch Template Previews - When Picks Have Different Progress")
+    @DisplayName("[assembleViewPage] Should Count Only Valid Answers And Batch Template Previews - When Picks Have Different Progress")
     void shouldCountOnlyValidAnswersAndBatchTemplatePreviewsWhenPicksHaveDifferentProgress() {
         UUID viewerId = UUID.randomUUID();
         User user = User.builder().id(UUID.randomUUID()).username("marina").build();
@@ -211,6 +214,7 @@ class PickPreviewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assembleViewPage] Should Preserve Visual Target Positions - When Repeated Targets Share One Batch")
     void assemblesVisualTargetPreviewsOnceAndPreservesContentPersonAndContextTargets() {
         UUID viewerId = UUID.randomUUID();
         User viewer = User.builder().id(viewerId).username("viewer").preferredLanguage("pt-BR")
@@ -266,6 +270,7 @@ class PickPreviewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assembleTemplateViewPage] Should Delegate Target Previews Once - When A Template Pick Is Assembled")
     void assemblesTemplatePickViewWithTheSameVisualAnswers() {
         UUID viewerId = UUID.randomUUID();
         User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
@@ -294,9 +299,11 @@ class PickPreviewAssemblerTest {
             assertThat(answer.preview()).isEqualTo(preview);
         });
         assertThat(result.progress()).isEqualTo(PickProgress.COMPLETE);
+        verify(targetPreviewAssembler, times(1)).assemble(any(), any());
     }
 
     @Test
+    @DisplayName("[assembleTemplateViewPage] Should Keep Full Count While Showing Five Answers - When Six Targets Are Valid")
     void limitsTemplatePickAnswersToFiveWhileKeepingTheFullValidCount() {
         UUID viewerId = UUID.randomUUID();
         User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
@@ -335,6 +342,7 @@ class PickPreviewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assembleDetail] Should Include All Categories Without Dynamic Validation - When A Pick Is Detailed")
     void assemblesDetailWithAllCategoriesAndDoesNotRunDynamicTargetValidation() {
         UUID viewerId = UUID.randomUUID();
         User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
@@ -368,6 +376,129 @@ class PickPreviewAssemblerTest {
         assertThat(result.answers().get(1).preview()).isNull();
         assertThat(result.answeredCategoriesCount()).isEqualTo(1);
         verify(targetService, never()).isValid(any(), any(), any(), any());
+        verify(targetPreviewAssembler, times(1)).assemble(any(), any());
+    }
+
+    @Test
+    @DisplayName("[assembleViewPage] Should Preserve Raw IDs And Preview Statuses - When Metadata Is Partial Or Unavailable")
+    void shouldPreserveRawIdsAndPreviewStatusesWhenMetadataIsPartialOrUnavailable() {
+        UUID viewerId = UUID.randomUUID();
+        User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        PicksTemplateCategory partialCategory = category(template, 1);
+        PicksTemplateCategory unavailableCategory = category(template, 2);
+        Pick pick = pick(owner, template);
+        PickSelection partialSelection = selection(pick, partialCategory);
+        PickSelection unavailableSelection = selection(pick, unavailableCategory);
+        PickOptionSearchDTO partialTarget = new PickOptionSearchDTO(partialSelection.getId(),
+                contentRef("550", ContentType.MOVIE), null, null);
+        PickOptionSearchDTO unavailableTarget = new PickOptionSearchDTO(unavailableSelection.getId(),
+                contentRef("999", ContentType.MOVIE), null, null);
+        PickTargetPreviewDTO partialPreview = new PickTargetPreviewDTO(
+                contentCard("550", "Back to the Future", ContentPreviewStatus.PARTIAL), null, null);
+        PickTargetPreviewDTO unavailablePreview = new PickTargetPreviewDTO(
+                contentCard("999", null, ContentPreviewStatus.UNAVAILABLE), null, null);
+        List<UUID> pickIds = List.of(pick.getId());
+        when(selectionRepository.findByPickIdIn(pickIds)).thenReturn(List.of(partialSelection, unavailableSelection));
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of(partialCategory, unavailableCategory));
+        when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(partialSelection)).thenReturn(partialTarget);
+        when(pickMapper.pickSelectionToSearchDto(unavailableSelection)).thenReturn(unavailableTarget);
+        when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(partialPreview, unavailablePreview));
+        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
+        when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), preview(template)));
+
+        PickViewCardDTO result = assembler.assembleViewPage(new PageImpl<>(List.of(pick)), viewerId)
+                .getContent().getFirst();
+
+        assertThat(result.answeredCategories()).extracting(answer -> answer.target().content().tmdbId())
+                .containsExactly("550", "999");
+        assertThat(result.answeredCategories()).extracting(answer -> answer.preview().contentCard().previewStatus())
+                .containsExactly(ContentPreviewStatus.PARTIAL, ContentPreviewStatus.UNAVAILABLE);
+        verify(targetPreviewAssembler, times(1)).assemble(any(), any());
+    }
+
+    @Test
+    @DisplayName("[assembleViewPage] Should Delegate Repeated Targets In One Ordered Batch - When Targets Repeat Across Answers")
+    void shouldDelegateRepeatedTargetsInOneOrderedBatchWhenTargetsRepeatAcrossAnswers() {
+        UUID viewerId = UUID.randomUUID();
+        User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        PicksTemplateCategory firstCategory = category(template, 1);
+        PicksTemplateCategory secondCategory = category(template, 2);
+        Pick pick = pick(owner, template);
+        PickSelection firstSelection = selection(pick, firstCategory);
+        PickSelection secondSelection = selection(pick, secondCategory);
+        ContentRefDTO repeatedRef = contentRef("550", ContentType.MOVIE);
+        PickOptionSearchDTO firstTarget = new PickOptionSearchDTO(firstSelection.getId(), repeatedRef, null, null);
+        PickOptionSearchDTO secondTarget = new PickOptionSearchDTO(secondSelection.getId(), repeatedRef, null, null);
+        PickTargetPreviewDTO firstPreview = new PickTargetPreviewDTO(contentCard("550", "First", ContentPreviewStatus.AVAILABLE), null, null);
+        PickTargetPreviewDTO secondPreview = new PickTargetPreviewDTO(contentCard("550", "Second", ContentPreviewStatus.AVAILABLE), null, null);
+        List<UUID> pickIds = List.of(pick.getId());
+        when(selectionRepository.findByPickIdIn(pickIds)).thenReturn(List.of(firstSelection, secondSelection));
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of(firstCategory, secondCategory));
+        when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(firstSelection)).thenReturn(firstTarget);
+        when(pickMapper.pickSelectionToSearchDto(secondSelection)).thenReturn(secondTarget);
+        when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(firstPreview, secondPreview));
+        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
+        when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), preview(template)));
+
+        PickViewCardDTO result = assembler.assembleViewPage(new PageImpl<>(List.of(pick)), viewerId)
+                .getContent().getFirst();
+
+        assertThat(result.answeredCategories()).extracting(answer -> answer.preview().contentCard().title())
+                .containsExactly("First", "Second");
+        ArgumentCaptor<List<PickOptionSearchDTO>> targets = ArgumentCaptor.forClass(List.class);
+        verify(targetPreviewAssembler, times(1)).assemble(targets.capture(), any());
+        assertThat(targets.getValue()).containsExactly(firstTarget, secondTarget);
+    }
+
+    @Test
+    @DisplayName("[assembleDetail] Should Preserve Repeated Target Positions - When Detail Uses One Delegated Batch")
+    void shouldPreserveRepeatedTargetPositionsWhenDetailUsesOneDelegatedBatch() {
+        UUID viewerId = UUID.randomUUID();
+        User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        PicksTemplateCategory firstCategory = category(template, 1);
+        PicksTemplateCategory secondCategory = category(template, 2);
+        Pick pick = pick(owner, template);
+        PickSelection firstSelection = selection(pick, firstCategory);
+        PickSelection secondSelection = selection(pick, secondCategory);
+        ContentRefDTO repeatedRef = contentRef("550", ContentType.MOVIE);
+        PickOptionSearchDTO firstTarget = new PickOptionSearchDTO(firstSelection.getId(), repeatedRef, null, null);
+        PickOptionSearchDTO secondTarget = new PickOptionSearchDTO(secondSelection.getId(), repeatedRef, null, null);
+        PickTargetPreviewDTO firstPreview = new PickTargetPreviewDTO(contentCard("550", "First", ContentPreviewStatus.AVAILABLE), null, null);
+        PickTargetPreviewDTO secondPreview = new PickTargetPreviewDTO(contentCard("550", "Second", ContentPreviewStatus.AVAILABLE), null, null);
+        List<UUID> pickIds = List.of(pick.getId());
+        when(selectionRepository.findByPickIdIn(pickIds)).thenReturn(List.of(firstSelection, secondSelection));
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of(firstCategory, secondCategory));
+        when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(firstSelection)).thenReturn(firstTarget);
+        when(pickMapper.pickSelectionToSearchDto(secondSelection)).thenReturn(secondTarget);
+        when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(firstPreview, secondPreview));
+        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
+        when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), preview(template)));
+
+        var result = assembler.assembleDetail(pick, viewerId);
+
+        assertThat(result.answers()).extracting(answer -> answer.preview().contentCard().title())
+                .containsExactly("First", "Second");
+        ArgumentCaptor<List<PickOptionSearchDTO>> targets = ArgumentCaptor.forClass(List.class);
+        verify(targetPreviewAssembler, times(1)).assemble(targets.capture(), any());
+        assertThat(targets.getValue()).containsExactly(firstTarget, secondTarget);
     }
 
     private Pick pick(User user, PicksTemplate template) {
@@ -390,8 +521,12 @@ class PickPreviewAssemblerTest {
     }
 
     private ContentCardDTO contentCard(String tmdbId, String title) {
+        return contentCard(tmdbId, title, ContentPreviewStatus.AVAILABLE);
+    }
+
+    private ContentCardDTO contentCard(String tmdbId, String title, ContentPreviewStatus status) {
         return new ContentCardDTO(null, ContentType.MOVIE, tmdbId, null, null, null, title, null, null,
-                null, null, null, null, null, null, null, null, null, ContentPreviewStatus.AVAILABLE);
+                null, null, null, null, null, null, null, null, null, status);
     }
 
     private PicksTemplatePreviewDTO preview(PicksTemplate template) {
