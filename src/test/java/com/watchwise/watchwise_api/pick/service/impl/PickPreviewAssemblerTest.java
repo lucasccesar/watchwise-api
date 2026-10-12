@@ -7,9 +7,17 @@ import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickProgress;
+import com.watchwise.watchwise_api.pick.dto.PickTargetPreviewDTO;
+import com.watchwise.watchwise_api.pick.dto.PickTemplatePickViewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickViewCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickSelection;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
@@ -28,6 +36,7 @@ import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePrevi
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -37,8 +46,10 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -64,6 +75,8 @@ class PickPreviewAssemblerTest {
     @Mock PickTargetService targetService;
     @Mock UserMapper userMapper;
     @Mock PicksTemplatePreviewAssembler templatePreviewAssembler;
+    @Mock PickTargetPreviewAssembler targetPreviewAssembler;
+    @Mock UserRepository userRepository;
     @InjectMocks PickPreviewAssembler assembler;
 
     @Test
@@ -197,9 +210,169 @@ class PickPreviewAssemblerTest {
         verify(commentRepository).countByPickIdIn(pickIds);
     }
 
+    @Test
+    void assemblesVisualTargetPreviewsOnceAndPreservesContentPersonAndContextTargets() {
+        UUID viewerId = UUID.randomUUID();
+        User viewer = User.builder().id(viewerId).username("viewer").preferredLanguage("pt-BR")
+                .preferredRegion("BR").build();
+        User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        PicksTemplateCategory movieCategory = category(template, 1);
+        PicksTemplateCategory personCategory = PicksTemplateCategory.builder().id(UUID.randomUUID())
+                .picksTemplate(template).name("Actor").group(PickCategoryGroup.SECONDARY).displayOrder(2)
+                .allowedType(PickAllowedType.PERSON).optionMode(PickCategoryOptionMode.OPEN).build();
+        Pick pick = pick(owner, template);
+        PickSelection movieSelection = selection(pick, movieCategory);
+        PickSelection personSelection = selection(pick, personCategory);
+        ContentRefDTO movieRef = contentRef("550", ContentType.MOVIE);
+        ContentRefDTO contextRef = contentRef("550", ContentType.MOVIE);
+        PickOptionSearchDTO movieTarget = new PickOptionSearchDTO(movieSelection.getId(), movieRef, null, null);
+        PickOptionSearchDTO personTarget = new PickOptionSearchDTO(personSelection.getId(), null, "42", contextRef);
+        PickTargetPreviewDTO moviePreview = new PickTargetPreviewDTO(contentCard("550", "Back to the Future"), null, null);
+        PickTargetPreviewDTO personPreview = new PickTargetPreviewDTO(null,
+                new PickPersonPreviewDTO("42", "Christopher Lloyd", "/lloyd.jpg", ContentPreviewStatus.AVAILABLE),
+                contentCard("550", "Back to the Future"));
+        List<UUID> pickIds = List.of(pick.getId());
+
+        when(userRepository.findById(viewerId)).thenReturn(Optional.of(viewer));
+        when(selectionRepository.findByPickIdIn(pickIds)).thenReturn(List.of(movieSelection, personSelection));
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of(movieCategory, personCategory));
+        when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(movieSelection)).thenReturn(movieTarget);
+        when(pickMapper.pickSelectionToSearchDto(personSelection)).thenReturn(personTarget);
+        when(targetPreviewAssembler.assemble(List.of(movieTarget, personTarget),
+                new ContentCardContext("pt-BR", "BR", null, null)))
+                .thenReturn(List.of(moviePreview, personPreview));
+        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
+        when(templatePreviewAssembler.assemble(anyCollection(), org.mockito.ArgumentMatchers.eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), preview(template)));
+
+        PickViewCardDTO result = assembler.assembleViewPage(new PageImpl<>(List.of(pick)), viewerId).getContent().getFirst();
+
+        assertThat(result.answeredCategories()).hasSize(2);
+        assertThat(result.answeredCategories().get(0).target().content().tmdbId()).isEqualTo("550");
+        assertThat(result.answeredCategories().get(0).preview().contentCard().title())
+                .isEqualTo("Back to the Future");
+        assertThat(result.answeredCategories().get(1).target().personTmdbId()).isEqualTo("42");
+        assertThat(result.answeredCategories().get(1).preview().person().name()).isEqualTo("Christopher Lloyd");
+        assertThat(result.answeredCategories().get(1).preview().contextCard().title())
+                .isEqualTo("Back to the Future");
+        verify(targetPreviewAssembler).assemble(List.of(movieTarget, personTarget),
+                new ContentCardContext("pt-BR", "BR", null, null));
+        verify(userRepository).findById(viewerId);
+    }
+
+    @Test
+    void assemblesTemplatePickViewWithTheSameVisualAnswers() {
+        UUID viewerId = UUID.randomUUID();
+        User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        PicksTemplateCategory category = category(template, 1);
+        Pick pick = pick(owner, template);
+        PickSelection selection = selection(pick, category);
+        PickOptionSearchDTO target = new PickOptionSearchDTO(selection.getId(), contentRef("550", ContentType.MOVIE), null, null);
+        PickTargetPreviewDTO preview = new PickTargetPreviewDTO(contentCard("550", "Back to the Future"), null, null);
+        List<UUID> pickIds = List.of(pick.getId());
+        when(selectionRepository.findByPickIdIn(pickIds)).thenReturn(List.of(selection));
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of(category));
+        when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(selection)).thenReturn(target);
+        when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(preview));
+        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
+
+        PickTemplatePickViewDTO result = assembler.assembleTemplateViewPage(new PageImpl<>(List.of(pick)), viewerId)
+                .getContent().getFirst();
+
+        assertThat(result.answeredCategories()).singleElement().satisfies(answer -> {
+            assertThat(answer.target()).isEqualTo(target);
+            assertThat(answer.preview()).isEqualTo(preview);
+        });
+        assertThat(result.progress()).isEqualTo(PickProgress.COMPLETE);
+    }
+
+    @Test
+    void limitsTemplatePickAnswersToFiveWhileKeepingTheFullValidCount() {
+        UUID viewerId = UUID.randomUUID();
+        User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        Pick pick = pick(owner, template);
+        List<PicksTemplateCategory> categories = new ArrayList<>();
+        List<PickSelection> selections = new ArrayList<>();
+        for (int order = 1; order <= 6; order++) {
+            PicksTemplateCategory category = category(template, order);
+            categories.add(category);
+            selections.add(selection(pick, category));
+        }
+        List<UUID> pickIds = List.of(pick.getId());
+        when(selectionRepository.findByPickIdIn(pickIds)).thenReturn(selections);
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(categories);
+        when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(any(PickSelection.class))).thenAnswer(invocation -> {
+            PickSelection selection = invocation.getArgument(0);
+            return new PickOptionSearchDTO(selection.getId(), contentRef(String.valueOf(selection.getCategory().getDisplayOrder()),
+                    ContentType.MOVIE), null, null);
+        });
+        when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of());
+        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
+
+        PickTemplatePickViewDTO result = assembler.assembleTemplateViewPage(new PageImpl<>(List.of(pick)), viewerId)
+                .getContent().getFirst();
+
+        assertThat(result.answeredCategories()).hasSize(5);
+        assertThat(result.answeredCategories()).extracting(answer -> answer.displayOrder())
+                .containsExactly(1, 2, 3, 4, 5);
+        assertThat(result.answeredCategoriesCount()).isEqualTo(6);
+        assertThat(result.progress()).isEqualTo(PickProgress.COMPLETE);
+    }
+
+    @Test
+    void assemblesDetailWithAllCategoriesAndDoesNotRunDynamicTargetValidation() {
+        UUID viewerId = UUID.randomUUID();
+        User owner = User.builder().id(UUID.randomUUID()).username("marina").build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        PicksTemplateCategory answeredCategory = category(template, 1);
+        PicksTemplateCategory unansweredCategory = category(template, 2);
+        Pick pick = pick(owner, template);
+        PickSelection selection = selection(pick, answeredCategory);
+        PickOptionSearchDTO target = new PickOptionSearchDTO(selection.getId(), contentRef("550", ContentType.MOVIE), null, null);
+        PickTargetPreviewDTO preview = new PickTargetPreviewDTO(contentCard("550", "Back to the Future"), null, null);
+        List<UUID> pickIds = List.of(pick.getId());
+        when(selectionRepository.findByPickIdIn(pickIds)).thenReturn(List.of(selection));
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of(answeredCategory, unansweredCategory));
+        when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
+        when(pickMapper.pickSelectionToSearchDto(selection)).thenReturn(target);
+        when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(preview));
+        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
+        when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
+        when(templatePreviewAssembler.assemble(anyCollection(), org.mockito.ArgumentMatchers.eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), preview(template)));
+
+        var result = assembler.assembleDetail(pick, viewerId);
+
+        assertThat(result.answers()).hasSize(2);
+        assertThat(result.answers().get(0).preview()).isEqualTo(preview);
+        assertThat(result.answers().get(0).target()).isEqualTo(target);
+        assertThat(result.answers().get(1).isAnswered()).isFalse();
+        assertThat(result.answers().get(1).target()).isNull();
+        assertThat(result.answers().get(1).preview()).isNull();
+        assertThat(result.answeredCategoriesCount()).isEqualTo(1);
+        verify(targetService, never()).isValid(any(), any(), any(), any());
+    }
+
     private Pick pick(User user, PicksTemplate template) {
         return Pick.builder().id(UUID.randomUUID()).user(user).picksTemplate(template)
-                .visibility(PickVisibility.PRIVATE).createdAt(LocalDateTime.now()).likesCount(0).build();
+                .visibility(PickVisibility.PUBLIC).createdAt(LocalDateTime.now()).likesCount(0).build();
     }
 
     private PicksTemplateCategory category(PicksTemplate template, int order) {
@@ -210,6 +383,15 @@ class PickPreviewAssemblerTest {
 
     private PickSelection selection(Pick pick, PicksTemplateCategory category) {
         return PickSelection.builder().id(UUID.randomUUID()).pick(pick).category(category).build();
+    }
+
+    private ContentRefDTO contentRef(String tmdbId, ContentType type) {
+        return new ContentRefDTO(null, tmdbId, type, null, null, null, null, null, null, null);
+    }
+
+    private ContentCardDTO contentCard(String tmdbId, String title) {
+        return new ContentCardDTO(null, ContentType.MOVIE, tmdbId, null, null, null, title, null, null,
+                null, null, null, null, null, null, null, null, null, ContentPreviewStatus.AVAILABLE);
     }
 
     private PicksTemplatePreviewDTO preview(PicksTemplate template) {
