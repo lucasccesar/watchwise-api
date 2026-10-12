@@ -26,11 +26,13 @@ import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategoryRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
+import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePreviewAssembler;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -65,6 +67,7 @@ class PickServiceImplTest {
     @Mock LikeService likeService;
     @Mock UserMapper userMapper;
     @Mock PicksTemplateOptionRepository optionRepository;
+    @Mock PicksTemplatePreviewAssembler templatePreviewAssembler;
 
     PickService service;
     PageRequestFactory pageRequestFactory;
@@ -75,11 +78,51 @@ class PickServiceImplTest {
         pageRequestFactory = new PageRequestFactory();
         PickPreviewAssembler pickPreviewAssembler = new PickPreviewAssembler(selectionRepository, categoryRepository,
                 optionRepository, commentRepository, mock(CommentPreviewAssembler.class), likeService, pickMapper,
-                targetService, userMapper);
+                targetService, userMapper, templatePreviewAssembler);
         service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
                 userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
                 pickPreviewAssembler);
         savedSelections = new ArrayList<>();
+    }
+
+    @Test
+    @DisplayName("[getMyPicksView] Should Query Only The Requested User Page - When Page Is Nonempty")
+    void shouldQueryOnlyRequestedUserPageWhenPageIsNonempty() {
+        UUID ownerId = UUID.randomUUID();
+        PicksTemplate template = template();
+        Pick newer = pick(ownerId, template, PickVisibility.PUBLIC);
+        PageRequest request = PageRequest.of(1, 5);
+        Page<Pick> repositoryPage = new PageImpl<>(List.of(newer), request, 6);
+        when(pickRepository.findByUserIdOrderByCreatedAtDescIdDesc(ownerId, request)).thenReturn(repositoryPage);
+        when(selectionRepository.findByPickIdIn(List.of(newer.getId()))).thenReturn(List.of());
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId()))).thenReturn(List.of());
+        when(templatePreviewAssembler.assemble(anyCollection(), eq(ownerId)))
+                .thenReturn(java.util.Map.of(template.getId(), templatePreview(template)));
+        when(commentRepository.countByPickIdIn(List.of(newer.getId()))).thenReturn(List.of());
+        when(likeService.getLikedPickIds(ownerId, List.of(newer.getId()))).thenReturn(java.util.Set.of());
+
+        Page<PickViewCardDTO> result = service.getMyPicksView(ownerId, 2, 5);
+
+        assertThat(result.getContent()).extracting(PickViewCardDTO::id).containsExactly(newer.getId());
+        assertThat(result.getTotalElements()).isEqualTo(6);
+        verify(pickRepository).findByUserIdOrderByCreatedAtDescIdDesc(ownerId, request);
+        verify(pickRepository, never()).findVisibleByOwner(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("[getMyPicksView] Should Preserve Empty Page Metadata - When User Has No Picks")
+    void shouldPreserveEmptyPageMetadataWhenUserHasNoPicks() {
+        UUID ownerId = UUID.randomUUID();
+        PageRequest request = PageRequest.of(0, 5);
+        Page<Pick> emptyPage = Page.empty(request);
+        when(pickRepository.findByUserIdOrderByCreatedAtDescIdDesc(ownerId, request)).thenReturn(emptyPage);
+
+        Page<PickViewCardDTO> result = service.getMyPicksView(ownerId, null, 5);
+
+        assertThat(result.getContent()).isEmpty();
+        assertThat(result.getTotalElements()).isZero();
+        verifyNoInteractions(selectionRepository, categoryRepository, optionRepository, templatePreviewAssembler,
+                commentRepository, likeService);
     }
 
     @Test
@@ -203,7 +246,8 @@ class PickServiceImplTest {
                 .thenReturn(new PageImpl<>(List.of(first, second), pageRequest, 2));
         when(selectionRepository.findByPickIdIn(List.of(first.getId(), second.getId())))
                 .thenReturn(List.of(firstSelection, secondSelection));
-        when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId())).thenReturn(List.of(category));
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
+                .thenReturn(List.of(category));
         lenient().when(targetService.isStructurallyValid(same(category), any(), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(UUID.randomUUID(), null, null, null));
         lenient().when(templateMapper.picksTemplateToPreviewDto(template)).thenReturn(templatePreview(template));
@@ -226,7 +270,7 @@ class PickServiceImplTest {
         when(pickRepository.findVisibleByTemplateRecent(viewerId, template.getId(), pageRequest))
                 .thenReturn(new PageImpl<>(List.of(pick), pageRequest, 1));
         when(selectionRepository.findByPickIdIn(List.of(pick.getId()))).thenReturn(List.of(selection));
-        when(categoryRepository.findByPicksTemplateIdOrderByGroupAscDisplayOrderAsc(template.getId()))
+        when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
                 .thenReturn(List.of(category));
         when(targetService.isStructurallyValid(same(category), same(selection), anyList())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(selection))

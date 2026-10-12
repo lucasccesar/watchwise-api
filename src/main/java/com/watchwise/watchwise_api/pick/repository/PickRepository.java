@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PickRepository extends JpaRepository<Pick, UUID> {
+    Page<Pick> findByUserIdOrderByCreatedAtDescIdDesc(UUID userId, Pageable pageable);
+
     @Query("select pick.picksTemplate.id from Pick pick where pick.id = :id and pick.user.id = :userId")
     Optional<UUID> findOwnedTemplateId(@Param("id") UUID id, @Param("userId") UUID userId);
 

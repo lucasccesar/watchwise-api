@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
+import com.watchwise.watchwise_api.pick.dto.PickViewCardDTO;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickService;
 import jakarta.validation.Valid;
@@ -71,6 +72,14 @@ public class PickController {
                                                                          @RequestParam(required = false) Integer page,
                                                                          @RequestParam(required = false) Integer size) {
         Page<PickPreviewDTO> picks = pickService.getUserPicks(currentUserId(), userId, templateId, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(picks));
+    }
+
+    @GetMapping("/users/me/picks/view")
+    public ResponseEntity<PageResponseDTO<PickViewCardDTO>> getMyPicksView(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        Page<PickViewCardDTO> picks = pickService.getMyPicksView(currentUserId(), page, size);
         return ResponseEntity.ok(PageResponseDTO.of(picks));
     }
 

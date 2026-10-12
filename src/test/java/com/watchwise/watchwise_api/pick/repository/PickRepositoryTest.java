@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -40,6 +41,26 @@ class PickRepositoryTest {
         repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PUBLIC).createdAt(now).updatedAt(now).build());
         Pick second = repository.saveAndFlush(Pick.builder().user(user).picksTemplate(template).visibility(PickVisibility.PRIVATE).createdAt(now).updatedAt(now).build());
         assertThat(second.getId()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[findByUserIdOrderByCreatedAtDescIdDesc] Should Isolate And Order Owned Picks Across Pages - When Another User Has Newer Picks")
+    void shouldIsolateAndOrderOwnedPicksAcrossPagesWhenAnotherUserHasNewerPicks() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);
+        User owner = user("owned-page-owner", now);
+        User other = user("owned-page-other", now);
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.COMMUNITY)
+                .name("Owned page").createdAt(now).updatedAt(now).build());
+        Pick older = save(owner, template, PickVisibility.PRIVATE, now.minusDays(1));
+        Pick newer = save(owner, template, PickVisibility.PUBLIC, now);
+        save(other, template, PickVisibility.PUBLIC, now.plusDays(1));
+
+        Page<Pick> firstPage = repository.findByUserIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(0, 1));
+        Page<Pick> secondPage = repository.findByUserIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(1, 1));
+
+        assertThat(firstPage.getContent()).extracting(Pick::getId).containsExactly(newer.getId());
+        assertThat(firstPage.getTotalElements()).isEqualTo(2);
+        assertThat(secondPage.getContent()).extracting(Pick::getId).containsExactly(older.getId());
     }
     @Test void exposesOwnerPublicAndAcceptedFollowerPicksOnly() {
         LocalDateTime now = LocalDateTime.now();

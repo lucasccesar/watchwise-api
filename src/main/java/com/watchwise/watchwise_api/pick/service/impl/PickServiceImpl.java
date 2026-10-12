@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionCreationDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSelectionDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
+import com.watchwise.watchwise_api.pick.dto.PickViewCardDTO;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.entity.PickSelection;
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
@@ -117,6 +118,14 @@ public class PickServiceImpl implements PickService {
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         Page<Pick> picks = pickRepository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(userId, templateId, pageRequest);
         return mapPreviewPage(picks, userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<PickViewCardDTO> getMyPicksView(UUID viewerId, Integer page, Integer size) {
+        PageRequest pageRequest = pageRequestFactory.build(page, size);
+        Page<Pick> picks = pickRepository.findByUserIdOrderByCreatedAtDescIdDesc(viewerId, pageRequest);
+        return pickPreviewAssembler.assembleViewPage(picks, viewerId);
     }
 
     @Override

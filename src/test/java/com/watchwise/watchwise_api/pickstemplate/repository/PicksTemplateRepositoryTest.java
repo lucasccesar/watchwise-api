@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -58,6 +59,27 @@ class PicksTemplateRepositoryTest {
         PicksTemplate template = repository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
         assertThat(template.getId()).isNotNull();
         assertThat(template.getCreator()).isNull();
+    }
+
+    @Test
+    @DisplayName("[findByCreatorIdOrderByCreatedAtDescIdDesc] Should Isolate And Order Owned Templates Across Pages - When Another Creator Has A Newer Template")
+    void shouldIsolateAndOrderOwnedTemplatesAcrossPagesWhenAnotherCreatorHasANewerTemplate() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);
+        User owner = saveUser("owned-template-owner", now);
+        User other = saveUser("owned-template-other", now);
+        PicksTemplate older = repository.saveAndFlush(PicksTemplate.builder().creator(owner).origin(PickOrigin.COMMUNITY)
+                .name("Older").createdAt(now.minusDays(1)).updatedAt(now.minusDays(1)).build());
+        PicksTemplate newer = repository.saveAndFlush(PicksTemplate.builder().creator(owner).origin(PickOrigin.COMMUNITY)
+                .name("Newer").createdAt(now).updatedAt(now).build());
+        repository.saveAndFlush(PicksTemplate.builder().creator(other).origin(PickOrigin.COMMUNITY)
+                .name("Other").createdAt(now.plusDays(1)).updatedAt(now.plusDays(1)).build());
+
+        Page<PicksTemplate> firstPage = repository.findByCreatorIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(0, 1));
+        Page<PicksTemplate> secondPage = repository.findByCreatorIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(1, 1));
+
+        assertThat(firstPage.getContent()).extracting(PicksTemplate::getId).containsExactly(newer.getId());
+        assertThat(firstPage.getTotalElements()).isEqualTo(2);
+        assertThat(secondPage.getContent()).extracting(PicksTemplate::getId).containsExactly(older.getId());
     }
 
     @Test

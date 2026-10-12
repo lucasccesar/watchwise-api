@@ -17,6 +17,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UUID> {
+    Page<PicksTemplate> findByCreatorIdOrderByCreatedAtDescIdDesc(UUID creatorId, Pageable pageable);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select template from PicksTemplate template where template.id = :id")
     Optional<PicksTemplate> findByIdForUpdate(@Param("id") UUID id);

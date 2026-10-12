@@ -16,6 +16,33 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class PicksTemplateControllerIntegrationTest extends PicksDomainIntegrationSupport {
 
+    @Test
+    @DisplayName("[getMyTemplatesView] Should Return Only Owned Templates In The Requested Page - When Other Creators Have Templates")
+    void shouldReturnOnlyOwnedTemplatesInRequestedPageWhenOtherCreatorsHaveTemplates() throws Exception {
+        template();
+        mvc.perform(authenticated(other, HttpMethod.POST, "/picks-templates", """
+                {"name":"Other Template","categories":[
+                  {"name":"Person","group":"PRIMARY","displayOrder":1,"allowedType":"PERSON","optionMode":"OPEN"}]}
+                """))
+                .andExpect(status().isCreated());
+
+        mvc.perform(authenticated(owner, HttpMethod.GET, "/users/me/picks-templates/view?page=1&size=1&sort=RECENT", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].name").value("Awards"));
+    }
+
+    @Test
+    @DisplayName("[getMyTemplatesView] Should Return ApiError - When Pagination Is Invalid")
+    void shouldReturnApiErrorWhenOwnedTemplatePaginationIsInvalid() throws Exception {
+        mvc.perform(authenticated(owner, HttpMethod.GET, "/users/me/picks-templates/view?page=0&size=-1", ""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"));
+    }
+
     @ParameterizedTest
     @CsvSource({"MOVIE,false", "PERSON,false", "PERSON,true"})
     @DisplayName("[createTemplate] Should Roll Back Aggregate With 409 - When Initial Targets Are Duplicated")
@@ -72,7 +99,7 @@ class PicksTemplateControllerIntegrationTest extends PicksDomainIntegrationSuppo
     @DisplayName("[createTemplate] Should Derive Origin From Current Role - When Token Predates Promotion")
     void shouldUsePersistedRoleAndDeleteUnusedAggregate() throws Exception {
         var tokenRequest = authenticated(other, HttpMethod.POST, "/picks-templates",
-                "{\"name\":\"Official\",\"categories\":[" + categoryBody("PERSON", "[]") + "]}");
+                "{\"name\":\"Official\",\"categories\":[{\"name\":\"Person\",\"group\":\"PRIMARY\",\"displayOrder\":1,\"allowedType\":\"PERSON\",\"optionMode\":\"OPEN\"}]}");
         other.setRole(UserRole.ADMIN);
         users.saveAndFlush(other);
         var result = mvc.perform(tokenRequest).andExpect(status().isCreated())

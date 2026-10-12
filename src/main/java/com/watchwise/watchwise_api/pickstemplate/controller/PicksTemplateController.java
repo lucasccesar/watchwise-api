@@ -19,17 +19,16 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/picks-templates")
 @RequiredArgsConstructor
 public class PicksTemplateController {
     private final PicksTemplateService picksTemplateService;
 
-    @PostMapping
+    @PostMapping("/picks-templates")
     public ResponseEntity<PicksTemplateResponseDTO> createTemplate(@Valid @RequestBody PicksTemplateCreationDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(picksTemplateService.createTemplate(currentUserId(), dto));
     }
 
-    @GetMapping
+    @GetMapping("/picks-templates")
     public ResponseEntity<PageResponseDTO<PicksTemplatePreviewDTO>> listTemplates(
             @RequestParam(required = false) PickOrigin origin, @RequestParam(required = false) String name,
             @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size,
@@ -38,21 +37,31 @@ public class PicksTemplateController {
         return ResponseEntity.ok(PageResponseDTO.of(templates));
     }
 
-    @GetMapping("/{templateId}")
+    @GetMapping("/picks-templates/{templateId}")
     public ResponseEntity<PicksTemplateResponseDTO> getTemplate(@PathVariable UUID templateId) {
         return ResponseEntity.ok(picksTemplateService.getTemplate(currentUserId(), templateId));
     }
 
-    @PatchMapping("/{templateId}")
+    @PatchMapping("/picks-templates/{templateId}")
     public ResponseEntity<PicksTemplateResponseDTO> updateTemplate(@PathVariable UUID templateId,
                                                                       @Valid @RequestBody PicksTemplatePatchDTO dto) {
         return ResponseEntity.ok(picksTemplateService.updateTemplate(currentUserId(), templateId, dto));
     }
 
-    @DeleteMapping("/{templateId}")
+    @DeleteMapping("/picks-templates/{templateId}")
     public ResponseEntity<Void> detachOrDeleteTemplate(@PathVariable UUID templateId) {
         picksTemplateService.detachOrDeleteTemplate(currentUserId(), templateId);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/users/me/picks-templates/view")
+    public ResponseEntity<PageResponseDTO<PicksTemplatePreviewDTO>> getMyTemplatesView(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) PicksTemplateSort sort) {
+        Page<PicksTemplatePreviewDTO> templates = picksTemplateService.getMyTemplatesView(
+                currentUserId(), page, size, sort);
+        return ResponseEntity.ok(PageResponseDTO.of(templates));
     }
 
     private UUID currentUserId() {

@@ -92,6 +92,18 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
 
     @Override
     @Transactional(readOnly = true)
+    public Page<PicksTemplatePreviewDTO> getMyTemplatesView(UUID viewerId, Integer page, Integer size,
+                                                             PicksTemplateSort sort) {
+        if (sort != null && sort != PicksTemplateSort.RECENT) {
+            throw new BadRequestException("Owned templates only support RECENT sort");
+        }
+        PageRequest pageRequest = pageRequestFactory.build(page, size);
+        Page<PicksTemplate> templates = templateRepository.findByCreatorIdOrderByCreatedAtDescIdDesc(viewerId, pageRequest);
+        return previewAssembler.assemblePage(templates, viewerId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PicksTemplateResponseDTO getTemplate(UUID viewerId, UUID templateId) {
         return toResponse(findTemplate(templateId), viewerId);
     }

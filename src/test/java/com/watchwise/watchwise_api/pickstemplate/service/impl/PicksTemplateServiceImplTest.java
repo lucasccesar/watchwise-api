@@ -56,6 +56,27 @@ class PicksTemplateServiceImplTest {
     @InjectMocks PicksTemplateServiceImpl service;
 
     @Test
+    @DisplayName("[getMyTemplatesView] Should Query And Assemble The Requested Creator Page - When Sort Is Recent")
+    void shouldQueryAndAssembleRequestedCreatorPageWhenSortIsRecent() {
+        UUID viewerId = UUID.randomUUID();
+        PicksTemplate template = template(null, PickOrigin.COMMUNITY);
+        PageRequest request = PageRequest.of(1, 5);
+        Page<PicksTemplate> repositoryPage = new PageImpl<>(List.of(template), request, 6);
+        Page<PicksTemplatePreviewDTO> assembledPage = new PageImpl<>(List.of(
+                new PicksTemplatePreviewDTO(template.getId(), PickOrigin.COMMUNITY, "Awards", null, null)), request, 6);
+        when(pageRequestFactory.build(2, 5)).thenReturn(request);
+        when(templateRepository.findByCreatorIdOrderByCreatedAtDescIdDesc(viewerId, request)).thenReturn(repositoryPage);
+        when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
+
+        Page<PicksTemplatePreviewDTO> result = service.getMyTemplatesView(viewerId, 2, 5, PicksTemplateSort.RECENT);
+
+        assertThat(result).isSameAs(assembledPage);
+        verify(templateRepository).findByCreatorIdOrderByCreatedAtDescIdDesc(viewerId, request);
+        verify(previewAssembler).assemblePage(repositoryPage, viewerId);
+        verify(templateRepository, never()).search(any(), any(), any());
+    }
+
+    @Test
     void shouldUseAlphabeticalSearchForDefaultSortAndAssembleReturnedPage() {
         UUID viewerId = UUID.randomUUID();
         PageRequest pageRequest = PageRequest.of(0, 20);
