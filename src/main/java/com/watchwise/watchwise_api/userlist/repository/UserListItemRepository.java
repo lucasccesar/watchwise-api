@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.userlist.repository;
 
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -13,6 +14,22 @@ import java.util.Set;
 import java.util.UUID;
 
 public interface UserListItemRepository extends JpaRepository<UserListItem, UUID> {
+
+    @Query("""
+            SELECT DISTINCT child FROM UserList child JOIN FETCH child.user
+            WHERE child.id IN :childListIds
+            AND (child.user.id = :viewerId
+                OR child.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
+                OR (child.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
+                    AND EXISTS (
+                        SELECT 1 FROM Follower follower
+                        WHERE follower.follower.id = :viewerId
+                        AND follower.followed.id = child.user.id
+                        AND follower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                    )))
+            """)
+    List<UserList> findVisibleChildListsByIdIn(
+            @Param("childListIds") Collection<UUID> childListIds, @Param("viewerId") UUID viewerId);
 
     @Query(value = """
             SELECT parent_id AS parentId, child_id AS childId, owner_id AS ownerId,
