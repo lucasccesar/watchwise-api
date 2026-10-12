@@ -8,8 +8,14 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
+import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
+import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickOptionViewDTO;
+import com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickTargetPreviewDTO;
 import com.watchwise.watchwise_api.pick.service.impl.PickTargetPreviewAssembler;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
@@ -339,6 +345,83 @@ class PicksTemplateOptionServiceImplTest {
         assertThat(result.hasNext()).isTrue();
         verify(previewAssembler).assemble(eq(List.of(firstTarget, secondTarget)), any(ContentCardContext.class));
         verify(optionRepository, never()).findByCategoryId(category.getId());
+        verifyNoInteractions(requestThrottler, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getOptionViews] Should Return Content Card Preview - When Persisted Fixed Movie Option Is Read")
+    void shouldReturnContentCardPreviewForPersistedFixedMovieOption() {
+        PicksTemplateCategory category = fixedCategory();
+        Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        PicksTemplateOption option = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category)
+                .content(movie).createdAt(LocalDateTime.now()).build();
+        PickOptionSearchDTO target = new PickOptionSearchDTO(option.getId(),
+                new ContentRefDTO(movie.getId(), movie.getTmdbId(), ContentType.MOVIE,
+                        null, null, null, null, null, null, null), null, null);
+        PickTargetPreviewDTO preview = new PickTargetPreviewDTO(
+                new ContentCardDTO(null, ContentType.MOVIE, "550", null, null, null,
+                        "Fight Club", null, null, null, null, null, null, null, null,
+                        null, null, null, ContentPreviewStatus.AVAILABLE), null, null);
+        PageRequest pageRequest = PageRequest.of(0, 20);
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId()))
+                .thenReturn(Optional.of(category));
+        when(optionRepository.findByCategoryId(category.getId(), pageRequest))
+                .thenReturn(new PageImpl<>(List.of(option), pageRequest, 1));
+        when(optionMapper.picksTemplateOptionToSearchDto(option)).thenReturn(target);
+        when(previewAssembler.assemble(eq(List.of(target)), any(ContentCardContext.class)))
+                .thenReturn(List.of(preview));
+
+        Page<PickOptionViewDTO> result = service.getOptionViews(UUID.randomUUID(),
+                category.getPicksTemplate().getId(), category.getId(), null, null, null, 1, 20);
+
+        assertThat(result).singleElement().satisfies(view -> {
+            assertThat(view.id()).isEqualTo(option.getId());
+            assertThat(view.target().content().tmdbId()).isEqualTo("550");
+            assertThat(view.preview().contentCard().tmdbId()).isEqualTo("550");
+            assertThat(view.preview().contentCard().title()).isEqualTo("Fight Club");
+        });
+        verify(previewAssembler).assemble(eq(List.of(target)), any(ContentCardContext.class));
+        verifyNoInteractions(requestThrottler, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getOptionViews] Should Return Person And Context Previews - When Persisted Fixed Person Option Has Context")
+    void shouldReturnPersonAndContextPreviewsForPersistedFixedPersonOption() {
+        PicksTemplateCategory category = fixedCategory();
+        Content context = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        PicksTemplateOption option = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category)
+                .personTmdbId("42").contextContent(context).createdAt(LocalDateTime.now()).build();
+        PickOptionSearchDTO target = new PickOptionSearchDTO(option.getId(), null, "42",
+                new ContentRefDTO(context.getId(), context.getTmdbId(), ContentType.MOVIE,
+                        null, null, null, null, null, null, null));
+        PickTargetPreviewDTO preview = new PickTargetPreviewDTO(null,
+                new PickPersonPreviewDTO("42", "Ada", "/ada.jpg", ContentPreviewStatus.AVAILABLE),
+                new ContentCardDTO(null, ContentType.MOVIE, "550", null, null, null,
+                        "Fight Club", null, null, null, null, null, null, null, null,
+                        null, null, null, ContentPreviewStatus.AVAILABLE));
+        PageRequest pageRequest = PageRequest.of(0, 20);
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId()))
+                .thenReturn(Optional.of(category));
+        when(optionRepository.findByCategoryId(category.getId(), pageRequest))
+                .thenReturn(new PageImpl<>(List.of(option), pageRequest, 1));
+        when(optionMapper.picksTemplateOptionToSearchDto(option)).thenReturn(target);
+        when(previewAssembler.assemble(eq(List.of(target)), any(ContentCardContext.class)))
+                .thenReturn(List.of(preview));
+
+        Page<PickOptionViewDTO> result = service.getOptionViews(UUID.randomUUID(),
+                category.getPicksTemplate().getId(), category.getId(), null, null, null, 1, 20);
+
+        assertThat(result).singleElement().satisfies(view -> {
+            assertThat(view.id()).isEqualTo(option.getId());
+            assertThat(view.target().personTmdbId()).isEqualTo("42");
+            assertThat(view.preview().person().tmdbId()).isEqualTo("42");
+            assertThat(view.preview().person().name()).isEqualTo("Ada");
+            assertThat(view.preview().contextCard().tmdbId()).isEqualTo("550");
+            assertThat(view.preview().contextCard().title()).isEqualTo("Fight Club");
+        });
+        verify(previewAssembler).assemble(eq(List.of(target)), any(ContentCardContext.class));
         verifyNoInteractions(requestThrottler, tmdbClient);
     }
 
