@@ -121,6 +121,10 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
                 option.getContextContent() == null ? null : option.getContextContent().getId())) {
             throw new ConflictException("A fixed option with selections cannot be deleted");
         }
+        if (category.getOptionMode() == PickCategoryOptionMode.FIXED
+                && optionRepository.findByCategoryId(categoryId).size() == 1) {
+            throw new ConflictException("A fixed category must retain at least one option");
+        }
         optionRepository.delete(option);
     }
 

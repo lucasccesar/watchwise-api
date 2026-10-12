@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.user.entity.UserRole;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -132,7 +133,7 @@ class PicksTemplateServiceImplTest {
     void shouldDeriveOfficialOriginFromPersistedAdminRole() {
         UUID actorId = UUID.randomUUID();
         User admin = user(actorId, UserRole.ADMIN);
-        PicksTemplateCategory category = category(PickCategoryOptionMode.FIXED);
+        PicksTemplateCategory category = category(PickCategoryOptionMode.OPEN);
         when(userRepository.findById(actorId)).thenReturn(Optional.of(admin));
         when(templateRepository.save(any())).thenAnswer(invocation -> {
             PicksTemplate template = invocation.getArgument(0); template.setId(UUID.randomUUID()); return template;
@@ -144,7 +145,7 @@ class PicksTemplateServiceImplTest {
         when(optionRepository.findByCategoryId(any())).thenReturn(List.of());
         when(userMapper.userToUserPreviewDto(admin)).thenReturn(new UserPreviewDTO(actorId, "admin", "image", true));
 
-        PicksTemplateResponseDTO result = service.createTemplate(actorId, creation(List.of(categoryCreation(PickCategoryOptionMode.FIXED, List.of()))));
+        PicksTemplateResponseDTO result = service.createTemplate(actorId, creation(List.of(categoryCreation(PickCategoryOptionMode.OPEN, List.of()))));
 
         assertThat(result.origin()).isEqualTo(PickOrigin.OFFICIAL);
     }
@@ -154,6 +155,16 @@ class PicksTemplateServiceImplTest {
         UUID actorId = UUID.randomUUID();
         assertThatThrownBy(() -> service.createTemplate(actorId, creation(List.of()))).isInstanceOf(BadRequestException.class);
         verifyNoInteractions(templateRepository, userRepository);
+    }
+
+    @Test
+    @DisplayName("[shouldRejectFixedCategoryWithoutOptionsWhenCreatingTemplate] Should Reject - When Creating A Template With An Empty Fixed Category")
+    void shouldRejectFixedCategoryWithoutOptionsWhenCreatingTemplate() {
+        UUID actorId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> service.createTemplate(actorId,
+                creation(List.of(categoryCreation(PickCategoryOptionMode.FIXED, List.of())))))
+                .isInstanceOf(BadRequestException.class);
     }
 
     @Test

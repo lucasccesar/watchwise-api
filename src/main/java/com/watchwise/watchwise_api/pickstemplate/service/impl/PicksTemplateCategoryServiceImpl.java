@@ -42,9 +42,7 @@ public class PicksTemplateCategoryServiceImpl implements PicksTemplateCategorySe
         PicksTemplate template = lockTemplate(templateId);
         assertCanManage(actorId, template);
         LocalDateTime now = LocalDateTime.now();
-        if (dto.optionMode() == PickCategoryOptionMode.OPEN && dto.options() != null && !dto.options().isEmpty()) {
-            throw new com.watchwise.watchwise_api.common.exception.BadRequestException("Open categories cannot receive fixed options");
-        }
+        PicksTemplateCategoryOptionsValidator.validateNewCategory(dto.optionMode(), dto.options());
         PicksTemplateCategory category = categoryRepository.save(PicksTemplateCategory.builder().picksTemplate(template)
                 .name(dto.name()).description(dto.description()).group(dto.group()).displayOrder(dto.displayOrder())
                 .allowedType(dto.allowedType()).optionMode(dto.optionMode()).createdAt(now).updatedAt(now).build());
@@ -71,6 +69,8 @@ public class PicksTemplateCategoryServiceImpl implements PicksTemplateCategorySe
         }
         if (dto.allowedType() != null) category.setAllowedType(dto.allowedType());
         if (dto.optionMode() != null) {
+            int optionCount = optionRepository.findByCategoryId(categoryId).size();
+            PicksTemplateCategoryOptionsValidator.validateModeChange(category.getOptionMode(), dto.optionMode(), optionCount);
             if (dto.optionMode() == PickCategoryOptionMode.OPEN && !optionRepository.findByCategoryId(categoryId).isEmpty()) {
                 throw new ConflictException("A category with fixed options cannot become open");
             }

@@ -9,13 +9,17 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
+import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
 import com.watchwise.watchwise_api.pickstemplate.entity.*;
 import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateOptionMapper;
 import com.watchwise.watchwise_api.pickstemplate.repository.*;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.InOrder;
@@ -136,6 +140,51 @@ class PicksTemplateOptionServiceImplTest {
         assertThatThrownBy(() -> service.searchOptions(UUID.randomUUID(), category.getPicksTemplate().getId(), category.getId(), null, null, null, null, null))
                 .isInstanceOf(com.watchwise.watchwise_api.common.exception.BadRequestException.class);
         verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[shouldRejectDeletingLastFixedOptionWhenCategoryHasNoSelections] Should Reject - When Deleting The Last Option From An Unused Fixed Category")
+    void shouldRejectDeletingLastFixedOptionWhenCategoryHasNoSelections() {
+        UUID actorId = UUID.randomUUID();
+        PicksTemplateCategory category = fixedCategory();
+        PicksTemplateOption option = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category)
+                .personTmdbId("42").createdAt(LocalDateTime.now()).build();
+        when(templateRepository.findByIdForUpdate(category.getPicksTemplate().getId())).thenReturn(Optional.of(category.getPicksTemplate()));
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(User.builder().id(actorId).role(com.watchwise.watchwise_api.user.entity.UserRole.ADMIN).build()));
+        when(categoryRepository.findByIdForUpdate(category.getId())).thenReturn(Optional.of(category));
+        when(optionRepository.findById(option.getId())).thenReturn(Optional.of(option));
+        when(selectionRepository.existsByCategoryIdAndContentIdAndPersonTmdbIdAndContextContentId(
+                category.getId(), null, "42", null)).thenReturn(false);
+        when(optionRepository.findByCategoryId(category.getId())).thenReturn(List.of(option));
+
+        assertThatThrownBy(() -> service.deleteOption(actorId, category.getPicksTemplate().getId(), category.getId(), option.getId()))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.ConflictException.class);
+
+        verify(optionRepository, never()).delete(option);
+    }
+
+    @Test
+    @DisplayName("[shouldAllowAddingOptionToHistoricalEmptyFixedCategoryWhenRepairingTemplate] Should Allow - When Repairing An Historical Empty Fixed Category")
+    void shouldAllowAddingOptionToHistoricalEmptyFixedCategoryWhenRepairingTemplate() {
+        UUID actorId = UUID.randomUUID();
+        PicksTemplateCategory category = fixedCategory();
+        when(templateRepository.findByIdForUpdate(category.getPicksTemplate().getId())).thenReturn(Optional.of(category.getPicksTemplate()));
+        when(userRepository.findById(actorId)).thenReturn(Optional.of(User.builder().id(actorId).role(com.watchwise.watchwise_api.user.entity.UserRole.ADMIN).build()));
+        when(categoryRepository.findByIdForUpdate(category.getId())).thenReturn(Optional.of(category));
+        ResolvedPickTarget target = new ResolvedPickTarget(null, "42", null, null);
+        when(pickTargetService.validateFixedOption(eq(actorId), eq(category.getPicksTemplate()), eq(category), any())).thenReturn(target);
+        when(optionRepository.saveAndFlush(any())).thenAnswer(invocation -> {
+            PicksTemplateOption saved = invocation.getArgument(0);
+            saved.setId(UUID.randomUUID());
+            return saved;
+        });
+        when(optionMapper.picksTemplateOptionToSearchDto(any())).thenReturn(new PickOptionSearchDTO(null, null, "42", null));
+
+        var result = service.addOption(actorId, category.getPicksTemplate().getId(), category.getId(),
+                new com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionCreationDTO(new PickTargetDTO(null, "42", null)));
+
+        assertThat(result.target().personTmdbId()).isEqualTo("42");
+        verify(optionRepository).saveAndFlush(any());
     }
 
     @Test

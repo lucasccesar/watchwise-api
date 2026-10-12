@@ -133,10 +133,7 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
             if (category == null || category.optionMode() == null || category.allowedType() == null || category.group() == null) {
                 throw new BadRequestException("Category configuration is incomplete");
             }
-            if (category.optionMode() == PickCategoryOptionMode.OPEN
-                    && category.options() != null && !category.options().isEmpty()) {
-                throw new BadRequestException("Open categories cannot receive fixed options");
-            }
+            PicksTemplateCategoryOptionsValidator.validateNewCategory(category.optionMode(), category.options());
         });
     }
 
