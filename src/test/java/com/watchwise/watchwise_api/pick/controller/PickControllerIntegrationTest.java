@@ -204,6 +204,21 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    void shouldReturnApiErrorForVisualPickSortBindingFailure() throws Exception {
+        RegisteredUser viewer = registerUser("visualpickbindings");
+        UUID templateId = UUID.randomUUID();
+
+        mockMvc.perform(get("/picks-templates/{templateId}/picks/view", templateId)
+                        .param("sort", "UNKNOWN")
+                        .cookie(viewer.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Accepted values: POPULAR, RECENT")))
+                .andExpect(apiError(400, "Bad Request", "/picks-templates/" + templateId + "/picks/view"));
+
+        verifyNoInteractions(pickService);
+    }
+
+    @Test
     void shouldReturnPagedVisibleTemplatePicksForDefaultRecentAndPopularSorts() throws Exception {
         RegisteredUser viewer = registerUser("templatereads");
         UUID templateId = UUID.randomUUID();

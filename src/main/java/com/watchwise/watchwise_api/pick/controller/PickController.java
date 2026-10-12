@@ -7,6 +7,8 @@ import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickSort;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
+import com.watchwise.watchwise_api.pick.dto.PickDetailViewDTO;
+import com.watchwise.watchwise_api.pick.dto.PickTemplatePickViewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickViewCardDTO;
 import com.watchwise.watchwise_api.pick.service.PickSelectionService;
 import com.watchwise.watchwise_api.pick.service.PickService;
@@ -49,9 +51,35 @@ public class PickController {
         return ResponseEntity.ok(PageResponseDTO.of(picks));
     }
 
+    @GetMapping("/picks-templates/{templateId}/picks/view")
+    public ResponseEntity<PageResponseDTO<PickTemplatePickViewDTO>> getTemplatePicksView(
+            @PathVariable UUID templateId,
+            @RequestParam(required = false) PickSort sort,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        Page<PickTemplatePickViewDTO> picks = pickService.getTemplatePicksView(
+                currentUserId(), templateId, sort, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(picks));
+    }
+
+    @GetMapping("/picks-templates/{templateId}/my-picks/view")
+    public ResponseEntity<PageResponseDTO<PickTemplatePickViewDTO>> getMyPicksView(
+            @PathVariable UUID templateId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        Page<PickTemplatePickViewDTO> picks = pickService.getMyPicksView(
+                currentUserId(), templateId, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(picks));
+    }
+
     @GetMapping("/picks/{pickId}")
     public ResponseEntity<PickResponseDTO> getPick(@PathVariable UUID pickId) {
         return ResponseEntity.ok(pickService.getPick(currentUserId(), pickId));
+    }
+
+    @GetMapping("/picks/{pickId}/view")
+    public ResponseEntity<PickDetailViewDTO> getPickView(@PathVariable UUID pickId) {
+        return ResponseEntity.ok(pickService.getPickView(currentUserId(), pickId));
     }
 
     @PatchMapping("/picks/{pickId}")
