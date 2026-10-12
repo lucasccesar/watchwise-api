@@ -17,6 +17,57 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class PicksTemplateControllerIntegrationTest extends PicksDomainIntegrationSupport {
 
     @Test
+    @DisplayName("[listTemplates] Should Return Filtered Page Metadata - When Origin Name And Pagination Are Supplied")
+    void shouldReturnFilteredPageMetadataWhenOriginNameAndPaginationAreSupplied() throws Exception {
+        template();
+        mvc.perform(authenticated(other, HttpMethod.POST, "/picks-templates", """
+                {"name":"Different","categories":[
+                  {"name":"Person","group":"PRIMARY","displayOrder":1,"allowedType":"PERSON","optionMode":"OPEN"}]}
+                """))
+                .andExpect(status().isCreated());
+
+        mvc.perform(authenticated(owner, HttpMethod.GET,
+                        "/picks-templates?origin=COMMUNITY&name=Award&page=1&size=1&sort=RECENT", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.content[0].name").value("Awards"));
+    }
+
+    @Test
+    @DisplayName("[listTemplates] Should Include Creator Social State And Viewer Picks - When Explore Loads A Template")
+    void shouldIncludeCreatorSocialStateAndViewerPicksWhenExploreLoadsATemplate() throws Exception {
+        var template = template();
+        owner.setProfilePicture("https://images.example/avatar.png");
+        users.saveAndFlush(owner);
+        var ownerPick = personPick(template, PickVisibility.PUBLIC);
+        pickService.createPick(other.getId(), template.id(), new com.watchwise.watchwise_api.pick.dto.PickCreationDTO(
+                PickVisibility.PUBLIC, java.util.List.of(new com.watchwise.watchwise_api.pick.dto.PickSelectionCreationDTO(
+                        template.person(), new com.watchwise.watchwise_api.pick.dto.PickTargetDTO(null, "84", null)))));
+        mvc.perform(authenticated(other, HttpMethod.POST, "/picks-templates/" + template.id() + "/like", ""))
+                .andExpect(status().isNoContent());
+        mvc.perform(authenticated(other, HttpMethod.POST, "/picks-templates/" + template.id() + "/comments",
+                        "{\"text\":\"Nice template\"}"))
+                .andExpect(status().isCreated());
+
+        mvc.perform(authenticated(owner, HttpMethod.GET, "/picks-templates?name=Awards", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].creator.id").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.content[0].creator.username").value("owner"))
+                .andExpect(jsonPath("$.content[0].creator.profilePicture").value("https://images.example/avatar.png"))
+                .andExpect(jsonPath("$.content[0].origin").value("COMMUNITY"))
+                .andExpect(jsonPath("$.content[0].picksCount").value(2))
+                .andExpect(jsonPath("$.content[0].likesCount").value(1))
+                .andExpect(jsonPath("$.content[0].commentsCount").value(1))
+                .andExpect(jsonPath("$.content[0].isLikedByViewer").value(false))
+                .andExpect(jsonPath("$.content[0].myPicksCount").value(1))
+                .andExpect(jsonPath("$.content[0].latestMyPickId").value(ownerPick.id().toString()));
+    }
+
+    @Test
     @DisplayName("[getMyTemplatesView] Should Return Only Owned Templates In The Requested Page - When Other Creators Have Templates")
     void shouldReturnOnlyOwnedTemplatesInRequestedPageWhenOtherCreatorsHaveTemplates() throws Exception {
         template();
