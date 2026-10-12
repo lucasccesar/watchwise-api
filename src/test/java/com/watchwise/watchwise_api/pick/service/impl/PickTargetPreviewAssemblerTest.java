@@ -39,7 +39,7 @@ class PickTargetPreviewAssemblerTest {
     private final ContentCardContext context = new ContentCardContext("en-US", "US", null, null);
 
     @Test
-    @DisplayName("[shouldResolveRepeatedContentCoordinateOnceAndPreserveTargetOrderWhenCoordinatesRepeat] Should resolve a repeated content coordinate once and preserve order - When targets repeat")
+    @DisplayName("[assemble] Should Resolve A Repeated Content Coordinate Once And Preserve Order - When Targets Repeat")
     void shouldResolveRepeatedContentCoordinateOnceAndPreserveTargetOrderWhenCoordinatesRepeat() {
         PickOptionSearchDTO target = contentTarget("550", ContentType.MOVIE);
         ContentCardDTO card = card(ContentType.MOVIE, "550", ContentPreviewStatus.PARTIAL);
@@ -57,7 +57,7 @@ class PickTargetPreviewAssemblerTest {
     }
 
     @Test
-    @DisplayName("[shouldPassThroughUnavailableContentCardMetadataWhenTmdbDoesNotResolve] Should preserve an unavailable content card - When TMDB cannot resolve metadata")
+    @DisplayName("[assemble] Should Preserve An Unavailable Content Card - When TMDB Cannot Resolve Metadata")
     void shouldPassThroughUnavailableContentCardMetadataWhenTmdbDoesNotResolve() {
         PickOptionSearchDTO target = contentTarget("999", ContentType.SERIES);
         ContentCardDTO card = card(ContentType.SERIES, "999", ContentPreviewStatus.UNAVAILABLE);
@@ -70,7 +70,7 @@ class PickTargetPreviewAssemblerTest {
     }
 
     @Test
-    @DisplayName("[shouldResolveRepeatedPersonAndContextCoordinatesOnceWhenTargetsRepeat] Should resolve repeated person and context metadata once - When targets repeat")
+    @DisplayName("[assemble] Should Resolve Repeated Person And Context Metadata Once - When Targets Repeat")
     void shouldResolveRepeatedPersonAndContextCoordinatesOnceWhenTargetsRepeat() {
         PickOptionSearchDTO target = personTarget("42", contentRef("550", ContentType.MOVIE));
         ContentCardDTO contextCard = card(ContentType.MOVIE, "550", ContentPreviewStatus.UNAVAILABLE);
@@ -92,7 +92,7 @@ class PickTargetPreviewAssemblerTest {
     }
 
     @Test
-    @DisplayName("[shouldKeepInputOrderWhenContentAndPersonTargetsAreMixed] Should keep content and person results in input order - When target types are mixed")
+    @DisplayName("[assemble] Should Keep Content And Person Results In Input Order - When Target Types Are Mixed")
     void shouldKeepInputOrderWhenContentAndPersonTargetsAreMixed() {
         PickOptionSearchDTO movie = contentTarget("550", ContentType.MOVIE);
         PickOptionSearchDTO person = personTarget("42", null);
@@ -115,7 +115,7 @@ class PickTargetPreviewAssemblerTest {
     }
 
     @Test
-    @DisplayName("[shouldKeepPersonWithPartialDetailsWhenProfileIsMissing] Should retain partial person metadata - When TMDB omits a profile image")
+    @DisplayName("[assemble] Should Retain Partial Person Metadata - When TMDB Omits A Profile Image")
     void shouldKeepPersonWithPartialDetailsWhenProfileIsMissing() {
         when(tmdbClient.getPersonDetails("42"))
                 .thenReturn(found(new TmdbPersonDetails("42", "Ada", null, null)));
@@ -128,7 +128,7 @@ class PickTargetPreviewAssemblerTest {
     }
 
     @Test
-    @DisplayName("[shouldKeepPersonTargetWhenDetailsAreUnavailable] Should retain the person ID - When TMDB details are unavailable")
+    @DisplayName("[assemble] Should Retain The Person ID - When TMDB Details Are Unavailable")
     void shouldKeepPersonTargetWhenDetailsAreUnavailable() {
         when(tmdbClient.getPersonDetails("77")).thenReturn(new TmdbLookupResult.Unavailable<>());
 

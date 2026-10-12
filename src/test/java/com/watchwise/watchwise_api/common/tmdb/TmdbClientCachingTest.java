@@ -226,7 +226,7 @@ class TmdbClientCachingTest {
     }
 
     @Test
-    @DisplayName("[shouldCacheFoundPersonDetailsWhenRepeated] Should reuse found person details - When a person is requested again")
+    @DisplayName("[getPersonDetails] Should Reuse Found Person Details - When A Person Is Requested Again")
     void shouldCacheFoundPersonDetailsWhenRepeated() {
         mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
                 .andRespond(withSuccess("{\"id\":6193}", MediaType.APPLICATION_JSON));
@@ -243,7 +243,7 @@ class TmdbClientCachingTest {
     }
 
     @Test
-    @DisplayName("[shouldNotCacheUnavailablePersonDetailsAndRetryOnNextCall] Should retry person details - When the previous lookup was unavailable")
+    @DisplayName("[getPersonDetails] Should Retry Person Details - When The Previous Lookup Was Unavailable")
     void shouldNotCacheUnavailablePersonDetailsAndRetryOnNextCall() {
         mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
                 .andRespond(withServerError());

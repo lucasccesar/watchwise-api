@@ -13,7 +13,13 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PickSelectionRepository extends JpaRepository<PickSelection, UUID> {
-    List<PickSelection> findByPickIdIn(Collection<UUID> pickIds);
+    @Query("""
+            select selection from PickSelection selection
+            left join fetch selection.content
+            left join fetch selection.contextContent
+            where selection.pick.id in :pickIds
+            """)
+    List<PickSelection> findByPickIdIn(@Param("pickIds") Collection<UUID> pickIds);
     long countByPickId(UUID pickId);
     boolean existsByCategoryId(UUID categoryId);
     boolean existsByCategoryIdAndContentIdAndPersonTmdbIdAndContextContentId(UUID categoryId, UUID contentId, String personTmdbId, UUID contextContentId);

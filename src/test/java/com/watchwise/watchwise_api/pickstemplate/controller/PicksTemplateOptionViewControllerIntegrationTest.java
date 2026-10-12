@@ -73,13 +73,13 @@ class PicksTemplateOptionViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[shouldReturnPaginatedVisualOptionsFromOptionsViewRoute] Should return visual option pages - When the authenticated viewer requests the route")
+    @DisplayName("[getOptionViews] Should Return Visual Option Pages With Null IDs - When The Authenticated Viewer Searches Open Options")
     void shouldReturnPaginatedVisualOptionsFromOptionsViewRoute() throws Exception {
         RegisteredUser user = registerUser("optionview");
         UUID templateId = UUID.randomUUID();
         UUID categoryId = UUID.randomUUID();
         PickOptionSearchDTO target = new PickOptionSearchDTO(null, null, "42", null);
-        PickOptionViewDTO option = new PickOptionViewDTO(UUID.randomUUID(), target,
+        PickOptionViewDTO option = new PickOptionViewDTO(null, target,
                 new PickTargetPreviewDTO(null, new PickPersonPreviewDTO("42", "Ada", null,
                         ContentPreviewStatus.PARTIAL), null));
         when(optionService.getOptionViews(user.id(), templateId, categoryId, "Ada", null, null, 2, 3))
@@ -94,6 +94,10 @@ class PicksTemplateOptionViewControllerIntegrationTest {
                 .andExpect(jsonPath("$.page").value(2))
                 .andExpect(jsonPath("$.size").value(3))
                 .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.content[0].id").hasJsonPath())
+                .andExpect(jsonPath("$.content[0].id").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].target.id").hasJsonPath())
+                .andExpect(jsonPath("$.content[0].target.id").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.content[0].target.personTmdbId").value("42"))
                 .andExpect(jsonPath("$.content[0].preview.person.name").value("Ada"))
                 .andExpect(jsonPath("$.content[0].preview.person.previewStatus").value("PARTIAL"));
@@ -102,7 +106,7 @@ class PicksTemplateOptionViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[shouldRequireAuthenticationForOptionsViewRoute] Should require authentication - When options view is requested anonymously")
+    @DisplayName("[getOptionViews] Should Require Authentication - When Options View Is Requested Anonymously")
     void shouldRequireAuthenticationForOptionsViewRoute() throws Exception {
         mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options/view",
                         UUID.randomUUID(), UUID.randomUUID()))
@@ -111,7 +115,7 @@ class PicksTemplateOptionViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[shouldLeaveRawOptionsRouteDelegatingToRawServiceMethod] Should retain raw option responses - When the existing options route is requested")
+    @DisplayName("[searchOptions] Should Retain Raw Option Responses - When The Existing Options Route Is Requested")
     void shouldLeaveRawOptionsRouteDelegatingToRawServiceMethod() throws Exception {
         RegisteredUser user = registerUser("optionraw");
         UUID templateId = UUID.randomUUID();

@@ -19,6 +19,30 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class PicksTemplateOptionDomainIntegrationTest extends PicksDomainIntegrationSupport {
 
+    @Test
+    @DisplayName("[getOptionViews] Should Serialize Null Option IDs And Preserve Person Targets - When An Open Search Returns A Result")
+    void shouldSerializeNullOptionIdsAndPreservePersonTargetsWhenOpenSearchReturnsResult() throws Exception {
+        var template = template();
+        when(tmdb.searchPeople("Ada", com.watchwise.watchwise_api.common.tmdb.TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1))
+                .thenReturn(new com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult.Found<>(
+                        new com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage<>(1,
+                                List.of(new com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult("42", "Ada", null)), 1, 1)));
+
+        mvc.perform(authenticated(other, HttpMethod.GET, "/picks-templates/" + template.id()
+                        + "/categories/" + template.person() + "/options/view?q=Ada", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").hasJsonPath())
+                .andExpect(jsonPath("$.content[0].id").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].target.id").hasJsonPath())
+                .andExpect(jsonPath("$.content[0].target.id").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].target.personTmdbId").value("42"))
+                .andExpect(jsonPath("$.content[0].preview.person.tmdbId").value("42"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.totalElements").value(1));
+        assertThat(options.count()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from contents", Long.class)).isZero();
+    }
+
     @ParameterizedTest
     @CsvSource({"MOVIE,false", "PERSON,false", "PERSON,true"})
     @DisplayName("[addOption] Should Return 409 Without Partial Write - When Target Already Exists")

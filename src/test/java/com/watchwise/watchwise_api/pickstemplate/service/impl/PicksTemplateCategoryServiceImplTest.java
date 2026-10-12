@@ -54,7 +54,7 @@ class PicksTemplateCategoryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[shouldRejectFixedCategoryWithoutOptionsWhenAddingCategory] Should Reject - When Adding A Fixed Category Without Options")
+    @DisplayName("[addCategory] Should Reject - When Adding A Fixed Category Without Options")
     void shouldRejectFixedCategoryWithoutOptionsWhenAddingCategory() {
         UUID actorId = UUID.randomUUID();
         PicksTemplate template = template(actorId);
@@ -70,7 +70,7 @@ class PicksTemplateCategoryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[shouldRejectChangingOpenCategoryToFixedWithoutOptionsWhenUpdatingCategory] Should Reject - When Changing An Empty Open Category To Fixed")
+    @DisplayName("[updateCategory] Should Reject - When Changing An Empty Open Category To Fixed")
     void shouldRejectChangingOpenCategoryToFixedWithoutOptionsWhenUpdatingCategory() {
         UUID actorId = UUID.randomUUID();
         PicksTemplate template = template(actorId);

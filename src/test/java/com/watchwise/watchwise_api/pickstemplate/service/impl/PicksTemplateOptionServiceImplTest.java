@@ -23,12 +23,11 @@ import com.watchwise.watchwise_api.pickstemplate.repository.*;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.InOrder;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -52,25 +51,33 @@ class PicksTemplateOptionServiceImplTest {
     @Mock UserRepository userRepository;
     @Mock PickTargetService pickTargetService;
     @Mock PicksTemplateOptionMapper optionMapper;
-    @Mock PageRequestFactory pageRequestFactory;
     @Mock TmdbClient tmdbClient;
     @Mock RequestThrottler requestThrottler;
     @Mock PickTargetPreviewAssembler previewAssembler;
-    @Spy @InjectMocks PicksTemplateOptionServiceImpl service;
+    PicksTemplateOptionServiceImpl service;
+
+    @BeforeEach
+    void initializeService() {
+        service = new PicksTemplateOptionServiceImpl(templateRepository, categoryRepository, optionRepository,
+                selectionRepository, userRepository, pickTargetService, optionMapper, new PageRequestFactory(),
+                tmdbClient, requestThrottler, previewAssembler);
+    }
 
     @Test
-    @DisplayName("[shouldEnrichOnlyTheSearchPageAndPreservePageMetadataWhenGettingOptionViews] Should enrich only the selected page - When visual options are requested")
+    @DisplayName("[getOptionViews] Should Enrich Only The Selected Page And Preserve Metadata - When Open Options Are Requested")
     void shouldEnrichOnlyTheSearchPageAndPreservePageMetadataWhenGettingOptionViews() {
         UUID viewerId = UUID.randomUUID();
-        UUID templateId = UUID.randomUUID();
-        UUID categoryId = UUID.randomUUID();
+        PicksTemplateCategory category = category();
+        UUID templateId = category.getPicksTemplate().getId();
+        UUID categoryId = category.getId();
         PickOptionSearchDTO target = new PickOptionSearchDTO(null, null, "42", null);
-        Page<PickOptionSearchDTO> rawPage = new PageImpl<>(List.of(target), PageRequest.of(1, 2), 5);
         PickTargetPreviewDTO preview = new PickTargetPreviewDTO(null,
                 new com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO("42", "Ada", null,
                         com.watchwise.watchwise_api.content.dto.ContentPreviewStatus.PARTIAL), null);
-        doReturn(rawPage).when(service).searchOptions(viewerId, templateId, categoryId,
-                "Ada", null, null, 2, 2);
+        when(categoryRepository.findByIdAndPicksTemplateId(categoryId, templateId)).thenReturn(Optional.of(category));
+        when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 2))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(2,
+                        List.of(new TmdbPersonSearchResult("42", "Ada", null)), 5, 81)));
         when(previewAssembler.assemble(eq(List.of(target)), any(ContentCardContext.class)))
                 .thenReturn(List.of(preview));
 
@@ -78,11 +85,14 @@ class PicksTemplateOptionServiceImplTest {
                 "Ada", null, null, 2, 2);
 
         assertThat(result.getContent()).containsExactly(new PickOptionViewDTO(null, target, preview));
-        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getTotalElements()).isEqualTo(81);
+        assertThat(result.getTotalPages()).isEqualTo(5);
+        assertThat(result.hasNext()).isTrue();
         assertThat(result.getNumber()).isEqualTo(1);
         assertThat(result.getSize()).isEqualTo(2);
         verify(previewAssembler).assemble(eq(List.of(target)), any(ContentCardContext.class));
-        verify(service).searchOptions(viewerId, templateId, categoryId, "Ada", null, null, 2, 2);
+        verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
+        verifyNoInteractions(optionRepository);
     }
 
     @Test
@@ -90,7 +100,6 @@ class PicksTemplateOptionServiceImplTest {
         UUID viewerId = UUID.randomUUID();
         PicksTemplateCategory category = category();
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
-        when(pageRequestFactory.build(2, 40)).thenReturn(PageRequest.of(1, 40));
         when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 2))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(2,
                         List.of(new TmdbPersonSearchResult("42", "Ada", null)), 5, 81)));
@@ -110,7 +119,6 @@ class PicksTemplateOptionServiceImplTest {
     void shouldPreserveMovieTmdbPageMetadataWithNonDefaultSize() {
         PicksTemplateCategory category = category(PickAllowedType.MOVIE);
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
-        when(pageRequestFactory.build(3, 40)).thenReturn(PageRequest.of(2, 40));
         when(tmdbClient.searchMovies("Fight", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 3))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(3,
                         java.util.Collections.nCopies(20, new TmdbMovieSearchResult("550", "Fight Club", null, "1999-10-15")), 5, 81)));
@@ -131,7 +139,6 @@ class PicksTemplateOptionServiceImplTest {
         PicksTemplateCategory category = category();
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId()))
                 .thenReturn(Optional.of(category));
-        when(pageRequestFactory.build(5, 40)).thenReturn(PageRequest.of(4, 40));
         when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 5))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(5,
                         List.of(new TmdbPersonSearchResult("42", "Ada", null)), 5, 81)));
@@ -152,7 +159,6 @@ class PicksTemplateOptionServiceImplTest {
     void shouldPreserveSeriesTmdbPageMetadataWithSmallNonDefaultSize() {
         PicksTemplateCategory category = category(PickAllowedType.SERIES);
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
-        when(pageRequestFactory.build(2, 5)).thenReturn(PageRequest.of(1, 5));
         when(tmdbClient.searchTv("Breaking", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 2))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(2,
                         List.of(new TmdbTvSearchResult("1396", "Breaking Bad", null, "2008-01-20")), 5, 81)));
@@ -169,7 +175,6 @@ class PicksTemplateOptionServiceImplTest {
     void shouldRejectMissingQueryForOpenPersonSearch() {
         PicksTemplateCategory category = category();
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
-        when(pageRequestFactory.build(null, null)).thenReturn(PageRequest.of(0, 20));
 
         assertThatThrownBy(() -> service.searchOptions(UUID.randomUUID(), category.getPicksTemplate().getId(), category.getId(), null, null, null, null, null))
                 .isInstanceOf(com.watchwise.watchwise_api.common.exception.BadRequestException.class);
@@ -177,7 +182,7 @@ class PicksTemplateOptionServiceImplTest {
     }
 
     @Test
-    @DisplayName("[shouldRejectDeletingLastFixedOptionWhenCategoryHasNoSelections] Should Reject - When Deleting The Last Option From An Unused Fixed Category")
+    @DisplayName("[deleteOption] Should Reject - When Deleting The Last Option From An Unused Fixed Category")
     void shouldRejectDeletingLastFixedOptionWhenCategoryHasNoSelections() {
         UUID actorId = UUID.randomUUID();
         PicksTemplateCategory category = fixedCategory();
@@ -198,7 +203,7 @@ class PicksTemplateOptionServiceImplTest {
     }
 
     @Test
-    @DisplayName("[shouldAllowAddingOptionToHistoricalEmptyFixedCategoryWhenRepairingTemplate] Should Allow - When Repairing An Historical Empty Fixed Category")
+    @DisplayName("[addOption] Should Allow - When Repairing An Historical Empty Fixed Category")
     void shouldAllowAddingOptionToHistoricalEmptyFixedCategoryWhenRepairingTemplate() {
         UUID actorId = UUID.randomUUID();
         PicksTemplateCategory category = fixedCategory();
@@ -226,12 +231,9 @@ class PicksTemplateOptionServiceImplTest {
         UUID viewerId = UUID.randomUUID();
         PicksTemplateCategory category = fixedCategory();
         PageRequest pageRequest = PageRequest.of(1, 1);
-        PageRequest openPageRequest = PageRequest.of(0, 20);
         PicksTemplateOption option = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category).personTmdbId("42")
                 .createdAt(LocalDateTime.now()).build();
         when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId())).thenReturn(Optional.of(category));
-        when(pageRequestFactory.build(2, 1)).thenReturn(pageRequest);
-        when(pageRequestFactory.build(1, 20)).thenReturn(openPageRequest);
         when(optionRepository.findByCategoryId(category.getId(), pageRequest)).thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(option), pageRequest, 2));
         when(optionMapper.picksTemplateOptionToSearchDto(option)).thenReturn(new PickOptionSearchDTO(option.getId(), null, "42", null));
         when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1))
@@ -254,6 +256,75 @@ class PicksTemplateOptionServiceImplTest {
         InOrder inOrder = inOrder(requestThrottler, tmdbClient);
         inOrder.verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
         inOrder.verify(tmdbClient).searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1);
+    }
+
+    @Test
+    @DisplayName("[getOptionViews] Should Enrich Distinct Fixed Targets In Page Order - When The Database Selects A Later Page")
+    void shouldEnrichDistinctFixedTargetsInPageOrderWhenDatabaseSelectsLaterPage() {
+        PicksTemplateCategory category = fixedCategory();
+        PicksTemplateOption first = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category).personTmdbId("42").build();
+        PicksTemplateOption second = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category).personTmdbId("84").build();
+        var firstTarget = new PickOptionSearchDTO(first.getId(), null, "42", null);
+        var secondTarget = new PickOptionSearchDTO(second.getId(), null, "84", null);
+        var firstPreview = new PickTargetPreviewDTO(null, new com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO(
+                "42", "Ada", null, com.watchwise.watchwise_api.content.dto.ContentPreviewStatus.PARTIAL), null);
+        var secondPreview = new PickTargetPreviewDTO(null, new com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO(
+                "84", "Grace", null, com.watchwise.watchwise_api.content.dto.ContentPreviewStatus.UNAVAILABLE), null);
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId()))
+                .thenReturn(Optional.of(category));
+        when(optionRepository.findByCategoryId(category.getId(), PageRequest.of(1, 2)))
+                .thenReturn(new PageImpl<>(List.of(first, second), PageRequest.of(1, 2), 5));
+        when(optionMapper.picksTemplateOptionToSearchDto(first)).thenReturn(firstTarget);
+        when(optionMapper.picksTemplateOptionToSearchDto(second)).thenReturn(secondTarget);
+        when(previewAssembler.assemble(eq(List.of(firstTarget, secondTarget)), any(ContentCardContext.class)))
+                .thenReturn(List.of(firstPreview, secondPreview));
+
+        var result = service.getOptionViews(UUID.randomUUID(), category.getPicksTemplate().getId(), category.getId(),
+                null, null, null, 2, 2);
+
+        assertThat(result.getContent()).extracting(option -> option.preview().person().tmdbId()).containsExactly("42", "84");
+        assertThat(result.getContent()).extracting(PickOptionViewDTO::id).containsExactly(first.getId(), second.getId());
+        assertThat(result.getContent().get(1).preview().person().previewStatus())
+                .isEqualTo(com.watchwise.watchwise_api.content.dto.ContentPreviewStatus.UNAVAILABLE);
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(2);
+        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getTotalPages()).isEqualTo(3);
+        assertThat(result.hasNext()).isTrue();
+        verify(previewAssembler).assemble(eq(List.of(firstTarget, secondTarget)), any(ContentCardContext.class));
+        verify(optionRepository, never()).findByCategoryId(category.getId());
+        verifyNoInteractions(requestThrottler, tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getOptionViews] Should Reject Invalid Pagination Before Enrichment - When Page Or Size Is Invalid")
+    void shouldRejectInvalidPaginationBeforeEnrichmentWhenPageOrSizeIsInvalid() {
+        PicksTemplateCategory category = category();
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId()))
+                .thenReturn(Optional.of(category));
+
+        for (var pagination : List.of(List.of(-1, 2), List.of(1, 0), List.of(1, -1))) {
+            assertThatThrownBy(() -> service.getOptionViews(UUID.randomUUID(), category.getPicksTemplate().getId(),
+                    category.getId(), "Ada", null, null, pagination.get(0), pagination.get(1)))
+                    .isInstanceOf(com.watchwise.watchwise_api.common.exception.BadRequestException.class);
+        }
+
+        verifyNoInteractions(optionRepository, tmdbClient, requestThrottler, previewAssembler);
+    }
+
+    @Test
+    @DisplayName("[getOptionViews] Should Reject Missing Category Before Enrichment - When The Category Does Not Belong To The Template")
+    void shouldRejectMissingCategoryBeforeEnrichmentWhenCategoryDoesNotBelongToTemplate() {
+        UUID templateId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+        when(categoryRepository.findByIdAndPicksTemplateId(categoryId, templateId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getOptionViews(UUID.randomUUID(), templateId, categoryId,
+                "Ada", null, null, 1, 2))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.NotFoundException.class)
+                .hasMessage("Picks template category not found");
+
+        verifyNoInteractions(optionRepository, tmdbClient, requestThrottler, previewAssembler);
     }
 
     private PicksTemplateCategory category() {

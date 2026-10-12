@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PickViewCardDTOTest {
 
     @Test
-    @DisplayName("[constructor] Should defensively copy and cap answers - When more than five are supplied")
+    @DisplayName("[PickViewCardDTO] Should Defensively Copy And Cap Answers - When More Than Five Are Supplied")
     void shouldDefensivelyCopyAndCapAnswersWhenMoreThanFiveAreSupplied() {
         List<PickAnsweredCategoryPreviewDTO> answers = new ArrayList<>();
         for (int i = 0; i < 7; i++) answers.add(answer(i));
@@ -28,7 +28,7 @@ class PickViewCardDTOTest {
     }
 
     @Test
-    @DisplayName("[constructor] Should use an empty immutable list - When answers are null")
+    @DisplayName("[PickViewCardDTO] Should Use An Empty Immutable List - When Answers Are Null")
     void shouldUseEmptyImmutableListWhenAnswersAreNull() {
         PickViewCardDTO card = card(null);
 

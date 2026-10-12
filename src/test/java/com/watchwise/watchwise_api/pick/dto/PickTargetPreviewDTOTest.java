@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PickTargetPreviewDTOTest {
 
     @Test
-    @DisplayName("[constructor] Should accept a content target - When person is absent")
+    @DisplayName("[PickTargetPreviewDTO] Should Accept A Content Target - When Person Is Absent")
     void shouldAcceptContentTargetWhenPersonIsAbsent() {
         ContentCardDTO content = content();
 
@@ -22,7 +22,7 @@ class PickTargetPreviewDTOTest {
     }
 
     @Test
-    @DisplayName("[constructor] Should accept an available person target - When content is absent")
+    @DisplayName("[PickTargetPreviewDTO] Should Accept An Available Person Target - When Content Is Absent")
     void shouldAcceptPersonTargetWhenContentIsAbsent() {
         PickPersonPreviewDTO person = person(ContentPreviewStatus.AVAILABLE);
 
@@ -32,7 +32,7 @@ class PickTargetPreviewDTOTest {
     }
 
     @Test
-    @DisplayName("[constructor] Should accept a person target with context - When context card is provided")
+    @DisplayName("[PickTargetPreviewDTO] Should Accept A Person Target With Context - When Context Card Is Provided")
     void shouldAcceptPersonTargetWithContextWhenContextCardIsProvided() {
         ContentCardDTO context = content();
 
@@ -42,7 +42,7 @@ class PickTargetPreviewDTOTest {
     }
 
     @Test
-    @DisplayName("[constructor] Should accept unavailable person metadata - When person lookup fails")
+    @DisplayName("[PickTargetPreviewDTO] Should Accept Unavailable Person Metadata - When Person Lookup Fails")
     void shouldAcceptUnavailablePersonMetadataWhenPersonLookupFails() {
         PickPersonPreviewDTO person = person(ContentPreviewStatus.UNAVAILABLE);
 
@@ -53,21 +53,21 @@ class PickTargetPreviewDTOTest {
     }
 
     @Test
-    @DisplayName("[constructor] Should reject both primary targets - When content and person are present")
+    @DisplayName("[PickTargetPreviewDTO] Should Reject Both Primary Targets - When Content And Person Are Present")
     void shouldRejectBothPrimaryTargetsWhenContentAndPersonArePresent() {
         assertThatThrownBy(() -> new PickTargetPreviewDTO(content(), person(ContentPreviewStatus.AVAILABLE), null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    @DisplayName("[constructor] Should reject context without person - When content is the target")
+    @DisplayName("[PickTargetPreviewDTO] Should Reject Context Without Person - When Content Is The Target")
     void shouldRejectContextWithoutPersonWhenContentIsTheTarget() {
         assertThatThrownBy(() -> new PickTargetPreviewDTO(content(), null, content()))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    @DisplayName("[constructor] Should reject missing primary target - When both targets are absent")
+    @DisplayName("[PickTargetPreviewDTO] Should Reject Missing Primary Target - When Both Targets Are Absent")
     void shouldRejectMissingPrimaryTargetWhenBothTargetsAreAbsent() {
         assertThatThrownBy(() -> new PickTargetPreviewDTO(null, null, null))
                 .isInstanceOf(IllegalArgumentException.class);

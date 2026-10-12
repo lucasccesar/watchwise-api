@@ -179,7 +179,7 @@ class PicksTemplateServiceImplTest {
     }
 
     @Test
-    @DisplayName("[shouldRejectFixedCategoryWithoutOptionsWhenCreatingTemplate] Should Reject - When Creating A Template With An Empty Fixed Category")
+    @DisplayName("[createTemplate] Should Reject - When Creating A Template With An Empty Fixed Category")
     void shouldRejectFixedCategoryWithoutOptionsWhenCreatingTemplate() {
         UUID actorId = UUID.randomUUID();
 
