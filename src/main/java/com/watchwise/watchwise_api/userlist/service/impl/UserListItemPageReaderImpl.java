@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPage;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPageMode;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPageRequest;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
@@ -85,17 +86,13 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
             throw new BadRequestException("watchStatus is only available for content lists");
         }
 
-        List<UserListItemResponseDTO> visibleItems = allItems.stream()
-                .filter(item -> item.content() != null || item.childList() != null)
-                .toList();
+        List<UserListItemResponseDTO> visibleItems = request.mode() == UserListItemPageMode.VISUAL
+                ? allItems.stream()
+                        .filter(item -> item.content() != null || item.childList() != null)
+                        .toList()
+                : allItems;
         List<UserListItemResponseDTO> filtered = filterAndSortItems(
                 visibleItems, request, userList.getUser().getId(), canViewOwnerRatings);
-        if (request.watchStatus() != null) {
-            filtered = filtered.stream()
-                    .filter(item -> resolvedWatchStatus(item) == request.watchStatus())
-                    .toList();
-        }
-
         int maxPageSize = itemScope == UserListItemScope.EPISODE ? 24 : 30;
         PageRequest pageRequest = pageRequestFactory.build(request.page(), request.size(), maxPageSize);
         long offset = pageRequest.getOffset();
@@ -136,6 +133,12 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
             Map<String, List<String>> seriesGenres = loadSeriesGenres(filtered, request.genre());
             filtered = filtered.stream()
                     .filter(item -> matchesGenre(item, request.genre(), seriesGenres))
+                    .toList();
+        }
+
+        if (request.watchStatus() != null) {
+            filtered = filtered.stream()
+                    .filter(item -> resolvedWatchStatus(item) == request.watchStatus())
                     .toList();
         }
 

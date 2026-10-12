@@ -28,6 +28,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPageRequest;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
@@ -820,6 +821,31 @@ class UserListServiceImplTest {
         UserListDetailedResponseDTO result = userListService.getUserListById(lucasId, list.getId(), null, null, null, null, null, null);
 
         assertThat(result).isEqualTo(dto);
+    }
+
+    @Test
+    @DisplayName("[getUserListById] Should Preserve Inaccessible Nested List Placeholder Rows - When Reading The Raw Route")
+    void shouldPreserveInaccessibleNestedListPlaceholderRowsWhenReadingTheRawRoute() {
+        UserList list = buildList(lucas, "Mixed", null, UserListVisibility.PUBLIC);
+        UserListItemResponseDTO inaccessiblePlaceholder = new UserListItemResponseDTO(
+                UUID.randomUUID(), null, null, 1, null, LocalDateTime.now(), LocalDateTime.now(), null, null);
+        UserListItemResponseDTO movie = buildItemResponseDtoWithContent(ContentType.MOVIE, null, null, 2);
+        List<UserListItemResponseDTO> allItems = List.of(inaccessiblePlaceholder, movie);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemService.getItemsWithState(lucasId, list.getId()))
+                .thenReturn(new UserListItemsWithState(allItems, 0.0));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.LIST);
+        when(userListMapper.userListToDetailedResponseDto(eq(list), anyList(), anyDouble(), anyBoolean(), eq(2L),
+                anyLong(), anyLong(), eq(UserListItemScope.LIST), anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean()))
+                .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
+
+        userListService.getUserListById(lucasId, list.getId(), null, null, null, null, null, null);
+
+        ArgumentCaptor<List<UserListItemResponseDTO>> itemsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(userListMapper).userListToDetailedResponseDto(
+                eq(list), itemsCaptor.capture(), anyDouble(), anyBoolean(), eq(2L), anyLong(), anyLong(),
+                eq(UserListItemScope.LIST), anyInt(), anyInt(), anyLong(), anyInt(), anyBoolean());
+        assertThat(itemsCaptor.getValue()).containsExactlyElementsOf(allItems);
     }
 
     @Test

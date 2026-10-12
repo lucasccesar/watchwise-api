@@ -14,9 +14,18 @@ public record UserListItemPageRequest(
         String sortDirection,
         WatchStatus watchStatus,
         Integer page,
-        Integer size
+        Integer size,
+        UserListItemPageMode mode
 ) {
     public UserListItemPageRequest {
         genre = genre == null || genre.isBlank() ? null : genre.trim();
+        mode = mode == null ? UserListItemPageMode.RAW : mode;
+    }
+
+    public UserListItemPageRequest(
+            UUID viewerId, UUID listId, ContentType type, String genre, String sortBy, String sortDirection,
+            WatchStatus watchStatus, Integer page, Integer size) {
+        this(viewerId, listId, type, genre, sortBy, sortDirection, watchStatus, page, size,
+                UserListItemPageMode.RAW);
     }
 }

@@ -25,6 +25,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPage;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPageMode;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPageRequest;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
@@ -226,7 +227,8 @@ public class UserListServiceImpl implements UserListService {
     public UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
             String sortBy, String sortDirection, Integer pageNumber, Integer pageSize) {
         UserListItemPage page = userListItemPageReader.read(new UserListItemPageRequest(
-                viewerId, listId, type, genre, sortBy, sortDirection, null, pageNumber, pageSize));
+                viewerId, listId, type, genre, sortBy, sortDirection, null, pageNumber, pageSize,
+                UserListItemPageMode.RAW));
         return userListMapper.userListToDetailedResponseDto(
                 page.userList(), page.items(), page.watchedPercentage(), Boolean.TRUE.equals(page.likedByMe()),
                 page.itemsCount(), page.commentsCount(), page.totalRuntimeMinutes(), page.itemScope(), page.page(),

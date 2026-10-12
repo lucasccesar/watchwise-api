@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPage;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPageMode;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPageRequest;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
@@ -180,10 +181,45 @@ class UserListItemPageReaderImplTest {
         UserListItemResponseDTO movie = item(ContentType.MOVIE, 2, null, WatchStatus.UNWATCHED);
         stubListRead(List.of(hiddenNestedList, movie), 0.0);
 
-        UserListItemPage result = reader.read(request(null, null, null, null, null, null, null));
+        UserListItemPage result = reader.read(request(UserListItemPageMode.VISUAL, null, null, null, null, null, null, null));
 
         assertThat(result.items()).containsExactly(movie);
         assertThat(result.itemsCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[read] Should Preserve Inaccessible Nested List Placeholder Rows - When Reading Raw Mode")
+    void shouldPreserveInaccessibleNestedListPlaceholderRowsWhenReadingRawMode() {
+        UserListItemResponseDTO inaccessiblePlaceholder = new UserListItemResponseDTO(
+                UUID.randomUUID(), null, null, 1, null, LocalDateTime.now(), LocalDateTime.now(), null, null);
+        UserListItemResponseDTO movie = item(ContentType.MOVIE, 2, null, WatchStatus.UNWATCHED);
+        stubListRead(List.of(inaccessiblePlaceholder, movie), 0.0);
+        when(userListItemService.getItemScope(listId)).thenReturn(UserListItemScope.LIST);
+
+        UserListItemPage result = reader.read(request(UserListItemPageMode.RAW, null, null, null, null, null, null, null));
+
+        assertThat(result.items()).containsExactly(inaccessiblePlaceholder, movie);
+        assertThat(result.itemsCount()).isEqualTo(2);
+        assertThat(result.totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("[read] Should Exclude Status Filtered Items From Rating Queries - When Filtering By Watch Status")
+    void shouldExcludeStatusFilteredItemsFromRatingQueriesWhenFilteringByWatchStatus() {
+        UserListItemResponseDTO included = item(
+                ContentType.EPISODE, 1, null, WatchStatus.WATCHED, "series-included", 1, 1);
+        UserListItemResponseDTO excluded = item(
+                ContentType.EPISODE, 2, null, WatchStatus.UNWATCHED, "series-excluded", 1, 2);
+        stubListRead(List.of(included, excluded), 50.0);
+        when(userListItemService.getItemScope(listId)).thenReturn(UserListItemScope.EPISODE);
+
+        reader.read(request(UserListItemPageMode.VISUAL, null, null, null, null, WatchStatus.WATCHED, null, null));
+
+        verify(diaryEntryRepository).findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(
+                ownerId, Set.of("series-included"));
+        verify(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(
+                Set.of("series-included"));
+        verify(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(included.content().id()));
     }
 
     @Test
@@ -206,7 +242,13 @@ class UserListItemPageReaderImplTest {
 
     private UserListItemPageRequest request(ContentType type, String genre, String sortBy, String sortDirection,
             WatchStatus watchStatus, Integer page, Integer size) {
-        return new UserListItemPageRequest(viewerId, listId, type, genre, sortBy, sortDirection, watchStatus, page, size);
+        return request(UserListItemPageMode.VISUAL, type, genre, sortBy, sortDirection, watchStatus, page, size);
+    }
+
+    private UserListItemPageRequest request(UserListItemPageMode mode, ContentType type, String genre, String sortBy,
+            String sortDirection, WatchStatus watchStatus, Integer page, Integer size) {
+        return new UserListItemPageRequest(
+                viewerId, listId, type, genre, sortBy, sortDirection, watchStatus, page, size, mode);
     }
 
     private UserListItemResponseDTO item(ContentType type, int position, List<String> genres, WatchStatus status) {

@@ -47,6 +47,15 @@ class UserListItemPageRequestTest {
     }
 
     @Test
+    @DisplayName("[UserListItemPageRequest] Should Preserve The Requested Page Mode - When Constructed With A Mode")
+    void shouldPreserveTheRequestedPageMode() {
+        assertThat(request(null, null, null, null, UserListItemPageMode.RAW).mode())
+                .isEqualTo(UserListItemPageMode.RAW);
+        assertThat(request(null, null, null, null, UserListItemPageMode.VISUAL).mode())
+                .isEqualTo(UserListItemPageMode.VISUAL);
+    }
+
+    @Test
     @DisplayName("[UserListItemPage] Should Defensively Copy Items And Preview Cards - When Constructed With Mutable Sources")
     void shouldDefensivelyCopyPageAndNestedPreviewCollections() {
         List<com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO> itemSource = new ArrayList<>();
@@ -108,9 +117,14 @@ class UserListItemPageRequestTest {
     }
 
     private static UserListItemPageRequest request(String genre, WatchStatus status, Integer page, Integer size) {
+        return request(genre, status, page, size, UserListItemPageMode.RAW);
+    }
+
+    private static UserListItemPageRequest request(
+            String genre, WatchStatus status, Integer page, Integer size, UserListItemPageMode mode) {
         return new UserListItemPageRequest(
                 UUID.randomUUID(), UUID.randomUUID(), ContentType.MOVIE, genre,
-                "createdAt", "DESC", status, page, size);
+                "createdAt", "DESC", status, page, size, mode);
     }
 
     private static UserListDetailItemDTO visualItem(
