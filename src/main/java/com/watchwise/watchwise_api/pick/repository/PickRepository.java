@@ -16,7 +16,16 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PickRepository extends JpaRepository<Pick, UUID> {
-    Page<Pick> findByUserIdOrderByCreatedAtDescIdDesc(UUID userId, Pageable pageable);
+    @Query(value = """
+            select pick from Pick pick
+            join fetch pick.user
+            join fetch pick.picksTemplate template
+            left join fetch template.creator
+            where pick.user.id = :userId
+            order by pick.createdAt desc, pick.id desc
+            """,
+            countQuery = "select count(pick) from Pick pick where pick.user.id = :userId")
+    Page<Pick> findByUserIdOrderByCreatedAtDescIdDesc(@Param("userId") UUID userId, Pageable pageable);
 
     @Query("select pick.picksTemplate.id from Pick pick where pick.id = :id and pick.user.id = :userId")
     Optional<UUID> findOwnedTemplateId(@Param("id") UUID id, @Param("userId") UUID userId);

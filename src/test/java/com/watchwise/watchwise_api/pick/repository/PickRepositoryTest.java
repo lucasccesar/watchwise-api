@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,6 +62,32 @@ class PickRepositoryTest {
         assertThat(firstPage.getContent()).extracting(Pick::getId).containsExactly(newer.getId());
         assertThat(firstPage.getTotalElements()).isEqualTo(2);
         assertThat(secondPage.getContent()).extracting(Pick::getId).containsExactly(older.getId());
+    }
+
+    @Test
+    @DisplayName("[findByUserIdOrderByCreatedAtDescIdDesc] Should Fetch Card To-One Associations With The Page - When Picks Span Templates")
+    void shouldFetchCardToOneAssociationsWithPageWhenPicksSpanTemplates() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);
+        User owner = user("owned-card-page-owner", now);
+        User firstCreator = user("owned-card-page-creator-a", now);
+        User secondCreator = user("owned-card-page-creator-b", now);
+        PicksTemplate firstTemplate = templateRepository.saveAndFlush(PicksTemplate.builder().creator(firstCreator)
+                .origin(PickOrigin.COMMUNITY).name("First").createdAt(now).updatedAt(now).build());
+        PicksTemplate secondTemplate = templateRepository.saveAndFlush(PicksTemplate.builder().creator(secondCreator)
+                .origin(PickOrigin.COMMUNITY).name("Second").createdAt(now).updatedAt(now).build());
+        save(owner, firstTemplate, PickVisibility.PRIVATE, now.plusMinutes(1));
+        save(owner, secondTemplate, PickVisibility.PRIVATE, now);
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<Pick> page = repository.findByUserIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(0, 5));
+
+        assertThat(page.getContent()).hasSize(2);
+        assertThat(page.getContent()).allSatisfy(pick -> {
+            assertThat(Hibernate.isInitialized(pick.getUser())).isTrue();
+            assertThat(Hibernate.isInitialized(pick.getPicksTemplate())).isTrue();
+            assertThat(Hibernate.isInitialized(pick.getPicksTemplate().getCreator())).isTrue();
+        });
     }
     @Test void exposesOwnerPublicAndAcceptedFollowerPicksOnly() {
         LocalDateTime now = LocalDateTime.now();
