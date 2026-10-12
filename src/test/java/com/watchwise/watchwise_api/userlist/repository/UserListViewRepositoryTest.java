@@ -273,6 +273,30 @@ class UserListViewRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findNestedPreviewsByParentIdIn] Should Return Public And Accepted Follower Children Only - When Viewer Is Not Owner")
+    void shouldReturnPublicAndAcceptedFollowerChildrenOnlyWhenViewerIsNotOwner() {
+        UserList parent = list(viewer, "parent", UserListVisibility.PUBLIC, 0, 1, null);
+        UserList publicChild = list(owner, "public", UserListVisibility.PUBLIC, 0, 2, null);
+        UserList acceptedFollowersChild = list(owner, "accepted-followers", UserListVisibility.FOLLOWERS, 0, 3, null);
+        User otherOwner = users.save(user("other-owner", true));
+        UserList unacceptedFollowersChild = list(
+                otherOwner, "unaccepted-followers", UserListVisibility.FOLLOWERS, 0, 4, null);
+        UserList privateChild = list(owner, "private", UserListVisibility.PRIVATE, 0, 5, null);
+        followers.save(Follower.builder().follower(viewer).followed(owner).status(FollowStatus.ACCEPTED)
+                .createdAt(LocalDateTime.now()).build());
+        item(parent, null, publicChild, 1);
+        item(parent, null, acceptedFollowersChild, 2);
+        item(parent, null, unacceptedFollowersChild, 3);
+        item(parent, null, privateChild, 4);
+        em.flush();
+        em.clear();
+
+        assertThat(items.findNestedPreviewsByParentIdIn(List.of(parent.getId()), viewer.getId()))
+                .extracting(UserListItemRepository.NestedPreview::getChildId)
+                .containsExactly(publicChild.getId(), acceptedFollowersChild.getId());
+    }
+
+    @Test
     @DisplayName("[findPage] Should Sort Both Directions And Place Null Rank Last - When Sorting By Name Or Rank")
     void shouldSortBothDirectionsAndPlaceNullRanksLastWhenSortingByRank() {
         UserList a = list(viewer, "Alpha", UserListVisibility.PUBLIC, 1, 1, null);
