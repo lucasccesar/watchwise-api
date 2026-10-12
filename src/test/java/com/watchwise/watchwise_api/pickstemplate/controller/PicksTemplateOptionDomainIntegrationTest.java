@@ -24,8 +24,13 @@ class PicksTemplateOptionDomainIntegrationTest extends PicksDomainIntegrationSup
     @DisplayName("[addOption] Should Return 409 Without Partial Write - When Target Already Exists")
     void shouldRejectRealDuplicateTargets(String type, boolean contextual) throws Exception {
         var template = template();
+        String seedOptions = type.equals("MOVIE") ?
+                "[{\"target\":{\"content\":{\"type\":\"MOVIE\",\"tmdbId\":\"551\"}}}]"
+                : contextual ?
+                "[{\"target\":{\"personTmdbId\":\"84\",\"contextContent\":{\"type\":\"MOVIE\",\"tmdbId\":\"551\"}}}]"
+                : "[{\"target\":{\"personTmdbId\":\"84\"}}]";
         var created = mvc.perform(authenticated(owner, HttpMethod.POST,
-                        "/picks-templates/" + template.id() + "/categories", categoryBody(type, "[]")))
+                        "/picks-templates/" + template.id() + "/categories", categoryBody(type, seedOptions)))
                 .andExpect(status().isCreated()).andReturn();
         String path = "/picks-templates/" + template.id() + "/categories/" + id(created, "$.id") + "/options";
         String target = type.equals("MOVIE") ? "{\"content\":{\"type\":\"MOVIE\",\"tmdbId\":\"550\"}}"
@@ -35,12 +40,12 @@ class PicksTemplateOptionDomainIntegrationTest extends PicksDomainIntegrationSup
         mvc.perform(authenticated(owner, HttpMethod.POST, path, body)).andExpect(status().isCreated());
         mvc.perform(authenticated(owner, HttpMethod.POST, path, body))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.status").value(409));
-        assertThat(options.count()).isEqualTo(1);
+        assertThat(options.count()).isEqualTo(2);
         if (type.equals("PERSON")) {
             String distinct = contextual ? "{\"target\":{\"personTmdbId\":\"42\"}}"
                     : "{\"target\":{\"personTmdbId\":\"42\",\"contextContent\":{\"type\":\"MOVIE\",\"tmdbId\":\"550\"}}}";
             mvc.perform(authenticated(owner, HttpMethod.POST, path, distinct)).andExpect(status().isCreated());
-            assertThat(options.count()).isEqualTo(2);
+            assertThat(options.count()).isEqualTo(3);
         }
     }
 
