@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -109,6 +110,7 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createPick] Should Throttle The Third Creation And Isolate Users - When Requests Exceed The Bucket")
     void shouldThrottleTheThirdPickCreationAndKeepBucketsIndependentPerUser() throws Exception {
         RegisteredUser userA = registerUser("pickthrottlea");
         RegisteredUser userB = registerUser("pickthrottleb");
@@ -131,6 +133,7 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createPick] Should Return Api Errors - When Binding Or CSRF Validation Fails")
     void shouldReturnApiErrorForPickBindingFailuresAndRejectMissingOrInvalidCsrf() throws Exception {
         RegisteredUser bindingUser = registerUser("pickbindings");
         RegisteredUser mediaTypeUser = registerUser("pickmediatype");
@@ -177,6 +180,7 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[pick routes] Should Return Api Errors - When Enum Or UUID Parameters Cannot Bind")
     void shouldReturnApiErrorForPickTemplateEnumAndUuidBindingFailures() throws Exception {
         RegisteredUser user = registerUser("picktemplatebindings");
         UUID templateId = UUID.randomUUID();
@@ -204,6 +208,7 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getTemplatePicksView] Should Return Api Error - When Sort Cannot Bind")
     void shouldReturnApiErrorForVisualPickSortBindingFailure() throws Exception {
         RegisteredUser viewer = registerUser("visualpickbindings");
         UUID templateId = UUID.randomUUID();
@@ -219,6 +224,7 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getTemplatePicks] Should Return Paged Visible Picks - When Recent Or Popular Sort Is Requested")
     void shouldReturnPagedVisibleTemplatePicksForDefaultRecentAndPopularSorts() throws Exception {
         RegisteredUser viewer = registerUser("templatereads");
         UUID templateId = UUID.randomUUID();
@@ -256,6 +262,7 @@ class PickControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getTemplatePicks] Should Return Not Found - When Template Does Not Exist")
     void shouldReturnNotFoundForUnknownTemplatePicks() throws Exception {
         RegisteredUser viewer = registerUser("unknownpicktemplate");
         UUID templateId = UUID.randomUUID();

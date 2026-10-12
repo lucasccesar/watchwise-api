@@ -96,6 +96,34 @@ class PicksTemplateOptionServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getOptionViews] Should Cap Page Size At Twenty - When Client Requests A Larger Visual Page")
+    void shouldCapVisualOptionPageSizeAtTwentyWhenClientRequestsLargerPage() {
+        UUID viewerId = UUID.randomUUID();
+        PicksTemplateCategory category = category();
+        UUID templateId = category.getPicksTemplate().getId();
+        UUID categoryId = category.getId();
+        PickOptionSearchDTO target = new PickOptionSearchDTO(null, null, "42", null);
+        PickTargetPreviewDTO preview = new PickTargetPreviewDTO(null,
+                new com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO("42", "Ada", null,
+                        com.watchwise.watchwise_api.content.dto.ContentPreviewStatus.PARTIAL), null);
+        when(categoryRepository.findByIdAndPicksTemplateId(categoryId, templateId)).thenReturn(Optional.of(category));
+        when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1,
+                        List.of(new TmdbPersonSearchResult("42", "Ada", null)), 2, 21)));
+        when(previewAssembler.assemble(eq(List.of(target)), any(ContentCardContext.class)))
+                .thenReturn(List.of(preview));
+
+        Page<PickOptionViewDTO> result = service.getOptionViews(viewerId, templateId, categoryId,
+                "Ada", null, null, 1, 21);
+
+        assertThat(result.getSize()).isEqualTo(20);
+        assertThat(result.getPageable().getPageSize()).isEqualTo(20);
+        assertThat(result.getTotalElements()).isEqualTo(21);
+        assertThat(result.getTotalPages()).isEqualTo(2);
+        verify(previewAssembler).assemble(eq(List.of(target)), any(ContentCardContext.class));
+    }
+
+    @Test
     void shouldUseDirectPersonSearchAndPreserveTmdbMetadata() {
         UUID viewerId = UUID.randomUUID();
         PicksTemplateCategory category = category();
@@ -113,6 +141,24 @@ class PicksTemplateOptionServiceImplTest {
         assertThat(result.hasNext()).isTrue();
         verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
         verifyNoInteractions(optionRepository);
+    }
+
+    @Test
+    @DisplayName("[searchOptions] Should Preserve Requested Page Size - When Raw Options Are Requested")
+    void shouldPreserveRawOptionPageSizeWhenClientRequestsTwentyOne() {
+        PicksTemplateCategory category = category();
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), category.getPicksTemplate().getId()))
+                .thenReturn(Optional.of(category));
+        when(tmdbClient.searchPeople("Ada", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE, 1))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1,
+                        List.of(new TmdbPersonSearchResult("42", "Ada", null)), 2, 21)));
+
+        Page<PickOptionSearchDTO> result = service.searchOptions(UUID.randomUUID(),
+                category.getPicksTemplate().getId(), category.getId(), "Ada", null, null, 1, 21);
+
+        assertThat(result.getSize()).isEqualTo(21);
+        assertThat(result.getPageable().getPageSize()).isEqualTo(21);
+        assertThat(result.getTotalElements()).isEqualTo(21);
     }
 
     @Test

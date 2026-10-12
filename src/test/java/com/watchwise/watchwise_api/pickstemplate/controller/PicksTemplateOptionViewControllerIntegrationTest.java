@@ -106,6 +106,45 @@ class PicksTemplateOptionViewControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[options/view] Should Keep Visual Cap Separate From Raw Pagination - When Client Requests Size Twenty-One")
+    void shouldKeepVisualPageCapSeparateFromRawOptionPagination() throws Exception {
+        RegisteredUser user = registerUser("optionpagecap");
+        UUID templateId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+        PickOptionSearchDTO target = new PickOptionSearchDTO(null, null, "42", null);
+        PickOptionViewDTO visualOption = new PickOptionViewDTO(null, target, null);
+
+        when(optionService.getOptionViews(user.id(), templateId, categoryId, "Ada", null, null, 1, 21))
+                .thenReturn(new PageImpl<>(List.of(visualOption), PageRequest.of(0, 20), 21));
+        when(optionService.searchOptions(user.id(), templateId, categoryId, "Ada", null, null, 1, 21))
+                .thenReturn(new PageImpl<>(List.of(target), PageRequest.of(0, 21), 21));
+
+        mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options/view", templateId, categoryId)
+                        .cookie(user.accessToken())
+                        .queryParam("q", "Ada")
+                        .queryParam("page", "1")
+                        .queryParam("size", "21"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(21));
+
+        mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options", templateId, categoryId)
+                        .cookie(user.accessToken())
+                        .queryParam("q", "Ada")
+                        .queryParam("page", "1")
+                        .queryParam("size", "21"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(21))
+                .andExpect(jsonPath("$.totalElements").value(21))
+                .andExpect(jsonPath("$.content[0].preview").doesNotExist());
+
+        verify(optionService).getOptionViews(user.id(), templateId, categoryId, "Ada", null, null, 1, 21);
+        verify(optionService).searchOptions(user.id(), templateId, categoryId, "Ada", null, null, 1, 21);
+    }
+
+    @Test
     @DisplayName("[getOptionViews] Should Require Authentication - When Options View Is Requested Anonymously")
     void shouldRequireAuthenticationForOptionsViewRoute() throws Exception {
         mockMvc.perform(get("/picks-templates/{templateId}/categories/{categoryId}/options/view",

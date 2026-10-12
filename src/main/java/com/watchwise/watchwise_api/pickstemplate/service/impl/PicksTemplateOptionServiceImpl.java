@@ -57,6 +57,7 @@ import java.util.stream.IntStream;
 @Service
 @RequiredArgsConstructor
 public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionService {
+    private static final int MAX_OPTION_VIEW_PAGE_SIZE = 20;
 
     private final PicksTemplateRepository templateRepository;
     private final PicksTemplateCategoryRepository categoryRepository;
@@ -95,11 +96,16 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     @Transactional(readOnly = true)
     public Page<PickOptionSearchDTO> searchOptions(UUID viewerId, UUID templateId, UUID categoryId, String query,
                                                     String seriesTmdbId, Integer seasonNumber, Integer page, Integer size) {
-        PicksTemplateCategory category = categoryRepository.findByIdAndPicksTemplateId(categoryId, templateId)
-                .orElseThrow(() -> new NotFoundException("Picks template category not found"));
-        PageRequest pageRequest = pageRequestFactory.build(page, size);
+        PicksTemplateCategory category = findCategory(templateId, categoryId);
+        return searchOptions(viewerId, category, query, seriesTmdbId, seasonNumber,
+                pageRequestFactory.build(page, size));
+    }
+
+    private Page<PickOptionSearchDTO> searchOptions(UUID viewerId, PicksTemplateCategory category, String query,
+                                                    String seriesTmdbId, Integer seasonNumber, PageRequest pageRequest) {
         if (category.getOptionMode() == PickCategoryOptionMode.FIXED) {
-            return optionRepository.findByCategoryId(categoryId, pageRequest).map(optionMapper::picksTemplateOptionToSearchDto);
+            return optionRepository.findByCategoryId(category.getId(), pageRequest)
+                    .map(optionMapper::picksTemplateOptionToSearchDto);
         }
         requestThrottler.checkAllowed(
                 "search|" + viewerId,
@@ -115,8 +121,9 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     @Transactional(readOnly = true)
     public Page<PickOptionViewDTO> getOptionViews(UUID viewerId, UUID templateId, UUID categoryId, String query,
                                                   String seriesTmdbId, Integer seasonNumber, Integer page, Integer size) {
-        Page<PickOptionSearchDTO> options = searchOptions(viewerId, templateId, categoryId, query,
-                seriesTmdbId, seasonNumber, page, size);
+        PicksTemplateCategory category = findCategory(templateId, categoryId);
+        Page<PickOptionSearchDTO> options = searchOptions(viewerId, category, query, seriesTmdbId, seasonNumber,
+                pageRequestFactory.build(page, size, MAX_OPTION_VIEW_PAGE_SIZE));
         List<PickTargetPreviewDTO> previews = pickTargetPreviewAssembler.assemble(
                 options.getContent(), new ContentCardContext(TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE,
                         null, null, null));
@@ -157,6 +164,11 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
                 return options.isLast();
             }
         };
+    }
+
+    private PicksTemplateCategory findCategory(UUID templateId, UUID categoryId) {
+        return categoryRepository.findByIdAndPicksTemplateId(categoryId, templateId)
+                .orElseThrow(() -> new NotFoundException("Picks template category not found"));
     }
 
     @Override
