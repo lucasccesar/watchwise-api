@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.pick.dto;
 
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -19,11 +21,16 @@ class PickDetailViewDTOTest {
         PickAnswerViewDTO unanswered = answer(2, false);
         PickAnswerViewDTO answered = answer(1, true);
         List<PickAnswerViewDTO> answers = new ArrayList<>(List.of(unanswered, answered));
+        PicksTemplatePreviewDTO templatePreview = new PicksTemplatePreviewDTO(UUID.randomUUID(), PickOrigin.COMMUNITY,
+                "Template", "Description", "/cover.jpg");
 
-        PickDetailViewDTO detail = new PickDetailViewDTO(UUID.randomUUID(), null, null, PickVisibility.PUBLIC,
+        PickDetailViewDTO detail = new PickDetailViewDTO(UUID.randomUUID(), templatePreview, null, PickVisibility.PUBLIC,
                 null, null, PickProgress.PARTIAL, 1, 2, answers, 3, 4, true);
         answers.clear();
 
+        assertThat(detail.picksTemplate()).isSameAs(templatePreview);
+        assertThat(detail.picksTemplate().name()).isEqualTo("Template");
+        assertThat(detail.picksTemplate().origin()).isEqualTo(PickOrigin.COMMUNITY);
         assertThat(detail.answers()).containsExactly(unanswered, answered);
         assertThat(detail.answers().get(0).isAnswered()).isFalse();
         assertThat(detail.answers().get(1).isAnswered()).isTrue();
