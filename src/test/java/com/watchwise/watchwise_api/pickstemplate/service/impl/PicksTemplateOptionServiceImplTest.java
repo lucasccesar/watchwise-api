@@ -9,6 +9,10 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickOptionViewDTO;
+import com.watchwise.watchwise_api.pick.dto.PickTargetPreviewDTO;
+import com.watchwise.watchwise_api.pick.service.impl.PickTargetPreviewAssembler;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.pick.dto.PickTargetDTO;
 import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
@@ -24,9 +28,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.InOrder;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.PageImpl;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -49,7 +55,35 @@ class PicksTemplateOptionServiceImplTest {
     @Mock PageRequestFactory pageRequestFactory;
     @Mock TmdbClient tmdbClient;
     @Mock RequestThrottler requestThrottler;
-    @InjectMocks PicksTemplateOptionServiceImpl service;
+    @Mock PickTargetPreviewAssembler previewAssembler;
+    @Spy @InjectMocks PicksTemplateOptionServiceImpl service;
+
+    @Test
+    @DisplayName("[shouldEnrichOnlyTheSearchPageAndPreservePageMetadataWhenGettingOptionViews] Should enrich only the selected page - When visual options are requested")
+    void shouldEnrichOnlyTheSearchPageAndPreservePageMetadataWhenGettingOptionViews() {
+        UUID viewerId = UUID.randomUUID();
+        UUID templateId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+        PickOptionSearchDTO target = new PickOptionSearchDTO(null, null, "42", null);
+        Page<PickOptionSearchDTO> rawPage = new PageImpl<>(List.of(target), PageRequest.of(1, 2), 5);
+        PickTargetPreviewDTO preview = new PickTargetPreviewDTO(null,
+                new com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO("42", "Ada", null,
+                        com.watchwise.watchwise_api.content.dto.ContentPreviewStatus.PARTIAL), null);
+        doReturn(rawPage).when(service).searchOptions(viewerId, templateId, categoryId,
+                "Ada", null, null, 2, 2);
+        when(previewAssembler.assemble(eq(List.of(target)), any(ContentCardContext.class)))
+                .thenReturn(List.of(preview));
+
+        Page<PickOptionViewDTO> result = service.getOptionViews(viewerId, templateId, categoryId,
+                "Ada", null, null, 2, 2);
+
+        assertThat(result.getContent()).containsExactly(new PickOptionViewDTO(null, target, preview));
+        assertThat(result.getTotalElements()).isEqualTo(5);
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getSize()).isEqualTo(2);
+        verify(previewAssembler).assemble(eq(List.of(target)), any(ContentCardContext.class));
+        verify(service).searchOptions(viewerId, templateId, categoryId, "Ada", null, null, 2, 2);
+    }
 
     @Test
     void shouldUseDirectPersonSearchAndPreserveTmdbMetadata() {

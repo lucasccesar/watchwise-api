@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.pickstemplate.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickOptionViewDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionCreationDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionDTO;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateOptionService;
@@ -34,6 +35,16 @@ public class PicksTemplateOptionController {
             @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
         Page<PickOptionSearchDTO> options = picksTemplateOptionService.searchOptions(currentUserId(), templateId, categoryId,
                 query, seriesTmdbId, seasonNumber, page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(options));
+    }
+
+    @GetMapping("/view")
+    public ResponseEntity<PageResponseDTO<PickOptionViewDTO>> getOptionViews(@PathVariable UUID templateId,
+            @PathVariable UUID categoryId, @RequestParam(name = "q", required = false) String query,
+            @RequestParam(required = false) String seriesTmdbId, @RequestParam(required = false) Integer seasonNumber,
+            @RequestParam(required = false) Integer page, @RequestParam(required = false) Integer size) {
+        Page<PickOptionViewDTO> options = picksTemplateOptionService.getOptionViews(currentUserId(), templateId,
+                categoryId, query, seriesTmdbId, seasonNumber, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(options));
     }
 

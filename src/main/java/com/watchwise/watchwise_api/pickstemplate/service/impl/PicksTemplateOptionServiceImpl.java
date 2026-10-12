@@ -16,9 +16,12 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
+import com.watchwise.watchwise_api.pick.dto.PickOptionViewDTO;
 import com.watchwise.watchwise_api.pick.repository.PickSelectionRepository;
+import com.watchwise.watchwise_api.pick.service.impl.PickTargetPreviewAssembler;
 import com.watchwise.watchwise_api.pick.service.PickTargetService;
 import com.watchwise.watchwise_api.pick.service.ResolvedPickTarget;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplateOptionCreationDTO;
@@ -33,6 +36,7 @@ import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategor
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateOptionRepository;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateOptionService;
+import com.watchwise.watchwise_api.pick.dto.PickTargetPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -48,6 +52,7 @@ import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 @Service
 @RequiredArgsConstructor
@@ -63,6 +68,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     private final PageRequestFactory pageRequestFactory;
     private final TmdbClient tmdbClient;
     private final RequestThrottler requestThrottler;
+    private final PickTargetPreviewAssembler pickTargetPreviewAssembler;
 
     @Value("${app.rate-limit.search.max-requests}")
     private int searchMaxRequests;
@@ -103,6 +109,54 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
             throw new BadRequestException("q must be provided for open movie, series and person searches");
         }
         return openOptions(viewerId, category, query, seriesTmdbId, seasonNumber, pageRequest);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<PickOptionViewDTO> getOptionViews(UUID viewerId, UUID templateId, UUID categoryId, String query,
+                                                  String seriesTmdbId, Integer seasonNumber, Integer page, Integer size) {
+        Page<PickOptionSearchDTO> options = searchOptions(viewerId, templateId, categoryId, query,
+                seriesTmdbId, seasonNumber, page, size);
+        List<PickTargetPreviewDTO> previews = pickTargetPreviewAssembler.assemble(
+                options.getContent(), new ContentCardContext(TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE,
+                        null, null, null));
+        List<PickOptionViewDTO> viewContent = IntStream.range(0, options.getContent().size())
+                .mapToObj(index -> {
+                    PickOptionSearchDTO option = options.getContent().get(index);
+                    return new PickOptionViewDTO(option.id(), option, previews.get(index));
+                })
+                .toList();
+        return new PageImpl<>(viewContent, options.getPageable(), options.getTotalElements()) {
+            @Override
+            public int getNumber() {
+                return options.getNumber();
+            }
+
+            @Override
+            public int getSize() {
+                return options.getSize();
+            }
+
+            @Override
+            public int getTotalPages() {
+                return options.getTotalPages();
+            }
+
+            @Override
+            public long getTotalElements() {
+                return options.getTotalElements();
+            }
+
+            @Override
+            public boolean hasNext() {
+                return options.hasNext();
+            }
+
+            @Override
+            public boolean isLast() {
+                return options.isLast();
+            }
+        };
     }
 
     @Override

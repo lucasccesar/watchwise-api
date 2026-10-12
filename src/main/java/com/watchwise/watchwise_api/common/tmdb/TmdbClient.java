@@ -265,15 +265,11 @@ public class TmdbClient {
     }
 
     public TmdbLookupResult<TmdbPersonDetails> getPersonDetails(String personTmdbId) {
-        TmdbLookupResult<TmdbPersonDetails> cached = tmdbPersonDetailsCache.getIfPresent(personTmdbId);
-        if (cached instanceof TmdbLookupResult.Found<TmdbPersonDetails> found) {
-            return new TmdbLookupResult.Found<>(found.value(), TmdbLookupOrigin.CACHE);
-        }
-        return callWithRetry(() -> tmdbRestClient.get()
+        return cachedLookup(tmdbPersonDetailsCache, personTmdbId, () -> callWithRetry(() -> tmdbRestClient.get()
                         .uri("/person/{id}", personTmdbId)
                         .retrieve()
                         .body(TmdbPersonDetails.class),
-                "person details " + personTmdbId);
+                "person details " + personTmdbId));
     }
 
     public TmdbLookupResult<TmdbPersonAggregate> getPersonAggregate(String personTmdbId, String language) {

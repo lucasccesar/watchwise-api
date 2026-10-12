@@ -226,9 +226,8 @@ class TmdbClientCachingTest {
     }
 
     @Test
-    void shouldCallTmdbForEachUnseededPersonExistenceLookup() {
-        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
-                .andRespond(withSuccess("{\"id\":6193}", MediaType.APPLICATION_JSON));
+    @DisplayName("[shouldCacheFoundPersonDetailsWhenRepeated] Should reuse found person details - When a person is requested again")
+    void shouldCacheFoundPersonDetailsWhenRepeated() {
         mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
                 .andRespond(withSuccess("{\"id\":6193}", MediaType.APPLICATION_JSON));
 
@@ -238,8 +237,28 @@ class TmdbClientCachingTest {
         assertThat(first).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
         assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
+                found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.CACHE));
+        assertThat(tmdbPersonDetailsCache.getIfPresent("6193")).isNotNull();
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("[shouldNotCacheUnavailablePersonDetailsAndRetryOnNextCall] Should retry person details - When the previous lookup was unavailable")
+    void shouldNotCacheUnavailablePersonDetailsAndRetryOnNextCall() {
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
+                .andRespond(withServerError());
+        mockServer.expect(requestTo("https://api.themoviedb.org/3/person/6193"))
+                .andRespond(withSuccess("{\"id\":6193}", MediaType.APPLICATION_JSON));
+
+        var first = tmdbClient.getPersonDetails("6193");
+        var second = tmdbClient.getPersonDetails("6193");
+
+        assertThat(first.isUnavailable()).isTrue();
+        assertThat(second).isInstanceOfSatisfying(TmdbLookupResult.Found.class,
                 found -> assertThat(found.origin()).isEqualTo(TmdbLookupOrigin.REMOTE));
-        assertThat(tmdbPersonDetailsCache.getIfPresent("6193")).isNull();
+        assertThat(tmdbPersonDetailsCache.getIfPresent("6193")).isNotNull();
         mockServer.verify();
     }
 
