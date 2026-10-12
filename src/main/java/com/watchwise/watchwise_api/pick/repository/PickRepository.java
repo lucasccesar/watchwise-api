@@ -62,7 +62,22 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
             @Param("cursorId") UUID cursorId,
             Pageable pageable);
 
-    Page<Pick> findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(UUID userId, UUID templateId, Pageable pageable);
+    @Query(value = """
+            select pick from Pick pick
+            join fetch pick.user
+            join fetch pick.picksTemplate template
+            left join fetch template.creator
+            where pick.user.id = :userId
+              and pick.picksTemplate.id = :templateId
+            order by pick.createdAt desc, pick.id desc
+            """,
+            countQuery = """
+                    select count(pick) from Pick pick
+                    where pick.user.id = :userId
+                      and pick.picksTemplate.id = :templateId
+                    """)
+    Page<Pick> findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(
+            @Param("userId") UUID userId, @Param("templateId") UUID templateId, Pageable pageable);
     List<Pick> findByUserIdAndPicksTemplateIdInOrderByCreatedAtDescIdDesc(UUID userId, Collection<UUID> templateIds);
 
     @Query("select pick.picksTemplate.id as templateId, count(pick) as count from Pick pick "
@@ -102,6 +117,16 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
         UUID getTemplateId();
         long getCount();
     }
+
+    @Query("""
+            select pick from Pick pick
+            join fetch pick.user
+            join fetch pick.picksTemplate template
+            left join fetch template.creator
+            where pick.id = :id
+            """)
+    Optional<Pick> findByIdWithUserAndTemplateAndCreator(@Param("id") UUID id);
+
     @Query("""
             select pick from Pick pick where pick.user.id = :ownerId
               and (:templateId is null or pick.picksTemplate.id = :templateId)
@@ -115,6 +140,9 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
 
     @Query(value = """
             select pick from Pick pick
+            join fetch pick.user
+            join fetch pick.picksTemplate template
+            left join fetch template.creator
             where pick.picksTemplate.id = :templateId
               and (pick.user.id = :viewerId
                 or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
@@ -138,6 +166,9 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
 
     @Query(value = """
             select pick from Pick pick
+            join fetch pick.user
+            join fetch pick.picksTemplate template
+            left join fetch template.creator
             where pick.picksTemplate.id = :templateId
               and (pick.user.id = :viewerId
                 or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC

@@ -15,6 +15,7 @@ import java.util.UUID;
 public interface PickSelectionRepository extends JpaRepository<PickSelection, UUID> {
     @Query("""
             select selection from PickSelection selection
+            join fetch selection.category
             left join fetch selection.content
             left join fetch selection.contextContent
             where selection.pick.id in :pickIds

@@ -161,7 +161,7 @@ class PickRepositoryTest {
         User follower = user("template-rank-follower", now);
         User stranger = user("template-rank-stranger", now);
         PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder()
-                .origin(PickOrigin.OFFICIAL).name("Template ranking").createdAt(now).updatedAt(now).build());
+                .creator(owner).origin(PickOrigin.OFFICIAL).name("Template ranking").createdAt(now).updatedAt(now).build());
 
         Pick publicPick = save(UUID.fromString("00000000-0000-0000-0000-000000000001"), owner, template,
                 PickVisibility.PUBLIC, now.plusHours(2), 1);
@@ -174,6 +174,8 @@ class PickRepositoryTest {
                 .status(FollowStatus.ACCEPTED).createdAt(now).build());
         followerRepository.saveAndFlush(Follower.builder().follower(stranger).followed(owner)
                 .status(FollowStatus.PENDING).createdAt(now).build());
+        entityManager.flush();
+        entityManager.clear();
 
         PageRequest page = PageRequest.of(0, 10);
         assertThat(repository.findVisibleByTemplateRecent(owner.getId(), template.getId(), page).getContent())
@@ -195,16 +197,25 @@ class PickRepositoryTest {
         assertThat(repository.findVisibleByTemplatePopular(stranger.getId(), template.getId(), page).getContent())
                 .extracting(Pick::getId)
                 .containsExactly(publicPick.getId());
+
+        Page<Pick> visualPage = repository.findVisibleByTemplateRecent(follower.getId(), template.getId(), page);
+        assertThat(visualPage.getContent()).allSatisfy(pick -> {
+            assertThat(Hibernate.isInitialized(pick.getUser())).isTrue();
+            assertThat(Hibernate.isInitialized(pick.getPicksTemplate())).isTrue();
+            assertThat(Hibernate.isInitialized(pick.getPicksTemplate().getCreator())).isTrue();
+        });
     }
 
     @Test
     void supportsOwnerTemplatePaginationAndVisibleQueryWithoutTemplateFilterAcrossTwoOwners() {
         LocalDateTime now = LocalDateTime.now();
         User owner = user("page-owner", now), otherOwner = user("page-other", now), viewer = user("page-viewer", now);
-        PicksTemplate first = templateRepository.save(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("First").createdAt(now).updatedAt(now).build());
-        PicksTemplate second = templateRepository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Second").createdAt(now).updatedAt(now).build());
+        PicksTemplate first = templateRepository.save(PicksTemplate.builder().creator(owner).origin(PickOrigin.OFFICIAL).name("First").createdAt(now).updatedAt(now).build());
+        PicksTemplate second = templateRepository.saveAndFlush(PicksTemplate.builder().creator(owner).origin(PickOrigin.OFFICIAL).name("Second").createdAt(now).updatedAt(now).build());
         Pick firstPick = save(owner, first, PickVisibility.PUBLIC, now); Pick secondPick = save(owner, first, PickVisibility.PUBLIC, now); Pick thirdPick = save(owner, first, PickVisibility.PUBLIC, now);
         Pick secondTemplatePick = save(owner, second, PickVisibility.PUBLIC, now); save(otherOwner, first, PickVisibility.PUBLIC, now);
+        entityManager.flush();
+        entityManager.clear();
 
         Page<Pick> firstPage = repository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(owner.getId(), first.getId(), PageRequest.of(0, 2));
         Page<Pick> secondPage = repository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(owner.getId(), first.getId(), PageRequest.of(1, 2));
@@ -212,10 +223,63 @@ class PickRepositoryTest {
         assertThat(secondPage.getTotalElements()).isEqualTo(3); assertThat(secondPage.getTotalPages()).isEqualTo(2); assertThat(secondPage.getContent()).hasSize(1);
         assertThat(Stream.concat(firstPage.getContent().stream(), secondPage.getContent().stream()).map(Pick::getId).toList())
                 .containsExactlyInAnyOrder(firstPick.getId(), secondPick.getId(), thirdPick.getId());
+        assertThat(firstPage.getContent()).allSatisfy(pick -> {
+            assertThat(Hibernate.isInitialized(pick.getUser())).isTrue();
+            assertThat(Hibernate.isInitialized(pick.getPicksTemplate())).isTrue();
+            assertThat(Hibernate.isInitialized(pick.getPicksTemplate().getCreator())).isTrue();
+        });
         Page<Pick> visiblePicks = repository.findVisibleByOwner(viewer.getId(), owner.getId(), null, PageRequest.of(0, 10));
         assertThat(visiblePicks.getTotalElements()).isEqualTo(4);
         assertThat(visiblePicks.getContent()).extracting(Pick::getId)
                 .containsExactlyInAnyOrder(firstPick.getId(), secondPick.getId(), thirdPick.getId(), secondTemplatePick.getId());
+    }
+
+    @Test
+    @DisplayName("[findVisibleByTemplateRecent] Should preserve every Pick across joined pages - When the page is smaller than the result")
+    void shouldPreserveEveryPickAcrossJoinedPagesWhenPageIsSmallerThanResult() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);
+        User owner = user("joined-page-owner", now);
+        User viewer = user("joined-page-viewer", now);
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().creator(owner)
+                .origin(PickOrigin.COMMUNITY).name("Joined pages").createdAt(now).updatedAt(now).build());
+        List<UUID> pickIds = List.of(
+                save(owner, template, PickVisibility.PUBLIC, now).getId(),
+                save(owner, template, PickVisibility.PUBLIC, now).getId(),
+                save(owner, template, PickVisibility.PUBLIC, now).getId(),
+                save(owner, template, PickVisibility.PUBLIC, now).getId(),
+                save(owner, template, PickVisibility.PUBLIC, now).getId());
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<Pick> firstPage = repository.findVisibleByTemplateRecent(viewer.getId(), template.getId(), PageRequest.of(0, 2));
+        Page<Pick> secondPage = repository.findVisibleByTemplateRecent(viewer.getId(), template.getId(), PageRequest.of(1, 2));
+        Page<Pick> thirdPage = repository.findVisibleByTemplateRecent(viewer.getId(), template.getId(), PageRequest.of(2, 2));
+
+        assertThat(firstPage.getTotalElements()).isEqualTo(5);
+        assertThat(firstPage.getTotalPages()).isEqualTo(3);
+        assertThat(Stream.of(firstPage, secondPage, thirdPage).flatMap(page -> page.getContent().stream())
+                .map(Pick::getId).toList()).containsExactlyInAnyOrderElementsOf(pickIds);
+    }
+
+    @Test
+    @DisplayName("[findByIdWithUserAndTemplateAndCreator] Should fetch detail associations in the same read - When a Pick is loaded")
+    void shouldFetchDetailAssociationsInTheSameReadWhenPickIsLoaded() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);
+        User owner = user("detail-owner", now);
+        User creator = user("detail-creator", now);
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder().creator(creator)
+                .origin(PickOrigin.COMMUNITY).name("Detail").createdAt(now).updatedAt(now).build());
+        Pick pick = save(owner, template, PickVisibility.PUBLIC, now);
+        entityManager.flush();
+        entityManager.clear();
+
+        Pick result = repository.findByIdWithUserAndTemplateAndCreator(pick.getId()).orElseThrow();
+
+        assertThat(Hibernate.isInitialized(result.getUser())).isTrue();
+        assertThat(Hibernate.isInitialized(result.getPicksTemplate())).isTrue();
+        assertThat(Hibernate.isInitialized(result.getPicksTemplate().getCreator())).isTrue();
+        assertThat(result.getUser().getId()).isEqualTo(owner.getId());
+        assertThat(result.getPicksTemplate().getCreator().getId()).isEqualTo(creator.getId());
     }
 
     @Test

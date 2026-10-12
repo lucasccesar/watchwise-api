@@ -23,6 +23,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
+import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -58,8 +59,11 @@ class PickSelectionRepositoryTest {
         PickSelection requestedSelection = repository.saveAndFlush(PickSelection.builder().pick(requestedPick).category(category).personTmdbId("100").createdAt(now).updatedAt(now).build());
         repository.saveAndFlush(PickSelection.builder().pick(excludedPick).category(category).personTmdbId("200").createdAt(now).updatedAt(now).build());
 
-        assertThat(repository.findByPickIdIn(java.util.List.of(pick.getId(), requestedPick.getId())))
+        List<PickSelection> batchResults = repository.findByPickIdIn(java.util.List.of(pick.getId(), requestedPick.getId()));
+        assertThat(batchResults)
                 .extracting(PickSelection::getId).containsExactlyInAnyOrder(selection.getId(), requestedSelection.getId(), otherSelection.getId());
+        assertThat(batchResults)
+                .allSatisfy(result -> assertThat(Hibernate.isInitialized(result.getCategory())).isTrue());
         assertThat(repository.countByPickId(pick.getId())).isEqualTo(2);
         assertThat(repository.existsByCategoryId(category.getId())).isTrue();
         assertThat(repository.existsByCategoryIdAndContentIdAndPersonTmdbIdAndContextContentId(category.getId(), null, "287", context.getId())).isTrue();
@@ -100,6 +104,7 @@ class PickSelectionRepositoryTest {
         var results = repository.findByPickIdIn(java.util.List.of(pick.getId()));
 
         assertThat(results).hasSize(7).allSatisfy(selection -> {
+            assertThat(Hibernate.isInitialized(selection.getCategory())).isTrue();
             assertThat(Hibernate.isInitialized(selection.getContent())).isTrue();
             assertThat(Hibernate.isInitialized(selection.getContextContent())).isTrue();
         });
