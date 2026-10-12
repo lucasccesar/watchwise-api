@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.userlist.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
-import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
@@ -155,12 +154,8 @@ public class UserListController {
             @RequestParam(required = false) String sortBy,
             @RequestParam(required = false) String sortDirection,
             @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer size,
-            @RequestParam(required = false) UserListItemPageMode mode
+            @RequestParam(required = false) Integer size
     ) {
-        if (mode != null && mode != UserListItemPageMode.VISUAL) {
-            throw new BadRequestException("List detail view only supports VISUAL mode");
-        }
         UserListItemPageRequest request = new UserListItemPageRequest(
                 getCurrentUserId(), listId, type, genre, sortBy, sortDirection, watchStatus, page, size,
                 UserListItemPageMode.VISUAL);

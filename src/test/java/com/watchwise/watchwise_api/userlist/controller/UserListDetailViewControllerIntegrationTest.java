@@ -268,8 +268,14 @@ class UserListDetailViewControllerIntegrationTest {
     @Test
     @DisplayName("[getUserListDetailView] Should Return ApiError For Invalid Inputs And Require Authentication")
     void shouldReturnApiErrorForInvalidInputsAndRequireAuthentication() throws Exception {
-        mockMvc.perform(get("/lists/" + UUID.randomUUID() + "/view"))
-                .andExpect(status().isUnauthorized());
+        UUID unauthenticatedListId = UUID.randomUUID();
+        mockMvc.perform(get("/lists/" + unauthenticatedListId + "/view"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.message").value("Authentication is required to access this resource"))
+                .andExpect(jsonPath("$.path").value("/lists/" + unauthenticatedListId + "/view"));
 
         RegisteredUser viewer = register("detailinvalidviewer");
         assertApiError(mockMvc.perform(get("/lists/not-a-uuid/view").cookie(viewer.accessToken())), 400);
@@ -277,16 +283,12 @@ class UserListDetailViewControllerIntegrationTest {
         for (MockHttpServletRequestBuilder invalid : List.of(
                 detailView(viewer, list.getId()).param("type", "INVALID"),
                 detailView(viewer, list.getId()).param("watchStatus", "INVALID"),
-                detailView(viewer, list.getId()).param("mode", "INVALID"),
-                detailView(viewer, list.getId()).param("mode", "RAW"),
                 detailView(viewer, list.getId()).param("sortBy", "title"),
+                detailView(viewer, list.getId()).param("sortDirection", "sideways"),
                 detailView(viewer, list.getId()).param("page", "0"),
                 detailView(viewer, list.getId()).param("size", "0"))) {
             assertApiError(mockMvc.perform(invalid), 400);
         }
-        mockMvc.perform(detailView(viewer, list.getId()).param("mode", "VISUAL"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items.content").isArray());
     }
 
     private void assertStatusFilter(RegisteredUser viewer, UserList list, String watchStatus, Content expected)
