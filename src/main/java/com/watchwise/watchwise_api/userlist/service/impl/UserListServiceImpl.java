@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -31,6 +32,7 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListProgressItemDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListProgressAggregateDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListProgressResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListResponseDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -310,6 +312,32 @@ public class UserListServiceImpl implements UserListService {
 
         long totalItems = contentItems.size();
         double watchedPercentage = totalItems == 0 ? 0.0 : watchedItems * 100.0 / totalItems;
+        List<Content> movieContents = contentItems.stream()
+                .map(UserListItem::getContent)
+                .filter(content -> content.getType() == ContentType.MOVIE)
+                .toList();
+        long watchedMovieItems = movieContents.stream()
+                .filter(content -> watchedDirectContentIds.contains(content.getId()))
+                .count();
+        long movieRuntimeMinutes = movieContents.stream()
+                .map(Content::getRuntimeMinutes)
+                .filter(Objects::nonNull)
+                .mapToLong(Integer::longValue)
+                .sum();
+        long watchedMovieRuntimeMinutes = movieContents.stream()
+                .filter(content -> watchedDirectContentIds.contains(content.getId()))
+                .map(Content::getRuntimeMinutes)
+                .filter(Objects::nonNull)
+                .mapToLong(Integer::longValue)
+                .sum();
+        UserListProgressAggregateDTO movieProgress = new UserListProgressAggregateDTO(
+                movieContents.size(),
+                watchedMovieItems,
+                movieContents.size() - watchedMovieItems,
+                movieRuntimeMinutes,
+                watchedMovieRuntimeMinutes,
+                movieRuntimeMinutes - watchedMovieRuntimeMinutes);
+        SeriesInProgressAggregateDTO seriesProgressAggregate = aggregateSeriesProgress(seriesProgressById);
         long commentsCount = commentRepository.countByListId(listId);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
@@ -332,7 +360,42 @@ public class UserListServiceImpl implements UserListService {
                 totalItems,
                 watchedItems,
                 watchedPercentage,
-                progressItems);
+                progressItems,
+                movieProgress,
+                seriesProgressAggregate);
+    }
+
+    private SeriesInProgressAggregateDTO aggregateSeriesProgress(
+            Map<String, SeriesInProgressResponseDTO> seriesProgressById) {
+        long watchedEpisodeCount = seriesProgressById.values().stream()
+                .map(SeriesInProgressResponseDTO::watchedEpisodeCount)
+                .filter(Objects::nonNull)
+                .mapToLong(Long::longValue)
+                .sum();
+        long totalReleasedEpisodeCount = seriesProgressById.values().stream()
+                .map(SeriesInProgressResponseDTO::totalReleasedEpisodeCount)
+                .filter(Objects::nonNull)
+                .mapToLong(Integer::longValue)
+                .sum();
+        long remainingEpisodeCount = seriesProgressById.values().stream()
+                .map(SeriesInProgressResponseDTO::remainingEpisodeCount)
+                .filter(Objects::nonNull)
+                .mapToLong(Long::longValue)
+                .sum();
+        boolean remainingRuntimeKnown = seriesProgressById.values().stream()
+                .allMatch(progress -> progress.remainingRuntimeMinutes() != null);
+        Long remainingRuntimeMinutes = remainingRuntimeKnown
+                ? seriesProgressById.values().stream()
+                        .mapToLong(progress -> progress.remainingRuntimeMinutes())
+                        .sum()
+                : null;
+
+        return new SeriesInProgressAggregateDTO(
+                seriesProgressById.size(),
+                watchedEpisodeCount,
+                totalReleasedEpisodeCount,
+                remainingEpisodeCount,
+                remainingRuntimeMinutes);
     }
 
     private Map<UUID, String> loadPostersForOwner(UUID ownerId, List<UserListItem> items) {

@@ -1545,8 +1545,11 @@ class UserListServiceImplTest {
     void shouldReturnAggregatedMovieProgressWithoutItemState() {
         UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
         Content firstMovie = buildContent(ContentType.MOVIE, "100", null, null, null);
+        firstMovie.setRuntimeMinutes(120);
         Content secondMovie = buildContent(ContentType.MOVIE, "200", null, null, null);
+        secondMovie.setRuntimeMinutes(90);
         Content thirdMovie = buildContent(ContentType.MOVIE, "300", null, null, null);
+        thirdMovie.setRuntimeMinutes(120);
         List<UserListItem> items = List.of(
                 buildContentItem(list, firstMovie, 1),
                 buildContentItem(list, secondMovie, 2),
@@ -1556,21 +1559,27 @@ class UserListServiceImplTest {
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
                 .thenReturn(items);
-        when(diaryEntryRepository.findWatchedDirectContentIds(lucasId, contentIds))
+        when(diaryEntryRepository.findWatchedDirectContentIds(marinaId, contentIds))
                 .thenReturn(Set.of(firstMovie.getId(), secondMovie.getId()));
         when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
 
-        UserListProgressResponseDTO result = userListService.getUserListProgress(lucasId, list.getId());
+        UserListProgressResponseDTO result = userListService.getUserListProgress(marinaId, list.getId());
 
         assertThat(result.totalItems()).isEqualTo(3);
         assertThat(result.watchedItems()).isEqualTo(2);
         assertThat(result.watchedPercentage()).isEqualTo(200.0 / 3.0 * 1.0);
+        assertThat(result.movieProgress().totalItems()).isEqualTo(3);
+        assertThat(result.movieProgress().watchedItems()).isEqualTo(2);
+        assertThat(result.movieProgress().remainingItems()).isEqualTo(1);
+        assertThat(result.movieProgress().totalRuntimeMinutes()).isEqualTo(330);
+        assertThat(result.movieProgress().watchedRuntimeMinutes()).isEqualTo(210);
+        assertThat(result.movieProgress().remainingRuntimeMinutes()).isEqualTo(120);
         assertThat(result.items()).extracting(UserListProgressItemDTO::seriesProgress)
                 .containsOnlyNulls();
         assertThat(result.items()).extracting(UserListProgressItemDTO::seasonProgress)
                 .containsOnlyNulls();
         verifyNoInteractions(seriesProgressReader);
-        verify(diaryEntryRepository).findWatchedDirectContentIds(lucasId, contentIds);
+        verify(diaryEntryRepository).findWatchedDirectContentIds(marinaId, contentIds);
     }
 
     @Test
@@ -1583,9 +1592,11 @@ class UserListServiceImplTest {
                 buildContentItem(list, firstSeries, 1),
                 buildContentItem(list, secondSeries, 2));
         SeriesInProgressResponseDTO zeroProgress = new SeriesInProgressResponseDTO(
-                "1396", null, null, null, 0L, 10, 0.0);
+                "1396", null, null, null, 2L, 10, 20.0, List.of(), null, null,
+                80L, 10, 500, null, 8L, 420L);
         SeriesInProgressResponseDTO completedProgress = new SeriesInProgressResponseDTO(
-                "94605", 2, 5, LocalDateTime.now().toLocalDate(), 10L, 10, 100.0);
+                "94605", 2, 5, LocalDateTime.now().toLocalDate(), 10L, 10, 100.0, List.of(),
+                2, 5, 400L, 10, 500, null, 0L, 0L);
 
         when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
         when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
@@ -1599,6 +1610,11 @@ class UserListServiceImplTest {
         assertThat(result.items()).extracting(UserListProgressItemDTO::seriesProgress)
                 .containsExactly(zeroProgress, completedProgress);
         assertThat(result.watchedItems()).isEqualTo(1);
+        assertThat(result.seriesProgressAggregate().totalSeriesCount()).isEqualTo(2);
+        assertThat(result.seriesProgressAggregate().watchedEpisodeCount()).isEqualTo(12);
+        assertThat(result.seriesProgressAggregate().totalReleasedEpisodeCount()).isEqualTo(20);
+        assertThat(result.seriesProgressAggregate().remainingEpisodeCount()).isEqualTo(8);
+        assertThat(result.seriesProgressAggregate().remainingRuntimeMinutes()).isEqualTo(420);
         verify(seriesProgressReader).readForSeriesIds(marinaId, List.of("1396", "94605"));
         verifyNoInteractions(diaryEntryRepository);
     }

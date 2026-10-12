@@ -1188,12 +1188,34 @@ class UserListControllerIntegrationTest {
                 .andExpect(jsonPath("$.name").value("Movie progress"))
                 .andExpect(jsonPath("$.totalItems").value(1))
                 .andExpect(jsonPath("$.watchedItems").value(0))
+                .andExpect(jsonPath("$.movieProgress.totalItems").value(1))
+                .andExpect(jsonPath("$.movieProgress.watchedItems").value(0))
+                .andExpect(jsonPath("$.movieProgress.remainingItems").value(1))
+                .andExpect(jsonPath("$.movieProgress.totalRuntimeMinutes").value(0))
+                .andExpect(jsonPath("$.movieProgress.watchedRuntimeMinutes").value(0))
+                .andExpect(jsonPath("$.movieProgress.remainingRuntimeMinutes").value(0))
+                .andExpect(jsonPath("$.seriesProgressAggregate.totalSeriesCount").value(0))
                 .andExpect(jsonPath("$.items[0].content.tmdbId").value("550"))
                 .andExpect(jsonPath("$.items[0].contentState").doesNotExist())
                 .andExpect(jsonPath("$.items[0].seriesProgress").doesNotExist())
                 .andExpect(jsonPath("$.items[0].seasonProgress").doesNotExist());
 
         verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Reject A Nested-List List - When Requested Over HTTP")
+    void shouldRejectANestedListListWhenRequestedOverHttp() throws Exception {
+        RegisteredUser user = registerUser("listprogressnested");
+        User entity = userRepository.findById(user.id()).orElseThrow();
+        UserList list = persistList(entity, "Nested", UserListVisibility.PUBLIC);
+        UserList childList = persistList(entity, "Child", UserListVisibility.PUBLIC);
+        persistNestedListItem(list, childList, 1);
+
+        mockMvc.perform(get("/lists/{listId}/progress", list.getId())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("List progress is only available for content lists"));
     }
 
     @Test

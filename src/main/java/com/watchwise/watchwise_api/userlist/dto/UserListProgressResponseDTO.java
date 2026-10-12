@@ -1,5 +1,6 @@
 package com.watchwise.watchwise_api.userlist.dto;
 
+import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 
 import java.time.LocalDateTime;
@@ -23,7 +24,9 @@ public record UserListProgressResponseDTO(
         long totalItems,
         long watchedItems,
         double watchedPercentage,
-        List<UserListProgressItemDTO> items) {
+        List<UserListProgressItemDTO> items,
+        UserListProgressAggregateDTO movieProgress,
+        SeriesInProgressAggregateDTO seriesProgressAggregate) {
 
     public UserListProgressResponseDTO {
         items = List.copyOf(items);
