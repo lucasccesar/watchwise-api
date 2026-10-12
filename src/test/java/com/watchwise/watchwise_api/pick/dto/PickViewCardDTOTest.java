@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.pick.dto;
 
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryOptionMode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,15 +17,17 @@ class PickViewCardDTOTest {
     @Test
     @DisplayName("[PickViewCardDTO] Should Defensively Copy And Cap Answers - When More Than Five Are Supplied")
     void shouldDefensivelyCopyAndCapAnswersWhenMoreThanFiveAreSupplied() {
-        List<PickAnsweredCategoryPreviewDTO> answers = new ArrayList<>();
+        List<PickAnswerViewDTO> answers = new ArrayList<>();
         for (int i = 0; i < 7; i++) answers.add(answer(i));
 
         PickViewCardDTO card = card(answers);
         answers.clear();
 
         assertThat(card.answeredCategories()).hasSize(5);
-        assertThat(card.answeredCategories()).extracting(PickAnsweredCategoryPreviewDTO::displayOrder)
+        assertThat(card.answeredCategories()).extracting(PickAnswerViewDTO::displayOrder)
                 .containsExactly(0, 1, 2, 3, 4);
+        assertThat(card.answeredCategories().getFirst().allowedType()).isEqualTo(PickAllowedType.MOVIE);
+        assertThat(card.answeredCategories().getFirst().optionMode()).isEqualTo(PickCategoryOptionMode.OPEN);
         assertThatThrownBy(() -> card.answeredCategories().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
 
@@ -37,12 +41,14 @@ class PickViewCardDTOTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
-    private static PickViewCardDTO card(List<PickAnsweredCategoryPreviewDTO> answers) {
+    private static PickViewCardDTO card(List<PickAnswerViewDTO> answers) {
         return new PickViewCardDTO(null, null, null, PickVisibility.PUBLIC, null, null,
                 0, 7, answers, null, 0, false);
     }
 
-    private static PickAnsweredCategoryPreviewDTO answer(int order) {
-        return new PickAnsweredCategoryPreviewDTO(null, "Category " + order, null, order, null, true);
+    private static PickAnswerViewDTO answer(int order) {
+        return new PickAnswerViewDTO(null, "Category " + order, null, order,
+                PickAllowedType.MOVIE, PickCategoryOptionMode.OPEN,
+                null, null, true, true);
     }
 }
