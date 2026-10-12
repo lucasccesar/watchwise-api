@@ -13,7 +13,6 @@ import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
-import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -25,6 +24,8 @@ import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPage;
+import com.watchwise.watchwise_api.userlist.dto.UserListItemPageRequest;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPatchDTO;
@@ -37,6 +38,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.mapper.UserListMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
+import com.watchwise.watchwise_api.userlist.service.UserListItemPageReader;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userlist.service.UserListService;
@@ -44,7 +46,6 @@ import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,16 +53,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -71,6 +68,7 @@ public class UserListServiceImpl implements UserListService {
     private final UserRepository userRepository;
     private final FollowerRepository followerRepository;
     private final UserListItemService userListItemService;
+    private final UserListItemPageReader userListItemPageReader;
     private final UserListMapper userListMapper;
     private final ContentMapper contentMapper;
     private final LikeService likeService;
@@ -224,52 +222,15 @@ public class UserListServiceImpl implements UserListService {
                 : List.of(UserListVisibility.PUBLIC);
     }
 
-    private static final Set<String> ITEM_SORT_FIELDS = Set.of(
-            "position", "dateAdded", "duration", "episodeAvgRating", "globalEpisodeAvgRating", "contentAvgRating");
-
     @Override
     public UserListDetailedResponseDTO getUserListById(UUID viewerId, UUID listId, ContentType type, String genre,
             String sortBy, String sortDirection, Integer pageNumber, Integer pageSize) {
-        UserList userList = userListRepository.findById(listId)
-                .orElseThrow(() -> new NotFoundException("List not found"));
-
-        assertListIsVisibleTo(viewerId, userList);
-
-        if (sortBy != null && !ITEM_SORT_FIELDS.contains(sortBy)) {
-            throw new BadRequestException(
-                    "sortBy must be one of: position, dateAdded, duration, episodeAvgRating, globalEpisodeAvgRating, contentAvgRating");
-        }
-        assertValidSortDirection(sortDirection);
-
-        boolean canViewOwnerRatings = canViewOwnerRatings(viewerId, userList.getUser());
-        if ("episodeAvgRating".equals(sortBy) && !canViewOwnerRatings) {
-            throw new ForbiddenException("The list owner's episode ratings are private");
-        }
-
-        if (pageNumber != null && pageNumber <= 0) {
-            throw new BadRequestException("Page number must be greater than 0");
-        }
-
-        UserListItemsWithState itemsWithState = userListItemService.getItemsWithState(viewerId, listId);
-        List<UserListItemResponseDTO> allItems = itemsWithState.items();
-        List<UserListItemResponseDTO> items = filterAndSortItems(
-                allItems, type, genre, sortBy, sortDirection, userList.getUser().getId(), canViewOwnerRatings);
-        double watchedPercentage = itemsWithState.watchedPercentage();
-        boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
-        long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
-        long commentsCount = commentRepository.countByListId(listId);
-        UserListItemScope itemScope = userListItemService.getItemScope(listId);
-        int maxPageSize = itemScope == UserListItemScope.EPISODE ? 24 : 30;
-        PageRequest itemPageRequest = pageRequestFactory.build(pageNumber, pageSize, maxPageSize);
-        long offset = itemPageRequest.getOffset();
-        int fromIndex = offset >= items.size() ? items.size() : (int) offset;
-        int toIndex = Math.min(fromIndex + itemPageRequest.getPageSize(), items.size());
-        Page<UserListItemResponseDTO> page = new PageImpl<>(
-                items.subList(fromIndex, toIndex), itemPageRequest, items.size());
-
-        return userListMapper.userListToDetailedResponseDto(userList, page.getContent(), watchedPercentage, likedByMe,
-                allItems.size(), commentsCount, totalRuntimeMinutes, itemScope, page.getNumber() + 1, page.getSize(),
-                page.getTotalElements(), page.getTotalPages(), page.hasNext());
+        UserListItemPage page = userListItemPageReader.read(new UserListItemPageRequest(
+                viewerId, listId, type, genre, sortBy, sortDirection, null, pageNumber, pageSize));
+        return userListMapper.userListToDetailedResponseDto(
+                page.userList(), page.items(), page.watchedPercentage(), Boolean.TRUE.equals(page.likedByMe()),
+                page.itemsCount(), page.commentsCount(), page.totalRuntimeMinutes(), page.itemScope(), page.page(),
+                page.size(), page.totalElements(), page.totalPages(), page.hasNext());
     }
 
     @Override
@@ -412,207 +373,6 @@ public class UserListServiceImpl implements UserListService {
                 .map(item -> item.content().type())
                 .collect(Collectors.toSet());
         return UserListItemScope.resolve(types, hasNestedLists);
-    }
-
-    private List<UserListItemResponseDTO> filterAndSortItems(List<UserListItemResponseDTO> items, ContentType type,
-            String genre, String sortBy, String sortDirection, UUID ownerId, boolean includeOwnerRatings) {
-        Stream<UserListItemResponseDTO> stream = items.stream();
-
-        if (type != null) {
-            stream = stream.filter(item -> item.content() != null && item.content().type() == type);
-        }
-        if (genre != null) {
-            stream = stream.filter(item -> item.content() != null
-                    && item.content().genres() != null && item.content().genres().contains(genre));
-        }
-
-        List<UserListItemResponseDTO> filtered = enrichRatingAverages(stream.toList(), ownerId, includeOwnerRatings);
-
-        if (sortBy == null) {
-            return filtered;
-        }
-
-        Comparator<UserListItemResponseDTO> comparator = switch (sortBy) {
-            case "episodeAvgRating" -> ratingComparator(
-                    UserListItemResponseDTO::episodeAverageRating, sortDirection);
-            case "globalEpisodeAvgRating" -> ratingComparator(
-                    UserListItemResponseDTO::globalEpisodeAverageRating, sortDirection);
-            case "contentAvgRating" -> ratingComparator(
-                    UserListItemResponseDTO::contentAverageRating, sortDirection);
-            case "dateAdded" -> Comparator.comparing(UserListItemResponseDTO::createdAt);
-            case "duration" -> Comparator.comparing(item -> durationMinutes(item.content()));
-            default -> Comparator.comparing(UserListItemResponseDTO::position, Comparator.nullsLast(Comparator.naturalOrder()));
-        };
-
-        if ("desc".equals(sortDirection) && !isRatingSort(sortBy)) {
-            comparator = comparator.reversed();
-        }
-
-        return filtered.stream().sorted(comparator).toList();
-    }
-
-    private int durationMinutes(ContentRefDTO content) {
-        return content == null || content.runtimeMinutes() == null ? 0 : content.runtimeMinutes();
-    }
-
-    private List<UserListItemResponseDTO> enrichRatingAverages(
-            List<UserListItemResponseDTO> items, UUID ownerId, boolean includeOwnerRatings) {
-        Set<String> seriesTmdbIds = items.stream()
-                .map(UserListItemResponseDTO::content)
-                .filter(content -> content != null
-                        && (content.type() == ContentType.SERIES || content.type() == ContentType.SEASON
-                                || content.type() == ContentType.EPISODE))
-                .map(content -> content.type() == ContentType.SERIES ? content.tmdbId() : content.seriesTmdbId())
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-
-        Map<UUID, Double> ownerEpisodeAverages = Map.of();
-        Map<UUID, Double> publicEpisodeAverages = Map.of();
-        if (!seriesTmdbIds.isEmpty()) {
-            if (includeOwnerRatings) {
-                List<DiaryEntry> ownerEntries =
-                        diaryEntryRepository.findScoredEpisodeEntriesByUserIdAndSeriesTmdbIdIn(
-                                ownerId, seriesTmdbIds);
-                ownerEpisodeAverages = computeEpisodeAverageRatings(ownerEntries, items);
-            }
-            List<DiaryEntryRepository.PublicEpisodeRatingAggregate> publicAggregates =
-                    diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(seriesTmdbIds);
-            publicEpisodeAverages = computePublicEpisodeAverageRatings(publicAggregates, items);
-        }
-
-        Set<UUID> contentIds = items.stream()
-                .map(UserListItemResponseDTO::content)
-                .filter(Objects::nonNull)
-                .map(ContentRefDTO::id)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        Map<UUID, Double> contentAverages = new HashMap<>();
-        if (!contentIds.isEmpty()) {
-            for (DiaryEntryRepository.ContentStats stats
-                    : diaryEntryRepository.findContentStatsByContentIdIn(contentIds)) {
-                contentAverages.put(stats.getContentId(), stats.getAverageScore());
-            }
-        }
-
-        Map<UUID, Double> finalOwnerEpisodeAverages = ownerEpisodeAverages;
-        Map<UUID, Double> finalPublicEpisodeAverages = publicEpisodeAverages;
-        return items.stream()
-                .map(item -> item.withRatingAverages(
-                        finalOwnerEpisodeAverages.get(item.id()),
-                        finalPublicEpisodeAverages.get(item.id()),
-                        item.content() == null ? null : contentAverages.get(item.content().id())))
-                .toList();
-    }
-
-    private Map<UUID, Double> computeEpisodeAverageRatings(
-            List<DiaryEntry> scoredEpisodes, List<UserListItemResponseDTO> items) {
-
-        Map<String, List<Integer>> scoresBySeries = new HashMap<>();
-        Map<String, List<Integer>> scoresBySeason = new HashMap<>();
-        Map<String, List<Integer>> scoresByEpisode = new HashMap<>();
-
-        for (DiaryEntry entry : scoredEpisodes) {
-            String seriesTmdbId = entry.getContent().getSeriesTmdbId();
-            Integer seasonNumber = entry.getContent().getSeasonNumber();
-            Integer episodeNumber = entry.getContent().getEpisodeNumber();
-            String seasonKey = seriesTmdbId + "|" + seasonNumber;
-            String episodeKey = seasonKey + "|" + episodeNumber;
-
-            scoresBySeries.computeIfAbsent(seriesTmdbId, key -> new ArrayList<>()).add(entry.getScore());
-            scoresBySeason.computeIfAbsent(seasonKey, key -> new ArrayList<>()).add(entry.getScore());
-            scoresByEpisode.computeIfAbsent(episodeKey, key -> new ArrayList<>()).add(entry.getScore());
-        }
-
-        Map<UUID, Double> result = new HashMap<>();
-        for (UserListItemResponseDTO item : items) {
-            ContentRefDTO content = item.content();
-            if (content == null) {
-                continue;
-            }
-
-            List<Integer> scores = switch (content.type()) {
-                case SERIES -> scoresBySeries.get(content.tmdbId());
-                case SEASON -> scoresBySeason.get(content.seriesTmdbId() + "|" + content.seasonNumber());
-                case EPISODE -> scoresByEpisode.get(
-                        content.seriesTmdbId() + "|" + content.seasonNumber() + "|" + content.episodeNumber());
-                default -> null;
-            };
-
-            if (scores != null && !scores.isEmpty()) {
-                double average = scores.stream().mapToInt(Integer::intValue).average().orElseThrow();
-                result.put(item.id(), average);
-            }
-        }
-
-        return result;
-    }
-
-    private Map<UUID, Double> computePublicEpisodeAverageRatings(
-            List<DiaryEntryRepository.PublicEpisodeRatingAggregate> aggregates,
-            List<UserListItemResponseDTO> items) {
-        Map<String, EpisodeRatingTotals> totalsBySeries = new HashMap<>();
-        Map<String, EpisodeRatingTotals> totalsBySeason = new HashMap<>();
-        Map<String, EpisodeRatingTotals> totalsByEpisode = new HashMap<>();
-
-        for (DiaryEntryRepository.PublicEpisodeRatingAggregate aggregate : aggregates) {
-            String seriesTmdbId = aggregate.getSeriesTmdbId();
-            String seasonKey = seriesTmdbId + "|" + aggregate.getSeasonNumber();
-            String episodeKey = seasonKey + "|" + aggregate.getEpisodeNumber();
-            EpisodeRatingTotals totals = new EpisodeRatingTotals(aggregate.getScoreSum(), aggregate.getScoreCount());
-            totalsBySeries.merge(seriesTmdbId, totals, EpisodeRatingTotals::plus);
-            totalsBySeason.merge(seasonKey, totals, EpisodeRatingTotals::plus);
-            totalsByEpisode.merge(episodeKey, totals, EpisodeRatingTotals::plus);
-        }
-
-        Map<UUID, Double> result = new HashMap<>();
-        for (UserListItemResponseDTO item : items) {
-            ContentRefDTO content = item.content();
-            if (content == null) {
-                continue;
-            }
-
-            EpisodeRatingTotals totals = switch (content.type()) {
-                case SERIES -> totalsBySeries.get(content.tmdbId());
-                case SEASON -> totalsBySeason.get(content.seriesTmdbId() + "|" + content.seasonNumber());
-                case EPISODE -> totalsByEpisode.get(
-                        content.seriesTmdbId() + "|" + content.seasonNumber() + "|" + content.episodeNumber());
-                default -> null;
-            };
-            if (totals != null) {
-                result.put(item.id(), totals.average());
-            }
-        }
-        return result;
-    }
-
-    private record EpisodeRatingTotals(long scoreSum, long scoreCount) {
-        EpisodeRatingTotals plus(EpisodeRatingTotals other) {
-            return new EpisodeRatingTotals(scoreSum + other.scoreSum, scoreCount + other.scoreCount);
-        }
-
-        double average() {
-            return (double) scoreSum / scoreCount;
-        }
-    }
-
-    private Comparator<UserListItemResponseDTO> ratingComparator(
-            Function<UserListItemResponseDTO, Double> ratingExtractor, String sortDirection) {
-        Comparator<Double> valueComparator = "desc".equals(sortDirection)
-                ? Comparator.<Double>naturalOrder().reversed()
-                : Comparator.naturalOrder();
-        return Comparator.comparing(ratingExtractor, Comparator.nullsLast(valueComparator));
-    }
-
-    private boolean isRatingSort(String sortBy) {
-        return "episodeAvgRating".equals(sortBy)
-                || "globalEpisodeAvgRating".equals(sortBy)
-                || "contentAvgRating".equals(sortBy);
-    }
-
-    private boolean canViewOwnerRatings(UUID viewerId, User owner) {
-        return viewerId.equals(owner.getId())
-                || Boolean.TRUE.equals(owner.getIsProfilePublic())
-                || viewerFollowsTarget(viewerId, owner.getId());
     }
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {

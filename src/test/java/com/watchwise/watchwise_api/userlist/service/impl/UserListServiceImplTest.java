@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
@@ -41,6 +42,7 @@ import com.watchwise.watchwise_api.userlist.mapper.UserListMapper;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userlist.service.impl.UserListItemPageReaderImpl;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressReader;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +60,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -122,6 +125,9 @@ class UserListServiceImplTest {
     @Mock
     private UserContentPosterService userContentPosterService;
 
+    @Mock
+    private ContentRepository contentRepository;
+
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
 
@@ -144,11 +150,13 @@ class UserListServiceImplTest {
     private UUID marinaId;
     private User lucas;
     private User marina;
+    private final Map<String, List<String>> genresBySeriesId = new java.util.HashMap<>();
 
     @BeforeEach
     void setUp() {
         lucasId = UUID.randomUUID();
         marinaId = UUID.randomUUID();
+        genresBySeriesId.clear();
 
         lucas = buildUser(lucasId, "lucas", true);
         marina = buildUser(marinaId, "marina", true);
@@ -156,6 +164,18 @@ class UserListServiceImplTest {
         lenient().when(likeService.getLikedListIds(any(), any())).thenReturn(Set.of());
         lenient().when(userContentPosterService.findByUserAndContentIds(any(), any()))
                 .thenReturn(Map.of());
+        lenient().when(diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(any()))
+                .thenReturn(List.of());
+        lenient().when(diaryEntryRepository.findContentStatsByContentIdIn(any())).thenReturn(List.of());
+        lenient().when(contentRepository.findByTypeAndTmdbIdIn(eq(ContentType.SERIES), any()))
+                .thenAnswer(invocation -> ((Set<String>) invocation.getArgument(1)).stream()
+                        .filter(genresBySeriesId::containsKey)
+                        .map(seriesId -> Content.builder().id(UUID.randomUUID()).type(ContentType.SERIES)
+                                .tmdbId(seriesId).genres(genresBySeriesId.get(seriesId)).build())
+                        .toList());
+        ReflectionTestUtils.setField(userListService, "userListItemPageReader", new UserListItemPageReaderImpl(
+                userListRepository, followerRepository, userListItemService, likeService, commentRepository,
+                diaryEntryRepository, contentRepository, pageRequestFactory));
         lenient().when(contentMapper.contentToContentRefDto(any(Content.class)))
                 .thenAnswer(invocation -> {
                     Content content = invocation.getArgument(0);
@@ -1373,7 +1393,15 @@ class UserListServiceImplTest {
 
     private UserListItemResponseDTO buildItemResponseDtoWithContent(ContentType type, Integer runtimeMinutes, List<String> genres, int position) {
         LocalDateTime now = LocalDateTime.now();
-        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "100", type, null, null, null, null, null, now, now, runtimeMinutes, genres);
+        String seriesId = type == ContentType.SEASON || type == ContentType.EPISODE ? "series-" + position : null;
+        if (seriesId != null) {
+            genresBySeriesId.put(seriesId, genres);
+        }
+        ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(),
+                type == ContentType.MOVIE || type == ContentType.SERIES ? "100" : null,
+                type, seriesId, type == ContentType.SEASON || type == ContentType.EPISODE ? 1 : null,
+                type == ContentType.EPISODE ? 1 : null, null, null, now, now, runtimeMinutes,
+                type == ContentType.SEASON || type == ContentType.EPISODE ? null : genres);
         return new UserListItemResponseDTO(UUID.randomUUID(), content, null, position, null, now, now);
     }
 
