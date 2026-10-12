@@ -127,7 +127,7 @@ public class PickServiceImpl implements PickService {
     @Override
     @Transactional(readOnly = true)
     public Page<PickViewCardDTO> getMyPicksView(UUID viewerId, Integer page, Integer size) {
-        PageRequest pageRequest = pageRequestFactory.build(page, size);
+        PageRequest pageRequest = pageRequestFactory.build(page, size, MAX_VISUAL_PICK_PAGE_SIZE);
         Page<Pick> picks = pickRepository.findByUserIdOrderByCreatedAtDescIdDesc(viewerId, pageRequest);
         return pickPreviewAssembler.assembleViewPage(picks, viewerId);
     }

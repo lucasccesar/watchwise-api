@@ -231,6 +231,26 @@ class PickViewControllerIntegrationTest extends PicksDomainIntegrationSupport {
     }
 
     @Test
+    @DisplayName("[getMyPicksView] Should Cap Global Page Size At Ten - When Client Requests A Larger Size")
+    void shouldCapGlobalMyPicksViewPageSizeAtTenWhenClientRequestsLargerSize() throws Exception {
+        var template = template();
+        var first = personPick(template, PickVisibility.PRIVATE);
+        var second = personPick(template, PickVisibility.PRIVATE);
+
+        mvc.perform(authenticated(owner, HttpMethod.GET, "/users/me/picks/view?page=1&size=99", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[*].id")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder(
+                                first.id().toString(), second.id().toString())));
+    }
+
+    @Test
     @DisplayName("[getMyPicksView] Should Return ApiError - When Pagination Is Invalid")
     void shouldReturnApiErrorWhenPaginationIsInvalid() throws Exception {
         mvc.perform(authenticated(owner, HttpMethod.GET, "/users/me/picks/view?page=-1&size=0", ""))
