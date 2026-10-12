@@ -88,8 +88,8 @@ class UserListDetailViewServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getView] Should Assemble Distinct Coordinates Once And Preserve Final Page Order")
-    void shouldAssembleDistinctCoordinatesOnceAndPreserveFinalPageOrder() {
+    @DisplayName("[getView] Should Assemble Distinct Coordinates Once And Preserve Final Page Order - When A Page Repeats Content Coordinates")
+    void shouldAssembleDistinctCoordinatesOnceAndPreserveFinalPageOrderWhenAPageRepeatsContentCoordinates() {
         ContentRefDTO movie = contentRef("11", ContentType.MOVIE);
         ContentCardDTO movieCard = card(movie, ContentPreviewStatus.PARTIAL);
         ContentRefDTO series = contentRef("22", ContentType.SERIES);
@@ -122,8 +122,8 @@ class UserListDetailViewServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getView] Should Preserve Partial And Unavailable Cards And Item State")
-    void shouldPreservePartialAndUnavailableCardsAndItemState() {
+    @DisplayName("[getView] Should Preserve Partial And Unavailable Cards And Item State - When Card Assembly Returns Incomplete Previews")
+    void shouldPreservePartialAndUnavailableCardsAndItemStateWhenCardAssemblyReturnsIncompletePreviews() {
         ContentRefDTO partialRef = contentRef("31", ContentType.MOVIE);
         ContentRefDTO unavailableRef = contentRef("32", ContentType.MOVIE);
         ContentCardDTO partial = card(partialRef, ContentPreviewStatus.PARTIAL);
@@ -161,8 +161,8 @@ class UserListDetailViewServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getView] Should Cap Nested Preview Cards And Include Them In The Single Assembly")
-    void shouldCapNestedPreviewCardsAndIncludeThemInTheSingleAssembly() {
+    @DisplayName("[getView] Should Cap Nested Preview Cards And Include Them In The Single Assembly - When A Nested List Has More Than Five Content Items")
+    void shouldCapNestedPreviewCardsAndIncludeThemInTheSingleAssemblyWhenANestedListHasMoreThanFiveContentItems() {
         UUID childId = UUID.randomUUID();
         UserList child = list(childId, user(UUID.randomUUID(), "child-owner"), "Child list");
         UserListPreviewDTO childPreview = new UserListPreviewDTO(childId,
@@ -203,15 +203,15 @@ class UserListDetailViewServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getView] Should Reject Non Visual Requests Before Reading The Page")
-    void shouldRejectNonVisualRequestsBeforeReadingThePage() {
+    @DisplayName("[getView] Should Reject Non Visual Requests Before Reading The Page - When Request Mode Is Raw")
+    void shouldRejectNonVisualRequestsBeforeReadingThePageWhenRequestModeIsRaw() {
         assertThrows(BadRequestException.class, () -> service.getView(request(UserListItemPageMode.RAW)));
         verifyNoInteractions(pageReader, contentCardAssembler, userListItemRepository);
     }
 
     @Test
-    @DisplayName("[getView] Should Reject A Nested List That Became Invisible Before Metadata Is Loaded")
-    void shouldRejectANestedListThatBecameInvisibleBeforeMetadataIsLoaded() {
+    @DisplayName("[getView] Should Reject A Nested List That Became Invisible Before Metadata Is Loaded - When Visibility Changes During Assembly")
+    void shouldRejectANestedListThatBecameInvisibleBeforeMetadataIsLoadedWhenVisibilityChangesDuringAssembly() {
         UUID childId = UUID.randomUUID();
         UserListPreviewDTO childPreview = new UserListPreviewDTO(childId,
                 new UserPreviewDTO(UUID.randomUUID(), "private", "Private", "avatar", false),

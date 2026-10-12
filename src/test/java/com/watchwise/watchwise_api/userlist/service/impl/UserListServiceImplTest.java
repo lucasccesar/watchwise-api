@@ -1541,8 +1541,8 @@ class UserListServiceImplTest {
     // ---------- getUserListProgress ----------
 
     @Test
-    @DisplayName("[getUserListProgress] Should Return Aggregated Movie Progress Without Item State")
-    void shouldReturnAggregatedMovieProgressWithoutItemState() {
+    @DisplayName("[getUserListProgress] Should Return Aggregated Movie Progress Without Item State - When The List Contains Movie Items")
+    void shouldReturnAggregatedMovieProgressWithoutItemStateWhenTheListContainsMovieItems() {
         UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
         Content firstMovie = buildContent(ContentType.MOVIE, "100", null, null, null);
         firstMovie.setRuntimeMinutes(120);
@@ -1574,6 +1574,9 @@ class UserListServiceImplTest {
         assertThat(result.movieProgress().totalRuntimeMinutes()).isEqualTo(330);
         assertThat(result.movieProgress().watchedRuntimeMinutes()).isEqualTo(210);
         assertThat(result.movieProgress().remainingRuntimeMinutes()).isEqualTo(120);
+        assertThat(result.seriesProgressAggregate().totalSeriesCount()).isZero();
+        assertThat(result.seriesProgressAggregate().watchedEpisodeCount()).isZero();
+        assertThat(result.seriesProgressAggregate().remainingRuntimeMinutes()).isZero();
         assertThat(result.items()).extracting(UserListProgressItemDTO::seriesProgress)
                 .containsOnlyNulls();
         assertThat(result.items()).extracting(UserListProgressItemDTO::seasonProgress)
@@ -1583,8 +1586,8 @@ class UserListServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getUserListProgress] Should Return Every Series With Viewer Progress")
-    void shouldReturnEverySeriesWithViewerProgress() {
+    @DisplayName("[getUserListProgress] Should Return Every Series With Viewer Progress - When The List Contains Series Items")
+    void shouldReturnEverySeriesWithViewerProgressWhenTheListContainsSeriesItems() {
         UserList list = buildList(lucas, "Series", null, UserListVisibility.PUBLIC);
         Content firstSeries = buildContent(ContentType.SERIES, "1396", null, null, null);
         Content secondSeries = buildContent(ContentType.SERIES, "94605", null, null, null);
@@ -1620,8 +1623,42 @@ class UserListServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getUserListProgress] Should Reject A Nested-List List")
-    void shouldRejectANestedListList() {
+    @DisplayName("[getUserListProgress] Should Preserve Null Aggregate Runtime And Series Counts - When One Series Runtime Is Unknown")
+    void shouldPreserveNullAggregateRuntimeAndSeriesCountsWhenOneSeriesRuntimeIsUnknown() {
+        UserList list = buildList(lucas, "Series", null, UserListVisibility.PUBLIC);
+        Content knownSeries = buildContent(ContentType.SERIES, "1396", null, null, null);
+        Content unknownSeries = buildContent(ContentType.SERIES, "94605", null, null, null);
+        List<UserListItem> items = List.of(
+                buildContentItem(list, knownSeries, 1),
+                buildContentItem(list, unknownSeries, 2));
+        SeriesInProgressResponseDTO knownProgress = new SeriesInProgressResponseDTO(
+                "1396", 2, 5, LocalDateTime.now().toLocalDate(), 2L, 10, 20.0, List.of(),
+                2, 5, 80L, 10, 500, null, 8L, 420L);
+        SeriesInProgressResponseDTO unknownProgress = new SeriesInProgressResponseDTO(
+                "94605", 1, 2, LocalDateTime.now().toLocalDate(), 3L, 6, 50.0, List.of(),
+                1, 2, null, 6, 240, null, 3L, null);
+
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
+                .thenReturn(items);
+        when(seriesProgressReader.readForSeriesIds(marinaId, List.of("1396", "94605")))
+                .thenReturn(Map.of("1396", knownProgress, "94605", unknownProgress));
+        when(userListItemService.getItemScope(list.getId())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
+
+        UserListProgressResponseDTO result = userListService.getUserListProgress(marinaId, list.getId());
+
+        assertThat(result.watchedItems()).isZero();
+        assertThat(result.seriesProgressAggregate().totalSeriesCount()).isEqualTo(2);
+        assertThat(result.seriesProgressAggregate().watchedEpisodeCount()).isEqualTo(5);
+        assertThat(result.seriesProgressAggregate().totalReleasedEpisodeCount()).isEqualTo(16);
+        assertThat(result.seriesProgressAggregate().remainingEpisodeCount()).isEqualTo(11);
+        assertThat(result.seriesProgressAggregate().remainingRuntimeMinutes()).isNull();
+        verify(seriesProgressReader).readForSeriesIds(marinaId, List.of("1396", "94605"));
+    }
+
+    @Test
+    @DisplayName("[getUserListProgress] Should Reject A Nested-List List - When The List Contains Nested Items")
+    void shouldRejectANestedListListWhenTheListContainsNestedItems() {
         UserList list = buildList(lucas, "Nested", null, UserListVisibility.PUBLIC);
         UserList childList = buildList(lucas, "Child", null, UserListVisibility.PUBLIC);
         UserListItem nestedItem = UserListItem.builder()

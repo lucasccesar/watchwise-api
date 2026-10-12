@@ -23,7 +23,7 @@ class UserListItemPageRequestTest {
 
     @Test
     @DisplayName("[UserListItemPageRequest] Should Trim Genre And Preserve Raw Page Values - When Constructed With A NonBlank Genre")
-    void shouldTrimGenreAndPreserveRawPageValues() {
+    void shouldTrimGenreAndPreserveRawPageValuesWhenConstructedWithANonBlankGenre() {
         UserListItemPageRequest request = request("  Science Fiction  ", WatchStatus.WATCHED, -2, 0);
 
         assertThat(request.genre()).isEqualTo("Science Fiction");
@@ -33,14 +33,14 @@ class UserListItemPageRequestTest {
 
     @Test
     @DisplayName("[UserListItemPageRequest] Should Normalize Genre To Null - When Genre Is Absent Or Blank")
-    void shouldNormalizeAbsentAndBlankGenreToNull() {
+    void shouldNormalizeAbsentAndBlankGenreToNullWhenGenreIsAbsentOrBlank() {
         assertThat(request(null, null, null, null).genre()).isNull();
         assertThat(request(" \t ", null, null, null).genre()).isNull();
     }
 
     @Test
     @DisplayName("[UserListItemPageRequest] Should Accept Every WatchStatus Value - When Constructed With Any Enum Value")
-    void shouldAcceptEveryWatchStatusValue() {
+    void shouldAcceptEveryWatchStatusValueWhenConstructedWithAnyEnumValue() {
         for (WatchStatus status : WatchStatus.values()) {
             assertThat(request(null, status, null, null).watchStatus()).isEqualTo(status);
         }
@@ -48,7 +48,7 @@ class UserListItemPageRequestTest {
 
     @Test
     @DisplayName("[UserListItemPageRequest] Should Preserve The Requested Page Mode - When Constructed With A Mode")
-    void shouldPreserveTheRequestedPageMode() {
+    void shouldPreserveTheRequestedPageModeWhenConstructedWithAMode() {
         assertThat(request(null, null, null, null, UserListItemPageMode.RAW).mode())
                 .isEqualTo(UserListItemPageMode.RAW);
         assertThat(request(null, null, null, null, UserListItemPageMode.VISUAL).mode())
@@ -57,7 +57,7 @@ class UserListItemPageRequestTest {
 
     @Test
     @DisplayName("[UserListItemPage] Should Defensively Copy Items And Preview Cards - When Constructed With Mutable Sources")
-    void shouldDefensivelyCopyPageAndNestedPreviewCollections() {
+    void shouldDefensivelyCopyPageAndNestedPreviewCollectionsWhenConstructedWithMutableSources() {
         List<com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO> itemSource = new ArrayList<>();
         List<ContentCardDTO> previewSource = new ArrayList<>();
         UserListItemPage page = new UserListItemPage(
@@ -79,7 +79,7 @@ class UserListItemPageRequestTest {
 
     @Test
     @DisplayName("[UserListDetailItemDTO] Should Require Exactly One Visual Item Target - When Constructed With Card Or Nested List")
-    void shouldRequireExactlyOneVisualItemTarget() {
+    void shouldRequireExactlyOneVisualItemTargetWhenConstructedWithCardOrNestedList() {
         ContentCardDTO card = new ContentCardDTO(
                 UUID.randomUUID(), ContentType.MOVIE, "42", null, null, null, "Film", null, null,
                 null, null, null, null, null, null, List.of(), null, null, null);
@@ -93,7 +93,7 @@ class UserListItemPageRequestTest {
 
     @Test
     @DisplayName("[UserListNestedDetailDTO] Should Reject More Than Five Preview Cards - When Constructed With Six Cards")
-    void shouldRejectNestedPreviewWithMoreThanFiveCards() {
+    void shouldRejectNestedPreviewWithMoreThanFiveCardsWhenConstructedWithSixCards() {
         ContentCardDTO card = card();
 
         assertThatIllegalArgumentException().isThrownBy(() -> nested(List.of(card, card, card, card, card, card)));
@@ -101,7 +101,7 @@ class UserListItemPageRequestTest {
 
     @Test
     @DisplayName("[UserListDetailViewResponseDTO] Should Defensively Copy Page Content - When Constructed With A Mutable Page")
-    void shouldDefensivelyCopyVisualResponsePageContent() {
+    void shouldDefensivelyCopyVisualResponsePageContentWhenConstructedWithAMutablePage() {
         List<UserListDetailItemDTO> source = new ArrayList<>();
         source.add(visualItem(card(), null, LocalDateTime.now()));
         UserListDetailViewResponseDTO response = new UserListDetailViewResponseDTO(

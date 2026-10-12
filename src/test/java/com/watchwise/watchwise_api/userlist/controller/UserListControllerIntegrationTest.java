@@ -1174,8 +1174,8 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListProgress] Should Return Aggregated Movie Progress Without Item State")
-    void shouldReturnAggregatedMovieProgressWithoutItemState() throws Exception {
+    @DisplayName("[getUserListProgress] Should Return Aggregated Movie Progress Without Item State - When The List Contains Movie Items")
+    void shouldReturnAggregatedMovieProgressWithoutItemStateWhenTheListContainsMovieItems() throws Exception {
         RegisteredUser user = registerUser("listprogressmovie");
         User entity = userRepository.findById(user.id()).orElseThrow();
         UserList list = persistList(entity, "Movie progress", UserListVisibility.PUBLIC);

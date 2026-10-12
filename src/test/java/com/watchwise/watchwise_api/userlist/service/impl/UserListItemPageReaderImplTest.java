@@ -124,8 +124,8 @@ class UserListItemPageReaderImplTest {
     }
 
     @Test
-    @DisplayName("[read] Should Match Season And Episode Genres Through One Batched Series Lookup")
-    void shouldMatchSeasonAndEpisodeGenresThroughOneBatchedSeriesLookup() {
+    @DisplayName("[read] Should Match Season And Episode Genres Through One Batched Series Lookup - When Genre Matches A Persisted Series Parent")
+    void shouldMatchSeasonAndEpisodeGenresThroughOneBatchedSeriesLookupWhenGenreMatchesAPersistedSeriesParent() {
         UserListItemResponseDTO season = item(ContentType.SEASON, 1, null, WatchStatus.UNKNOWN, "series-1", 1, null);
         UserListItemResponseDTO episode = item(ContentType.EPISODE, 2, null, WatchStatus.UNKNOWN, "series-2", 1, 1);
         UserListItemResponseDTO movie = item(ContentType.MOVIE, 3, List.of("Drama"), WatchStatus.UNKNOWN);
@@ -140,8 +140,8 @@ class UserListItemPageReaderImplTest {
     }
 
     @Test
-    @DisplayName("[read] Should Filter Every Watch Status And Treat Missing State As Unknown")
-    void shouldFilterEveryWatchStatusAndTreatMissingStateAsUnknown() {
+    @DisplayName("[read] Should Filter Every Watch Status And Treat Missing State As Unknown - When Each Status Is Requested")
+    void shouldFilterEveryWatchStatusAndTreatMissingStateAsUnknownWhenEachStatusIsRequested() {
         List<UserListItemResponseDTO> items = List.of(
                 item(ContentType.MOVIE, 1, null, WatchStatus.WATCHED),
                 item(ContentType.MOVIE, 2, null, WatchStatus.PARTIALLY_WATCHED),
@@ -163,8 +163,8 @@ class UserListItemPageReaderImplTest {
     }
 
     @Test
-    @DisplayName("[read] Should Reject Watch Status For List Scope")
-    void shouldRejectWatchStatusForListScope() {
+    @DisplayName("[read] Should Reject Watch Status For List Scope - When The List Contains Nested Items")
+    void shouldRejectWatchStatusForListScopeWhenTheListContainsNestedItems() {
         stubListRead(List.of(nestedItem(1)), 0.0);
         when(userListItemService.getItemScope(listId)).thenReturn(UserListItemScope.LIST);
 
@@ -174,8 +174,8 @@ class UserListItemPageReaderImplTest {
     }
 
     @Test
-    @DisplayName("[read] Should Omit Inaccessible Nested Lists From The Returned Page")
-    void shouldOmitInaccessibleNestedListsFromTheReturnedPage() {
+    @DisplayName("[read] Should Omit Inaccessible Nested Lists From The Returned Page - When Reading Visual Mode")
+    void shouldOmitInaccessibleNestedListsFromTheReturnedPageWhenReadingVisualMode() {
         UserListItemResponseDTO hiddenNestedList = new UserListItemResponseDTO(
                 UUID.randomUUID(), null, null, 1, null, LocalDateTime.now(), LocalDateTime.now(), null, null);
         UserListItemResponseDTO movie = item(ContentType.MOVIE, 2, null, WatchStatus.UNWATCHED);
@@ -223,8 +223,8 @@ class UserListItemPageReaderImplTest {
     }
 
     @Test
-    @DisplayName("[read] Should Reject Private Owner Rating Sort Before Loading Items")
-    void shouldRejectPrivateOwnerRatingSortBeforeLoadingItems() {
+    @DisplayName("[read] Should Reject Private Owner Rating Sort Before Loading Items - When The Owner Profile Is Private")
+    void shouldRejectPrivateOwnerRatingSortBeforeLoadingItemsWhenTheOwnerProfileIsPrivate() {
         owner.setIsProfilePublic(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(list));
 

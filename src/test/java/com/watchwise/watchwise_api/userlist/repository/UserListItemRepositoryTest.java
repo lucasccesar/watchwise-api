@@ -3,6 +3,9 @@ package com.watchwise.watchwise_api.userlist.repository;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
@@ -60,6 +63,9 @@ class UserListItemRepositoryTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private FollowerRepository followerRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -95,6 +101,48 @@ class UserListItemRepositoryTest {
         assertThat(result).extracting(UserListItem::getPosition).containsExactly(1, 2);
         assertThat(result).extracting(item -> item.getContent().getId())
                 .containsExactly(pulpFiction.getId(), fightClub.getId());
+    }
+
+    @Test
+    @DisplayName("[findVisibleChildListsByIdIn] Should Return Owner Public And Accepted Follower Lists - When Other Visibility Cases Are Also Requested")
+    void shouldReturnOwnerPublicAndAcceptedFollowerListsWhenOtherVisibilityCasesAreAlsoRequested() {
+        User acceptedOwner = userRepository.save(buildUser("accepted-owner", "accepted-owner@email.com"));
+        User pendingOwner = userRepository.save(buildUser("pending-owner", "pending-owner@email.com"));
+        User absentFollowOwner = userRepository.save(buildUser("absent-follow-owner", "absent-follow-owner@email.com"));
+        User privateOwner = userRepository.save(buildUser("private-owner", "private-owner@email.com"));
+        UserList ownerList = userListRepository.save(buildList(lucas, "Owner child"));
+        UserList publicList = userListRepository.save(buildList(acceptedOwner, "Public child"));
+        UserList acceptedFollowerList = userListRepository.save(
+                buildList(acceptedOwner, "Accepted follower child", UserListVisibility.FOLLOWERS));
+        UserList pendingFollowerList = userListRepository.save(
+                buildList(pendingOwner, "Pending follower child", UserListVisibility.FOLLOWERS));
+        UserList absentFollowList = userListRepository.save(
+                buildList(absentFollowOwner, "Absent follow child", UserListVisibility.FOLLOWERS));
+        UserList privateList = userListRepository.save(
+                buildList(privateOwner, "Private child", UserListVisibility.PRIVATE));
+        followerRepository.save(Follower.builder()
+                .follower(lucas)
+                .followed(acceptedOwner)
+                .status(FollowStatus.ACCEPTED)
+                .createdAt(LocalDateTime.now())
+                .build());
+        followerRepository.save(Follower.builder()
+                .follower(lucas)
+                .followed(pendingOwner)
+                .status(FollowStatus.PENDING)
+                .createdAt(LocalDateTime.now())
+                .build());
+        userListRepository.flush();
+        entityManager.clear();
+
+        List<UserList> result = userListItemRepository.findVisibleChildListsByIdIn(
+                List.of(ownerList.getId(), publicList.getId(), acceptedFollowerList.getId(),
+                        pendingFollowerList.getId(), absentFollowList.getId(), privateList.getId()),
+                lucas.getId());
+
+        assertThat(result).extracting(UserList::getId)
+                .containsExactlyInAnyOrder(ownerList.getId(), publicList.getId(), acceptedFollowerList.getId());
+        assertThat(result).allSatisfy(list -> assertThat(Hibernate.isInitialized(list.getUser())).isTrue());
     }
 
     @Test
@@ -706,11 +754,15 @@ class UserListItemRepositoryTest {
     }
 
     private UserList buildList(User user, String name) {
+        return buildList(user, name, UserListVisibility.PUBLIC);
+    }
+
+    private UserList buildList(User user, String name, UserListVisibility visibility) {
         LocalDateTime now = LocalDateTime.now();
         return UserList.builder()
                 .user(user)
                 .name(name)
-                .visibility(UserListVisibility.PUBLIC)
+                .visibility(visibility)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

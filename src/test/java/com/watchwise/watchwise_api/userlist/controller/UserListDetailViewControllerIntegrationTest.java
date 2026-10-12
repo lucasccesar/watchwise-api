@@ -59,6 +59,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -120,14 +122,14 @@ class UserListDetailViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Start With The Detail Service Wired")
-    void shouldStartWithTheDetailServiceWired() {
+    @DisplayName("[getUserListDetailView] Should Start With The Detail Service Wired - When Application Context Loads")
+    void shouldStartWithTheDetailServiceWiredWhenApplicationContextLoads() {
         assertThat(detailViewService).isNotNull();
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Return Visual Cards And Page Metadata")
-    void shouldReturnVisualCardsAndPageMetadata() throws Exception {
+    @DisplayName("[getUserListDetailView] Should Return Visual Cards And Page Metadata - When A Public List Has Content Items")
+    void shouldReturnVisualCardsAndPageMetadataWhenAPublicListHasContentItems() throws Exception {
         RegisteredUser owner = register("detailnormalowner");
         UserList list = persistList(users.findById(owner.id()).orElseThrow(), "Films", UserListVisibility.PUBLIC);
         persistContentItem(list, ContentType.MOVIE, 1, "movie-normal");
@@ -149,8 +151,8 @@ class UserListDetailViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Cap Episode Pages At 24 And Include Episode Metadata")
-    void shouldCapEpisodePagesAt24AndIncludeEpisodeMetadata() throws Exception {
+    @DisplayName("[getUserListDetailView] Should Cap Episode Pages At 24 And Include Episode Metadata - When Requested Size Exceeds The Episode Limit")
+    void shouldCapEpisodePagesAt24AndIncludeEpisodeMetadataWhenRequestedSizeExceedsTheEpisodeLimit() throws Exception {
         RegisteredUser owner = register("detailepisodeowner");
         UserList list = persistList(users.findById(owner.id()).orElseThrow(), "Episodes", UserListVisibility.PUBLIC);
         for (int position = 1; position <= 25; position++) {
@@ -173,8 +175,8 @@ class UserListDetailViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Return At Most Five Nested Content Previews")
-    void shouldReturnAtMostFiveNestedContentPreviews() throws Exception {
+    @DisplayName("[getUserListDetailView] Should Return At Most Five Nested Content Previews - When A List Contains A Visible Child")
+    void shouldReturnAtMostFiveNestedContentPreviewsWhenAListContainsAVisibleChild() throws Exception {
         RegisteredUser owner = register("detailnestedowner");
         User ownerEntity = users.findById(owner.id()).orElseThrow();
         UserList parent = persistList(ownerEntity, "Parent", UserListVisibility.PUBLIC);
@@ -193,8 +195,38 @@ class UserListDetailViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Filter Each Watch Status Before Paging")
-    void shouldFilterEachWatchStatusBeforePaging() throws Exception {
+    @DisplayName("[getUserListDetailView] Should Omit Inaccessible Children Before Pagination And Metadata Loading - When A Visible Parent Has Children From Another Owner")
+    void shouldOmitInaccessibleChildrenBeforePaginationAndMetadataLoadingWhenAVisibleParentHasChildrenFromAnotherOwner()
+            throws Exception {
+        RegisteredUser viewer = register("detailchildviewer");
+        RegisteredUser childOwner = register("detailchildowner");
+        UserList parent = persistList(users.findById(viewer.id()).orElseThrow(), "Parent", UserListVisibility.PUBLIC);
+        UserList inaccessibleChild = persistList(
+                users.findById(childOwner.id()).orElseThrow(), "Private child", UserListVisibility.PRIVATE);
+        UserList visibleChild = persistList(
+                users.findById(childOwner.id()).orElseThrow(), "Public child", UserListVisibility.PUBLIC);
+        persistNestedItem(parent, inaccessibleChild, 1);
+        persistNestedItem(parent, visibleChild, 2);
+        persistContentItem(inaccessibleChild, ContentType.MOVIE, 1, "hidden-child-movie");
+        persistContentItem(visibleChild, ContentType.MOVIE, 1, "visible-child-movie");
+        when(tmdbClient.getCardMetadata(any(TmdbCardMetadataKey.class), eq("visible-child-movie")))
+                .thenReturn(new TmdbLookupResult.Found<>(
+                        new TmdbCardMetadata("Visible child movie", "/visible.jpg", "2024-01-01", 90)));
+
+        mockMvc.perform(detailView(viewer, parent.getId()).param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.content.length()").value(1))
+                .andExpect(jsonPath("$.items.totalElements").value(1))
+                .andExpect(jsonPath("$.items.content[0].nestedList.name").value("Public child"))
+                .andExpect(jsonPath("$.items.content[0].nestedList.previewCards[0].tmdbId")
+                        .value("visible-child-movie"));
+
+        verify(tmdbClient, never()).getCardMetadata(any(TmdbCardMetadataKey.class), eq("hidden-child-movie"));
+    }
+
+    @Test
+    @DisplayName("[getUserListDetailView] Should Filter Each Watch Status Before Paging - When A Status Filter Is Requested")
+    void shouldFilterEachWatchStatusBeforePagingWhenAStatusFilterIsRequested() throws Exception {
         RegisteredUser viewer = register("detailstatusviewer");
         User viewerEntity = users.findById(viewer.id()).orElseThrow();
         UserList list = persistList(viewerEntity, "Status", UserListVisibility.PUBLIC);
@@ -222,8 +254,8 @@ class UserListDetailViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Match Existing List Visibility Rules")
-    void shouldMatchExistingListVisibilityRules() throws Exception {
+    @DisplayName("[getUserListDetailView] Should Match Existing List Visibility Rules - When Viewer Visibility Varies")
+    void shouldMatchExistingListVisibilityRulesWhenViewerVisibilityVaries() throws Exception {
         RegisteredUser owner = register("detailvisibilityowner");
         RegisteredUser acceptedViewer = register("detailvisibilityaccepted");
         RegisteredUser otherViewer = register("detailvisibilityother");
@@ -244,8 +276,8 @@ class UserListDetailViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Keep Partial And Unavailable Previews")
-    void shouldKeepPartialAndUnavailablePreviews() throws Exception {
+    @DisplayName("[getUserListDetailView] Should Keep Partial And Unavailable Previews - When Metadata Is Incomplete")
+    void shouldKeepPartialAndUnavailablePreviewsWhenMetadataIsIncomplete() throws Exception {
         RegisteredUser owner = register("detailpartialowner");
         UserList list = persistList(users.findById(owner.id()).orElseThrow(), "Metadata", UserListVisibility.PUBLIC);
         persistContentItem(list, ContentType.MOVIE, 1, "movie-partial");
@@ -266,8 +298,9 @@ class UserListDetailViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getUserListDetailView] Should Return ApiError For Invalid Inputs And Require Authentication")
-    void shouldReturnApiErrorForInvalidInputsAndRequireAuthentication() throws Exception {
+    @DisplayName("[getUserListDetailView] Should Return ApiError For Invalid Inputs And Require Authentication - When Requests Are Invalid Or Unauthenticated")
+    void shouldReturnApiErrorForInvalidInputsAndRequireAuthenticationWhenRequestsAreInvalidOrUnauthenticated()
+            throws Exception {
         UUID unauthenticatedListId = UUID.randomUUID();
         mockMvc.perform(get("/lists/" + unauthenticatedListId + "/view"))
                 .andExpect(status().isUnauthorized())
