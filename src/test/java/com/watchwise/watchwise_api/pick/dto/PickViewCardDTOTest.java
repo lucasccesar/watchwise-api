@@ -2,12 +2,15 @@ package com.watchwise.watchwise_api.pick.dto;
 
 import com.watchwise.watchwise_api.pick.entity.PickVisibility;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickAllowedType;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryGroup;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickCategoryOptionMode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,6 +42,31 @@ class PickViewCardDTOTest {
         assertThat(card.answeredCategories()).isEmpty();
         assertThatThrownBy(() -> card.answeredCategories().add(answer(1)))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("[compatibility constructor] Should map legacy answer fields and defaults - When legacy answers are supplied")
+    void shouldMapLegacyAnswerFieldsAndDefaultsWhenLegacyAnswersAreSupplied() {
+        UUID categoryId = UUID.randomUUID();
+        PickOptionSearchDTO target = new PickOptionSearchDTO(UUID.randomUUID(), null, "42", null);
+        PickAnsweredCategoryPreviewDTO legacyAnswer = new PickAnsweredCategoryPreviewDTO(categoryId, "Legacy",
+                PickCategoryGroup.SECONDARY, 3, target, false);
+        Collection<PickAnsweredCategoryPreviewDTO> legacyAnswers = List.of(legacyAnswer);
+
+        PickViewCardDTO card = new PickViewCardDTO(null, null, null, PickVisibility.PUBLIC, null, null,
+                1, 1, legacyAnswers, null, 0, false);
+
+        PickAnswerViewDTO answer = card.answeredCategories().getFirst();
+        assertThat(answer.categoryId()).isEqualTo(categoryId);
+        assertThat(answer.name()).isEqualTo("Legacy");
+        assertThat(answer.group()).isEqualTo(PickCategoryGroup.SECONDARY);
+        assertThat(answer.displayOrder()).isEqualTo(3);
+        assertThat(answer.target()).isSameAs(target);
+        assertThat(answer.isValid()).isFalse();
+        assertThat(answer.allowedType()).isNull();
+        assertThat(answer.optionMode()).isNull();
+        assertThat(answer.preview()).isNull();
+        assertThat(answer.isAnswered()).isTrue();
     }
 
     private static PickViewCardDTO card(List<PickAnswerViewDTO> answers) {
