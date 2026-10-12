@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -21,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class UserListItemPageRequestTest {
 
     @Test
+    @DisplayName("[UserListItemPageRequest] Should Trim Genre And Preserve Raw Page Values - When Constructed With A NonBlank Genre")
     void shouldTrimGenreAndPreserveRawPageValues() {
         UserListItemPageRequest request = request("  Science Fiction  ", WatchStatus.WATCHED, -2, 0);
 
@@ -30,12 +32,14 @@ class UserListItemPageRequestTest {
     }
 
     @Test
+    @DisplayName("[UserListItemPageRequest] Should Normalize Genre To Null - When Genre Is Absent Or Blank")
     void shouldNormalizeAbsentAndBlankGenreToNull() {
         assertThat(request(null, null, null, null).genre()).isNull();
         assertThat(request(" \t ", null, null, null).genre()).isNull();
     }
 
     @Test
+    @DisplayName("[UserListItemPageRequest] Should Accept Every WatchStatus Value - When Constructed With Any Enum Value")
     void shouldAcceptEveryWatchStatusValue() {
         for (WatchStatus status : WatchStatus.values()) {
             assertThat(request(null, status, null, null).watchStatus()).isEqualTo(status);
@@ -43,6 +47,7 @@ class UserListItemPageRequestTest {
     }
 
     @Test
+    @DisplayName("[UserListItemPage] Should Defensively Copy Items And Preview Cards - When Constructed With Mutable Sources")
     void shouldDefensivelyCopyPageAndNestedPreviewCollections() {
         List<com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO> itemSource = new ArrayList<>();
         List<ContentCardDTO> previewSource = new ArrayList<>();
@@ -64,6 +69,7 @@ class UserListItemPageRequestTest {
     }
 
     @Test
+    @DisplayName("[UserListDetailItemDTO] Should Require Exactly One Visual Item Target - When Constructed With Card Or Nested List")
     void shouldRequireExactlyOneVisualItemTarget() {
         ContentCardDTO card = new ContentCardDTO(
                 UUID.randomUUID(), ContentType.MOVIE, "42", null, null, null, "Film", null, null,
@@ -77,6 +83,7 @@ class UserListItemPageRequestTest {
     }
 
     @Test
+    @DisplayName("[UserListNestedDetailDTO] Should Reject More Than Five Preview Cards - When Constructed With Six Cards")
     void shouldRejectNestedPreviewWithMoreThanFiveCards() {
         ContentCardDTO card = card();
 
@@ -84,6 +91,7 @@ class UserListItemPageRequestTest {
     }
 
     @Test
+    @DisplayName("[UserListDetailViewResponseDTO] Should Defensively Copy Page Content - When Constructed With A Mutable Page")
     void shouldDefensivelyCopyVisualResponsePageContent() {
         List<UserListDetailItemDTO> source = new ArrayList<>();
         source.add(visualItem(card(), null, LocalDateTime.now()));
