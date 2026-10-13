@@ -56,10 +56,12 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
     Page<Follower> findByFollowerIdAndStatus(
             @Param("followerId") UUID followerId, @Param("status") FollowStatus status, Pageable pageable);
 
-    @Transactional
-    @Modifying
-    @Query("update Follower f set f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED "
-            + "where f.followed.id = :followedId and f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.PENDING")
-    void acceptAllPendingFollowRequestsFor(@Param("followedId") UUID followedId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT f FROM Follower f JOIN FETCH f.follower
+            WHERE f.followed.id = :followedId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.PENDING
+            """)
+    List<Follower> findPendingByFollowedIdForUpdate(@Param("followedId") UUID followedId);
 
 }

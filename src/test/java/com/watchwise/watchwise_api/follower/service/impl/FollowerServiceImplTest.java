@@ -656,11 +656,27 @@ class FollowerServiceImplTest {
     }
 
     @Test
-    @DisplayName("[acceptAllPendingFollowRequestsFor] Should Delegate To Repository - When Called")
-    void shouldDelegateToRepositoryWhenAcceptAllPendingFollowRequestsForCalled() {
-        followerService.acceptAllPendingFollowRequestsFor(followedId);
+    @DisplayName("[acceptAllPendingFollowRequestsFor] Should Accept And Notify All Pending Requesters - When Called")
+    void shouldAcceptAndNotifyAllPendingRequestersWhenCalled() {
+        User secondRequester = User.builder().id(UUID.randomUUID()).username("joao").build();
+        Follower firstPending = buildFollow(FollowStatus.PENDING);
+        Follower secondPending = Follower.builder()
+                .id(UUID.randomUUID())
+                .follower(secondRequester)
+                .followed(followedUser)
+                .status(FollowStatus.PENDING)
+                .createdAt(LocalDateTime.now())
+                .build();
+        when(followerRepository.findPendingByFollowedIdForUpdate(followedId))
+                .thenReturn(List.of(firstPending, secondPending));
 
-        verify(followerRepository).acceptAllPendingFollowRequestsFor(followedId);
+        followerService.acceptAllPendingFollowRequestsFor(followedUser);
+
+        assertThat(firstPending.getStatus()).isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(secondPending.getStatus()).isEqualTo(FollowStatus.ACCEPTED);
+        verify(followerRepository).saveAll(List.of(firstPending, secondPending));
+        verify(followNotificationService).notifyFollowRequestsAccepted(
+                followedUser, List.of(followerUser, secondRequester));
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {

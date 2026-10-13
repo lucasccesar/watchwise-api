@@ -96,12 +96,17 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponseDTO updateUser(User user, PatchUserDTO patchUserDTO) {
+        boolean becamePublic = Boolean.TRUE.equals(patchUserDTO.isProfilePublic())
+                && !Boolean.TRUE.equals(user.getIsProfilePublic());
         boolean touchesCredentials = applyPatch(user, patchUserDTO);
         user.setUpdatedAt(LocalDateTime.now());
 
         UserResponseDTO response;
         try {
             User saved = userRepository.saveAndFlush(user);
+            if (becamePublic) {
+                followerService.acceptAllPendingFollowRequestsFor(saved);
+            }
             response = toUserResponseDto(saved, computeProfileStats(saved.getId()));
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
@@ -189,11 +194,7 @@ public class UserServiceImpl implements UserService {
         }
 
         if (patchUserDTO.isProfilePublic() != null && !patchUserDTO.isProfilePublic().equals(user.getIsProfilePublic())) {
-            boolean becamePublic = Boolean.TRUE.equals(patchUserDTO.isProfilePublic()) && !Boolean.TRUE.equals(user.getIsProfilePublic());
             user.setIsProfilePublic(patchUserDTO.isProfilePublic());
-            if (becamePublic) {
-                followerService.acceptAllPendingFollowRequestsFor(user.getId());
-            }
         }
 
         return credentialChanges.touchesCredentials();

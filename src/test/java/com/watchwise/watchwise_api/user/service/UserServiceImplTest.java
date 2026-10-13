@@ -28,6 +28,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import org.hibernate.exception.ConstraintViolationException;
+import org.mockito.InOrder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -1051,7 +1052,9 @@ class UserServiceImplTest {
 
         userService.updateUser(savedUser, patchUserDTO);
 
-        verify(followerService).acceptAllPendingFollowRequestsFor(id);
+        InOrder order = inOrder(userRepository, followerService);
+        order.verify(userRepository).saveAndFlush(savedUser);
+        order.verify(followerService).acceptAllPendingFollowRequestsFor(savedUser);
     }
 
     @Test

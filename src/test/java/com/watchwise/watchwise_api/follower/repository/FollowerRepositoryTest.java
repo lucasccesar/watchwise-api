@@ -22,6 +22,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -313,18 +314,16 @@ class FollowerRepositoryTest {
     }
 
     @Test
-    @DisplayName("[acceptAllPendingFollowRequestsFor] Should Accept Only Pending Requests Targeting The Given User - When Called")
-    void shouldAcceptOnlyPendingRequestsTargetingTheGivenUserWhenCalled() {
+    @DisplayName("[findPendingByFollowedIdForUpdate] Should Return Only Pending Requests Targeting The Given User - When Called")
+    void shouldReturnOnlyPendingRequestsTargetingTheGivenUserWhenCalled() {
         Follower pendingForJoao = followerRepository.save(buildFollower(lucas, joao, FollowStatus.PENDING));
         Follower alreadyAcceptedForJoao = followerRepository.save(buildFollower(marina, joao, FollowStatus.ACCEPTED));
         Follower pendingForSomeoneElse = followerRepository.saveAndFlush(buildFollower(joao, marina, FollowStatus.PENDING));
         entityManager.clear();
 
-        followerRepository.acceptAllPendingFollowRequestsFor(joao.getId());
-        entityManager.clear();
+        List<Follower> pending = followerRepository.findPendingByFollowedIdForUpdate(joao.getId());
 
-        assertThat(followerRepository.findById(pendingForJoao.getId()).orElseThrow().getStatus())
-                .isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(pending).extracting(Follower::getId).containsExactly(pendingForJoao.getId());
         assertThat(followerRepository.findById(alreadyAcceptedForJoao.getId()).orElseThrow().getStatus())
                 .isEqualTo(FollowStatus.ACCEPTED);
         assertThat(followerRepository.findById(pendingForSomeoneElse.getId()).orElseThrow().getStatus())

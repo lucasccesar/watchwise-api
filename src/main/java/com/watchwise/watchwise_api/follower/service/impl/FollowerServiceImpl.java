@@ -134,8 +134,13 @@ public class FollowerServiceImpl implements FollowerService {
     }
 
     @Override
-    public void acceptAllPendingFollowRequestsFor(UUID followedId) {
-        followerRepository.acceptAllPendingFollowRequestsFor(followedId);
+    @Transactional
+    public void acceptAllPendingFollowRequestsFor(User followed) {
+        List<Follower> pending = followerRepository.findPendingByFollowedIdForUpdate(followed.getId());
+        pending.forEach(follow -> follow.setStatus(FollowStatus.ACCEPTED));
+        followerRepository.saveAll(pending);
+        followNotificationService.notifyFollowRequestsAccepted(
+                followed, pending.stream().map(Follower::getFollower).toList());
     }
 
     private void assertCanViewFollowGraph(UUID viewerId, UUID targetUserId, User target) {

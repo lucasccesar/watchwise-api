@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.follower.service;
 
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import org.springframework.data.domain.Page;
 
@@ -22,6 +23,6 @@ public interface FollowerService {
 
     Page<PublicUserDTO> getPendingFollowRequests(UUID targetUserId, Integer pageNumber, Integer pageSize);
 
-    void acceptAllPendingFollowRequestsFor(UUID followedId);
+    void acceptAllPendingFollowRequestsFor(User followed);
 
 }
