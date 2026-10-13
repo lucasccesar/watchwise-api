@@ -209,7 +209,7 @@ class PickControllerIntegrationTest {
 
     @Test
     @DisplayName("[getTemplatePicksView] Should Return Api Error - When Sort Cannot Bind")
-    void shouldReturnApiErrorForVisualPickSortBindingFailure() throws Exception {
+    void shouldReturnApiErrorForVisualPickSortBindingFailureWhenSortCannotBind() throws Exception {
         RegisteredUser viewer = registerUser("visualpickbindings");
         UUID templateId = UUID.randomUUID();
 

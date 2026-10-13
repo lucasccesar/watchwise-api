@@ -106,8 +106,8 @@ class PicksTemplateOptionViewControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[options/view] Should Keep Visual Cap Separate From Raw Pagination - When Client Requests Size Twenty-One")
-    void shouldKeepVisualPageCapSeparateFromRawOptionPagination() throws Exception {
+    @DisplayName("[getOptionViews] Should Keep Visual Cap Separate From Raw Pagination - When Client Requests Size Twenty-One")
+    void shouldKeepVisualPageCapSeparateFromRawOptionPaginationWhenClientRequestsSizeTwentyOne() throws Exception {
         RegisteredUser user = registerUser("optionpagecap");
         UUID templateId = UUID.randomUUID();
         UUID categoryId = UUID.randomUUID();

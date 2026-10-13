@@ -215,7 +215,7 @@ class PickPreviewAssemblerTest {
 
     @Test
     @DisplayName("[assembleViewPage] Should Preserve Visual Target Positions - When Repeated Targets Share One Batch")
-    void assemblesVisualTargetPreviewsOnceAndPreservesContentPersonAndContextTargets() {
+    void shouldAssembleVisualTargetPreviewsOnceAndPreserveContentPersonAndContextTargetsWhenTargetsRepeat() {
         UUID viewerId = UUID.randomUUID();
         User viewer = User.builder().id(viewerId).username("viewer").preferredLanguage("pt-BR")
                 .preferredRegion("BR").build();
