@@ -62,6 +62,7 @@ class UserRepositoryTest {
     @BeforeEach
     void setUp() {
         userRepository.deleteAll();
+        entityManager.flush();
 
         userRepository.save(buildUser("lucas", "lucas@email.com", true));
         userRepository.save(buildUser("lucasc", "lucasc@email.com", true));
@@ -118,6 +119,7 @@ class UserRepositoryTest {
         } finally {
             releaseFirst.countDown();
             executor.shutdownNow();
+            TestTransaction.start();
         }
     }
 

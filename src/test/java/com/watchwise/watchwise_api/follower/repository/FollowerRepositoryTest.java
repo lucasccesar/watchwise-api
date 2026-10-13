@@ -71,6 +71,7 @@ class FollowerRepositoryTest {
     void setUp() {
         followerRepository.deleteAll();
         userRepository.deleteAll();
+        entityManager.flush();
 
         lucas = userRepository.save(buildUser("lucas", "lucas@email.com"));
         marina = userRepository.save(buildUser("marina", "marina@email.com"));
@@ -183,6 +184,7 @@ class FollowerRepositoryTest {
         } finally {
             releaseFirst.countDown();
             executor.shutdownNow();
+            TestTransaction.start();
         }
     }
 
