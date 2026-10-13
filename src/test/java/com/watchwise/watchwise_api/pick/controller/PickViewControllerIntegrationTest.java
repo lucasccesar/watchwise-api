@@ -13,6 +13,7 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 class PickViewControllerIntegrationTest extends PicksDomainIntegrationSupport {
 
@@ -262,8 +263,50 @@ class PickViewControllerIntegrationTest extends PicksDomainIntegrationSupport {
     @Test
     @DisplayName("[getMyPicksView] Should Return 401 - When Viewer Is Not Authenticated")
     void shouldReturnUnauthorizedWhenViewerIsNotAuthenticated() throws Exception {
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/users/me/picks/view"))
+        mvc.perform(get("/users/me/picks/view"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.status").value(401));
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.message").value("Authentication is required to access this resource"))
+                .andExpect(jsonPath("$.path").value("/users/me/picks/view"));
+    }
+
+    @Test
+    @DisplayName("[getTemplatePicksView] Should Return 401 - When Viewer Is Not Authenticated")
+    void shouldReturnUnauthorizedForTemplatePicksViewWhenViewerIsNotAuthenticated() throws Exception {
+        UUID templateId = UUID.randomUUID();
+
+        mvc.perform(get("/picks-templates/{templateId}/picks/view", templateId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.message").value("Authentication is required to access this resource"))
+                .andExpect(jsonPath("$.path").value("/picks-templates/" + templateId + "/picks/view"));
+    }
+
+    @Test
+    @DisplayName("[getMyPicksView] Should Return 401 - When Viewer Is Not Authenticated")
+    void shouldReturnUnauthorizedForTemplateMyPicksViewWhenViewerIsNotAuthenticated() throws Exception {
+        UUID templateId = UUID.randomUUID();
+
+        mvc.perform(get("/picks-templates/{templateId}/my-picks/view", templateId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.message").value("Authentication is required to access this resource"))
+                .andExpect(jsonPath("$.path").value("/picks-templates/" + templateId + "/my-picks/view"));
+    }
+
+    @Test
+    @DisplayName("[getPickView] Should Return 401 - When Viewer Is Not Authenticated")
+    void shouldReturnUnauthorizedForPickViewWhenViewerIsNotAuthenticated() throws Exception {
+        UUID pickId = UUID.randomUUID();
+
+        mvc.perform(get("/picks/{pickId}/view", pickId))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("Unauthorized"))
+                .andExpect(jsonPath("$.message").value("Authentication is required to access this resource"))
+                .andExpect(jsonPath("$.path").value("/picks/" + pickId + "/view"));
     }
 }
