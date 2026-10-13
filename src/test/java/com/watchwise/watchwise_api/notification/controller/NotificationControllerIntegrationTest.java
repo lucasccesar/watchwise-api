@@ -132,6 +132,38 @@ class NotificationControllerIntegrationTest {
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
     }
 
+    private Notification buildFollowNotification(UUID ownerId, UUID actorId) {
+        User owner = userRepository.findById(ownerId).orElseThrow();
+        User actor = userRepository.findById(actorId).orElseThrow();
+        return Notification.builder()
+                .user(owner)
+                .latestActor(actor)
+                .type(NotificationType.FOLLOW_REQUEST)
+                .message(actor.getUsername() + " requested to follow you")
+                .isRead(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+    }
+
+    @Test
+    @DisplayName("[getNotifications] Should Return The Actor Preview - When Notification Is A Follow Event")
+    void shouldReturnTheActorPreviewWhenNotificationIsAFollowEvent() throws Exception {
+        RegisteredUser owner = registerUser("follownotifowner");
+        RegisteredUser actor = registerUser("follownotifactor");
+        notificationRepository.saveAndFlush(buildFollowNotification(owner.id(), actor.id()));
+
+        mockMvc.perform(get("/notifications").cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].type").value("FOLLOW_REQUEST"))
+                .andExpect(jsonPath("$.content[0].latestActor.id").value(actor.id().toString()))
+                .andExpect(jsonPath("$.content[0].latestActor.username").value("follownotifactor"))
+                .andExpect(jsonPath("$.content[0].content").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].targetType").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].targetId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.content[0].interactionCount").value(org.hamcrest.Matchers.nullValue()));
+    }
+
     @Test
     @DisplayName("[getNotifications] Should Return Only The Caller's Notifications - When Authenticated")
     void shouldReturnOnlyTheCallersNotificationsWhenAuthenticated() throws Exception {

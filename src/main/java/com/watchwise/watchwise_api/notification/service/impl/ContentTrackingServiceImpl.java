@@ -271,6 +271,8 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
             case RENEWED -> "This series was renewed";
             case NEW_EPISODE -> "New episode available (S" + event.seasonNumber() + "E" + event.episodeNumber() + ")";
             case FOLLOWED_PERSON_NEW_CREDIT -> "New title from someone you follow";
+            case FOLLOW_REQUEST, NEW_FOLLOWER, FOLLOW_REQUEST_ACCEPTED -> throw new IllegalArgumentException(
+                    "Follow notification types are not supported by content tracking");
             case LIKE_RECEIVED, COMMENT_RECEIVED -> throw new IllegalArgumentException(
                     "Social notification types are not supported by content tracking");
         };

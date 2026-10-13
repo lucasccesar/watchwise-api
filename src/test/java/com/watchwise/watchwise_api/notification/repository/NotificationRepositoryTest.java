@@ -60,6 +60,7 @@ class NotificationRepositoryTest {
     private EntityManager entityManager;
 
     private User lucas;
+    private User marina;
     private Content movie;
 
     @BeforeEach
@@ -72,6 +73,10 @@ class NotificationRepositoryTest {
         lucas = userRepository.saveAndFlush(User.builder()
                 .username("lucas").name("lucas").email("lucas@email.com").password("hashed")
                 .profilePicture("https://example.com/p.png").isProfilePublic(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        marina = userRepository.saveAndFlush(User.builder()
+                .username("marina").name("marina").email("marina@email.com").password("hashed")
+                .profilePicture("https://example.com/marina.png").isProfilePublic(true)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
         movie = contentRepository.saveAndFlush(Content.builder()
                 .tmdbId("603").type(ContentType.MOVIE)
@@ -121,6 +126,46 @@ class NotificationRepositoryTest {
         assertThat(loadedSocial.getTargetType()).isEqualTo(NotificationTargetType.DIARY_ENTRY);
         assertThat(loadedSocial.getTargetId()).isEqualTo(social.getTargetId());
         assertThat(loadedSocial.getInteractionCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[notifications] Should Persist Actor-Backed Follow Row - When Content And Target Are Null")
+    void shouldPersistActorBackedFollowRowWhenContentAndTargetAreNull() {
+        LocalDateTime now = LocalDateTime.now();
+
+        Notification saved = notificationRepository.saveAndFlush(Notification.builder()
+                .user(lucas)
+                .latestActor(marina)
+                .type(NotificationType.FOLLOW_REQUEST)
+                .message("marina requested to follow you")
+                .isRead(false)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+
+        assertThat(saved.getContent()).isNull();
+        assertThat(saved.getLatestActor()).isSameAs(marina);
+        assertThat(saved.getTargetType()).isNull();
+        assertThat(saved.getTargetId()).isNull();
+        assertThat(saved.getInteractionCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[notifications] Should Reject Follow Row With Content - When Follow Type Uses Legacy Shape")
+    void shouldRejectFollowRowWithContentWhenFollowTypeUsesLegacyShape() {
+        LocalDateTime now = LocalDateTime.now();
+
+        assertThatThrownBy(() -> notificationRepository.saveAndFlush(Notification.builder()
+                .user(lucas)
+                .latestActor(marina)
+                .type(NotificationType.FOLLOW_REQUEST)
+                .message("marina requested to follow you")
+                .content(movie)
+                .isRead(false)
+                .createdAt(now)
+                .updatedAt(now)
+                .build()))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

@@ -11,7 +11,7 @@ import org.mapstruct.ReportingPolicy;
 @Mapper(componentModel = "spring", uses = {ContentMapper.class, UserMapper.class}, unmappedTargetPolicy = ReportingPolicy.ERROR)
 public interface NotificationMapper {
 
-    @Mapping(target = "latestActor", conditionExpression = "java(notification.getTargetType() != null)")
+    @Mapping(target = "latestActor", conditionExpression = "java(notification.getLatestActor() != null)")
     @Mapping(target = "targetId", conditionExpression = "java(notification.getTargetType() != null)")
     @Mapping(target = "interactionCount", conditionExpression = "java(notification.getTargetType() != null)")
     NotificationResponseDTO notificationToNotificationResponseDto(Notification notification);

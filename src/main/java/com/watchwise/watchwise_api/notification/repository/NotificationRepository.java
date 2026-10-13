@@ -56,7 +56,8 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
             WITH expired AS (
                 SELECT id
                 FROM notifications
-                WHERE type IN ('LIKE_RECEIVED', 'COMMENT_RECEIVED')
+                WHERE type IN ('LIKE_RECEIVED', 'COMMENT_RECEIVED',
+                               'FOLLOW_REQUEST', 'NEW_FOLLOWER', 'FOLLOW_REQUEST_ACCEPTED')
                   AND is_read = :isRead
                   AND updated_at < :cutoff
                 ORDER BY updated_at ASC, id ASC
