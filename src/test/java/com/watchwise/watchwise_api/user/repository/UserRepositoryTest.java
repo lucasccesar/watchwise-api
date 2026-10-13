@@ -13,6 +13,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -21,6 +24,11 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -48,6 +56,9 @@ class UserRepositoryTest {
     @Autowired
     private jakarta.persistence.EntityManager entityManager;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void setUp() {
         userRepository.deleteAll();
@@ -67,6 +78,58 @@ class UserRepositoryTest {
         assertThat(result.getContent())
                 .extracting(User::getUsername)
                 .containsExactlyInAnyOrder("lucas", "lucasc", "lucasprivado");
+    }
+
+    @Test
+    @DisplayName("[findByIdForFollowStatus] Should Block A Visibility Update - When Follow Status Read Holds A Shared Lock")
+    void shouldBlockAVisibilityUpdateWhenFollowStatusReadHoldsASharedLock() throws Exception {
+        UUID ownerId = userRepository.findByUsernameIgnoreCase("lucasprivado").orElseThrow().getId();
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+
+        CountDownLatch firstLocked = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Void> reader = executor.submit(() -> {
+                transactionTemplate.executeWithoutResult(status -> {
+                    userRepository.findByIdForFollowStatus(ownerId);
+                    firstLocked.countDown();
+                    await(releaseFirst);
+                });
+                return null;
+            });
+            assertThat(firstLocked.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<Void> writer = executor.submit(() -> {
+                transactionTemplate.executeWithoutResult(status -> {
+                    User owner = userRepository.findById(ownerId).orElseThrow();
+                    owner.setIsProfilePublic(true);
+                    userRepository.saveAndFlush(owner);
+                });
+                return null;
+            });
+
+            assertThat(writer.isDone()).isFalse();
+            releaseFirst.countDown();
+            reader.get(5, TimeUnit.SECONDS);
+            writer.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseFirst.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for the first transaction");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for the first transaction", e);
+        }
     }
 
     @Test

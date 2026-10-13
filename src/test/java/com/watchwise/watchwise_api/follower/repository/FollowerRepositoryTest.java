@@ -17,6 +17,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -24,6 +27,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -47,6 +56,9 @@ class FollowerRepositoryTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -132,6 +144,57 @@ class FollowerRepositoryTest {
                 .findPendingByFollowerIdAndFollowedIdForUpdate(lucas.getId(), marina.getId());
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findPendingByFollowerIdAndFollowedIdForUpdate] Should Block A Second Transaction - When The First Transaction Holds The Row Lock")
+    void shouldBlockASecondTransactionWhenTheFirstTransactionHoldsTheRowLock() throws Exception {
+        followerRepository.saveAndFlush(buildFollower(lucas, marina, FollowStatus.PENDING));
+        UUID followerId = lucas.getId();
+        UUID followedId = marina.getId();
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+
+        CountDownLatch firstLocked = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Void> first = executor.submit(() -> {
+                transactionTemplate.executeWithoutResult(status -> {
+                    followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId);
+                    firstLocked.countDown();
+                    await(releaseFirst);
+                });
+                return null;
+            });
+            assertThat(firstLocked.await(5, TimeUnit.SECONDS)).isTrue();
+
+            Future<Void> second = executor.submit(() -> {
+                transactionTemplate.executeWithoutResult(status ->
+                        followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId));
+                return null;
+            });
+
+            assertThat(second.isDone()).isFalse();
+            releaseFirst.countDown();
+            first.get(5, TimeUnit.SECONDS);
+            second.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseFirst.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting for the first transaction");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for the first transaction", e);
+        }
     }
 
     @Test

@@ -245,12 +245,20 @@ class NotificationRepositoryTest {
         LocalDateTime unreadCutoff = now.minusDays(30);
         Notification expiredRead = notificationRepository.saveAndFlush(buildSocialNotification(
                 NotificationType.LIKE_RECEIVED, true, readCutoff.minusSeconds(1)));
+        Notification expiredFollowRead = notificationRepository.saveAndFlush(buildFollowNotification(
+                NotificationType.FOLLOW_REQUEST, true, readCutoff.minusSeconds(2)));
         Notification readAtCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
                 NotificationType.COMMENT_RECEIVED, true, readCutoff));
+        Notification followReadAtCutoff = notificationRepository.saveAndFlush(buildFollowNotification(
+                NotificationType.NEW_FOLLOWER, true, readCutoff));
         Notification expiredUnread = notificationRepository.saveAndFlush(buildSocialNotification(
                 NotificationType.LIKE_RECEIVED, false, unreadCutoff.minusSeconds(1)));
+        Notification expiredFollowUnread = notificationRepository.saveAndFlush(buildFollowNotification(
+                NotificationType.FOLLOW_REQUEST_ACCEPTED, false, unreadCutoff.minusSeconds(2)));
         Notification unreadAtCutoff = notificationRepository.saveAndFlush(buildSocialNotification(
                 NotificationType.COMMENT_RECEIVED, false, unreadCutoff));
+        Notification followUnreadAtCutoff = notificationRepository.saveAndFlush(buildFollowNotification(
+                NotificationType.FOLLOW_REQUEST, false, unreadCutoff));
         Notification[] systemNotifications = {
                 notificationRepository.saveAndFlush(buildSystemNotification(NotificationType.RELEASE, now.minusDays(60))),
                 notificationRepository.saveAndFlush(buildSystemNotification(NotificationType.ANNOUNCED_DATE, now.minusDays(60))),
@@ -269,12 +277,16 @@ class NotificationRepositoryTest {
 
         TestTransaction.start();
         entityManager.clear();
-        assertThat(deletedRead).isEqualTo(1);
-        assertThat(deletedUnread).isEqualTo(1);
+        assertThat(deletedRead).isEqualTo(2);
+        assertThat(deletedUnread).isEqualTo(2);
         assertThat(notificationRepository.findById(expiredRead.getId())).isEmpty();
+        assertThat(notificationRepository.findById(expiredFollowRead.getId())).isEmpty();
         assertThat(notificationRepository.findById(readAtCutoff.getId())).isPresent();
+        assertThat(notificationRepository.findById(followReadAtCutoff.getId())).isPresent();
         assertThat(notificationRepository.findById(expiredUnread.getId())).isEmpty();
+        assertThat(notificationRepository.findById(expiredFollowUnread.getId())).isEmpty();
         assertThat(notificationRepository.findById(unreadAtCutoff.getId())).isPresent();
+        assertThat(notificationRepository.findById(followUnreadAtCutoff.getId())).isPresent();
         for (Notification systemNotification : systemNotifications) {
             assertThat(notificationRepository.findById(systemNotification.getId())).isPresent();
         }
@@ -343,6 +355,18 @@ class NotificationRepositoryTest {
                 .latestActor(lucas)
                 .targetType(NotificationTargetType.DIARY_ENTRY)
                 .targetId(UUID.randomUUID())
+                .isRead(isRead)
+                .createdAt(updatedAt)
+                .updatedAt(updatedAt)
+                .build();
+    }
+
+    private Notification buildFollowNotification(NotificationType type, boolean isRead, LocalDateTime updatedAt) {
+        return Notification.builder()
+                .user(lucas)
+                .latestActor(marina)
+                .type(type)
+                .message("marina started following you")
                 .isRead(isRead)
                 .createdAt(updatedAt)
                 .updatedAt(updatedAt)

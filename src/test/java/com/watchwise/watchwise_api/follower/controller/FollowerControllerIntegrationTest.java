@@ -7,6 +7,9 @@ import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.notification.entity.Notification;
+import com.watchwise.watchwise_api.notification.entity.NotificationType;
+import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -17,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -63,6 +67,9 @@ class FollowerControllerIntegrationTest {
     private FollowerRepository followerRepository;
 
     @Autowired
+    private NotificationRepository notificationRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -71,6 +78,7 @@ class FollowerControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
+        notificationRepository.deleteAll();
         followerRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
@@ -155,6 +163,9 @@ class FollowerControllerIntegrationTest {
         Optional<Follower> saved = followerRepository.findByFollowerIdAndFollowedId(follower.id(), target.id());
         assertThat(saved).isPresent();
         assertThat(saved.get().getStatus()).isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(notificationRepository.findByUserIdOrderByCreatedAtDesc(target.id(), PageRequest.of(0, 10))
+                .getContent()).extracting(Notification::getType)
+                .containsExactly(NotificationType.NEW_FOLLOWER);
     }
 
     @Test
@@ -170,6 +181,9 @@ class FollowerControllerIntegrationTest {
         Optional<Follower> saved = followerRepository.findByFollowerIdAndFollowedId(follower.id(), target.id());
         assertThat(saved).isPresent();
         assertThat(saved.get().getStatus()).isEqualTo(FollowStatus.PENDING);
+        assertThat(notificationRepository.findByUserIdOrderByCreatedAtDesc(target.id(), PageRequest.of(0, 10))
+                .getContent()).extracting(Notification::getType)
+                .containsExactly(NotificationType.FOLLOW_REQUEST);
     }
 
     @Test
@@ -442,6 +456,9 @@ class FollowerControllerIntegrationTest {
 
         Follower updated = followerRepository.findByFollowerIdAndFollowedId(requester.id(), target.id()).orElseThrow();
         assertThat(updated.getStatus()).isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(notificationRepository.findByUserIdOrderByCreatedAtDesc(requester.id(), PageRequest.of(0, 10))
+                .getContent()).extracting(Notification::getType)
+                .containsExactly(NotificationType.FOLLOW_REQUEST_ACCEPTED);
     }
 
     @Test

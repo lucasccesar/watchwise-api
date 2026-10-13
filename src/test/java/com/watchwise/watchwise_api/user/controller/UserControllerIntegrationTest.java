@@ -14,6 +14,9 @@ import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepositor
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.notification.entity.Notification;
+import com.watchwise.watchwise_api.notification.entity.NotificationType;
+import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -24,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -90,6 +94,9 @@ class UserControllerIntegrationTest {
     private FollowerRepository followerRepository;
 
     @Autowired
+    private NotificationRepository notificationRepository;
+
+    @Autowired
     private WatchCompanionRepository watchCompanionRepository;
 
     @BeforeEach
@@ -97,6 +104,7 @@ class UserControllerIntegrationTest {
         watchCompanionRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         contentRepository.deleteAll();
+        notificationRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
@@ -195,6 +203,37 @@ class UserControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("johndoe"))
                 .andExpect(jsonPath("$.description").value("Updated bio"));
+    }
+
+    @Test
+    @DisplayName("[updateCurrentUser] Should Notify Pending Requesters - When Private Profile Becomes Public")
+    void shouldNotifyPendingRequestersWhenPrivateProfileBecomesPublic() throws Exception {
+        MvcResult ownerResult = mockMvc.perform(registerRequest("publicowner", "publicowner@email.com", false))
+                .andExpect(status().isCreated())
+                .andReturn();
+        MvcResult requesterResult = mockMvc.perform(registerRequest("publicrequester", "publicrequester@email.com"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        Cookie ownerAccessToken = ownerResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie ownerCsrfToken = ownerResult.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        User owner = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("publicowner", "publicowner")
+                .orElseThrow();
+        User requester = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("publicrequester", "publicrequester")
+                .orElseThrow();
+        persistFollow(requester, owner, FollowStatus.PENDING);
+
+        mockMvc.perform(patchMeRequest(ownerAccessToken, ownerCsrfToken, "{ \"isProfilePublic\": true }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isProfilePublic").value(true));
+
+        Follower accepted = followerRepository.findByFollowerIdAndFollowedId(requester.getId(), owner.getId())
+                .orElseThrow();
+        assertThat(accepted.getStatus()).isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(notificationRepository.findByUserIdOrderByCreatedAtDesc(requester.getId(), PageRequest.of(0, 10))
+                .getContent()).extracting(Notification::getType)
+                .containsExactly(NotificationType.FOLLOW_REQUEST_ACCEPTED);
+        assertThat(requesterResult.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE)).isNotNull();
     }
 
     @Test
