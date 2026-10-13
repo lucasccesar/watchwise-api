@@ -351,7 +351,7 @@ class PicksTemplateOptionServiceImplTest {
     @Test
     @DisplayName("[getOptionViews] Should Return Content Card Preview - When Persisted Fixed Movie Option Is Read")
     void shouldReturnContentCardPreviewForPersistedFixedMovieOption() {
-        PicksTemplateCategory category = fixedCategory();
+        PicksTemplateCategory category = fixedCategory(PickAllowedType.MOVIE);
         Content movie = Content.builder().id(UUID.randomUUID()).tmdbId("550").type(ContentType.MOVIE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         PicksTemplateOption option = PicksTemplateOption.builder().id(UUID.randomUUID()).category(category)
@@ -469,7 +469,11 @@ class PicksTemplateOptionServiceImplTest {
     }
 
     private PicksTemplateCategory fixedCategory() {
-        PicksTemplateCategory category = category();
+        return fixedCategory(PickAllowedType.PERSON);
+    }
+
+    private PicksTemplateCategory fixedCategory(PickAllowedType allowedType) {
+        PicksTemplateCategory category = category(allowedType);
         category.setOptionMode(PickCategoryOptionMode.FIXED);
         return category;
     }
