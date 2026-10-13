@@ -2,8 +2,10 @@ package com.watchwise.watchwise_api.follower.repository;
 
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -22,6 +24,15 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
     Optional<Follower> findByFollowerIdAndFollowedId(UUID followerId, UUID followedId);
 
     Optional<Follower> findByFollowerIdAndFollowedIdAndStatus(UUID followerId, UUID followedId, FollowStatus status);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT f FROM Follower f
+            WHERE f.follower.id = :followerId AND f.followed.id = :followedId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.PENDING
+            """)
+    Optional<Follower> findPendingByFollowerIdAndFollowedIdForUpdate(
+            @Param("followerId") UUID followerId, @Param("followedId") UUID followedId);
 
     boolean existsByFollowerIdAndFollowedIdAndStatus(UUID followerId, UUID followedId, FollowStatus status);
 

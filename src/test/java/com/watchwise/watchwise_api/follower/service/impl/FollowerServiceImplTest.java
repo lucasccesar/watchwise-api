@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.notification.service.FollowNotificationService;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -50,6 +51,9 @@ class FollowerServiceImplTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private FollowNotificationService followNotificationService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -118,30 +122,36 @@ class FollowerServiceImplTest {
     @DisplayName("[followUser] Should Return Accepted And Save With Accepted Status - When Followed User Profile Is Public")
     void shouldReturnAcceptedAndSaveWithAcceptedStatusWhenFollowedUserProfileIsPublic() {
         followedUser.setIsProfilePublic(true);
-        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.of(followedUser));
         when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
+        when(followerRepository.saveAndFlush(any(Follower.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         FollowStatus result = followerService.followUser(followerId, followedId);
 
         assertThat(result).isEqualTo(FollowStatus.ACCEPTED);
-        verify(followerRepository).save(followerCaptor.capture());
+        verify(followerRepository).saveAndFlush(followerCaptor.capture());
         assertThat(followerCaptor.getValue().getStatus()).isEqualTo(FollowStatus.ACCEPTED);
         assertThat(followerCaptor.getValue().getFollower()).isEqualTo(followerUser);
         assertThat(followerCaptor.getValue().getFollowed()).isEqualTo(followedUser);
+        verify(followNotificationService).notifyNewFollower(followerUser, followedUser);
     }
 
     @Test
     @DisplayName("[followUser] Should Return Pending And Save With Pending Status - When Followed User Profile Is Private")
     void shouldReturnPendingAndSaveWithPendingStatusWhenFollowedUserProfileIsPrivate() {
         followedUser.setIsProfilePublic(false);
-        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.of(followedUser));
         when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
+        when(followerRepository.saveAndFlush(any(Follower.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
         FollowStatus result = followerService.followUser(followerId, followedId);
 
         assertThat(result).isEqualTo(FollowStatus.PENDING);
-        verify(followerRepository).save(followerCaptor.capture());
+        verify(followerRepository).saveAndFlush(followerCaptor.capture());
         assertThat(followerCaptor.getValue().getStatus()).isEqualTo(FollowStatus.PENDING);
+        verify(followNotificationService).notifyFollowRequested(followerUser, followedUser);
     }
 
     @Test
@@ -157,7 +167,7 @@ class FollowerServiceImplTest {
     @Test
     @DisplayName("[followUser] Should Throw NotFoundException - When Followed User Does Not Exist")
     void shouldThrowNotFoundExceptionWhenFollowedUserDoesNotExist() {
-        when(userRepository.findById(followedId)).thenReturn(Optional.empty());
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
                 .isInstanceOf(NotFoundException.class)
@@ -169,7 +179,7 @@ class FollowerServiceImplTest {
     @Test
     @DisplayName("[followUser] Should Throw NotFoundException - When Follower's Own Account No Longer Exists")
     void shouldThrowNotFoundExceptionWhenFollowersOwnAccountNoLongerExists() {
-        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.of(followedUser));
         when(userRepository.findById(followerId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
@@ -182,9 +192,9 @@ class FollowerServiceImplTest {
     @Test
     @DisplayName("[followUser] Should Throw ConflictException With Specific Message - When Unique Constraint Is Violated")
     void shouldThrowConflictExceptionWithSpecificMessageWhenUniqueConstraintIsViolated() {
-        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.of(followedUser));
         when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
-        when(followerRepository.save(any(Follower.class)))
+        when(followerRepository.saveAndFlush(any(Follower.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_followers_follower_id_followed_id"));
 
         assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
@@ -195,9 +205,9 @@ class FollowerServiceImplTest {
     @Test
     @DisplayName("[followUser] Should Throw ConflictException With Generic Message - When Constraint Name Is Unknown")
     void shouldThrowConflictExceptionWithGenericMessageWhenConstraintNameIsUnknown() {
-        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.of(followedUser));
         when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
-        when(followerRepository.save(any(Follower.class)))
+        when(followerRepository.saveAndFlush(any(Follower.class)))
                 .thenThrow(buildDataIntegrityViolationException("uq_some_other_constraint"));
 
         assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
@@ -208,11 +218,11 @@ class FollowerServiceImplTest {
     @Test
     @DisplayName("[followUser] Should Throw ConflictException With Generic Message - When Cause Is Not ConstraintViolationException")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNotConstraintViolationException() {
-        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.of(followedUser));
         when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
         DataIntegrityViolationException exception =
                 new DataIntegrityViolationException("generic db error", new RuntimeException("unexpected cause"));
-        when(followerRepository.save(any(Follower.class))).thenThrow(exception);
+        when(followerRepository.saveAndFlush(any(Follower.class))).thenThrow(exception);
 
         assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
                 .isInstanceOf(ConflictException.class)
@@ -222,10 +232,10 @@ class FollowerServiceImplTest {
     @Test
     @DisplayName("[followUser] Should Throw ConflictException With Generic Message - When Cause Is Null")
     void shouldThrowConflictExceptionWithGenericMessageWhenCauseIsNull() {
-        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        when(userRepository.findByIdForFollowStatus(followedId)).thenReturn(Optional.of(followedUser));
         when(userRepository.findById(followerId)).thenReturn(Optional.of(followerUser));
         DataIntegrityViolationException exception = new DataIntegrityViolationException("no cause here");
-        when(followerRepository.save(any(Follower.class))).thenThrow(exception);
+        when(followerRepository.saveAndFlush(any(Follower.class))).thenThrow(exception);
 
         assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
                 .isInstanceOf(ConflictException.class)
@@ -259,19 +269,20 @@ class FollowerServiceImplTest {
     @DisplayName("[acceptFollowRequest] Should Set Status To Accepted And Save - When A Pending Request Exists")
     void shouldSetStatusToAcceptedAndSaveWhenAPendingRequestExists() {
         Follower pending = buildFollow(FollowStatus.PENDING);
-        when(followerRepository.findByFollowerIdAndFollowedIdAndStatus(followerId, followedId, FollowStatus.PENDING))
+        when(followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId))
                 .thenReturn(Optional.of(pending));
 
         followerService.acceptFollowRequest(followedId, followerId);
 
         verify(followerRepository).save(followerCaptor.capture());
         assertThat(followerCaptor.getValue().getStatus()).isEqualTo(FollowStatus.ACCEPTED);
+        verify(followNotificationService).notifyFollowRequestsAccepted(followedUser, List.of(followerUser));
     }
 
     @Test
     @DisplayName("[acceptFollowRequest] Should Throw NotFoundException - When No Pending Request Exists")
     void shouldThrowNotFoundExceptionWhenNoPendingRequestExistsOnAccept() {
-        when(followerRepository.findByFollowerIdAndFollowedIdAndStatus(followerId, followedId, FollowStatus.PENDING))
+        when(followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> followerService.acceptFollowRequest(followedId, followerId))
@@ -285,7 +296,7 @@ class FollowerServiceImplTest {
     @DisplayName("[rejectFollowRequest] Should Delete The Request - When A Pending Request Exists")
     void shouldDeleteTheRequestWhenAPendingRequestExists() {
         Follower pending = buildFollow(FollowStatus.PENDING);
-        when(followerRepository.findByFollowerIdAndFollowedIdAndStatus(followerId, followedId, FollowStatus.PENDING))
+        when(followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId))
                 .thenReturn(Optional.of(pending));
 
         followerService.rejectFollowRequest(followedId, followerId);
@@ -296,7 +307,7 @@ class FollowerServiceImplTest {
     @Test
     @DisplayName("[rejectFollowRequest] Should Throw NotFoundException - When No Pending Request Exists")
     void shouldThrowNotFoundExceptionWhenNoPendingRequestExistsOnReject() {
-        when(followerRepository.findByFollowerIdAndFollowedIdAndStatus(followerId, followedId, FollowStatus.PENDING))
+        when(followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> followerService.rejectFollowRequest(followedId, followerId))

@@ -109,6 +109,31 @@ class FollowerRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findPendingByFollowerIdAndFollowedIdForUpdate] Should Return Pending Row - When Request Exists")
+    void shouldReturnPendingRowWhenRequestExists() {
+        followerRepository.saveAndFlush(buildFollower(lucas, marina, FollowStatus.PENDING));
+        entityManager.clear();
+
+        Optional<Follower> result = followerRepository
+                .findPendingByFollowerIdAndFollowedIdForUpdate(lucas.getId(), marina.getId());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().getStatus()).isEqualTo(FollowStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("[findPendingByFollowerIdAndFollowedIdForUpdate] Should Return Empty - When Relationship Is Already Accepted")
+    void shouldReturnEmptyWhenRelationshipIsAlreadyAccepted() {
+        followerRepository.saveAndFlush(buildFollower(lucas, marina, FollowStatus.ACCEPTED));
+        entityManager.clear();
+
+        Optional<Follower> result = followerRepository
+                .findPendingByFollowerIdAndFollowedIdForUpdate(lucas.getId(), marina.getId());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     @DisplayName("[existsByFollowerIdAndFollowedIdAndStatus] Should Return True - When An Accepted Relationship Exists")
     void shouldReturnTrueWhenAnAcceptedRelationshipExists() {
         followerRepository.saveAndFlush(buildFollower(lucas, marina, FollowStatus.ACCEPTED));

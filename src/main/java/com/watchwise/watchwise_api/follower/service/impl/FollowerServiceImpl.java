@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
+import com.watchwise.watchwise_api.notification.service.FollowNotificationService;
 import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -18,8 +19,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -30,14 +33,16 @@ public class FollowerServiceImpl implements FollowerService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     private final PageRequestFactory pageRequestFactory;
+    private final FollowNotificationService followNotificationService;
 
     @Override
+    @Transactional
     public FollowStatus followUser(UUID followerId, UUID followedId) {
         if (followerId.equals(followedId)) {
             throw new BadRequestException("Cannot follow yourself");
         }
 
-        User followed = userRepository.findById(followedId)
+        User followed = userRepository.findByIdForFollowStatus(followedId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         User follower = userRepository.findById(followerId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
@@ -54,7 +59,12 @@ public class FollowerServiceImpl implements FollowerService {
                 .build();
 
         try {
-            followerRepository.save(newFollow);
+            Follower saved = followerRepository.saveAndFlush(newFollow);
+            if (saved.getStatus() == FollowStatus.PENDING) {
+                followNotificationService.notifyFollowRequested(follower, followed);
+            } else {
+                followNotificationService.notifyNewFollower(follower, followed);
+            }
         } catch (DataIntegrityViolationException e) {
             throw mapUniqueConstraintViolation(e);
         }
@@ -71,19 +81,22 @@ public class FollowerServiceImpl implements FollowerService {
     }
 
     @Override
+    @Transactional
     public void acceptFollowRequest(UUID targetUserId, UUID requesterId) {
         Follower follow = followerRepository
-                .findByFollowerIdAndFollowedIdAndStatus(requesterId, targetUserId, FollowStatus.PENDING)
+                .findPendingByFollowerIdAndFollowedIdForUpdate(requesterId, targetUserId)
                 .orElseThrow(() -> new NotFoundException("Follow request not found"));
 
         follow.setStatus(FollowStatus.ACCEPTED);
         followerRepository.save(follow);
+        followNotificationService.notifyFollowRequestsAccepted(follow.getFollowed(), List.of(follow.getFollower()));
     }
 
     @Override
+    @Transactional
     public void rejectFollowRequest(UUID targetUserId, UUID requesterId) {
         Follower follow = followerRepository
-                .findByFollowerIdAndFollowedIdAndStatus(requesterId, targetUserId, FollowStatus.PENDING)
+                .findPendingByFollowerIdAndFollowedIdForUpdate(requesterId, targetUserId)
                 .orElseThrow(() -> new NotFoundException("Follow request not found"));
 
         followerRepository.delete(follow);
