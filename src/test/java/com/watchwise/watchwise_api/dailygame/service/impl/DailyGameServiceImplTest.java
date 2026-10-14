@@ -13,6 +13,8 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameOverviewCardDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
@@ -143,6 +145,76 @@ class DailyGameServiceImplTest {
 
         assertThatThrownBy(() -> service().getToday(USER_ID))
                 .isInstanceOf(DailyGamesUnavailableException.class);
+        verifyNoBatchReads();
+    }
+
+    @Test
+    @DisplayName("[getTodayOverview] Should Return Eight Safe Cards And A UTC Reset - When The Daily Set Is Complete")
+    void shouldReturnEightSafeCardsAndAUtcResetWhenTheDailySetIsComplete() {
+        List<DailyChallenge> challenges = allChallenges();
+        DailyChallenge completedChallenge = challenges.stream()
+                .filter(item -> item.getGameType() == DailyGameType.MOVIE_BY_POSTER)
+                .findFirst()
+                .orElseThrow();
+        DailyChallenge inProgressChallenge = challenges.stream()
+                .filter(item -> item.getGameType() == DailyGameType.EPISODE_BY_FRAME)
+                .findFirst()
+                .orElseThrow();
+        UserDailyGameResult completedResult = result(
+                completedChallenge, 2, 5, DailyGameResultStatus.COMPLETED, NOW);
+        UserDailyGameResult inProgressResult = result(
+                inProgressChallenge, 1, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        inProgressResult.setAttemptDetails(Map.of("attempts", List.of("not decoded")));
+
+        when(challengeRepository.findByChallengeDateOrderByGameTypeAsc(TODAY)).thenReturn(challenges);
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), eq(challenges.stream()
+                .map(DailyChallenge::getId).toList())))
+                .thenReturn(List.of(completedResult, inProgressResult));
+
+        DailyGamesOverviewDTO response = service().getTodayOverview(USER_ID);
+
+        assertThat(response.date()).isEqualTo(TODAY);
+        assertThat(response.nextResetAt()).isEqualTo(Instant.parse("2026-09-28T00:00:00Z"));
+        assertThat(response.totalMaxScore()).isEqualTo(64);
+        assertThat(response.currentScore()).isEqualTo(5);
+        assertThat(response.games()).extracting(DailyGameOverviewCardDTO::gameType)
+                .containsExactly(DailyGameType.values());
+
+        DailyGameOverviewCardDTO inProgressCard = response.games().stream()
+                .filter(item -> item.gameType() == DailyGameType.EPISODE_BY_FRAME)
+                .findFirst()
+                .orElseThrow();
+        assertThat(inProgressCard.attemptsUsed()).isEqualTo(1);
+        assertThat(inProgressCard.attemptsRemaining()).isEqualTo(5);
+        assertThat(inProgressCard.status()).isEqualTo(DailyGameViewStatus.IN_PROGRESS);
+        assertThat(inProgressCard.score()).isZero();
+        assertThat(inProgressCard.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w300/still-2.jpg");
+        assertThat(inProgressCard.visibleImageUrls()).containsExactly(
+                "https://image.tmdb.org/t/p/w300/still-1.jpg",
+                "https://image.tmdb.org/t/p/w300/still-2.jpg");
+        assertThat(response.games()).filteredOn(item -> item.gameType() == DailyGameType.MOVIE_BY_INFO
+                        || item.gameType() == DailyGameType.SERIES_BY_INFO
+                        || item.gameType() == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
+                        || item.gameType() == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY)
+                .allSatisfy(item -> {
+                    assertThat(item.imageUrl()).isNull();
+                    assertThat(item.visibleImageUrls()).isEmpty();
+                });
+
+        verify(resultRepository).findByUserIdAndDailyChallengeIdIn(
+                USER_ID, challenges.stream().map(DailyChallenge::getId).toList());
+        verifyNoInteractions(hintRepository);
+    }
+
+    @Test
+    @DisplayName("[getTodayOverview] Should Reject An Incomplete Daily Set - When Any Challenge Is Missing")
+    void shouldRejectAnIncompleteDailySetWhenOverviewIsRequested() {
+        when(challengeRepository.findByChallengeDateOrderByGameTypeAsc(TODAY))
+                .thenReturn(allChallenges().subList(0, 7));
+
+        assertThatThrownBy(() -> service().getTodayOverview(USER_ID))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+
         verifyNoBatchReads();
     }
 

@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
@@ -36,6 +37,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -100,6 +102,23 @@ class DailyGameControllerTest {
                 .andExpect(jsonPath("$.games").isEmpty());
 
         verify(dailyGameService).getToday(CURRENT_USER_ID);
+    }
+
+    @Test
+    @DisplayName("[getTodayOverview] Should Delegate With Current User - When The Games View Is Requested")
+    void shouldDelegateTodayOverviewWithCurrentUser() throws Exception {
+        when(dailyGameService.getTodayOverview(CURRENT_USER_ID))
+                .thenReturn(new DailyGamesOverviewDTO(
+                        LocalDate.of(2026, 9, 28), Instant.parse("2026-09-29T00:00:00Z"), 64, 0, List.of()));
+
+        mockMvc.perform(get("/games/today/view"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.date").value("2026-09-28"))
+                .andExpect(jsonPath("$.totalMaxScore").value(64))
+                .andExpect(jsonPath("$.games").isEmpty());
+
+        verify(dailyGameService).getTodayOverview(CURRENT_USER_ID);
+        verifyNoInteractions(dailyGameRankingService, dailyGameSearchService);
     }
 
     @Test

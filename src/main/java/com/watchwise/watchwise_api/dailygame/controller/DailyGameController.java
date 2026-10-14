@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
@@ -59,6 +60,11 @@ public class DailyGameController {
     @GetMapping("/games/today")
     public ResponseEntity<DailyGameTodayResponseDTO> getToday() {
         return ResponseEntity.ok(dailyGameService.getToday(currentUserId()));
+    }
+
+    @GetMapping("/games/today/view")
+    public ResponseEntity<DailyGamesOverviewDTO> getTodayOverview() {
+        return ResponseEntity.ok(dailyGameService.getTodayOverview(currentUserId()));
     }
 
     @GetMapping("/games/{challengeDate}")

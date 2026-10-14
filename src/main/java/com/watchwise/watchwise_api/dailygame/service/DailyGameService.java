@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 
 import java.time.LocalDate;
@@ -12,6 +13,8 @@ import java.util.UUID;
 public interface DailyGameService {
 
     DailyGameTodayResponseDTO getToday(UUID userId);
+
+    DailyGamesOverviewDTO getTodayOverview(UUID userId);
 
     DailyGameTodayResponseDTO getDay(UUID userId, LocalDate challengeDate);
 

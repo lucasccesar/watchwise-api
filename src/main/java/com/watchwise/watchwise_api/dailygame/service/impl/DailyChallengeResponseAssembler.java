@@ -11,6 +11,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHintDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameOverviewCardDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
@@ -68,6 +69,14 @@ public class DailyChallengeResponseAssembler {
                         date.equals(currentDate)))
                 .toList();
         return new DailyGameTodayResponseDTO(date, games);
+    }
+
+    public DailyGameOverviewCardDTO toOverviewCard(
+            DailyChallenge challenge, UserDailyGameResult result) {
+        DailyGameView view = view(challenge, result, List.of());
+        return new DailyGameOverviewCardDTO(
+                view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(),
+                view.attemptsRemaining(), view.status(), view.score(), view.imageUrl(), view.visibleImageUrls());
     }
 
     public DailyGameAttemptResponseDTO toAttemptResponse(

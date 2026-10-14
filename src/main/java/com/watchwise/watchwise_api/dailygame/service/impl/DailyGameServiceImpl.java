@@ -11,8 +11,10 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameOverviewCardDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallengeHint;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameResultStatus;
@@ -32,8 +34,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -153,16 +158,25 @@ public class DailyGameServiceImpl implements DailyGameService {
     }
 
     @Override
-    public DailyGameTodayResponseDTO getDay(UUID userId, LocalDate challengeDate) {
-        assertAvailableDate(challengeDate);
-        List<DailyChallenge> challenges = challengeRepository.findByChallengeDateOrderByGameTypeAsc(challengeDate);
-        requireCompleteDailySet(challenges);
+    public DailyGamesOverviewDTO getTodayOverview(UUID userId) {
+        LocalDate date = LocalDate.now(clock);
+        DailyGameDay day = loadDay(userId, date);
+        List<DailyGameOverviewCardDTO> games = day.challenges().stream()
+                .map(challenge -> responseAssembler.toOverviewCard(
+                        challenge, day.resultsByChallengeId().get(challenge.getId())))
+                .toList();
+        int totalMaxScore = games.stream().mapToInt(DailyGameOverviewCardDTO::maxAttempts).sum();
+        int currentScore = games.stream().mapToInt(DailyGameOverviewCardDTO::score).sum();
+        Instant nextResetAt = date.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        return new DailyGamesOverviewDTO(date, nextResetAt, totalMaxScore, currentScore, games);
+    }
 
+    @Override
+    public DailyGameTodayResponseDTO getDay(UUID userId, LocalDate challengeDate) {
+        DailyGameDay day = loadDay(userId, challengeDate);
+        List<DailyChallenge> challenges = day.challenges();
+        Map<UUID, UserDailyGameResult> results = day.resultsByChallengeId();
         List<UUID> challengeIds = challenges.stream().map(DailyChallenge::getId).toList();
-        Map<UUID, UserDailyGameResult> results = resultRepository
-                .findByUserIdAndDailyChallengeIdIn(userId, challengeIds)
-                .stream()
-                .collect(Collectors.toMap(result -> result.getDailyChallenge().getId(), Function.identity()));
         Map<UUID, List<DailyChallengeHint>> hints = hintRepository
                 .findByDailyChallengeIdInOrderByDailyChallengeIdAscPositionAsc(challengeIds)
                 .stream()
@@ -367,6 +381,22 @@ public class DailyGameServiceImpl implements DailyGameService {
         return filmographyService.compare(challenge, candidate.personTmdbId(), majorRoles);
     }
 
+    private DailyGameDay loadDay(UUID userId, LocalDate challengeDate) {
+        assertAvailableDate(challengeDate);
+        List<DailyChallenge> challenges = challengeRepository
+                .findByChallengeDateOrderByGameTypeAsc(challengeDate);
+        requireCompleteDailySet(challenges);
+        List<DailyChallenge> orderedChallenges = challenges.stream()
+                .sorted(Comparator.comparing(DailyChallenge::getGameType))
+                .toList();
+        List<UUID> challengeIds = orderedChallenges.stream().map(DailyChallenge::getId).toList();
+        Map<UUID, UserDailyGameResult> results = resultRepository
+                .findByUserIdAndDailyChallengeIdIn(userId, challengeIds)
+                .stream()
+                .collect(Collectors.toMap(result -> result.getDailyChallenge().getId(), Function.identity()));
+        return new DailyGameDay(orderedChallenges, results);
+    }
+
     private void assertAvailableDate(LocalDate challengeDate) {
         if (challengeDate == null || challengeDate.isAfter(LocalDate.now(clock))) {
             throw new BadRequestException("Daily games are not available for a future date");
@@ -394,5 +424,10 @@ public class DailyGameServiceImpl implements DailyGameService {
                 || result.getAttemptsUsed() >= gameType.maxAttempts()) {
             throw new ConflictException("Daily game attempt is already finished");
         }
+    }
+
+    private record DailyGameDay(
+            List<DailyChallenge> challenges,
+            Map<UUID, UserDailyGameResult> resultsByChallengeId) {
     }
 }

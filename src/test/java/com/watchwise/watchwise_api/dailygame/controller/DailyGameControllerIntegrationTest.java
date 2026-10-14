@@ -12,11 +12,13 @@ import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameOverviewCardDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
@@ -46,6 +48,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -128,6 +131,28 @@ class DailyGameControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getTodayOverview] Should Return Eight Safe Cards And The UTC Reset - When The User Is Authenticated")
+    void shouldReturnEightSafeCardsAndTheUtcResetWhenTheUserIsAuthenticated() throws Exception {
+        RegisteredUser user = registerUser("dailycontrolleroverview");
+        when(dailyGameService.getTodayOverview(user.id())).thenReturn(overview());
+
+        mockMvc.perform(get("/games/today/view").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.date").value("2026-09-28"))
+                .andExpect(jsonPath("$.nextResetAt").value("2026-09-29T00:00:00Z"))
+                .andExpect(jsonPath("$.totalMaxScore").value(64))
+                .andExpect(jsonPath("$.games").isArray())
+                .andExpect(jsonPath("$.games").value(org.hamcrest.Matchers.hasSize(8)))
+                .andExpect(jsonPath("$.games[0].answer").doesNotExist())
+                .andExpect(jsonPath("$.games[0].hints").doesNotExist())
+                .andExpect(jsonPath("$.games[0].attempts").doesNotExist())
+                .andExpect(jsonPath("$.games[0].filmography").doesNotExist())
+                .andExpect(jsonPath("$.games[0].imageUrls").doesNotExist());
+
+        verify(dailyGameService).getTodayOverview(user.id());
+    }
+
+    @Test
     @DisplayName("[getGame] Should Resolve The Specific Route - When A Game Type Is Requested After The Aggregate Route")
     void shouldResolveTheSpecificRouteWhenAGameTypeIsRequestedAfterTheAggregateRoute() throws Exception {
         RegisteredUser user = registerUser("dailycontrollerspecific");
@@ -149,6 +174,18 @@ class DailyGameControllerIntegrationTest {
     @DisplayName("[getToday] Should Return Unauthorized - When Access Token Is Missing")
     void shouldReturnUnauthorizedWhenAccessTokenIsMissing() throws Exception {
         mockMvc.perform(get("/games/today"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(dailyGameService);
+    }
+
+    @Test
+    @DisplayName("[getTodayOverview] Should Return Unauthorized - When Access Token Is Missing")
+    void shouldReturnOverviewUnauthorizedWhenAccessTokenIsMissing() throws Exception {
+        mockMvc.perform(get("/games/today/view"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.detail").doesNotExist())
@@ -387,6 +424,19 @@ class DailyGameControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getTodayOverview] Should Return ServiceUnavailable - When The Daily Set Is Missing")
+    void shouldReturnOverviewServiceUnavailableWhenTheDailySetIsMissing() throws Exception {
+        RegisteredUser user = registerUser("dailycontrolleroverviewunavailable");
+        when(dailyGameService.getTodayOverview(user.id())).thenThrow(new DailyGamesUnavailableException());
+
+        mockMvc.perform(get("/games/today/view").cookie(user.accessToken()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value(503))
+                .andExpect(jsonPath("$.message").value("Daily games are temporarily unavailable"))
+                .andExpect(jsonPath("$.path").value("/games/today/view"));
+    }
+
+    @Test
     @DisplayName("[search] Should Return BadGateway - When TMDB Is Unavailable")
     void shouldReturnBadGatewayWhenTmdbIsUnavailable() throws Exception {
         RegisteredUser user = registerUser("dailycontrollertmdb");
@@ -533,6 +583,16 @@ class DailyGameControllerIntegrationTest {
                 .header("X-XSRF-TOKEN", user.csrfToken().getValue())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
+    }
+
+    private DailyGamesOverviewDTO overview() {
+        List<DailyGameOverviewCardDTO> games = java.util.Arrays.stream(DailyGameType.values())
+                .map(gameType -> new DailyGameOverviewCardDTO(
+                        gameType, gameType.targetKind(), gameType.maxAttempts(), 0,
+                        gameType.maxAttempts(), DailyGameViewStatus.NOT_PLAYED, 0, null, List.of()))
+                .toList();
+        return new DailyGamesOverviewDTO(
+                LocalDate.of(2026, 9, 28), Instant.parse("2026-09-29T00:00:00Z"), 64, 0, games);
     }
 
     private DailyGameAnswerDTO answer() {
