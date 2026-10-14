@@ -157,6 +157,50 @@ class DailyChallengeSnapshotRepairServiceImplTest {
     }
 
     @Test
+    @DisplayName("[repairIfIncomplete] Should Decode V2 Identity And Preserve Flat Fields And Presentation")
+    void shouldDecodeV2IdentityAndPreserveFlatFieldsAndPresentation() {
+        Map<String, Object> presentation = new LinkedHashMap<>();
+        presentation.put("director", "Legacy Director");
+        Map<String, Object> v2Snapshot = new LinkedHashMap<>(Map.of(
+                "schemaVersion", 2,
+                "targetKind", "MOVIE",
+                "tmdbId", "550",
+                "title", "Frozen flat title",
+                "imageUrl", IMAGE_PATH,
+                "sourceTmdbId", "550",
+                "identity", Map.of("targetKind", "MOVIE", "tmdbId", "550", "sourceTmdbId", "550"),
+                "presentation", presentation));
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_INFO, "550", "550", v2Snapshot, "MOVIE:550");
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE)).thenReturn(found(movieDetails("550")));
+        when(tmdbClient.getMovieReleaseDates("550", LANGUAGE)).thenReturn(found(movieReleaseDates("550")));
+
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("title", "Frozen flat title")
+                .containsEntry("imageUrl", IMAGE_PATH).containsEntry("schemaVersion", 2);
+        assertThat(((Map<?, ?>) challenge.getAnswerSnapshot().get("presentation")).get("director"))
+                .isEqualTo("Legacy Director");
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("year", 2000);
+        assertThat(challenge.getAnswerKey()).isEqualTo("MOVIE:550");
+    }
+
+    @Test
+    @DisplayName("[repairIfIncomplete] Should Read V1 Flat Identity Without Rewriting It")
+    void shouldReadV1FlatIdentityWithoutRewritingIt() {
+        Map<String, Object> v1Snapshot = new LinkedHashMap<>(Map.of(
+                "targetKind", "PERSON", "personTmdbId", "550", "title", "Legacy title",
+                "imageUrl", IMAGE_PATH, "sourceTmdbId", "680"));
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "550", "680",
+                v1Snapshot, "PERSON:550");
+        when(filmographyService.snapshot("550", DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY))
+                .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(List.of(Map.of(
+                        "workId", "680", "title", "Pulp Fiction", "mediaType", "movie"))));
+        assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
+        assertThat(challenge.getAnswerSnapshot()).containsEntry("title", "Legacy title")
+                .containsEntry("imageUrl", IMAGE_PATH).containsEntry("targetKind", "PERSON");
+    }
+
+    @Test
     @DisplayName("[repairIfIncomplete] Should Add Movie Filmography And Be Idempotent - When The Legacy Snapshot Omits It")
     void shouldAddMovieFilmographyAndBeIdempotentWhenTheLegacySnapshotOmitsIt() {
         DailyChallenge challenge = actorChallenge(

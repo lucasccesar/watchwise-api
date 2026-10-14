@@ -172,6 +172,68 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
+    @DisplayName("[generate] Should Continue To Another Movie - When The First Movie Details Are Unavailable")
+    void shouldContinueToAnotherMovieWhenFirstMovieDetailsAreUnavailable() {
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
+                .thenReturn(found(new TmdbSearchPage<>(1, List.of(
+                        new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"),
+                        new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10")), 1, 2)));
+        lenient().when(tmdbClient.getMovieFullDetails(eq("550"), eq(LANGUAGE))).thenReturn(new TmdbLookupResult.NotFound<>());
+        when(tmdbClient.getMovieFullDetails(eq("680"), eq(LANGUAGE))).thenReturn(found(movieDetailsWithInfo("680")));
+
+        DailyChallengeCandidate candidate = new MovieByPosterGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE, Set.of("MOVIE:999"))
+                .orElseThrow();
+
+        assertThat(candidate.answerKey()).isEqualTo("MOVIE:680");
+    }
+
+    @Test
+    @DisplayName("[generate] Should Continue To Another Series - When The First Series Details Are Incomplete")
+    void shouldContinueToAnotherSeriesWhenFirstSeriesDetailsAreIncomplete() {
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
+                .thenReturn(found(new TmdbSearchPage<>(1, List.of(
+                        new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking.jpg", "2008-01-20"),
+                        new TmdbTvSearchResult("66732", "Stranger Things", "/stranger.jpg", "2016-07-15")), 1, 2)));
+        lenient().when(tmdbClient.getTvFullDetails(eq("1396"), eq(LANGUAGE))).thenReturn(new TmdbLookupResult.NotFound<>());
+        when(tmdbClient.getTvFullDetails(eq("66732"), eq(LANGUAGE))).thenReturn(found(seriesDetailsWithInfo("66732")));
+
+        DailyChallengeCandidate candidate = new SeriesByPosterGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE, Set.of("SERIES:999"))
+                .orElseThrow();
+
+        assertThat(candidate.answerKey()).isEqualTo("SERIES:66732");
+    }
+
+    @Test
+    @DisplayName("[episode] Should Reject Snapshot - When Air Date Or Six Distinct Frames Are Missing")
+    void shouldRejectEpisodeSnapshotWhenAirDateOrSixDistinctFramesAreMissing() {
+        List<String> fiveFrames = List.of("/1.jpg", "/2.jpg", "/3.jpg", "/4.jpg", "/5.jpg");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> snapshotAssembler.episode(
+                "1396", 1, 1, "Episode", "not-a-date", "Series", "/poster.jpg", 2008,
+                List.of("/1.jpg", "/2.jpg", "/3.jpg", "/4.jpg", "/5.jpg", "/6.jpg")))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> snapshotAssembler.episode(
+                "1396", 1, 1, "Episode", "2008-01-20", "Series", "/poster.jpg", 2008, fiveFrames))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> snapshotAssembler.episode(
+                "1396", 1, 1, "Episode", "2008-01-20", "Series", "/poster.jpg", 2008,
+                List.of("/1.jpg", "/2.jpg", "/3.jpg", "/4.jpg", "/5.jpg", "/5.jpg")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("[generate] Should Keep V1 Flat Snapshot Values Readable")
+    void shouldKeepV1FlatSnapshotValuesReadable() {
+        Map<String, Object> legacy = Map.of("targetKind", "MOVIE", "tmdbId", "550", "title", "Legacy title",
+                "imageUrl", "/legacy.jpg");
+
+        assertThat(legacy).containsEntry("title", "Legacy title").containsEntry("imageUrl", "/legacy.jpg")
+                .doesNotContainKey("presentation");
+    }
+
+    @Test
     @DisplayName("[generate] Should Create The Series Answer Key - When A Popular Series Is Eligible")
     void shouldCreateTheSeriesAnswerKeyWhenAPopularSeriesIsEligible() {
         when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
@@ -212,6 +274,27 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.targetTmdbId()).isEqualTo("287");
         assertThat(candidate.answerSnapshot().get("title")).isEqualTo("Brad Pitt");
         assertThat(((Map<?, ?>) candidate.answerSnapshot().get("presentation")).get("knownForTitles")).isEqualTo(List.of("The Office"));
+    }
+
+    @Test
+    @DisplayName("[generate] Should Continue To Another Person - When An Aggregate Is Unavailable And Preserve Exclusions")
+    void shouldContinueToAnotherPersonWhenAggregateIsUnavailableAndPreserveExclusions() {
+        when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE)).thenReturn(found(movieDetails("550", "Fight Club",
+                new TmdbCredits(List.of(
+                        new TmdbCastMember(287, "Brad Pitt", "Tyler Durden", "/brad.jpg"),
+                        new TmdbCastMember(288, "Unavailable Person", "Role", "/unavailable.jpg"),
+                        new TmdbCastMember(289, "Edward Norton", "The Narrator", "/edward.jpg")), List.of()))));
+        when(tmdbClient.getPersonAggregate("288", LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
+        when(tmdbClient.getPersonAggregate("289", LANGUAGE)).thenReturn(found(personAggregate("289", "Edward Norton")));
+
+        DailyChallengeCandidate candidate = new PersonByFaceGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE, Set.of("PERSON:287"))
+                .orElseThrow();
+
+        assertThat(candidate.answerKey()).isEqualTo("PERSON:289");
+        verify(tmdbClient, never()).getPersonAggregate("287", LANGUAGE);
     }
 
     @Test

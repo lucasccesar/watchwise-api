@@ -10,6 +10,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 import java.util.Locale;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.Collections;
 
 final class DailyChallengeGenerationSupport {
 
@@ -55,6 +57,15 @@ final class DailyChallengeGenerationSupport {
             return Optional.empty();
         }
         return Optional.ofNullable(eligibleItems.get(ThreadLocalRandom.current().nextInt(eligibleItems.size())));
+    }
+
+    static <T> List<T> shuffled(List<T> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        List<T> shuffled = new ArrayList<>(items);
+        Collections.shuffle(shuffled);
+        return shuffled;
     }
 
     static <T> Optional<T> value(TmdbLookupResult<T> lookup) {

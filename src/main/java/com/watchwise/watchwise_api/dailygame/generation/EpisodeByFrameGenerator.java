@@ -90,7 +90,8 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
                     continue;
                 }
                 List<String> paths = imagePaths(seriesTmdbId, episode);
-                if (paths.size() >= MINIMUM_STILL_COUNT) {
+                if (DailyChallengeGenerationSupport.date(episode.airDate()).isPresent()
+                        && paths.size() == MINIMUM_STILL_COUNT) {
                     return Optional.of(snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(),
                             episode.episodeNumber(), episode.name(), episode.airDate(), series.name(), series.posterPath(),
                             seriesYear(series.firstAirDate()), paths));

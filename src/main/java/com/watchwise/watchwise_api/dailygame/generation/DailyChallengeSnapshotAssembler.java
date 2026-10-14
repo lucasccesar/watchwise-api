@@ -30,7 +30,9 @@ public class DailyChallengeSnapshotAssembler {
         Map<String, Object> answer = answerSnapshot(DailyGameTargetKind.MOVIE, movie.id(), null, null, null, null,
                 movie.title(), imagePath, null);
         Map<String, Object> presentation = new LinkedHashMap<>();
-        put(presentation, "title", movie.title()); put(presentation, "imagePath", details == null ? movie.posterPath() : details.posterPath()); put(presentation, "tmdbId", movie.id());
+        put(presentation, "title", movie.title()); put(presentation, "imagePath",
+                details == null || trimmed(details.posterPath()) == null ? movie.posterPath() : details.posterPath());
+        put(presentation, "tmdbId", movie.id());
         put(presentation, "year", details == null ? year(movie.releaseDate()) : year(details.releaseDate()));
         if (details != null) {
             putNames(presentation, "genres", details.genres() == null ? null : details.genres().stream().map(v -> v == null ? null : v.name()).toList());
@@ -50,7 +52,9 @@ public class DailyChallengeSnapshotAssembler {
     public DailyChallengeCandidate seriesPoster(TmdbTvSearchResult series, TmdbTvFullDetails details, String imagePath) {
         Map<String, Object> answer = answerSnapshot(DailyGameTargetKind.SERIES, series.id(), null, null, null, null, series.name(), imagePath, null);
         Map<String, Object> presentation = new LinkedHashMap<>();
-        put(presentation, "name", series.name()); put(presentation, "posterPath", details == null ? series.posterPath() : details.posterPath()); put(presentation, "tmdbId", series.id());
+        put(presentation, "name", series.name()); put(presentation, "posterPath",
+                details == null || trimmed(details.posterPath()) == null ? series.posterPath() : details.posterPath());
+        put(presentation, "tmdbId", series.id());
         put(presentation, "year", details == null ? year(series.firstAirDate()) : year(details.firstAirDate()));
         if (details != null) {
             putNames(presentation, "genres", details.genres() == null ? null : details.genres().stream().map(v -> v == null ? null : v.name()).toList());
@@ -99,7 +103,14 @@ public class DailyChallengeSnapshotAssembler {
     public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
                                            String name, String airDate, String seriesName, String seriesPosterPath, Integer seriesYear,
                                            List<String> imagePaths) {
-        imagePaths = imagePaths.stream().filter(v -> v != null && !v.isBlank()).distinct().limit(6).toList();
+        if (DailyChallengeGenerationSupport.date(airDate).isEmpty() || imagePaths == null) {
+            throw new IllegalArgumentException("Episode snapshots require a valid air date and six distinct frame paths");
+        }
+        imagePaths = imagePaths.stream().filter(v -> v != null && !v.isBlank())
+                .map(String::trim).distinct().toList();
+        if (imagePaths.size() != 6) {
+            throw new IllegalArgumentException("Episode snapshots require a valid air date and six distinct frame paths");
+        }
         String imagePath = imagePaths.getFirst();
         Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.EPISODE, null, null,
                 seriesTmdbId, seasonNumber, episodeNumber, name, imagePath, seriesTmdbId);
