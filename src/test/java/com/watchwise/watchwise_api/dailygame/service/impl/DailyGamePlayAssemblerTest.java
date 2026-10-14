@@ -39,6 +39,20 @@ class DailyGamePlayAssemblerTest {
     }
 
     @Test
+    void preservesNegativePotentialScoreWhenOpenProjectionExceedsMaximumAttempts() {
+        var projection = new DailyGamePlayProjection(DATE, RESET, DailyGameType.MOVIE_BY_POSTER,
+                DailyGameTargetKind.MOVIE, 6, 7, DailyGameViewStatus.IN_PROGRESS, 0,
+                List.of(), List.of(), null, false, false);
+
+        var view = assembler.assemble(projection);
+
+        assertThat(view.attemptsRemaining()).isZero();
+        assertThat(view.potentialScore()).isEqualTo(-1);
+        assertThat(view.canAttempt()).isTrue();
+        assertThat(view.canGiveUp()).isFalse();
+    }
+
+    @Test
     void assemblesCompletedSeriesWithZeroPotentialAndAnswer() {
         var answer = answer(DailyGameTargetKind.SERIES, "series", null, null, null,
                 List.of("Drama"), List.of(), List.of());

@@ -13,7 +13,7 @@ final class DailyGamePlayAssembler {
         int attemptsRemaining = Math.max(0, projection.maxAttempts() - projection.attemptsUsed());
         boolean canAttempt = projection.status() == DailyGameViewStatus.NOT_PLAYED
                 || projection.status() == DailyGameViewStatus.IN_PROGRESS;
-        int potentialScore = canAttempt ? attemptsRemaining : 0;
+        int potentialScore = canAttempt ? projection.maxAttempts() - projection.attemptsUsed() : 0;
         List<DailyGameAttemptViewDTO> attempts = projection.attempts();
         if (projection.gameType() != DailyGameType.EPISODE_BY_FRAME) {
             attempts = attempts.stream()
