@@ -23,26 +23,66 @@ import java.util.Map;
 public class DailyChallengeSnapshotAssembler {
 
     public DailyChallengeCandidate moviePoster(TmdbMovieSearchResult movie, String imagePath) {
+        return moviePoster(movie, null, imagePath);
+    }
+
+    public DailyChallengeCandidate moviePoster(TmdbMovieSearchResult movie, TmdbMovieFullDetails details, String imagePath) {
+        Map<String, Object> answer = answerSnapshot(DailyGameTargetKind.MOVIE, movie.id(), null, null, null, null,
+                movie.title(), imagePath, null);
+        Map<String, Object> presentation = new LinkedHashMap<>();
+        put(presentation, "title", movie.title()); put(presentation, "imagePath", details == null ? movie.posterPath() : details.posterPath()); put(presentation, "tmdbId", movie.id());
+        put(presentation, "year", details == null ? year(movie.releaseDate()) : year(details.releaseDate()));
+        if (details != null) {
+            putNames(presentation, "genres", details.genres() == null ? null : details.genres().stream().map(v -> v == null ? null : v.name()).toList());
+            put(presentation, "director", director(details));
+        }
+        answer.put("schemaVersion", 2); answer.put("presentation", presentation);
+        Map<String, Object> display = displaySnapshot(imagePath); display.put("schemaVersion", 2); display.put("variant", Map.of());
         return candidate(DailyGameType.MOVIE_BY_POSTER, DailyGameTargetKind.MOVIE, movie.id(), null, null, null,
                 null, "MOVIE:" + movie.id(), imagePath,
-                answerSnapshot(DailyGameTargetKind.MOVIE, movie.id(), null, null, null, null, movie.title(), imagePath, null),
-                displaySnapshot(imagePath), List.of());
+                answer, display, List.of());
     }
 
     public DailyChallengeCandidate seriesPoster(TmdbTvSearchResult series, String imagePath) {
+        return seriesPoster(series, null, imagePath);
+    }
+
+    public DailyChallengeCandidate seriesPoster(TmdbTvSearchResult series, TmdbTvFullDetails details, String imagePath) {
+        Map<String, Object> answer = answerSnapshot(DailyGameTargetKind.SERIES, series.id(), null, null, null, null, series.name(), imagePath, null);
+        Map<String, Object> presentation = new LinkedHashMap<>();
+        put(presentation, "name", series.name()); put(presentation, "posterPath", details == null ? series.posterPath() : details.posterPath()); put(presentation, "tmdbId", series.id());
+        put(presentation, "year", details == null ? year(series.firstAirDate()) : year(details.firstAirDate()));
+        if (details != null) {
+            putNames(presentation, "genres", details.genres() == null ? null : details.genres().stream().map(v -> v == null ? null : v.name()).toList());
+            putNames(presentation, "creators", details.createdBy() == null ? null : details.createdBy().stream().map(v -> v == null ? null : v.name()).toList());
+            put(presentation, "numberOfSeasons", details.numberOfSeasons());
+        }
+        answer.put("schemaVersion", 2); answer.put("presentation", presentation);
+        Map<String, Object> display = displaySnapshot(imagePath); display.put("schemaVersion", 2); display.put("variant", Map.of());
         return candidate(DailyGameType.SERIES_BY_POSTER, DailyGameTargetKind.SERIES, series.id(), null, null, null,
                 null, "SERIES:" + series.id(), imagePath,
-                answerSnapshot(DailyGameTargetKind.SERIES, series.id(), null, null, null, null, series.name(), imagePath, null),
-                displaySnapshot(imagePath), List.of());
+                answer, display, List.of());
     }
 
     public DailyChallengeCandidate person(DailyGameType gameType, String personTmdbId, String name, String imagePath,
                                           String sourceTmdbId, List<DailyChallengeCandidate.HintSnapshot> hints) {
+        return person(gameType, personTmdbId, name, imagePath, sourceTmdbId, hints, List.of());
+    }
+
+    public DailyChallengeCandidate person(DailyGameType gameType, String personTmdbId, String name, String imagePath,
+                                          String sourceTmdbId, List<DailyChallengeCandidate.HintSnapshot> hints, List<String> knownForTitles) {
+        return person(gameType, personTmdbId, name, imagePath, imagePath, sourceTmdbId, hints, knownForTitles);
+    }
+
+    public DailyChallengeCandidate person(DailyGameType gameType, String personTmdbId, String name, String imageUrl,
+                                          String profilePath, String sourceTmdbId,
+                                          List<DailyChallengeCandidate.HintSnapshot> hints, List<String> knownForTitles) {
+        Map<String, Object> answer = answerSnapshot(DailyGameTargetKind.PERSON, null, personTmdbId, null, null, null, name, imageUrl, sourceTmdbId);
+        Map<String, Object> presentation = new LinkedHashMap<>(); put(presentation, "name", name); put(presentation, "profilePath", profilePath); put(presentation, "personTmdbId", personTmdbId); putNames(presentation, "knownForTitles", knownForTitles);
+        answer.put("schemaVersion", 2); answer.put("presentation", presentation);
+        Map<String, Object> display = displaySnapshot(imageUrl); display.put("schemaVersion", 2); display.put("variant", Map.of());
         return candidate(gameType, DailyGameTargetKind.PERSON, personTmdbId, null, null, null, sourceTmdbId,
-                "PERSON:" + personTmdbId, imagePath,
-                answerSnapshot(DailyGameTargetKind.PERSON, null, personTmdbId, null, null, null, name, imagePath,
-                        sourceTmdbId),
-                displaySnapshot(imagePath), hints);
+                "PERSON:" + personTmdbId, imageUrl, answer, display, hints);
     }
 
     public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
@@ -53,6 +93,13 @@ public class DailyChallengeSnapshotAssembler {
     public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
                                            String name, String seriesName, String seriesPosterPath, Integer seriesYear,
                                            List<String> imagePaths) {
+        return episode(seriesTmdbId, seasonNumber, episodeNumber, name, null, seriesName, seriesPosterPath, seriesYear, imagePaths);
+    }
+
+    public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
+                                           String name, String airDate, String seriesName, String seriesPosterPath, Integer seriesYear,
+                                           List<String> imagePaths) {
+        imagePaths = imagePaths.stream().filter(v -> v != null && !v.isBlank()).distinct().limit(6).toList();
         String imagePath = imagePaths.getFirst();
         Map<String, Object> answerSnapshot = answerSnapshot(DailyGameTargetKind.EPISODE, null, null,
                 seriesTmdbId, seasonNumber, episodeNumber, name, imagePath, seriesTmdbId);
@@ -60,12 +107,17 @@ public class DailyChallengeSnapshotAssembler {
         put(answerSnapshot, "seriesPosterPath", seriesPosterPath);
         put(answerSnapshot, "seriesYear", seriesYear);
         put(answerSnapshot, "episodeName", name);
+        Map<String,Object> presentation = new LinkedHashMap<>(); put(presentation,"episodeName",name); put(presentation,"airDate",airDate); put(presentation,"seriesName",seriesName); put(presentation,"seriesPosterPath",seriesPosterPath); put(presentation,"seriesYear",seriesYear); put(presentation,"seriesTmdbId",seriesTmdbId); put(presentation,"seasonNumber",seasonNumber); put(presentation,"episodeNumber",episodeNumber);
+        answerSnapshot.put("schemaVersion",2); answerSnapshot.put("presentation",presentation);
+        Map<String,Object> display = displaySnapshot(imagePaths); display.put("schemaVersion",2); display.put("variant",Map.of("framePaths",List.copyOf(imagePaths)));
         return candidate(DailyGameType.EPISODE_BY_FRAME, DailyGameTargetKind.EPISODE, null, seriesTmdbId,
                 seasonNumber, episodeNumber, seriesTmdbId,
                 "EPISODE:" + seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber, imagePath,
                 answerSnapshot,
-                displaySnapshot(imagePaths), List.of());
+                display, List.of());
     }
+
+    private void put(Map<String,Object> map, String key, Integer value) { if (value != null) map.put(key,value); }
 
     public DailyChallengeCandidate movieInfo(TmdbMovieFullDetails movie, String imagePath,
                                              List<DailyChallengeCandidate.HintSnapshot> hints) {

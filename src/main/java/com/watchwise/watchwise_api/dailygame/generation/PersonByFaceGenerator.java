@@ -67,8 +67,17 @@ public class PersonByFaceGenerator implements DailyChallengeGenerator {
 
         return DailyChallengeGenerationSupport.randomItem(new ArrayList<>(people.values()), person ->
                         !excludedAnswerKeys.contains("PERSON:" + person.id()))
-                .map(person -> snapshotAssembler.person(DailyGameType.PERSON_BY_FACE, String.valueOf(person.id()),
-                        person.name(), TmdbImageUrlBuilder.profileUrl(person.profilePath()), null, List.of()));
+                .flatMap(person -> DailyChallengeGenerationSupport.value(tmdbClient.getPersonAggregate(
+                        String.valueOf(person.id()), TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                        .filter(aggregate -> String.valueOf(person.id()).equals(aggregate.id()))
+                        .map(aggregate -> snapshotAssembler.person(DailyGameType.PERSON_BY_FACE, String.valueOf(person.id()),
+                                person.name(), TmdbImageUrlBuilder.profileUrl(person.profilePath()), person.profilePath(), null, List.of(),
+                                aggregate.combinedCredits() == null ? List.of() : java.util.stream.Stream.concat(
+                                        aggregate.combinedCredits().cast() == null ? java.util.stream.Stream.empty() : aggregate.combinedCredits().cast().stream(),
+                                        aggregate.combinedCredits().crew() == null ? java.util.stream.Stream.empty() : aggregate.combinedCredits().crew().stream())
+                                        .filter(credit -> credit != null)
+                                        .map(credit -> credit.title() == null ? credit.name() : credit.title())
+                                        .filter(title -> title != null && !title.isBlank()).distinct().limit(5).toList())));
     }
 
     private void addMoviePeople(Map<Integer, PersonCandidate> people, TmdbMovieFullDetails movie) {

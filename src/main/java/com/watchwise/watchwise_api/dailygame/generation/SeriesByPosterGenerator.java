@@ -40,8 +40,13 @@ public class SeriesByPosterGenerator implements DailyChallengeGenerator {
                         series != null && !excludedAnswerKeys.contains("SERIES:" + series.id())
                                 && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(series.originalLanguage())))
                 .filter(this::isUsable)
-                .map(series -> snapshotAssembler.seriesPoster(series,
-                        TmdbImageUrlBuilder.posterUrl(series.posterPath())));
+                .flatMap(series -> DailyChallengeGenerationSupport.value(tmdbClient.getTvFullDetails(series.id(),
+                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)).filter(details -> series.id().equals(details.id())
+                        && details.firstAirDate() != null && details.genres() != null && !details.genres().isEmpty()
+                        && details.createdBy() != null && !details.createdBy().isEmpty()
+                        && details.numberOfSeasons() != null && details.numberOfSeasons() > 0)
+                        .map(details -> snapshotAssembler.seriesPoster(series, details,
+                                TmdbImageUrlBuilder.posterUrl(series.posterPath()))));
     }
 
     private boolean isUsable(TmdbTvSearchResult series) {

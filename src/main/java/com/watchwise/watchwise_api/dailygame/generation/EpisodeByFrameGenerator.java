@@ -92,7 +92,7 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
                 List<String> paths = imagePaths(seriesTmdbId, episode);
                 if (paths.size() >= MINIMUM_STILL_COUNT) {
                     return Optional.of(snapshotAssembler.episode(seriesTmdbId, episode.seasonNumber(),
-                            episode.episodeNumber(), episode.name(), series.name(), series.posterPath(),
+                            episode.episodeNumber(), episode.name(), episode.airDate(), series.name(), series.posterPath(),
                             seriesYear(series.firstAirDate()), paths));
                 }
             }
@@ -113,7 +113,7 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
                 .forEach(paths::add);
         List<String> ordered = new ArrayList<>(paths);
         Collections.reverse(ordered);
-        return List.copyOf(ordered);
+        return List.copyOf(ordered.subList(0, Math.min(6, ordered.size())));
     }
 
     private boolean isRegularSeason(TmdbSeasonSummary season) {
@@ -128,7 +128,7 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
         season.episodes().stream()
                 .filter(episode -> isReleasedEpisode(episode, challengeDate))
                 .forEach(episode -> candidates.add(new EpisodeCandidate(season.seasonNumber(), episode.episodeNumber(),
-                        episode.name())));
+                        episode.name(), episode.airDate())));
     }
 
     private boolean isReleasedEpisode(TmdbEpisodeSummary episode, LocalDate challengeDate) {
@@ -151,7 +151,7 @@ public class EpisodeByFrameGenerator implements DailyChallengeGenerator {
         return shuffled;
     }
 
-    private record EpisodeCandidate(Integer seasonNumber, Integer episodeNumber, String name) {
+    private record EpisodeCandidate(Integer seasonNumber, Integer episodeNumber, String name, String airDate) {
     }
 
     private record TmdbLookup<T>(com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult<T> result) {

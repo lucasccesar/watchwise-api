@@ -65,7 +65,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
 
     private boolean repairMovieInformation(DailyChallenge challenge) {
         if (DailyChallengeInfoSupport.hasComparableInfo(
-                challenge.getAnswerSnapshot(), DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)) {
+                decodedAnswerSnapshot(challenge.getAnswerSnapshot()), DailyChallengeInfoSupport.MOVIE_COMPARABLE_FIELDS)) {
             return false;
         }
         if (!usable(challenge.getTargetTmdbId()) || !usable(challenge.getImagePath())) {
@@ -92,7 +92,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
 
     private boolean repairSeriesInformation(DailyChallenge challenge) {
         if (DailyChallengeInfoSupport.hasComparableInfo(
-                challenge.getAnswerSnapshot(), DailyChallengeInfoSupport.SERIES_COMPARABLE_FIELDS)) {
+                decodedAnswerSnapshot(challenge.getAnswerSnapshot()), DailyChallengeInfoSupport.SERIES_COMPARABLE_FIELDS)) {
             return false;
         }
         if (!usable(challenge.getTargetTmdbId()) || !usable(challenge.getImagePath())) {
@@ -268,7 +268,7 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
     }
 
     private boolean hasConsistentSnapshotIdentity(DailyChallenge challenge) {
-        Map<String, Object> snapshot = challenge.getAnswerSnapshot();
+        Map<String, Object> snapshot = decodedAnswerSnapshot(challenge.getAnswerSnapshot());
         if (snapshot == null || snapshot.isEmpty()) {
             return true;
         }
@@ -282,6 +282,25 @@ public class DailyChallengeSnapshotRepairServiceImpl implements DailyChallengeSn
                 && matchesIdentity(snapshot, "tmdbId", targetTmdbId)
                 && matchesIdentity(snapshot, "personTmdbId", personTmdbId)
                 && matchesIdentity(snapshot, "sourceTmdbId", challenge.getSourceTmdbId());
+    }
+
+    /** Reads both legacy flat maps and v2 maps while retaining flat keys for raw-route consumers. */
+    private Map<String, Object> decodedAnswerSnapshot(Map<String, Object> snapshot) {
+        if (snapshot == null || snapshot.isEmpty()) {
+            return snapshot;
+        }
+        Map<String, Object> decoded = new LinkedHashMap<>(snapshot);
+        for (String section : List.of("identity", "presentation")) {
+            Object value = snapshot.get(section);
+            if (value instanceof Map<?, ?> fields) {
+                fields.forEach((key, fieldValue) -> {
+                    if (key instanceof String name) {
+                        decoded.putIfAbsent(name, fieldValue);
+                    }
+                });
+            }
+        }
+        return decoded;
     }
 
     private boolean matchesIdentity(Map<String, Object> snapshot, String field, String expected) {

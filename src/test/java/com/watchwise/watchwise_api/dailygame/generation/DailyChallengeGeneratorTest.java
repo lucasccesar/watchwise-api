@@ -109,7 +109,8 @@ class DailyChallengeGeneratorTest {
     @DisplayName("[generate] Should Choose A Supported Discovery Page - When Generating A Movie Poster Challenge")
     void shouldChooseASupportedDiscoveryPageWhenGeneratingAMoviePosterChallenge() {
         when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
-                .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"))));
+                .thenReturn(found(moviePage(new TmdbMovieSearchResult("550", "2001: A Space Odyssey", "/fight.jpg", "1968-04-02"))));
+        when(tmdbClient.getMovieFullDetails("550", LANGUAGE)).thenReturn(found(new TmdbMovieFullDetails("550", "2001: A Space Odyssey", "2001: A Space Odyssey", null, null, "/fight.jpg", null, "1968-04-02", null, List.of(new TmdbGenre(878, "Science Fiction")), List.of(), new TmdbCredits(List.of(), List.of(new com.watchwise.watchwise_api.common.tmdb.TmdbCrewMember(1, "Stanley Kubrick", "Director", null))), null, null, null, null, null, null, null, null, null, null)));
 
         DailyChallengeCandidate candidate = new MovieByPosterGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE)
@@ -119,6 +120,9 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.targetKind()).isEqualTo(DailyGameTargetKind.MOVIE);
         assertThat(candidate.answerKey()).isEqualTo("MOVIE:550");
         assertThat(candidate.imagePath()).isEqualTo("https://image.tmdb.org/t/p/w500/fight.jpg");
+        assertThat(candidate.answerSnapshot()).containsEntry("schemaVersion", 2).containsEntry("title", "2001: A Space Odyssey");
+        assertThat(((Map<?, ?>) candidate.answerSnapshot().get("presentation")).get("year")).isEqualTo(1968);
+        assertThat(((Map<?, ?>) candidate.answerSnapshot().get("presentation")).get("director")).isEqualTo("Stanley Kubrick");
         verify(tmdbClient).getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE));
     }
 
@@ -158,6 +162,7 @@ class DailyChallengeGeneratorTest {
                 .thenReturn(found(new TmdbSearchPage<>(1, List.of(
                         new TmdbMovieSearchResult("550", "Fight Club", "/fight.jpg", "1999-10-15"),
                         new TmdbMovieSearchResult("680", "Pulp Fiction", "/pulp.jpg", "1994-09-10")), 1, 2)));
+        when(tmdbClient.getMovieFullDetails(eq("680"), eq(LANGUAGE))).thenReturn(found(movieDetailsWithInfo("680")));
 
         DailyChallengeCandidate candidate = new MovieByPosterGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE, Set.of("MOVIE:550"))
@@ -171,6 +176,7 @@ class DailyChallengeGeneratorTest {
     void shouldCreateTheSeriesAnswerKeyWhenAPopularSeriesIsEligible() {
         when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
                 .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetailsWithInfo("1396")));
 
         DailyChallengeCandidate candidate = new SeriesByPosterGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE)
@@ -178,6 +184,8 @@ class DailyChallengeGeneratorTest {
 
         assertThat(candidate.answerKey()).isEqualTo("SERIES:1396");
         assertThat(candidate.targetTmdbId()).isEqualTo("1396");
+        assertThat(candidate.answerSnapshot()).containsEntry("schemaVersion", 2);
+        assertThat(((Map<?, ?>) candidate.answerSnapshot().get("presentation")).get("creators")).isEqualTo(List.of("Dan Erickson"));
     }
 
     @Test
@@ -193,6 +201,8 @@ class DailyChallengeGeneratorTest {
         when(tmdbClient.getTvFullDetails("1396", LANGUAGE))
                 .thenReturn(found(seriesDetails("1396", "Breaking Bad", new TmdbAggregateCredits(
                         List.of(new TmdbAggregateCastMember(287, "Brad Pitt", "/brad.jpg", List.of(new TmdbAggregateRole("Tyler")), 10)), List.of()))));
+        when(tmdbClient.getPersonAggregate("287", LANGUAGE)).thenReturn(found(personAggregate("287", "Brad Pitt",
+                new TmdbPersonAggregateCredit("1", "tv", null, "The Office", "/x.jpg", null, "2005-01-01", null, null))));
 
         DailyChallengeCandidate candidate = new PersonByFaceGenerator(tmdbClient, snapshotAssembler)
                 .generate(CHALLENGE_DATE)
@@ -201,6 +211,7 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.answerKey()).isEqualTo("PERSON:287");
         assertThat(candidate.targetTmdbId()).isEqualTo("287");
         assertThat(candidate.answerSnapshot().get("title")).isEqualTo("Brad Pitt");
+        assertThat(((Map<?, ?>) candidate.answerSnapshot().get("presentation")).get("knownForTitles")).isEqualTo(List.of("The Office"));
     }
 
     @Test
@@ -212,7 +223,7 @@ class DailyChallengeGeneratorTest {
                         new TmdbEpisodeSummary(0, "Special", null, "2008-01-01", 10, "/special.jpg", List.of()),
                         new TmdbEpisodeSummary(1, "Missing frame", null, "2008-01-20", 10, null, List.of()),
                         new TmdbEpisodeSummary(2, "Future", null, "2026-09-28", 10, "/future.jpg", List.of()),
-                        new TmdbEpisodeSummary(3, "Valid", null, "2026-09-27", 10, "/valid.jpg", List.of())), null, null);
+                        new TmdbEpisodeSummary(3, "Valid", null, "2006-05-11", 10, "/valid.jpg", List.of())), null, null);
         TmdbTvFullDetails series = seriesDetails("1396", "Breaking Bad", null, List.of(
                 new TmdbSeasonSummary(0, "Specials", null, "2008-01-01", 1, null),
                 new TmdbSeasonSummary(1, "Season 1", null, "2008-01-20", 4, null)));
@@ -237,6 +248,11 @@ class DailyChallengeGeneratorTest {
         assertThat(candidate.episodeNumber()).isEqualTo(3);
         assertThat(candidate.imagePath()).isEqualTo("/sixth.jpg");
         assertThat(candidate.displaySnapshot().get("imagePaths"))
+                .isEqualTo(List.of("/sixth.jpg", "/fifth.jpg", "/fourth.jpg", "/third.jpg", "/second.jpg", "/first.jpg"));
+        assertThat(((Map<?, ?>) candidate.answerSnapshot().get("presentation")).get("airDate")).isEqualTo("2006-05-11");
+        assertThat(candidate.displaySnapshot().get("imagePaths")).asList().hasSize(6);
+        assertThat(candidate.displaySnapshot()).containsEntry("schemaVersion", 2);
+        assertThat(((Map<?, ?>) candidate.displaySnapshot().get("variant")).get("framePaths"))
                 .isEqualTo(List.of("/sixth.jpg", "/fifth.jpg", "/fourth.jpg", "/third.jpg", "/second.jpg", "/first.jpg"));
         assertThat(candidate.answerSnapshot())
                 .containsEntry("seriesName", "Breaking Bad")
@@ -419,7 +435,7 @@ class DailyChallengeGeneratorTest {
                 .containsEntry("platforms", List.of("Netflix"))
                 .containsEntry("genres", List.of("Drama"))
                 .containsEntry("year", 2008)
-                .containsEntry("creators", List.of("Vince Gilligan"))
+                .containsEntry("creators", List.of("Dan Erickson"))
                 .containsEntry("cast", List.of("Bryan Cranston"))
                 .containsEntry("productionCompanies", List.of("Sony Pictures Television"))
                 .containsEntry("seasons", 5)
@@ -659,7 +675,7 @@ class DailyChallengeGeneratorTest {
 
     private static TmdbTvFullDetails seriesDetailsWithInfo(String id) {
         return new TmdbTvFullDetails(id, "Breaking Bad", "Breaking Bad", null, "/breaking-bad.jpg", null, "2008-01-20", List.of(),
-                List.of(new TmdbGenre(18, "Drama")), List.of(), List.of(new TmdbCreator(666, "Vince Gilligan", null)), List.of(), null,
+                List.of(new TmdbGenre(18, "Drama")), List.of(), List.of(new TmdbCreator(666, "Dan Erickson", null)), List.of(), null,
                 new TmdbAggregateCredits(List.of(new TmdbAggregateCastMember(17419, "Bryan Cranston", "/bryan.jpg", List.of(), 62)), List.of()),
                 new TmdbWatchProviders(Map.of("BR", new TmdbRegionProviders(
                         List.of(new com.watchwise.watchwise_api.common.tmdb.TmdbProvider("Netflix", "/netflix.jpg")), List.of(), List.of()))),

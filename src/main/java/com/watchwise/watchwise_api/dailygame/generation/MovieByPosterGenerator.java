@@ -40,7 +40,13 @@ public class MovieByPosterGenerator implements DailyChallengeGenerator {
                         movie != null && !excludedAnswerKeys.contains("MOVIE:" + movie.id())
                                 && !DailyChallengeGenerationSupport.isAsianOriginalLanguage(movie.originalLanguage())))
                 .filter(this::isUsable)
-                .map(movie -> snapshotAssembler.moviePoster(movie, TmdbImageUrlBuilder.posterUrl(movie.posterPath())));
+                .flatMap(movie -> DailyChallengeGenerationSupport.value(tmdbClient.getMovieFullDetails(movie.id(),
+                        TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE)).filter(details -> movie.id().equals(details.id())
+                        && details.releaseDate() != null && details.genres() != null && !details.genres().isEmpty()
+                        && details.credits() != null && details.credits().crew() != null
+                        && details.credits().crew().stream().anyMatch(crew -> crew != null && "Director".equalsIgnoreCase(crew.job())
+                        && crew.name() != null && !crew.name().isBlank()))
+                        .map(details -> snapshotAssembler.moviePoster(movie, details, TmdbImageUrlBuilder.posterUrl(movie.posterPath()))));
     }
 
     private boolean isUsable(TmdbMovieSearchResult movie) {
