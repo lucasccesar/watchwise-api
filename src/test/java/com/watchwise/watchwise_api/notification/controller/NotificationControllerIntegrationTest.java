@@ -7,11 +7,15 @@ import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.follower.entity.FollowStatus;
+import com.watchwise.watchwise_api.follower.entity.Follower;
+import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.jayway.jsonpath.JsonPath;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +36,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -67,6 +72,9 @@ class NotificationControllerIntegrationTest {
     private NotificationRepository notificationRepository;
 
     @Autowired
+    private FollowerRepository followerRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
@@ -78,6 +86,7 @@ class NotificationControllerIntegrationTest {
     void setUp() {
         refreshTokenRepository.deleteAll();
         notificationRepository.deleteAll();
+        followerRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
         RequestThrottlerTestSupport.reset(requestThrottler);
@@ -144,6 +153,184 @@ class NotificationControllerIntegrationTest {
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+    }
+
+    private void persistPendingFollow(UUID requesterId, UUID targetId) {
+        followerRepository.saveAndFlush(Follower.builder()
+                .follower(userRepository.getReferenceById(requesterId))
+                .followed(userRepository.getReferenceById(targetId))
+                .status(FollowStatus.PENDING)
+                .createdAt(LocalDateTime.now())
+                .build());
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Return Unauthorized - When No Access Token Cookie Is Present")
+    void shouldReturnUnauthorizedWhenNoAccessTokenCookieIsPresentForView() throws Exception {
+        mockMvc.perform(get("/notifications/view"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Isolate Recipient And Keep Global Counts - When Read Filter Is Applied")
+    void shouldIsolateRecipientAndKeepGlobalCountsWhenReadFilterIsApplied() throws Exception {
+        RegisteredUser owner = registerUser("viewowner");
+        RegisteredUser otherOwner = registerUser("viewotherowner");
+        RegisteredUser actor = registerUser("viewactor");
+
+        notificationRepository.saveAndFlush(buildFollowNotification(owner.id(), actor.id()));
+        Notification readNotification = buildFollowNotification(owner.id(), actor.id());
+        readNotification.setIsRead(true);
+        notificationRepository.saveAndFlush(readNotification);
+        notificationRepository.saveAndFlush(buildFollowNotification(otherOwner.id(), actor.id()));
+
+        mockMvc.perform(get("/notifications/view")
+                        .param("isRead", "false")
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].latestActor.id").value(actor.id().toString()))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalNotifications").value(2))
+                .andExpect(jsonPath("$.unreadNotifications").value(1))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(20));
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Clamp Size And Preserve Page Convention - When Requested Size Exceeds Cap")
+    void shouldClampSizeAndPreservePageConventionWhenRequestedSizeExceedsCap() throws Exception {
+        RegisteredUser owner = registerUser("viewpagesowner");
+        RegisteredUser actor = registerUser("viewpagesactor");
+        for (int index = 0; index < 21; index++) {
+            Notification notification = buildFollowNotification(owner.id(), actor.id());
+            notification.setCreatedAt(LocalDateTime.now().minusSeconds(index));
+            notification.setUpdatedAt(notification.getCreatedAt());
+            notificationRepository.save(notification);
+        }
+        notificationRepository.flush();
+
+        mockMvc.perform(get("/notifications/view")
+                        .param("page", "0")
+                        .param("size", "100")
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.content.length()").value(20))
+                .andExpect(jsonPath("$.totalElements").value(21))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.hasNext").value(true));
+
+        mockMvc.perform(get("/notifications/view")
+                        .param("page", "1")
+                        .param("size", "100")
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.content.length()").value(20));
+
+        mockMvc.perform(get("/notifications/view")
+                        .param("page", "2")
+                        .param("size", "100")
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false));
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Return Empty Page And Global Counts - When Requested Page Is Beyond Results")
+    void shouldReturnEmptyPageAndGlobalCountsWhenRequestedPageIsBeyondResults() throws Exception {
+        RegisteredUser owner = registerUser("viewemptyowner");
+        RegisteredUser actor = registerUser("viewemptyactor");
+        notificationRepository.saveAndFlush(buildFollowNotification(owner.id(), actor.id()));
+
+        mockMvc.perform(get("/notifications/view")
+                        .param("page", "2")
+                        .param("size", "20")
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.totalNotifications").value(1))
+                .andExpect(jsonPath("$.unreadNotifications").value(1));
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Return ApiError - When Pagination Or Boolean Binding Is Invalid")
+    void shouldReturnApiErrorWhenPaginationOrBooleanBindingIsInvalid() throws Exception {
+        RegisteredUser owner = registerUser("viewinvalidowner");
+
+        mockMvc.perform(get("/notifications/view")
+                        .param("page", "-1")
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.title").doesNotExist());
+
+        mockMvc.perform(get("/notifications/view")
+                        .param("isRead", "not-a-boolean")
+                        .cookie(owner.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.title").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[acceptFollowRequest] Should Accept Request Using latestActor Id From Visual Notification - When Follow Request Exists")
+    void shouldAcceptRequestUsingLatestActorIdFromVisualNotificationWhenFollowRequestExists() throws Exception {
+        RegisteredUser target = registerUser("viewaccepttarget");
+        RegisteredUser requester = registerUser("viewacceptrequester");
+        persistPendingFollow(requester.id(), target.id());
+        notificationRepository.saveAndFlush(buildFollowNotification(target.id(), requester.id()));
+
+        MvcResult view = mockMvc.perform(get("/notifications/view").cookie(target.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].latestActor.id").value(requester.id().toString()))
+                .andReturn();
+        String requesterIdFromView = JsonPath.read(view.getResponse().getContentAsString(),
+                "$.content[0].latestActor.id");
+
+        mockMvc.perform(post("/users/me/follow-requests/{requesterId}/accept", requesterIdFromView)
+                        .cookie(target.accessToken(), target.csrfToken())
+                        .header("X-XSRF-TOKEN", target.csrfToken().getValue()))
+                .andExpect(status().isNoContent());
+
+        assertThat(followerRepository.findByFollowerIdAndFollowedId(requester.id(), target.id()).orElseThrow()
+                .getStatus()).isEqualTo(FollowStatus.ACCEPTED);
+    }
+
+    @Test
+    @DisplayName("[rejectFollowRequest] Should Reject Request Using latestActor Id From Visual Notification - When Follow Request Exists")
+    void shouldRejectRequestUsingLatestActorIdFromVisualNotificationWhenFollowRequestExists() throws Exception {
+        RegisteredUser target = registerUser("viewrejecttarget");
+        RegisteredUser requester = registerUser("viewrejectrequester");
+        persistPendingFollow(requester.id(), target.id());
+        notificationRepository.saveAndFlush(buildFollowNotification(target.id(), requester.id()));
+
+        MvcResult view = mockMvc.perform(get("/notifications/view").cookie(target.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].latestActor.id").value(requester.id().toString()))
+                .andReturn();
+        String requesterIdFromView = JsonPath.read(view.getResponse().getContentAsString(),
+                "$.content[0].latestActor.id");
+
+        mockMvc.perform(delete("/users/me/follow-requests/{requesterId}", requesterIdFromView)
+                        .cookie(target.accessToken(), target.csrfToken())
+                        .header("X-XSRF-TOKEN", target.csrfToken().getValue()))
+                .andExpect(status().isNoContent());
+
+        assertThat(followerRepository.findByFollowerIdAndFollowedId(requester.id(), target.id())).isEmpty();
     }
 
     @Test

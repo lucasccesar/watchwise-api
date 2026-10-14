@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.notification.controller;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
+import com.watchwise.watchwise_api.notification.dto.NotificationPageViewDTO;
 import com.watchwise.watchwise_api.notification.dto.NotificationResponseDTO;
 import com.watchwise.watchwise_api.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,16 @@ public class NotificationController {
     ) {
         Page<NotificationResponseDTO> notifications = notificationService.getNotifications(getCurrentUserId(), isRead, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(notifications));
+    }
+
+    @GetMapping("/view")
+    public ResponseEntity<NotificationPageViewDTO> getNotificationsView(
+            @RequestParam(required = false) Boolean isRead,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        return ResponseEntity.ok(notificationService.getNotificationsView(
+                getCurrentUserId(), isRead, page, size));
     }
 
     @PatchMapping("/{notificationId}/read")

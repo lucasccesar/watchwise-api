@@ -8,11 +8,14 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.notification.dto.NotificationResponseDTO;
+import com.watchwise.watchwise_api.notification.dto.NotificationPageViewDTO;
+import com.watchwise.watchwise_api.notification.dto.NotificationViewDTO;
 import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.mapper.NotificationMapper;
 import com.watchwise.watchwise_api.notification.mapper.NotificationMapperImpl;
+import com.watchwise.watchwise_api.notification.repository.NotificationCountsProjection;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
@@ -43,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -51,6 +55,9 @@ class NotificationServiceImplTest {
 
     @Mock
     private NotificationRepository notificationRepository;
+
+    @Mock
+    private NotificationViewAssembler notificationViewAssembler;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -107,8 +114,6 @@ class NotificationServiceImplTest {
                 .isRead(false).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(notificationRepository.findByUserIdOrderByCreatedAtDesc(eq(userId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(socialNotification, notification)));
-
-        notification.setLatestActor(latestActor);
 
         Page<NotificationResponseDTO> result = notificationService.getNotifications(userId, null, 1, 10);
 
@@ -236,6 +241,98 @@ class NotificationServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getNotificationsView] Should Return Filtered Rows And Global Counts - When Read Filter Is Provided")
+    void shouldReturnFilteredRowsAndGlobalCountsWhenReadFilterIsProvided() {
+        NotificationViewDTO visualNotification = notificationView(notification.getId());
+        when(notificationRepository.findByUserIdAndIsReadOrderByCreatedAtDesc(
+                eq(userId), eq(false), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(notification, notification, notification), PageRequest.of(0, 20), 3));
+        when(notificationViewAssembler.assemble(any(), eq(userId)))
+                .thenReturn(List.of(visualNotification, visualNotification, visualNotification));
+        when(notificationRepository.findCountsByUserId(userId)).thenReturn(counts(5, 2));
+
+        NotificationPageViewDTO result = notificationService.getNotificationsView(userId, false, 1, 50);
+
+        assertThat(result.content()).containsExactly(visualNotification, visualNotification, visualNotification);
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.size()).isEqualTo(20);
+        assertThat(result.totalElements()).isEqualTo(3);
+        assertThat(result.totalPages()).isEqualTo(1);
+        assertThat(result.hasNext()).isFalse();
+        assertThat(result.totalNotifications()).isEqualTo(5);
+        assertThat(result.unreadNotifications()).isEqualTo(2);
+        verify(notificationRepository).findByUserIdAndIsReadOrderByCreatedAtDesc(
+                eq(userId), eq(false), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(0);
+        assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(20);
+        verify(notificationRepository).findCountsByUserId(userId);
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Preserve First Page Convention - When Page Is Zero Or One")
+    void shouldPreserveFirstPageConventionWhenPageIsZeroOrOne() {
+        when(notificationRepository.findByUserIdOrderByCreatedAtDesc(eq(userId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(notification), PageRequest.of(0, 10), 1));
+        when(notificationViewAssembler.assemble(any(), eq(userId))).thenReturn(List.of(notificationView(notification.getId())));
+        when(notificationRepository.findCountsByUserId(userId)).thenReturn(counts(1, 1));
+
+        notificationService.getNotificationsView(userId, null, 0, 10);
+        notificationService.getNotificationsView(userId, null, 1, 10);
+
+        verify(notificationRepository, times(2))
+                .findByUserIdOrderByCreatedAtDesc(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getAllValues()).extracting(PageRequest::getPageNumber)
+                .containsExactly(0, 0);
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Address Second Page - When Page Is Two")
+    void shouldAddressSecondPageWhenPageIsTwo() {
+        when(notificationRepository.findByUserIdOrderByCreatedAtDesc(eq(userId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(notification), PageRequest.of(1, 10), 11));
+        when(notificationViewAssembler.assemble(any(), eq(userId))).thenReturn(List.of(notificationView(notification.getId())));
+        when(notificationRepository.findCountsByUserId(userId)).thenReturn(counts(11, 1));
+
+        NotificationPageViewDTO result = notificationService.getNotificationsView(userId, null, 2, 10);
+
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.size()).isEqualTo(10);
+        assertThat(result.totalElements()).isEqualTo(11);
+        verify(notificationRepository).findByUserIdOrderByCreatedAtDesc(eq(userId), pageRequestCaptor.capture());
+        assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Return Empty Page With Global Counts - When Requested Page Has No Rows")
+    void shouldReturnEmptyPageWithGlobalCountsWhenRequestedPageHasNoRows() {
+        when(notificationRepository.findByUserIdOrderByCreatedAtDesc(eq(userId), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(1, 20), 1));
+        when(notificationViewAssembler.assemble(any(), eq(userId))).thenReturn(List.of());
+        when(notificationRepository.findCountsByUserId(userId)).thenReturn(counts(1, 1));
+
+        NotificationPageViewDTO result = notificationService.getNotificationsView(userId, null, 2, 20);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.size()).isEqualTo(20);
+        assertThat(result.totalElements()).isEqualTo(1);
+        assertThat(result.totalPages()).isEqualTo(1);
+        assertThat(result.hasNext()).isFalse();
+        assertThat(result.totalNotifications()).isEqualTo(1);
+        assertThat(result.unreadNotifications()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[getNotificationsView] Should Reject Invalid Page - When Page Is Negative")
+    void shouldRejectInvalidPageWhenPageIsNegative() {
+        assertThatThrownBy(() -> notificationService.getNotificationsView(userId, null, -1, 20))
+                .isInstanceOf(BadRequestException.class);
+
+        verify(notificationRepository, never()).findCountsByUserId(any());
+        verifyNoVisualReads();
+    }
+
+    @Test
     @DisplayName("[getNotifications] Should Throw BadRequestException - When Page Size Is Negative")
     void shouldThrowBadRequestExceptionWhenPageSizeIsNegative() {
         assertThatThrownBy(() -> notificationService.getNotifications(userId, null, 1, -5))
@@ -290,6 +387,31 @@ class NotificationServiceImplTest {
 
     private void stubEmptyPage() {
         when(notificationRepository.findByUserIdOrderByCreatedAtDesc(any(), any(PageRequest.class))).thenReturn(Page.empty());
+    }
+
+    private NotificationViewDTO notificationView(UUID notificationId) {
+        return new NotificationViewDTO(
+                notificationId, notification.getType(), notification.getMessage(), null, null,
+                notification.getIsRead(), notification.getCreatedAt(), notification.getUpdatedAt(),
+                null, null, null, null, null, null, null);
+    }
+
+    private NotificationCountsProjection counts(long total, long unread) {
+        return new NotificationCountsProjection() {
+            @Override
+            public long getTotalNotifications() {
+                return total;
+            }
+
+            @Override
+            public long getUnreadNotifications() {
+                return unread;
+            }
+        };
+    }
+
+    private void verifyNoVisualReads() {
+        verify(notificationViewAssembler, never()).assemble(any(), any());
     }
 
     private static NotificationMapper buildRealNotificationMapper() {
