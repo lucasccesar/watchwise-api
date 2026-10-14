@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import java.awt.AlphaComposite;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -99,7 +100,18 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
         }
         BufferedImage decoded = decode(source);
         if (grant.variant() == DailyGameImageVariant.ORIGINAL) {
-            return new DailyGameMediaResponseDTO(source.body().clone(), source.mediaType());
+            boolean png = MediaType.IMAGE_PNG.isCompatibleWith(source.mediaType());
+            BufferedImage safeImage = new BufferedImage(decoded.getWidth(), decoded.getHeight(),
+                    png && decoded.getColorModel().hasAlpha()
+                            ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+            Graphics2D graphics = safeImage.createGraphics();
+            try {
+                graphics.setComposite(AlphaComposite.Src);
+                graphics.drawImage(decoded, 0, 0, null);
+            } finally {
+                graphics.dispose();
+            }
+            return encode(safeImage, png ? "png" : "jpeg", png ? MediaType.IMAGE_PNG : MediaType.IMAGE_JPEG);
         }
         int resolution = switch (grant.variant()) {
             case BLUR_26 -> 26;
@@ -126,13 +138,19 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
         } finally {
             up.dispose();
         }
+        return encode(blurred, "jpeg", MediaType.IMAGE_JPEG);
+    }
+
+    private static DailyGameMediaResponseDTO encode(BufferedImage image, String format, MediaType mediaType) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try {
-            ImageIO.write(blurred, "jpeg", output);
+            if (!ImageIO.write(image, format, output)) {
+                throw new BadRequestException("Could not transform daily game image");
+            }
         } catch (IOException error) {
             throw new BadRequestException("Could not transform daily game image");
         }
-        return new DailyGameMediaResponseDTO(output.toByteArray(), MediaType.IMAGE_JPEG);
+        return new DailyGameMediaResponseDTO(output.toByteArray(), mediaType);
     }
 
     private static BufferedImage decode(TmdbImageBytes source) {

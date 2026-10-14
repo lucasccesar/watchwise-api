@@ -17,11 +17,14 @@ import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.lang.reflect.Constructor;
 import java.util.UUID;
+import java.util.Arrays;
+import java.util.zip.CRC32;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -53,11 +56,23 @@ class DailyGameMediaServiceTest {
     }
 
     @Test
-    void originalGrantReturnsOriginalBytes() throws Exception {
-        byte[] source = image(80, 80, "png");
+    void originalGrantReencodesAtSourceDimensionsWithoutMetadata() throws Exception {
+        byte[] source = metadataBearingPng(image(80, 80, "png"));
         when(tmdb.getImageBytes("/frame.png")).thenReturn(new TmdbLookupResult.Found<>(new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
         var ref = service.issue(user, challenge, DailyGameMediaSlot.FRAME_0, DailyGameImageVariant.ORIGINAL, "/frame.png");
-        assertArrayEquals(source, service.fetch(user, token(ref)).body());
+        var response = service.fetch(user, token(ref));
+        byte[] output = response.body();
+        assertEquals(MediaType.IMAGE_PNG, response.mediaType());
+        assertFalse(Arrays.equals(source, output));
+        assertTrue(new String(source, StandardCharsets.ISO_8859_1).contains("private-fixture-metadata"));
+        assertFalse(new String(output, StandardCharsets.ISO_8859_1).contains("private-fixture-metadata"));
+        BufferedImage expected = ImageIO.read(new java.io.ByteArrayInputStream(source));
+        BufferedImage actual = ImageIO.read(new java.io.ByteArrayInputStream(output));
+        assertNotNull(actual);
+        assertEquals(80, actual.getWidth());
+        assertEquals(80, actual.getHeight());
+        for (int y = 0; y < 80; y++) for (int x = 0; x < 80; x++)
+            assertEquals(expected.getRGB(x, y), actual.getRGB(x, y), "pixel at " + x + "," + y);
     }
 
     @Test
@@ -152,6 +167,28 @@ class DailyGameMediaServiceTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ImageIO.write(image, format, out);
         return out.toByteArray();
+    }
+
+    private static byte[] metadataBearingPng(byte[] png) throws Exception {
+        byte[] text = "Comment\0private-fixture-metadata".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] type = "tEXt".getBytes(StandardCharsets.US_ASCII);
+        ByteArrayOutputStream chunk = new ByteArrayOutputStream();
+        chunk.write(new byte[] {0, 0, 0, (byte) text.length});
+        chunk.write(type);
+        chunk.write(text);
+        CRC32 crc = new CRC32();
+        crc.update(type);
+        crc.update(text);
+        int checksum = (int) crc.getValue();
+        chunk.write(new byte[] {(byte) (checksum >>> 24), (byte) (checksum >>> 16),
+                (byte) (checksum >>> 8), (byte) checksum});
+        byte[] metadata = chunk.toByteArray();
+        int firstChunkEnd = 8 + 4 + 4 + 13 + 4;
+        ByteArrayOutputStream fixture = new ByteArrayOutputStream();
+        fixture.write(png, 0, firstChunkEnd);
+        fixture.write(metadata);
+        fixture.write(png, firstChunkEnd, png.length - firstChunkEnd);
+        return fixture.toByteArray();
     }
 
     private static final class MutableClock extends Clock {
