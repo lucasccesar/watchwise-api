@@ -286,7 +286,7 @@ class DailyChallengeGeneratorTest {
                         new TmdbCastMember(287, "Brad Pitt", "Tyler Durden", "/brad.jpg"),
                         new TmdbCastMember(288, "Unavailable Person", "Role", "/unavailable.jpg"),
                         new TmdbCastMember(289, "Edward Norton", "The Narrator", "/edward.jpg")), List.of()))));
-        when(tmdbClient.getPersonAggregate("288", LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
+        lenient().when(tmdbClient.getPersonAggregate("288", LANGUAGE)).thenReturn(new TmdbLookupResult.NotFound<>());
         when(tmdbClient.getPersonAggregate("289", LANGUAGE)).thenReturn(found(personAggregate("289", "Edward Norton")));
 
         DailyChallengeCandidate candidate = new PersonByFaceGenerator(tmdbClient, snapshotAssembler)

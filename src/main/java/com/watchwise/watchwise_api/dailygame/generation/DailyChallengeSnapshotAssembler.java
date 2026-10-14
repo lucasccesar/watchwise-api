@@ -90,17 +90,6 @@ public class DailyChallengeSnapshotAssembler {
     }
 
     public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
-                                           String name, List<String> imagePaths) {
-        return episode(seriesTmdbId, seasonNumber, episodeNumber, name, null, null, null, imagePaths);
-    }
-
-    public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
-                                           String name, String seriesName, String seriesPosterPath, Integer seriesYear,
-                                           List<String> imagePaths) {
-        return episode(seriesTmdbId, seasonNumber, episodeNumber, name, null, seriesName, seriesPosterPath, seriesYear, imagePaths);
-    }
-
-    public DailyChallengeCandidate episode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber,
                                            String name, String airDate, String seriesName, String seriesPosterPath, Integer seriesYear,
                                            List<String> imagePaths) {
         if (DailyChallengeGenerationSupport.date(airDate).isEmpty() || imagePaths == null) {

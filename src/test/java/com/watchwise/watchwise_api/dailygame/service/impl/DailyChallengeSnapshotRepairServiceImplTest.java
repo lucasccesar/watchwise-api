@@ -196,8 +196,15 @@ class DailyChallengeSnapshotRepairServiceImplTest {
                 .thenReturn(new DailyGameFilmographyService.FilmographySnapshot(List.of(Map.of(
                         "workId", "680", "title", "Pulp Fiction", "mediaType", "movie"))));
         assertThat(repairService.repairIfIncomplete(challenge)).isTrue();
-        assertThat(challenge.getAnswerSnapshot()).containsEntry("title", "Legacy title")
-                .containsEntry("imageUrl", IMAGE_PATH).containsEntry("targetKind", "PERSON");
+        assertThat(challenge.getAnswerSnapshot())
+                .containsEntry("targetKind", "PERSON")
+                .containsEntry("personTmdbId", "550")
+                .containsEntry("sourceTmdbId", "680")
+                .containsEntry("title", "Legacy title")
+                .containsEntry("imageUrl", IMAGE_PATH)
+                .containsEntry("filmography", List.of(Map.of(
+                        "workId", "680", "title", "Pulp Fiction", "mediaType", "movie")));
+        assertThat(challenge.getAnswerKey()).isEqualTo("PERSON:550");
     }
 
     @Test
