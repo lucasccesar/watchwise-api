@@ -24,6 +24,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -640,6 +641,135 @@ class DailyGameRepositoryTest {
         assertThat(resultRepository.findRankingByGameType(null, PageRequest.of(0, 10))).isEmpty();
     }
 
+    @Test
+    @DisplayName("[findRankingViewByGameType] Should Aggregate Terminal Results Across Dates Exclude In Progress And Preserve Ties")
+    void shouldAggregateTerminalResultsAcrossDatesExcludeInProgressAndPreserveTies() {
+        User first = userRepository.save(buildUser(
+                "view-first", "First Name", "https://example.com/first.png"));
+        User tied = userRepository.save(buildUser(
+                "view-tied", "Tied Name", "https://example.com/tied.png"));
+        User inProgressOnly = userRepository.saveAndFlush(buildUser(
+                "view-in-progress", "In Progress", "https://example.com/in-progress.png"));
+
+        DailyChallenge firstCompleted = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "view:1"));
+        DailyChallenge firstFailed = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 28), DailyGameType.SERIES_BY_POSTER, "view:2"));
+        DailyChallenge firstCompletedAgain = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 29), DailyGameType.MOVIE_BY_INFO, "view:3"));
+        DailyChallenge firstInProgress = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 30), DailyGameType.PERSON_BY_FACE, "view:4"));
+        DailyChallenge tiedCompleted = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 27), DailyGameType.SERIES_BY_INFO, "view:5"));
+        DailyChallenge tiedFailed = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 28), DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, "view:6"));
+        DailyChallenge onlyInProgress = challengeRepository.saveAndFlush(
+                buildChallenge(LocalDate.of(2026, 9, 29), DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, "view:7"));
+
+        resultRepository.save(buildResult(first, firstCompleted, 2, 7, DailyGameResultStatus.COMPLETED));
+        resultRepository.save(buildResult(first, firstFailed, 4, 3, DailyGameResultStatus.FAILED));
+        resultRepository.save(buildResult(first, firstCompletedAgain, 1, 5, DailyGameResultStatus.COMPLETED));
+        resultRepository.save(buildResult(first, firstInProgress, 10, 100, DailyGameResultStatus.IN_PROGRESS));
+        resultRepository.save(buildResult(tied, tiedCompleted, 3, 10, DailyGameResultStatus.COMPLETED));
+        resultRepository.save(buildResult(tied, tiedFailed, 4, 5, DailyGameResultStatus.FAILED));
+        resultRepository.saveAndFlush(buildResult(
+                inProgressOnly, onlyInProgress, 1, 99, DailyGameResultStatus.IN_PROGRESS));
+
+        Page<UserDailyGameResultRepository.DailyGameRankingViewProjection> page = resultRepository
+                .findRankingViewByGameType(null, PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).extracting(
+                        UserDailyGameResultRepository.DailyGameRankingViewProjection::getUsername)
+                .containsExactly("view-first", "view-tied");
+        assertThat(page.getContent()).extracting(
+                        UserDailyGameResultRepository.DailyGameRankingViewProjection::getRank)
+                .containsExactly(1L, 1L);
+
+        UserDailyGameResultRepository.DailyGameRankingViewProjection firstProjection = page.getContent().getFirst();
+        assertThat(firstProjection.getUserId()).isEqualTo(first.getId());
+        assertThat(firstProjection.getName()).isEqualTo("First Name");
+        assertThat(firstProjection.getProfilePicture()).isEqualTo("https://example.com/first.png");
+        assertThat(firstProjection.getScore()).isEqualTo(15L);
+        assertThat(firstProjection.getDaysPlayed()).isEqualTo(3L);
+        assertThat(firstProjection.getGamesPlayed()).isEqualTo(3L);
+        assertThat(firstProjection.getSolvedGames()).isEqualTo(2L);
+        assertThat(firstProjection.getAttemptsUsed()).isEqualTo(7L);
+        assertThat(firstProjection.getAverageAttempts())
+                .isGreaterThan(new BigDecimal("2.333"))
+                .isLessThan(new BigDecimal("2.334"));
+        assertThat(page.getContent()).noneMatch(projection -> projection.getUserId().equals(inProgressOnly.getId()));
+    }
+
+    @Test
+    @DisplayName("[findRankingViewByGameType] Should Filter By Type And Find Viewer Outside The Requested Page")
+    void shouldFilterByTypeAndFindViewerOutsideTheRequestedPage() {
+        User pageUser = userRepository.save(buildUser(
+                "view-page", "Page User", "https://example.com/page.png"));
+        User viewer = userRepository.save(buildUser(
+                "view-viewer", "Viewer User", "https://example.com/viewer.png"));
+        User otherTypeUser = userRepository.saveAndFlush(buildUser(
+                "view-other-type", "Other Type User", "https://example.com/other.png"));
+
+        DailyChallenge pageChallenge = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "filter:1"));
+        DailyChallenge viewerChallenge = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 28), DailyGameType.MOVIE_BY_POSTER, "filter:2"));
+        DailyChallenge otherTypeChallenge = challengeRepository.saveAndFlush(
+                buildChallenge(LocalDate.of(2026, 9, 29), DailyGameType.SERIES_BY_POSTER, "filter:3"));
+
+        resultRepository.save(buildResult(pageUser, pageChallenge, 1, 10, DailyGameResultStatus.COMPLETED));
+        resultRepository.save(buildResult(viewer, viewerChallenge, 2, 5, DailyGameResultStatus.FAILED));
+        resultRepository.saveAndFlush(buildResult(
+                otherTypeUser, otherTypeChallenge, 1, 100, DailyGameResultStatus.COMPLETED));
+
+        Page<UserDailyGameResultRepository.DailyGameRankingViewProjection> page = resultRepository
+                .findRankingViewByGameType(
+                        DailyGameType.MOVIE_BY_POSTER.name(), PageRequest.of(0, 1));
+        UserDailyGameResultRepository.DailyGameRankingViewProjection viewerProjection = resultRepository
+                .findRankingViewerByGameType(
+                        DailyGameType.MOVIE_BY_POSTER.name(), viewer.getId())
+                .orElseThrow();
+
+        assertThat(page.getTotalElements()).isEqualTo(2);
+        assertThat(page.getContent()).extracting(
+                        UserDailyGameResultRepository.DailyGameRankingViewProjection::getUserId)
+                .containsExactly(pageUser.getId());
+        assertThat(viewerProjection.getUserId()).isEqualTo(viewer.getId());
+        assertThat(viewerProjection.getRank()).isEqualTo(2L);
+        assertThat(viewerProjection.getScore()).isEqualTo(5L);
+        assertThat(viewerProjection.getGamesPlayed()).isEqualTo(1L);
+        assertThat(viewerProjection.getName()).isEqualTo("Viewer User");
+        assertThat(resultRepository.findRankingViewByGameType(
+                        DailyGameType.SERIES_BY_POSTER.name(), PageRequest.of(0, 10)).getContent())
+                .extracting(UserDailyGameResultRepository.DailyGameRankingViewProjection::getUsername)
+                .containsExactly("view-other-type");
+    }
+
+    @Test
+    @DisplayName("[findTop200CutoffScoreByGameType] Should Return The Lowest Qualifying Score And Empty Without Matches")
+    void shouldReturnTheLowestQualifyingScoreAndEmptyWithoutMatches() {
+        User first = userRepository.save(buildUser("view-cutoff-first"));
+        User second = userRepository.save(buildUser("view-cutoff-second"));
+        User third = userRepository.saveAndFlush(buildUser("view-cutoff-third"));
+        DailyChallenge firstChallenge = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 27), DailyGameType.MOVIE_BY_POSTER, "cutoff:1"));
+        DailyChallenge secondChallenge = challengeRepository.save(
+                buildChallenge(LocalDate.of(2026, 9, 28), DailyGameType.MOVIE_BY_POSTER, "cutoff:2"));
+        DailyChallenge thirdChallenge = challengeRepository.saveAndFlush(
+                buildChallenge(LocalDate.of(2026, 9, 29), DailyGameType.MOVIE_BY_POSTER, "cutoff:3"));
+
+        resultRepository.save(buildResult(first, firstChallenge, 1, 10, DailyGameResultStatus.COMPLETED));
+        resultRepository.save(buildResult(second, secondChallenge, 2, 4, DailyGameResultStatus.FAILED));
+        resultRepository.saveAndFlush(buildResult(third, thirdChallenge, 3, 1, DailyGameResultStatus.FAILED));
+
+        assertThat(resultRepository.findTop200CutoffScoreByGameType(
+                DailyGameType.MOVIE_BY_POSTER.name(), 2)).hasValue(4L);
+        assertThat(resultRepository.findTop200CutoffScoreByGameType(
+                DailyGameType.MOVIE_BY_POSTER.name(), 200)).hasValue(1L);
+        assertThat(resultRepository.findTop200CutoffScoreByGameType(
+                DailyGameType.SERIES_BY_POSTER.name(), 200)).isEmpty();
+    }
+
     private DailyChallenge buildChallenge(LocalDate date, DailyGameType type, String answerKey) {
         boolean episode = type.targetKind() == DailyGameTargetKind.EPISODE;
         try {
@@ -738,12 +868,16 @@ class DailyGameRepositoryTest {
     }
 
     private User buildUser(String username) {
+        return buildUser(username, username, "https://example.com/photo.png");
+    }
+
+    private User buildUser(String username, String name, String profilePicture) {
         return User.builder()
                 .username(username)
-                .name(username)
+                .name(name)
                 .email(username + "@email.com")
                 .password("hashed_password")
-                .profilePicture("https://example.com/photo.png")
+                .profilePicture(profilePicture)
                 .createdAt(LocalDateTime.of(2026, 9, 27, 12, 0))
                 .updatedAt(LocalDateTime.of(2026, 9, 27, 12, 0))
                 .build();

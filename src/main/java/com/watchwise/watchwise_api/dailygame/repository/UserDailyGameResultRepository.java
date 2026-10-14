@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -32,6 +33,31 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
         Long getScore();
 
         Long getGamesPlayed();
+    }
+
+    interface DailyGameRankingViewProjection {
+
+        Long getRank();
+
+        UUID getUserId();
+
+        String getName();
+
+        String getUsername();
+
+        String getProfilePicture();
+
+        Long getScore();
+
+        Long getDaysPlayed();
+
+        Long getGamesPlayed();
+
+        Long getSolvedGames();
+
+        Long getAttemptsUsed();
+
+        BigDecimal getAverageAttempts();
     }
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -117,6 +143,114 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
             """, nativeQuery = true)
     Page<DailyGameRankingProjection> findRankingByGameType(
             @Param("gameType") String gameType, Pageable pageable);
+
+    @Query(value = """
+            WITH ranked AS (
+                SELECT u.id AS user_id,
+                       u.name AS name,
+                       u.username AS username,
+                       u.profile_picture AS profile_picture,
+                       RANK() OVER (
+                           ORDER BY SUM(r.score) DESC, SUM(r.attempts_used) ASC
+                       ) AS rank,
+                       SUM(r.score) AS score,
+                       COUNT(DISTINCT c.challenge_date) AS days_played,
+                       COUNT(*) AS games_played,
+                       COUNT(*) FILTER (WHERE r.status = 'COMPLETED') AS solved_games,
+                       SUM(r.attempts_used) AS attempts_used,
+                       AVG(r.attempts_used) AS average_attempts
+                FROM user_daily_game_results r
+                JOIN daily_challenges c ON c.id = r.daily_challenge_id
+                JOIN users u ON u.id = r.user_id
+                WHERE r.status IN ('COMPLETED', 'FAILED')
+                  AND (:gameType IS NULL OR c.game_type = :gameType)
+                GROUP BY u.id, u.name, u.username, u.profile_picture
+            )
+            SELECT ranked.rank AS rank,
+                   ranked.user_id AS userId,
+                   ranked.name AS name,
+                   ranked.username AS username,
+                   ranked.profile_picture AS profilePicture,
+                   ranked.score AS score,
+                   ranked.days_played AS daysPlayed,
+                   ranked.games_played AS gamesPlayed,
+                   ranked.solved_games AS solvedGames,
+                   ranked.attempts_used AS attemptsUsed,
+                   ranked.average_attempts AS averageAttempts
+            FROM ranked
+            ORDER BY ranked.rank ASC, ranked.username ASC, ranked.user_id ASC
+            """,
+            countQuery = """
+            SELECT COUNT(*)
+            FROM (
+                SELECT r.user_id
+                FROM user_daily_game_results r
+                JOIN daily_challenges c ON c.id = r.daily_challenge_id
+                WHERE r.status IN ('COMPLETED', 'FAILED')
+                  AND (:gameType IS NULL OR c.game_type = :gameType)
+                GROUP BY r.user_id
+            ) ranked
+            """, nativeQuery = true)
+    Page<DailyGameRankingViewProjection> findRankingViewByGameType(
+            @Param("gameType") String gameType, Pageable pageable);
+
+    @Query(value = """
+            WITH ranked AS (
+                SELECT u.id AS user_id,
+                       u.name AS name,
+                       u.username AS username,
+                       u.profile_picture AS profile_picture,
+                       RANK() OVER (
+                           ORDER BY SUM(r.score) DESC, SUM(r.attempts_used) ASC
+                       ) AS rank,
+                       SUM(r.score) AS score,
+                       COUNT(DISTINCT c.challenge_date) AS days_played,
+                       COUNT(*) AS games_played,
+                       COUNT(*) FILTER (WHERE r.status = 'COMPLETED') AS solved_games,
+                       SUM(r.attempts_used) AS attempts_used,
+                       AVG(r.attempts_used) AS average_attempts
+                FROM user_daily_game_results r
+                JOIN daily_challenges c ON c.id = r.daily_challenge_id
+                JOIN users u ON u.id = r.user_id
+                WHERE r.status IN ('COMPLETED', 'FAILED')
+                  AND (:gameType IS NULL OR c.game_type = :gameType)
+                GROUP BY u.id, u.name, u.username, u.profile_picture
+            )
+            SELECT ranked.rank AS rank,
+                   ranked.user_id AS userId,
+                   ranked.name AS name,
+                   ranked.username AS username,
+                   ranked.profile_picture AS profilePicture,
+                   ranked.score AS score,
+                   ranked.days_played AS daysPlayed,
+                   ranked.games_played AS gamesPlayed,
+                   ranked.solved_games AS solvedGames,
+                   ranked.attempts_used AS attemptsUsed,
+                   ranked.average_attempts AS averageAttempts
+            FROM ranked
+            WHERE ranked.user_id = :userId
+            """, nativeQuery = true)
+    Optional<DailyGameRankingViewProjection> findRankingViewerByGameType(
+            @Param("gameType") String gameType, @Param("userId") UUID userId);
+
+    @Query(value = """
+            WITH ranked AS (
+                SELECT RANK() OVER (
+                           ORDER BY SUM(r.score) DESC, SUM(r.attempts_used) ASC
+                       ) AS rank,
+                       SUM(r.score) AS score
+                FROM user_daily_game_results r
+                JOIN daily_challenges c ON c.id = r.daily_challenge_id
+                WHERE r.status IN ('COMPLETED', 'FAILED')
+                  AND (:gameType IS NULL OR c.game_type = :gameType)
+                GROUP BY r.user_id
+            )
+            SELECT MIN(ranked.score)
+            FROM ranked
+            WHERE ranked.rank <= :topLimit
+            """, nativeQuery = true)
+    Optional<Long> findTop200CutoffScoreByGameType(
+            @Param("gameType") String gameType, @Param("topLimit") int topLimit);
 
     @Modifying
     @Query(value = """
