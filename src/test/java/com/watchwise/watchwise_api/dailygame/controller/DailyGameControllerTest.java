@@ -10,6 +10,9 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewEntryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
@@ -18,6 +21,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingViewService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
 import org.junit.jupiter.api.AfterEach;
@@ -67,6 +71,9 @@ class DailyGameControllerTest {
 
     @Mock
     private DailyGameRankingService dailyGameRankingService;
+
+    @Mock
+    private DailyGameRankingViewService dailyGameRankingViewService;
 
     @Mock
     private RequestThrottler requestThrottler;
@@ -325,6 +332,32 @@ class DailyGameControllerTest {
         verify(dailyGameRankingService).getGeneralRanking(1, 5);
         verify(dailyGameRankingService).getRanking(GAME_TYPE, 2, 5);
         verifyNoInteractions(requestThrottler);
+    }
+
+    @Test
+    @DisplayName("[getRankingView] Should Delegate The Authenticated Viewer And Filters - When The Visual Ranking Is Requested")
+    void shouldDelegateAuthenticatedViewerAndFiltersWhenVisualRankingIsRequested() throws Exception {
+        DailyGameRankingViewerDTO viewer = new DailyGameRankingViewerDTO(
+                CURRENT_USER_ID, "Lucas", "lucas", "/profile.jpg", 1L, 20L, 2L, 3L,
+                67, new java.math.BigDecimal("2.3"), true, null, null);
+        DailyGameRankingViewEntryDTO entry = new DailyGameRankingViewEntryDTO(
+                1L, CURRENT_USER_ID, "Lucas", "lucas", "/profile.jpg", 20L, 2L, 3L,
+                67, new java.math.BigDecimal("2.3"));
+        DailyGameRankingViewDTO view = new DailyGameRankingViewDTO(
+                List.of(entry), 2, 20, 21, 2, false, GAME_TYPE, viewer);
+        when(dailyGameRankingViewService.getRankingView(CURRENT_USER_ID, GAME_TYPE, 2, 25))
+                .thenReturn(view);
+
+        mockMvc.perform(get("/games/rankings/view")
+                        .param("gameType", GAME_TYPE.name()).param("page", "2").param("size", "25"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.gameType").value(GAME_TYPE.name()))
+                .andExpect(jsonPath("$.viewer.userId").value(CURRENT_USER_ID.toString()))
+                .andExpect(jsonPath("$.content[0].solvedPercentage").value(67));
+
+        verify(dailyGameRankingViewService).getRankingView(CURRENT_USER_ID, GAME_TYPE, 2, 25);
     }
 
     private PageImpl<DailyGameSearchResultDTO> page(DailyGameSearchResultDTO value) {

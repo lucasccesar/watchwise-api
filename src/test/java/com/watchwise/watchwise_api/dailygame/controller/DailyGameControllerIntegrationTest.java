@@ -14,6 +14,9 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameOverviewCardDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewEntryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
@@ -22,6 +25,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingViewService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -49,6 +53,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -104,11 +109,14 @@ class DailyGameControllerIntegrationTest {
     @MockitoBean
     private DailyGameRankingService dailyGameRankingService;
 
+    @MockitoBean
+    private DailyGameRankingViewService dailyGameRankingViewService;
+
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
-        reset(dailyGameService, dailyGameSearchService, dailyGameRankingService);
+        reset(dailyGameService, dailyGameSearchService, dailyGameRankingService, dailyGameRankingViewService);
         RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
@@ -482,6 +490,15 @@ class DailyGameControllerIntegrationTest {
                 .thenReturn(new PageImpl<>(List.of(ranking), PageRequest.of(0, 20), 1));
         when(dailyGameRankingService.getRanking(DailyGameType.MOVIE_BY_INFO, 1, 20))
                 .thenReturn(new PageImpl<>(List.of(ranking), PageRequest.of(0, 20), 1));
+        DailyGameRankingViewEntryDTO viewEntry = new DailyGameRankingViewEntryDTO(
+                1L, user.id(), "dailycontrollerpages", "dailycontrollerpages", null,
+                10L, 1L, 1L, 100, new BigDecimal("2.3"));
+        DailyGameRankingViewerDTO viewer = new DailyGameRankingViewerDTO(
+                user.id(), "dailycontrollerpages", "dailycontrollerpages", null, 1L,
+                10L, 1L, 1L, 100, new BigDecimal("2.3"), true, null, null);
+        when(dailyGameRankingViewService.getRankingView(user.id(), null, 1, 20))
+                .thenReturn(new DailyGameRankingViewDTO(
+                        List.of(viewEntry), 1, 20, 1, 1, false, null, viewer));
 
         mockMvc.perform(get("/games/history").param("page", "1").param("size", "20")
                         .cookie(user.accessToken()))
@@ -497,6 +514,14 @@ class DailyGameControllerIntegrationTest {
         mockMvc.perform(get("/games/{gameType}/ranking", DailyGameType.MOVIE_BY_INFO)
                         .param("page", "1").param("size", "20").cookie(user.accessToken()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1));
+        mockMvc.perform(get("/games/rankings/view")
+                        .param("page", "1").param("size", "20").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.gameType").doesNotExist())
+                .andExpect(jsonPath("$.viewer.userId").value(user.id().toString()))
+                .andExpect(jsonPath("$.content[0].averageAttempts").value(2.3));
+        verify(dailyGameRankingViewService).getRankingView(user.id(), null, 1, 20);
     }
 
     @Test

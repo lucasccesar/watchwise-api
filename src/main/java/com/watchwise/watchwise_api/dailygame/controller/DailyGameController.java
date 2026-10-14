@@ -9,12 +9,14 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingEntryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingViewService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
 import jakarta.validation.Valid;
@@ -43,6 +45,7 @@ public class DailyGameController {
     private final DailyGameService dailyGameService;
     private final DailyGameSearchService dailyGameSearchService;
     private final DailyGameRankingService dailyGameRankingService;
+    private final DailyGameRankingViewService dailyGameRankingViewService;
     private final RequestThrottler requestThrottler;
 
     @Value("${app.rate-limit.daily-game-search.max-requests:30}")
@@ -65,6 +68,15 @@ public class DailyGameController {
     @GetMapping("/games/today/view")
     public ResponseEntity<DailyGamesOverviewDTO> getTodayOverview() {
         return ResponseEntity.ok(dailyGameService.getTodayOverview(currentUserId()));
+    }
+
+    @GetMapping("/games/rankings/view")
+    public ResponseEntity<DailyGameRankingViewDTO> getRankingView(
+            @RequestParam(value = "gameType", required = false) DailyGameType gameType,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size) {
+        return ResponseEntity.ok(dailyGameRankingViewService.getRankingView(
+                currentUserId(), gameType, page, size));
     }
 
     @GetMapping("/games/{challengeDate}")
