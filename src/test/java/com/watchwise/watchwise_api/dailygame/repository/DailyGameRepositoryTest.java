@@ -30,6 +30,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -746,8 +747,8 @@ class DailyGameRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findTop200CutoffScoreByGameType] Should Return The Lowest Qualifying Score And Empty Without Matches")
-    void shouldReturnTheLowestQualifyingScoreAndEmptyWithoutMatches() {
+    @DisplayName("[findTop200CutoffScoreByGameType] Should Return Empty Below The Top Limit And Empty Without Matches")
+    void shouldReturnEmptyBelowTheTopLimitAndEmptyWithoutMatches() {
         User first = userRepository.save(buildUser("view-cutoff-first"));
         User second = userRepository.save(buildUser("view-cutoff-second"));
         User third = userRepository.saveAndFlush(buildUser("view-cutoff-third"));
@@ -765,9 +766,40 @@ class DailyGameRepositoryTest {
         assertThat(resultRepository.findTop200CutoffScoreByGameType(
                 DailyGameType.MOVIE_BY_POSTER.name(), 2)).hasValue(4L);
         assertThat(resultRepository.findTop200CutoffScoreByGameType(
-                DailyGameType.MOVIE_BY_POSTER.name(), 200)).hasValue(1L);
+                DailyGameType.MOVIE_BY_POSTER.name(), 200)).isEmpty();
         assertThat(resultRepository.findTop200CutoffScoreByGameType(
                 DailyGameType.SERIES_BY_POSTER.name(), 200)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[findTop200CutoffScoreByGameType] Should Return A Real Cutoff When The Ranked Population Reaches The Top Limit")
+    void shouldReturnARealCutoffWhenTheRankedPopulationReachesTheTopLimit() {
+        int topLimit = 200;
+        List<User> users = IntStream.range(0, topLimit)
+                .mapToObj(index -> buildUser("view-cutoff-bulk-" + index))
+                .toList();
+        userRepository.saveAllAndFlush(users);
+
+        List<DailyChallenge> challenges = IntStream.range(0, topLimit)
+                .mapToObj(index -> buildChallenge(
+                        LocalDate.of(2026, 1, 1).plusDays(index),
+                        DailyGameType.MOVIE_BY_POSTER,
+                        "cutoff:bulk:" + index))
+                .toList();
+        challengeRepository.saveAllAndFlush(challenges);
+
+        List<UserDailyGameResult> results = IntStream.range(0, topLimit)
+                .mapToObj(index -> buildResult(
+                        users.get(index),
+                        challenges.get(index),
+                        1,
+                        topLimit - index,
+                        DailyGameResultStatus.COMPLETED))
+                .toList();
+        resultRepository.saveAllAndFlush(results);
+
+        assertThat(resultRepository.findTop200CutoffScoreByGameType(
+                DailyGameType.MOVIE_BY_POSTER.name(), topLimit)).hasValue(1L);
     }
 
     private DailyChallenge buildChallenge(LocalDate date, DailyGameType type, String answerKey) {

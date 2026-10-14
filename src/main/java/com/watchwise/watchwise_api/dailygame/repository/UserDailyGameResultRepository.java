@@ -245,9 +245,9 @@ public interface UserDailyGameResultRepository extends JpaRepository<UserDailyGa
                   AND (:gameType IS NULL OR c.game_type = :gameType)
                 GROUP BY r.user_id
             )
-            SELECT MIN(ranked.score)
+            SELECT MIN(ranked.score) FILTER (WHERE ranked.rank <= :topLimit)
             FROM ranked
-            WHERE ranked.rank <= :topLimit
+            HAVING COUNT(*) >= :topLimit
             """, nativeQuery = true)
     Optional<Long> findTop200CutoffScoreByGameType(
             @Param("gameType") String gameType, @Param("topLimit") int topLimit);
