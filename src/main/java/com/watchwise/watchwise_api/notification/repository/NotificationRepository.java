@@ -29,6 +29,14 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     @EntityGraph(attributePaths = {"content", "latestActor"})
     Page<Notification> findByUserIdAndIsReadOrderByCreatedAtDesc(UUID userId, boolean isRead, Pageable pageable);
 
+    @Query("""
+            SELECT COUNT(n) AS totalNotifications,
+                   COALESCE(SUM(CASE WHEN n.isRead = false THEN 1 ELSE 0 END), 0) AS unreadNotifications
+            FROM Notification n
+            WHERE n.user.id = :userId
+            """)
+    NotificationCountsProjection findCountsByUserId(@Param("userId") UUID userId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT n FROM Notification n WHERE n.id = :id")
     Optional<Notification> findByIdForUpdate(@Param("id") UUID id);

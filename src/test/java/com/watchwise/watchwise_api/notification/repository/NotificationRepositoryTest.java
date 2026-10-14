@@ -110,6 +110,30 @@ class NotificationRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findCountsByUserId] Should Return Total And Unread Counts Scoped To Recipient")
+    void shouldReturnTotalAndUnreadCountsScopedToRecipient() {
+        notificationRepository.saveAndFlush(buildNotification(LocalDateTime.now()));
+        Notification read = notificationRepository.saveAndFlush(buildNotification(LocalDateTime.now()));
+        read.setIsRead(true);
+        notificationRepository.saveAndFlush(read);
+        notificationRepository.saveAndFlush(Notification.builder()
+                .user(marina)
+                .type(NotificationType.RELEASE)
+                .message("A different user's notification")
+                .content(movie)
+                .isRead(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build());
+        entityManager.clear();
+
+        NotificationCountsProjection counts = notificationRepository.findCountsByUserId(lucas.getId());
+
+        assertThat(counts.getTotalNotifications()).isEqualTo(2L);
+        assertThat(counts.getUnreadNotifications()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("[notifications] Should Persist Legacy And Social Rows - When Both Shapes Are Valid")
     void shouldPersistLegacyAndSocialRowsWhenBothShapesAreValid() {
         Notification legacy = notificationRepository.saveAndFlush(buildNotification(LocalDateTime.now().minusMinutes(1)));
