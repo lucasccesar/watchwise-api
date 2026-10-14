@@ -45,6 +45,25 @@ class PickRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByIdInWithPicksTemplate] Should Fetch Only Templates For The Requested Picks - When Picks Exist")
+    void shouldFetchOnlyTemplatesForTheRequestedPicksWhenPicksExist() {
+        LocalDateTime now = LocalDateTime.now();
+        User owner = user("batch-pick-owner", now);
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder()
+                .creator(owner).origin(PickOrigin.COMMUNITY).name("Batch template")
+                .createdAt(now).updatedAt(now).build());
+        Pick pick = save(owner, template, PickVisibility.PUBLIC, now);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Pick> result = repository.findByIdInWithPicksTemplate(List.of(pick.getId()));
+
+        assertThat(result).extracting(Pick::getId).containsExactly(pick.getId());
+        assertThat(Hibernate.isInitialized(result.getFirst().getPicksTemplate())).isTrue();
+        assertThat(Hibernate.isInitialized(result.getFirst().getUser())).isFalse();
+    }
+
+    @Test
     @DisplayName("[findByUserIdOrderByCreatedAtDescIdDesc] Should Isolate And Order Owned Picks Across Pages - When Another User Has Newer Picks")
     void shouldIsolateAndOrderOwnedPicksAcrossPagesWhenAnotherUserHasNewerPicks() {
         LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);

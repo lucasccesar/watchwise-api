@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -94,6 +95,19 @@ class UserListRepositoryTest {
 
         assertThat(result).extracting(UserList::getName).containsExactlyInAnyOrder("Best sci-fi of the 90s", "Underrated horror");
         assertThat(result).extracting(UserList::getId).containsExactlyInAnyOrder(scifi.getId(), horror.getId());
+    }
+
+    @Test
+    @DisplayName("[findByIdInWithUser] Should Fetch Owners For The Requested Lists - When Lists Exist")
+    void shouldFetchOwnersForTheRequestedListsWhenListsExist() {
+        UserList lucasList = userListRepository.saveAndFlush(buildList(lucas, "Lucas list", true));
+        UserList marinaList = userListRepository.saveAndFlush(buildList(marina, "Marina list", true));
+        entityManager.clear();
+
+        List<UserList> result = userListRepository.findByIdInWithUser(List.of(lucasList.getId(), marinaList.getId()));
+
+        assertThat(result).extracting(UserList::getId).containsExactlyInAnyOrder(lucasList.getId(), marinaList.getId());
+        assertThat(result).allSatisfy(list -> assertThat(Hibernate.isInitialized(list.getUser())).isTrue());
     }
 
     @Test

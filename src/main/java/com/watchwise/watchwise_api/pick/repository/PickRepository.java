@@ -16,6 +16,9 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PickRepository extends JpaRepository<Pick, UUID> {
+    @Query("select pick from Pick pick join fetch pick.picksTemplate where pick.id in :ids")
+    List<Pick> findByIdInWithPicksTemplate(@Param("ids") Collection<UUID> ids);
+
     @Query(value = """
             select pick from Pick pick
             join fetch pick.user

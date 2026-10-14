@@ -17,6 +17,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UUID> {
+    @Query("select template from PicksTemplate template left join fetch template.creator where template.id in :ids")
+    List<PicksTemplate> findByIdInWithCreator(@Param("ids") Collection<UUID> ids);
+
     Page<PicksTemplate> findByCreatorIdOrderByCreatedAtDescIdDesc(UUID creatorId, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

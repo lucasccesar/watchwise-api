@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,6 +60,30 @@ class PicksTemplateRepositoryTest {
         PicksTemplate template = repository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Awards").createdAt(now).updatedAt(now).build());
         assertThat(template.getId()).isNotNull();
         assertThat(template.getCreator()).isNull();
+    }
+
+    @Test
+    @DisplayName("[findByIdInWithCreator] Should Fetch Creators For The Requested Templates - When Templates Exist")
+    void shouldFetchCreatorsForTheRequestedTemplatesWhenTemplatesExist() {
+        LocalDateTime now = LocalDateTime.now();
+        User creator = saveUser("batch-template-creator", now);
+        PicksTemplate community = repository.saveAndFlush(PicksTemplate.builder()
+                .creator(creator).origin(PickOrigin.COMMUNITY).name("Community template")
+                .createdAt(now).updatedAt(now).build());
+        PicksTemplate official = repository.saveAndFlush(PicksTemplate.builder()
+                .origin(PickOrigin.OFFICIAL).name("Official template")
+                .createdAt(now).updatedAt(now).build());
+        entityManager.clear();
+
+        List<PicksTemplate> result = repository.findByIdInWithCreator(List.of(community.getId(), official.getId()));
+
+        assertThat(result).extracting(PicksTemplate::getId)
+                .containsExactlyInAnyOrder(community.getId(), official.getId());
+        PicksTemplate fetchedCommunity = result.stream()
+                .filter(template -> template.getId().equals(community.getId())).findFirst().orElseThrow();
+        assertThat(Hibernate.isInitialized(fetchedCommunity.getCreator())).isTrue();
+        assertThat(result.stream().filter(template -> template.getId().equals(official.getId())).findFirst()
+                .orElseThrow().getCreator()).isNull();
     }
 
     @Test

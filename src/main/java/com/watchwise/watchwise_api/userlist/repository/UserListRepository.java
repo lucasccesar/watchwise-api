@@ -21,6 +21,9 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
 
     List<UserList> findByUserId(UUID userId);
 
+    @Query("SELECT ul FROM UserList ul JOIN FETCH ul.user WHERE ul.id IN :ids")
+    List<UserList> findByIdInWithUser(@Param("ids") Collection<UUID> ids);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT ul FROM UserList ul WHERE ul.id = :id")
     Optional<UserList> findByIdForUpdate(@Param("id") UUID id);
