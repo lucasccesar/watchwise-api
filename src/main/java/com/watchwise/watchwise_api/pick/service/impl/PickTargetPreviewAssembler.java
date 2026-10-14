@@ -1,9 +1,6 @@
 package com.watchwise.watchwise_api.pick.service.impl;
 
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
-import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
-import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
@@ -16,8 +13,10 @@ import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
 import com.watchwise.watchwise_api.pick.dto.PickPersonPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickTargetPreviewDTO;
+import com.watchwise.watchwise_api.person.dto.PersonPreviewDTO;
+import com.watchwise.watchwise_api.person.service.PersonPreviewResolver;
+import com.watchwise.watchwise_api.person.service.impl.TmdbPersonPreviewResolver;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -25,28 +24,30 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 
 @Component
 public final class PickTargetPreviewAssembler {
     private final ContentCardAssembler contentCardAssembler;
-    private final TmdbClient tmdbClient;
-    private final Executor metadataResolutionExecutor;
+    private final PersonPreviewResolver personPreviewResolver;
 
     @Autowired
     public PickTargetPreviewAssembler(
             ContentCardAssembler contentCardAssembler,
-            TmdbClient tmdbClient,
-            @Qualifier("contentCardMetadataResolutionExecutor") Executor metadataResolutionExecutor) {
+            PersonPreviewResolver personPreviewResolver) {
         this.contentCardAssembler = contentCardAssembler;
-        this.tmdbClient = tmdbClient;
-        this.metadataResolutionExecutor = metadataResolutionExecutor;
+        this.personPreviewResolver = personPreviewResolver;
     }
 
     public PickTargetPreviewAssembler(ContentCardAssembler contentCardAssembler, TmdbClient tmdbClient) {
-        this(contentCardAssembler, tmdbClient, Runnable::run);
+        this(contentCardAssembler, new TmdbPersonPreviewResolver(tmdbClient, Runnable::run));
+    }
+
+    public PickTargetPreviewAssembler(
+            ContentCardAssembler contentCardAssembler,
+            TmdbClient tmdbClient,
+            Executor metadataResolutionExecutor) {
+        this(contentCardAssembler, new TmdbPersonPreviewResolver(tmdbClient, metadataResolutionExecutor));
     }
 
     public List<PickTargetPreviewDTO> assemble(
@@ -58,14 +59,13 @@ public final class PickTargetPreviewAssembler {
         }
 
         Map<ContentCoordinate, ContentCardSpec> contentSpecs = new LinkedHashMap<>();
-        Map<String, CompletableFuture<PickPersonPreviewDTO>> people = new LinkedHashMap<>();
+        List<String> personIds = new ArrayList<>();
         for (PickOptionSearchDTO target : targets) {
             if (target == null) {
                 throw new IllegalArgumentException("target is required");
             }
             if (target.personTmdbId() != null) {
-                people.computeIfAbsent(target.personTmdbId(), personId -> CompletableFuture.supplyAsync(
-                        () -> personPreview(personId), metadataResolutionExecutor));
+                personIds.add(target.personTmdbId());
                 addContentSpec(target.contextContent(), contentSpecs);
             } else if (target.content() != null) {
                 addContentSpec(target.content(), contentSpecs);
@@ -76,13 +76,14 @@ public final class PickTargetPreviewAssembler {
 
         Map<ContentCoordinate, ContentCardDTO> cards = contentCardAssembler.assemble(
                 contentSpecs.values(), cardContext, ContentCardFieldSet.BASIC_METADATA);
-        Map<String, PickPersonPreviewDTO> personPreviews = new LinkedHashMap<>();
-        people.forEach((personId, future) -> personPreviews.put(personId, join(future)));
+        Map<String, PersonPreviewDTO> personPreviews = personIds.isEmpty()
+                ? Map.of()
+                : personPreviewResolver.resolve(personIds);
 
         List<PickTargetPreviewDTO> previews = new ArrayList<>(targets.size());
         for (PickOptionSearchDTO target : targets) {
             if (target.personTmdbId() != null) {
-                previews.add(new PickTargetPreviewDTO(null, personPreviews.get(target.personTmdbId()),
+                previews.add(new PickTargetPreviewDTO(null, personPreview(target.personTmdbId(), personPreviews),
                         card(target.contextContent(), cards)));
             } else {
                 previews.add(new PickTargetPreviewDTO(card(target.content(), cards), null, null));
@@ -120,33 +121,12 @@ public final class PickTargetPreviewAssembler {
                 reference.seasonNumber(), reference.episodeNumber());
     }
 
-    private PickPersonPreviewDTO personPreview(String personId) {
-        TmdbLookupResult<TmdbPersonDetails> lookup = tmdbClient.getPersonDetails(personId);
-        TmdbPersonDetails details = lookup.toOptional().orElse(null);
-        String name = details == null ? null : details.name();
-        String profileUrl = details == null ? null : TmdbImageUrlBuilder.profileUrl(details.profilePath());
-        ContentPreviewStatus status = details == null
-                ? ContentPreviewStatus.UNAVAILABLE
-                : name != null && profileUrl != null
-                        ? ContentPreviewStatus.AVAILABLE
-                        : name != null || profileUrl != null
-                                ? ContentPreviewStatus.PARTIAL
-                                : ContentPreviewStatus.UNAVAILABLE;
-        return new PickPersonPreviewDTO(personId, name, profileUrl, status);
-    }
-
-    private PickPersonPreviewDTO join(CompletableFuture<PickPersonPreviewDTO> future) {
-        try {
-            return future.join();
-        } catch (CompletionException exception) {
-            Throwable cause = exception.getCause();
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            if (cause instanceof Error error) {
-                throw error;
-            }
-            throw exception;
+    private PickPersonPreviewDTO personPreview(String personId, Map<String, PersonPreviewDTO> personPreviews) {
+        PersonPreviewDTO preview = personPreviews.get(personId);
+        if (preview == null) {
+            return new PickPersonPreviewDTO(personId, null, null, ContentPreviewStatus.UNAVAILABLE);
         }
+        return new PickPersonPreviewDTO(preview.personTmdbId(), preview.name(), preview.profileUrl(),
+                preview.previewStatus());
     }
 }

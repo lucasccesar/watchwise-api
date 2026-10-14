@@ -13,6 +13,8 @@ import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
+import com.watchwise.watchwise_api.person.dto.PersonPreviewDTO;
+import com.watchwise.watchwise_api.person.service.PersonPreviewResolver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.mockito.ArgumentCaptor;
@@ -138,6 +140,26 @@ class PickTargetPreviewAssemblerTest {
             assertThat(preview.person().tmdbId()).isEqualTo("77");
             assertThat(preview.person().previewStatus()).isEqualTo(ContentPreviewStatus.UNAVAILABLE);
         });
+    }
+
+    @Test
+    @DisplayName("[assemble] Should Map Shared Person Preview - When A Person Target Is Present")
+    void shouldMapSharedPersonPreviewWhenPersonTargetIsPresent() {
+        PersonPreviewResolver personPreviewResolver = mock(PersonPreviewResolver.class);
+        PickTargetPreviewAssembler resolverBackedAssembler =
+                new PickTargetPreviewAssembler(contentCards, personPreviewResolver);
+        when(personPreviewResolver.resolve(anyCollection())).thenReturn(Map.of("42",
+                new PersonPreviewDTO("42", "Ada", "/ada.jpg", ContentPreviewStatus.PARTIAL)));
+
+        var previews = resolverBackedAssembler.assemble(List.of(personTarget("42", null)), context);
+
+        assertThat(previews).singleElement().satisfies(preview -> {
+            assertThat(preview.person().tmdbId()).isEqualTo("42");
+            assertThat(preview.person().name()).isEqualTo("Ada");
+            assertThat(preview.person().profileUrl()).isEqualTo("/ada.jpg");
+            assertThat(preview.person().previewStatus()).isEqualTo(ContentPreviewStatus.PARTIAL);
+        });
+        verify(personPreviewResolver).resolve(anyCollection());
     }
 
     private static PickOptionSearchDTO contentTarget(String id, ContentType type) {
