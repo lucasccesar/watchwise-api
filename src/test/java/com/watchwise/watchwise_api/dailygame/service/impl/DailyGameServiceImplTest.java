@@ -207,6 +207,33 @@ class DailyGameServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDay/getToday/overview] Should Preserve Raw Repository Order And Sort Only The Overview")
+    void shouldPreserveRawRepositoryOrderAndSortOnlyTheOverview() {
+        List<DailyChallenge> challenges = allChallenges();
+        List<DailyChallenge> shuffledChallenges = List.of(
+                challenges.get(3), challenges.get(0), challenges.get(7), challenges.get(2),
+                challenges.get(5), challenges.get(1), challenges.get(6), challenges.get(4));
+        List<DailyGameType> repositoryOrder = shuffledChallenges.stream()
+                .map(DailyChallenge::getGameType)
+                .toList();
+        when(challengeRepository.findByChallengeDateOrderByGameTypeAsc(TODAY)).thenReturn(shuffledChallenges);
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(eq(USER_ID), any())).thenReturn(List.of());
+        when(hintRepository.findByDailyChallengeIdInOrderByDailyChallengeIdAscPositionAsc(any()))
+                .thenReturn(allHints(shuffledChallenges));
+
+        DailyGameTodayResponseDTO historicalRaw = service().getDay(USER_ID, TODAY);
+        DailyGameTodayResponseDTO todayRaw = service().getToday(USER_ID);
+        DailyGamesOverviewDTO overview = service().getTodayOverview(USER_ID);
+
+        assertThat(historicalRaw.games()).extracting(DailyGameStateDTO::gameType)
+                .containsExactlyElementsOf(repositoryOrder);
+        assertThat(todayRaw.games()).extracting(DailyGameStateDTO::gameType)
+                .containsExactlyElementsOf(repositoryOrder);
+        assertThat(overview.games()).extracting(DailyGameOverviewCardDTO::gameType)
+                .containsExactly(DailyGameType.values());
+    }
+
+    @Test
     @DisplayName("[getTodayOverview] Should Reject An Incomplete Daily Set - When Any Challenge Is Missing")
     void shouldRejectAnIncompleteDailySetWhenOverviewIsRequested() {
         when(challengeRepository.findByChallengeDateOrderByGameTypeAsc(TODAY))

@@ -162,6 +162,7 @@ public class DailyGameServiceImpl implements DailyGameService {
         LocalDate date = LocalDate.now(clock);
         DailyGameDay day = loadDay(userId, date);
         List<DailyGameOverviewCardDTO> games = day.challenges().stream()
+                .sorted(Comparator.comparing(DailyChallenge::getGameType))
                 .map(challenge -> responseAssembler.toOverviewCard(
                         challenge, day.resultsByChallengeId().get(challenge.getId())))
                 .toList();
@@ -386,15 +387,12 @@ public class DailyGameServiceImpl implements DailyGameService {
         List<DailyChallenge> challenges = challengeRepository
                 .findByChallengeDateOrderByGameTypeAsc(challengeDate);
         requireCompleteDailySet(challenges);
-        List<DailyChallenge> orderedChallenges = challenges.stream()
-                .sorted(Comparator.comparing(DailyChallenge::getGameType))
-                .toList();
-        List<UUID> challengeIds = orderedChallenges.stream().map(DailyChallenge::getId).toList();
+        List<UUID> challengeIds = challenges.stream().map(DailyChallenge::getId).toList();
         Map<UUID, UserDailyGameResult> results = resultRepository
                 .findByUserIdAndDailyChallengeIdIn(userId, challengeIds)
                 .stream()
                 .collect(Collectors.toMap(result -> result.getDailyChallenge().getId(), Function.identity()));
-        return new DailyGameDay(orderedChallenges, results);
+        return new DailyGameDay(challenges, results);
     }
 
     private void assertAvailableDate(LocalDate challengeDate) {
