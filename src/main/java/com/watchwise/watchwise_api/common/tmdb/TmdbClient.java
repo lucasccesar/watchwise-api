@@ -1,17 +1,20 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
 import com.github.benmanes.caffeine.cache.Cache;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-import java.util.Optional;
+import java.net.URI;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +32,49 @@ public class TmdbClient {
     public static final String LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE = "en-US";
 
     private final RestClient tmdbRestClient;
+    private TmdbImageTransport imageTransport;
+
+    @Autowired
+    void setImageTransport(TmdbImageTransport imageTransport) {
+        this.imageTransport = imageTransport;
+    }
+
+    public TmdbLookupResult<TmdbImageBytes> getImageBytes(String storedPath) {
+        String path = normalizeImagePath(storedPath);
+        return callWithRetry(() -> imageTransport.fetch(path), "image " + path);
+    }
+
+    public static String normalizeImagePath(String storedPath) {
+        if (storedPath == null || storedPath.isBlank() || storedPath.chars().anyMatch(Character::isWhitespace)) {
+            throw new BadRequestException("Invalid TMDB image path");
+        }
+        String path = storedPath.startsWith("/") ? storedPath : "/" + storedPath;
+        if (storedPath.contains("://") || storedPath.startsWith("http:")) {
+            URI uri;
+            try {
+                uri = URI.create(storedPath);
+            } catch (IllegalArgumentException invalid) {
+                throw new BadRequestException("Invalid TMDB image path");
+            }
+            if (!"https".equals(uri.getScheme()) || !"image.tmdb.org".equals(uri.getHost())
+                    || uri.getPort() != -1 || uri.getRawUserInfo() != null
+                    || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+                throw new BadRequestException("Invalid TMDB image path");
+            }
+            path = uri.getRawPath();
+            if (path == null || !path.startsWith("/t/p/")) {
+                throw new BadRequestException("Invalid TMDB image path");
+            }
+        } else if (storedPath.startsWith("//") || storedPath.indexOf(':') >= 0) {
+            throw new BadRequestException("Invalid TMDB image path");
+        }
+        if (!path.matches("/[A-Za-z0-9/_\\.-]+") || path.contains("..") || path.contains("//")
+                || path.endsWith("/") || path.equals("/")) {
+            throw new BadRequestException("Invalid TMDB image path");
+        }
+        return storedPath.startsWith("https://") ? storedPath : path;
+    }
+
     private final Cache<String, TmdbLookupResult<TmdbMovieFullDetails>> tmdbMovieFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbTvFullDetails>> tmdbTvFullDetailsCache;
     private final Cache<String, TmdbLookupResult<TmdbSeasonFullDetails>> tmdbSeasonFullDetailsCache;
