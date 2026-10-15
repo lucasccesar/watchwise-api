@@ -13,4 +13,18 @@ public record DailyGamePlayViewDTO(
         int attemptsRemaining, DailyGameViewStatus status, int score, int potentialScore,
         List<DailyGameMediaRefDTO> media, List<DailyGameAttemptViewDTO> attempts,
         DailyGameAnswerPreviewDTO answer, boolean canAttempt, boolean canGiveUp,
-        boolean shareOnCompletion, boolean sharedToFeed) {}
+        boolean shareOnCompletion, boolean sharedToFeed,
+        DailyGameFilmographyPlayStateDTO filmography) {
+
+    public DailyGamePlayViewDTO(
+            LocalDate challengeDate, Instant nextResetAt, DailyGameType gameType,
+            DailyGameTargetKind targetKind, int maxAttempts, int attemptsUsed,
+            int attemptsRemaining, DailyGameViewStatus status, int score, int potentialScore,
+            List<DailyGameMediaRefDTO> media, List<DailyGameAttemptViewDTO> attempts,
+            DailyGameAnswerPreviewDTO answer, boolean canAttempt, boolean canGiveUp,
+            boolean shareOnCompletion, boolean sharedToFeed) {
+        this(challengeDate, nextResetAt, gameType, targetKind, maxAttempts, attemptsUsed,
+                attemptsRemaining, status, score, potentialScore, media, attempts, answer,
+                canAttempt, canGiveUp, shareOnCompletion, sharedToFeed, null);
+    }
+}
