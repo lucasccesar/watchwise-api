@@ -18,7 +18,8 @@ final class DailyGamePlayAssembler {
         if (projection.gameType() != DailyGameType.EPISODE_BY_FRAME) {
             attempts = attempts.stream()
                     .map(attempt -> new DailyGameAttemptViewDTO(attempt.attemptNumber(), attempt.candidate(),
-                            new DailyGameAttemptOutcomeDTO(attempt.outcome().correct(), null, null, null)))
+                            new DailyGameAttemptOutcomeDTO(attempt.outcome().correct(), null, null, null),
+                            attempt.infoFeedback()))
                     .toList();
         }
         return new DailyGamePlayViewDTO(
@@ -27,6 +28,6 @@ final class DailyGamePlayAssembler {
                 attemptsRemaining, projection.status(), projection.score(), potentialScore,
                 projection.media(), attempts, canAttempt ? null : projection.answer(),
                 canAttempt, canAttempt && attemptsRemaining > 0,
-                projection.shareOnCompletion(), projection.sharedToFeed());
+                projection.shareOnCompletion(), projection.sharedToFeed(), projection.filmography());
     }
 }

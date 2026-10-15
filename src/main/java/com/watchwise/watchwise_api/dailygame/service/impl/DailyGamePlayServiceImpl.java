@@ -29,24 +29,27 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     private final DailyGameServiceImpl mutations;
     private final DailyGameMediaService media;
     private final DailyGameAttemptDetailsCodec codec;
+    private final DailyGameFilmographyPlayAssembler filmographyAssembler;
     private final Clock clock;
     private final DailyGamePlayAssembler assembler = new DailyGamePlayAssembler();
+    private final DailyGameInfoPlayAssembler infoAssembler = new DailyGameInfoPlayAssembler();
 
     public DailyGamePlayServiceImpl(DailyChallengeRepository challenges, UserDailyGameResultRepository results,
             DailyGameServiceImpl mutations, DailyGameMediaService media,
-            DailyGameAttemptDetailsCodec codec, Clock clock) {
+            DailyGameAttemptDetailsCodec codec, DailyGameFilmographyPlayAssembler filmographyAssembler, Clock clock) {
         this.challenges = challenges;
         this.results = results;
         this.mutations = mutations;
         this.media = media;
         this.codec = codec;
+        this.filmographyAssembler = filmographyAssembler;
         this.clock = clock;
     }
 
     @Override
     @Transactional(readOnly = true)
     public DailyGamePlayViewDTO readToday(UUID userId, DailyGameType gameType) {
-        requireVisual(gameType);
+        requireGameType(gameType);
         LocalDate today = LocalDate.now(clock);
         DailyChallenge challenge = challenges.findByChallengeDateAndGameType(today, gameType)
                 .orElseThrow(DailyGamesUnavailableException::new);
@@ -59,7 +62,7 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     @Override
     public DailyGamePlayActionResponseDTO submitToday(UUID userId, DailyGameType gameType,
             DailyGameAttemptRequest request) {
-        requireVisual(gameType);
+        requireGameType(gameType);
         var mutation = mutations.mutateAttempt(userId, LocalDate.now(clock), gameType, request, true, true);
         return new DailyGamePlayActionResponseDTO(view(userId, mutation.challenge(), mutation.result(),
                 mutation.attempts()), attempt(mutation.challenge(), mutation.currentAttempt()));
@@ -67,7 +70,7 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
 
     @Override
     public DailyGamePlayActionResponseDTO giveUpToday(UUID userId, DailyGameType gameType) {
-        requireVisual(gameType);
+        requireGameType(gameType);
         var mutation = mutations.mutateGiveUp(userId, LocalDate.now(clock), gameType);
         return new DailyGamePlayActionResponseDTO(view(userId, mutation.challenge(), mutation.result(),
                 mutation.attempts()), null);
@@ -82,15 +85,32 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
         List<DailyGameMediaRefDTO> refs = media(userId, challenge, used, terminal);
         List<DailyGameAttemptViewDTO> attempts = details.stream().map(detail -> attempt(challenge, detail)).toList();
         DailyGameAnswerPreviewDTO answer = terminal ? answer(userId, challenge, refs) : null;
+        DailyGameFilmographyPlayStateDTO filmography = isFilmographyGame(challenge.getGameType())
+                ? filmography(challenge, details, used) : null;
         LocalDate date = challenge.getChallengeDate();
         return assembler.assemble(new DailyGamePlayProjection(date,
                 date.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant(), challenge.getGameType(),
                 challenge.getTargetKind(), challenge.getGameType().maxAttempts(), used, status,
                 result == null ? 0 : result.getScore(), refs, attempts, answer,
-                result != null && result.isShareOnCompletion(), result != null && result.getSharedAt() != null));
+                result != null && result.isShareOnCompletion(), result != null && result.getSharedAt() != null,
+                filmography));
+    }
+
+    private DailyGameFilmographyPlayStateDTO filmography(
+            DailyChallenge challenge, List<DailyGameAttemptDTO> details, int attemptsUsed) {
+        DailyGameFilmographyPlayStateDTO assembled = filmographyAssembler.assemble(
+                challenge, details, true, challenge.getGameType().maxAttempts());
+        int maxAttempts = challenge.getGameType().maxAttempts();
+        return new DailyGameFilmographyPlayStateDTO(assembled.majorRoles(), assembled.guessedActors(),
+                assembled.entries(), attemptsUsed, Math.max(0, maxAttempts - attemptsUsed), maxAttempts);
     }
 
     private List<DailyGameMediaRefDTO> media(UUID userId, DailyChallenge challenge, int used, boolean terminal) {
+        if (isInformationOrFilmographyGame(challenge.getGameType())) {
+            if (!terminal) return List.of();
+            return List.of(media.issue(userId, challenge.getId(), DailyGameMediaSlot.CLUE,
+                    DailyGameImageVariant.ORIGINAL, challenge.getImagePath()));
+        }
         if (challenge.getGameType() != DailyGameType.EPISODE_BY_FRAME) {
             DailyGameImageVariant variant = terminal ? DailyGameImageVariant.ORIGINAL
                     : BLURS.get(Math.min(used, BLURS.size() - 1));
@@ -126,11 +146,13 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
                     && Objects.equals(challenge.getSeasonNumber(), candidate.seasonNumber())
                     && Objects.equals(challenge.getEpisodeNumber(), candidate.episodeNumber());
         };
-        return new DailyGameAttemptViewDTO(detail.attemptNumber(), view,
+        DailyGameAttemptViewDTO attemptView = new DailyGameAttemptViewDTO(detail.attemptNumber(), view,
                 new DailyGameAttemptOutcomeDTO(correct,
                         feedback == null ? null : feedback.seriesCorrect(),
                         feedback == null ? null : feedback.seasonCorrect(),
                         feedback == null ? null : feedback.episodeCorrect()));
+        return infoAssembler.assemble(attemptView,
+                isInformationGame(challenge.getGameType()) ? detail.infoFeedback() : null);
     }
 
     private DailyGameAnswerPreviewDTO answer(UUID userId, DailyChallenge challenge,
@@ -186,10 +208,20 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
         catch (RuntimeException ignored) { return null; }
     }
 
-    private void requireVisual(DailyGameType gameType) {
-        if (gameType != DailyGameType.MOVIE_BY_POSTER && gameType != DailyGameType.SERIES_BY_POSTER
-                && gameType != DailyGameType.PERSON_BY_FACE && gameType != DailyGameType.EPISODE_BY_FRAME) {
-            throw new BadRequestException("Unsupported visual daily game type");
-        }
+    private void requireGameType(DailyGameType gameType) {
+        if (gameType == null) throw new BadRequestException("gameType is required");
+    }
+
+    private boolean isInformationGame(DailyGameType gameType) {
+        return gameType == DailyGameType.MOVIE_BY_INFO || gameType == DailyGameType.SERIES_BY_INFO;
+    }
+
+    private boolean isFilmographyGame(DailyGameType gameType) {
+        return gameType == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
+                || gameType == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
+    }
+
+    private boolean isInformationOrFilmographyGame(DailyGameType gameType) {
+        return isInformationGame(gameType) || isFilmographyGame(gameType);
     }
 }

@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayViewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayActionResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -202,12 +203,44 @@ class DailyGameControllerIntegrationTest {
     }
 
     @Test
-    void visualReadRejectsUnsupportedType() throws Exception {
+    void visualReadAcceptsInfoAndFilmographyTypes() throws Exception {
         RegisteredUser user = registerUser("dailyvisualtype");
-        when(dailyGamePlayService.readToday(user.id(), DailyGameType.MOVIE_BY_INFO))
-                .thenThrow(new BadRequestException("Unsupported visual daily game type"));
-        mockMvc.perform(get("/games/MOVIE_BY_INFO/play").cookie(user.accessToken()))
-                .andExpect(status().isBadRequest());
+        for (DailyGameType type : List.of(DailyGameType.MOVIE_BY_INFO, DailyGameType.SERIES_BY_INFO,
+                DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY)) {
+            DailyGamePlayViewDTO state = new DailyGamePlayViewDTO(
+                    LocalDate.of(2026, 10, 15), Instant.parse("2026-10-16T00:00:00Z"), type,
+                    type.targetKind(), type.maxAttempts(), 0, type.maxAttempts(), DailyGameViewStatus.NOT_PLAYED,
+                    0, type.maxAttempts(), List.of(), List.of(), null, true, true, false, false);
+            DailyGamePlayActionResponseDTO action = new DailyGamePlayActionResponseDTO(state, null);
+            when(dailyGamePlayService.readToday(user.id(), type)).thenReturn(state);
+            when(dailyGamePlayService.submitToday(eq(user.id()), eq(type), any(DailyGameAttemptRequest.class)))
+                    .thenReturn(action);
+            when(dailyGamePlayService.giveUpToday(user.id(), type)).thenReturn(action);
+
+            mockMvc.perform(get("/games/{gameType}/play", type).cookie(user.accessToken()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.gameType").value(type.name()))
+                    .andExpect(jsonPath("$.media").isEmpty())
+                    .andExpect(jsonPath("$.answer").doesNotExist());
+
+            verify(dailyGamePlayService).readToday(user.id(), type);
+
+            mockMvc.perform(post("/games/{gameType}/play/attempt", type)
+                            .cookie(user.accessToken(), user.csrfToken())
+                            .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"tmdbId\":\"42\",\"personTmdbId\":\"501\"}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.state.gameType").value(type.name()));
+            verify(dailyGamePlayService).submitToday(eq(user.id()), eq(type), any(DailyGameAttemptRequest.class));
+
+            mockMvc.perform(post("/games/{gameType}/play/give-up", type)
+                            .cookie(user.accessToken(), user.csrfToken())
+                            .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.state.gameType").value(type.name()));
+            verify(dailyGamePlayService).giveUpToday(user.id(), type);
+        }
     }
 
     @Test
