@@ -170,6 +170,8 @@ public class DailyChallengeSnapshotAssembler {
                 : series.productionCompanies().stream().map(value -> value == null ? null : value.name()).toList());
         put(answerSnapshot, "seasons", series.numberOfSeasons() == null || series.numberOfSeasons() <= 0
                 ? null : series.numberOfSeasons());
+        put(answerSnapshot, "episodes", series.numberOfEpisodes() == null || series.numberOfEpisodes() <= 0
+                ? null : series.numberOfEpisodes());
         return candidate(DailyGameType.SERIES_BY_INFO, DailyGameTargetKind.SERIES, series.id(), null, null, null,
                 series.id(), "SERIES:" + series.id(), imagePath,
                 answerSnapshot,

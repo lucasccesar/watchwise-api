@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.dailygame.service;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import org.junit.jupiter.api.Test;
 
@@ -44,5 +45,31 @@ class DailyGameAttemptDetailsCodecTest {
         assertThat(attempts).isEmpty();
         assertThatThrownBy(() -> attempts.add(null))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void shouldRoundTripCandidateEpisodeCount() {
+        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoFeedbackDTO(
+                null, null, null, null, null, null, null, null, 24);
+        DailyGameAttemptDTO attempt = new DailyGameAttemptDTO(1, null, null, feedback, null);
+
+        DailyGameInfoFeedbackDTO decoded = codec.read(codec.append(null, attempt)).getFirst().infoFeedback();
+
+        assertThat(decoded.candidateEpisodeCount()).isEqualTo(24);
+    }
+
+    @Test
+    void shouldDecodeLegacyInfoFeedbackWithoutCandidateEpisodeCount() {
+        Map<String, Object> legacyFeedback = new HashMap<>(Map.of(
+                "platforms", Map.of(), "genres", Map.of(), "year", Map.of(), "certification", Map.of(),
+                "directorOrCreators", Map.of(), "cast", Map.of(), "productionCompanies", Map.of(),
+                "revenueOrSeasons", Map.of()));
+        Map<String, Object> legacyAttempt = new HashMap<>();
+        legacyAttempt.put("attemptNumber", 1);
+        legacyAttempt.put("infoFeedback", legacyFeedback);
+        DailyGameInfoFeedbackDTO decoded = codec.read(Map.of("attempts", List.of(legacyAttempt)))
+                .getFirst().infoFeedback();
+
+        assertThat(decoded.candidateEpisodeCount()).isNull();
     }
 }

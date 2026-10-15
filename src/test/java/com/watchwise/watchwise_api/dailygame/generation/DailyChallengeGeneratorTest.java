@@ -251,6 +251,20 @@ class DailyChallengeGeneratorTest {
     }
 
     @Test
+    @DisplayName("[generate] Should Freeze Episode Count - When Creating A Series Info Challenge")
+    void shouldFreezeEpisodeCountWhenCreatingASeriesInfoChallenge() {
+        when(tmdbClient.getTopRatedSeries(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
+                .thenReturn(found(seriesPage(new TmdbTvSearchResult("1396", "Breaking Bad", "/breaking-bad.jpg", "2008-01-20"))));
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(seriesDetailsWithInfo("1396", 3, 24)));
+
+        DailyChallengeCandidate candidate = new SeriesByInfoGenerator(tmdbClient, snapshotAssembler)
+                .generate(CHALLENGE_DATE)
+                .orElseThrow();
+
+        assertThat(candidate.answerSnapshot()).containsEntry("seasons", 3).containsEntry("episodes", 24);
+    }
+
+    @Test
     @DisplayName("[generate] Should Deduplicate People By ID - When Movie And Series Credits Overlap")
     void shouldDeduplicatePeopleByIdWhenMovieAndSeriesCreditsOverlap() {
         when(tmdbClient.getTopRatedMovies(intThat(page -> page >= 1 && page <= 20), eq(LANGUAGE)))
@@ -757,12 +771,16 @@ class DailyChallengeGeneratorTest {
     }
 
     private static TmdbTvFullDetails seriesDetailsWithInfo(String id) {
+        return seriesDetailsWithInfo(id, 5, 62);
+    }
+
+    private static TmdbTvFullDetails seriesDetailsWithInfo(String id, int seasons, int episodes) {
         return new TmdbTvFullDetails(id, "Breaking Bad", "Breaking Bad", null, "/breaking-bad.jpg", null, "2008-01-20", List.of(),
                 List.of(new TmdbGenre(18, "Drama")), List.of(), List.of(new TmdbCreator(666, "Dan Erickson", null)), List.of(), null,
                 new TmdbAggregateCredits(List.of(new TmdbAggregateCastMember(17419, "Bryan Cranston", "/bryan.jpg", List.of(), 62)), List.of()),
                 new TmdbWatchProviders(Map.of("BR", new TmdbRegionProviders(
                         List.of(new com.watchwise.watchwise_api.common.tmdb.TmdbProvider("Netflix", "/netflix.jpg")), List.of(), List.of()))),
-                        null, 5, 62, List.of(new TmdbProductionCompany(1, "Sony Pictures Television", null, "US")), null, "Ended", null, List.of(
+                        null, seasons, episodes, List.of(new TmdbProductionCompany(1, "Sony Pictures Television", null, "US")), null, "Ended", null, List.of(
                         new TmdbNetwork(49, "AMC", null, "US")));
     }
 }

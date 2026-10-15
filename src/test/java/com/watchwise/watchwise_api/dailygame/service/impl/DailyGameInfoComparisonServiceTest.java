@@ -244,6 +244,20 @@ class DailyGameInfoComparisonServiceTest {
     }
 
     @Test
+    @DisplayName("[compare] Should Return Candidate Episode Count - When Comparing A Series")
+    void shouldReturnCandidateEpisodeCountWhenComparingASeries() {
+        DailyChallenge challenge = seriesChallenge(snapshot("seasons", 5));
+        TmdbTvFullDetails candidate = series("1396", 4, 24, List.of(), List.of(), List.of(), List.of());
+        when(tmdbClient.getTvFullDetails("1396", LANGUAGE)).thenReturn(found(candidate));
+
+        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoComparisonServiceImpl(tmdbClient)
+                .compare(challenge, seriesIdentity("1396"));
+
+        assertThat(feedback.candidateEpisodeCount()).isEqualTo(24);
+        assertThat(feedback.seasons().displayValue()).isEqualTo(4);
+    }
+
+    @Test
     @DisplayName("[compare] Should Mark Missing Metadata As No Data - When Either Side Lacks A Value")
     void shouldMarkMissingMetadataAsNoDataWhenEitherSideLacksAValue() {
         DailyChallenge challenge = movieChallenge(snapshot(
@@ -325,11 +339,17 @@ class DailyGameInfoComparisonServiceTest {
     private TmdbTvFullDetails series(String id, int seasons, List<String> creators,
                                      List<TmdbGenre> genres, List<String> cast,
                                      List<TmdbProductionCompany> companies) {
+        return series(id, seasons, 10, creators, genres, cast, companies);
+    }
+
+    private TmdbTvFullDetails series(String id, int seasons, int episodes, List<String> creators,
+                                     List<TmdbGenre> genres, List<String> cast,
+                                     List<TmdbProductionCompany> companies) {
         return new TmdbTvFullDetails(id, "Series", "Series", null, "/poster.jpg", null, "2000-01-01",
                 List.of(), genres, List.of(), creators.stream().map(name -> new com.watchwise.watchwise_api.common.tmdb.TmdbCreator(null, name, null)).toList(),
                 List.of(), null, new com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCredits(
                 cast.stream().map(name -> new com.watchwise.watchwise_api.common.tmdb.TmdbAggregateCastMember(null, name, null, List.of(), null)).toList(), List.of()),
-                providers(List.of()), null, seasons, 10, companies, null, "Ended");
+                providers(List.of()), null, seasons, episodes, companies, null, "Ended");
     }
 
     private TmdbWatchProviders providers(List<String> names) {

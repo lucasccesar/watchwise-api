@@ -102,6 +102,7 @@ public class DailyGameAttemptDetailsCodec {
         encoded.put("cast", encodeCell(feedback.cast()));
         encoded.put("productionCompanies", encodeCell(feedback.productionCompanies()));
         encoded.put("revenueOrSeasons", encodeCell(feedback.revenueOrSeasons()));
+        encoded.put("candidateEpisodeCount", feedback.candidateEpisodeCount());
         return encoded;
     }
 
@@ -207,7 +208,8 @@ public class DailyGameAttemptDetailsCodec {
                 decodeCell(feedback.get("platforms")), decodeCell(feedback.get("genres")),
                 decodeCell(feedback.get("year")), decodeCell(feedback.get("certification")),
                 decodeCell(feedback.get("directorOrCreators")), decodeCell(feedback.get("cast")),
-                decodeCell(feedback.get("productionCompanies")), decodeCell(feedback.get("revenueOrSeasons")));
+                decodeCell(feedback.get("productionCompanies")), decodeCell(feedback.get("revenueOrSeasons")),
+                nullableInteger(feedback.get("candidateEpisodeCount")));
     }
 
     private DailyGameComparisonCellDTO decodeCell(Object value) {

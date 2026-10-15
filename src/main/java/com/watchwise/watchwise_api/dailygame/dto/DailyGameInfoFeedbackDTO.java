@@ -8,7 +8,21 @@ public record DailyGameInfoFeedbackDTO(
         DailyGameComparisonCellDTO directorOrCreators,
         DailyGameComparisonCellDTO cast,
         DailyGameComparisonCellDTO productionCompanies,
-        DailyGameComparisonCellDTO revenueOrSeasons) {
+        DailyGameComparisonCellDTO revenueOrSeasons,
+        Integer candidateEpisodeCount) {
+
+    public DailyGameInfoFeedbackDTO(
+            DailyGameComparisonCellDTO platforms,
+            DailyGameComparisonCellDTO genres,
+            DailyGameComparisonCellDTO year,
+            DailyGameComparisonCellDTO certification,
+            DailyGameComparisonCellDTO directorOrCreators,
+            DailyGameComparisonCellDTO cast,
+            DailyGameComparisonCellDTO productionCompanies,
+            DailyGameComparisonCellDTO revenueOrSeasons) {
+        this(platforms, genres, year, certification, directorOrCreators, cast, productionCompanies,
+                revenueOrSeasons, null);
+    }
 
     public DailyGameComparisonCellDTO director() {
         return directorOrCreators;

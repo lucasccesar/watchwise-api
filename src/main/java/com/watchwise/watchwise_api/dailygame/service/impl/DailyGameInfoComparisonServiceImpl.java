@@ -95,7 +95,7 @@ public class DailyGameInfoComparisonServiceImpl implements DailyGameInfoComparis
                 scalarCell(secret.get("director"), director),
                 castCell(secret.get("cast"), cast),
                 setCell(secret.get("productionCompanies"), productionCompanies),
-                numericCell(secret.get("revenue"), revenue, false));
+                numericCell(secret.get("revenue"), revenue, false), null);
     }
 
     private DailyGameInfoFeedbackDTO compareSeries(Map<String, Object> secret,
@@ -124,7 +124,8 @@ public class DailyGameInfoComparisonServiceImpl implements DailyGameInfoComparis
                 setCell(creatorsSnapshot, creators),
                 castCell(secret.get("cast"), cast),
                 setCell(secret.get("productionCompanies"), productionCompanies),
-                numericCell(secret.get("seasons"), seasons, true));
+                numericCell(secret.get("seasons"), seasons, true),
+                positive(series.numberOfEpisodes()));
     }
 
     private DailyGameInfoFeedbackDTO feedback(DailyGameComparisonCellDTO platforms,
@@ -134,9 +135,10 @@ public class DailyGameInfoComparisonServiceImpl implements DailyGameInfoComparis
                                                DailyGameComparisonCellDTO directorOrCreators,
                                                DailyGameComparisonCellDTO cast,
                                                DailyGameComparisonCellDTO productionCompanies,
-                                               DailyGameComparisonCellDTO revenueOrSeasons) {
+                                               DailyGameComparisonCellDTO revenueOrSeasons,
+                                               Integer candidateEpisodeCount) {
         return new DailyGameInfoFeedbackDTO(platforms, genres, year, certification, directorOrCreators,
-                cast, productionCompanies, revenueOrSeasons);
+                cast, productionCompanies, revenueOrSeasons, candidateEpisodeCount);
     }
 
     private DailyGameComparisonCellDTO setCell(Object secretValue, List<String> candidateValues) {
