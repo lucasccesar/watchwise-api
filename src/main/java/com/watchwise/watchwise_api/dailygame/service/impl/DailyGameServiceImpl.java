@@ -391,9 +391,8 @@ public class DailyGameServiceImpl implements DailyGameService {
                 || card.status() == com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus.FAILED) {
             return card;
         }
-        List<String> paths = challenge.getDisplaySnapshot() != null
-                && challenge.getDisplaySnapshot().get("imagePaths") instanceof List<?> raw
-                ? raw.stream().filter(String.class::isInstance).map(String.class::cast).toList()
+        List<String> paths = challenge.getGameType() == DailyGameType.EPISODE_BY_FRAME
+                ? DailyGameFramePaths.select(challenge.getDisplaySnapshot())
                 : List.of(challenge.getImagePath());
         List<String> visible = new java.util.ArrayList<>();
         for (int index = 0; index < card.visibleImageUrls().size(); index++) {

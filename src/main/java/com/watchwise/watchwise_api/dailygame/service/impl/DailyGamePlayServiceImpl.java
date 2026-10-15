@@ -97,7 +97,7 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
             return List.of(media.issue(userId, challenge.getId(), DailyGameMediaSlot.CLUE,
                     variant, challenge.getImagePath()));
         }
-        List<String> paths = framePaths(challenge);
+        List<String> paths = DailyGameFramePaths.select(challenge.getDisplaySnapshot());
         if (paths.size() != FRAMES.length) throw new DailyGamesUnavailableException();
         List<DailyGameMediaRefDTO> refs = new ArrayList<>(FRAMES.length);
         for (int index = 0; index < FRAMES.length; index++) {
@@ -109,13 +109,6 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
             }
         }
         return List.copyOf(refs);
-    }
-
-    private List<String> framePaths(DailyChallenge challenge) {
-        Map<String, Object> display = challenge.getDisplaySnapshot();
-        if (display == null || !(display.get("imagePaths") instanceof List<?> values)) return List.of();
-        return values.stream().filter(String.class::isInstance).map(String.class::cast)
-                .filter(value -> !value.isBlank()).distinct().toList();
     }
 
     private DailyGameAttemptViewDTO attempt(DailyChallenge challenge, DailyGameAttemptDTO detail) {

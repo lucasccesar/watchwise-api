@@ -1,6 +1,11 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageBytes;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaRefDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
@@ -12,9 +17,15 @@ import com.watchwise.watchwise_api.dailygame.repository.*;
 import com.watchwise.watchwise_api.dailygame.service.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.time.*;
 import java.util.*;
 
@@ -87,6 +98,77 @@ class DailyGamePlayServiceImplTest {
         assertThat(view.media()).hasSize(6).allSatisfy(ref ->
                 assertThat(ref.url()).startsWith("/games/play/media/"));
         assertThat(view.canAttempt()).isFalse();
+    }
+
+    @ParameterizedTest
+    @EnumSource(DailyGameViewStatus.class)
+    void legacyEpisodeUsesFirstSixDistinctUsableFramesWithFetchableGrants(DailyGameViewStatus status)
+            throws Exception {
+        DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME).toBuilder()
+                .displaySnapshot(Map.of("imagePaths", Arrays.asList(null, 42, " ",
+                        "https://evil.example/frame.jpg", "/frame0.jpg", "frame0.jpg", "/frame1.jpg",
+                        "/frame2.jpg", "/frame3.jpg", "/frame4.jpg", "/frame5.jpg", "/frame6.jpg",
+                        "/frame7.jpg"))).build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+        when(challenges.findById(challenge.getId())).thenReturn(Optional.of(challenge));
+        int used = status == DailyGameViewStatus.NOT_PLAYED ? 0 : 2;
+        boolean terminal = status == DailyGameViewStatus.COMPLETED || status == DailyGameViewStatus.FAILED;
+        when(results.findByUserIdAndDailyChallengeIdIn(USER, List.of(challenge.getId())))
+                .thenReturn(status == DailyGameViewStatus.NOT_PLAYED ? List.of() : List.of(
+                        UserDailyGameResult.builder().dailyChallenge(challenge).attemptsUsed(used)
+                                .status(DailyGameResultStatus.valueOf(status.name())).build()));
+        TmdbClient tmdb = mock(TmdbClient.class);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(8, 8, BufferedImage.TYPE_INT_RGB), "png", bytes);
+        int visible = terminal ? 6 : used + 1;
+        for (int index = 0; index < visible; index++) {
+            when(tmdb.getImageBytes("/frame" + index + ".jpg")).thenReturn(new TmdbLookupResult.Found<>(
+                    new TmdbImageBytes(bytes.toByteArray(), MediaType.IMAGE_PNG)));
+        }
+        var realMedia = new DailyGameMediaServiceImpl(tmdb, challenges, CLOCK);
+        var play = new DailyGamePlayServiceImpl(challenges, results, mutations, realMedia,
+                new DailyGameAttemptDetailsCodec(), CLOCK);
+
+        var view = play.readToday(USER, challenge.getGameType());
+
+        assertThat(view.media()).hasSize(6);
+        assertThat(view.media()).extracting(DailyGameMediaRefDTO::slot).containsExactly(
+                DailyGameMediaSlot.FRAME_0, DailyGameMediaSlot.FRAME_1, DailyGameMediaSlot.FRAME_2,
+                DailyGameMediaSlot.FRAME_3, DailyGameMediaSlot.FRAME_4, DailyGameMediaSlot.FRAME_5);
+        assertThat(view.answer() != null).isEqualTo(terminal);
+        for (int index = 0; index < 6; index++) {
+            var ref = view.media().get(index);
+            assertThat(ref.revealed()).isEqualTo(index < visible);
+            if (index < visible) {
+                String token = ref.url().substring(ref.url().lastIndexOf('/') + 1);
+                assertThat(realMedia.fetch(USER, token).body()).isNotEmpty();
+                verify(tmdb).getImageBytes("/frame" + index + ".jpg");
+            } else {
+                assertThat(ref.url()).isNull();
+            }
+        }
+        var unselected = realMedia.issue(USER, challenge.getId(), DailyGameMediaSlot.FRAME_5,
+                DailyGameImageVariant.ORIGINAL, "/frame6.jpg");
+        String token = unselected.url().substring(unselected.url().lastIndexOf('/') + 1);
+        assertThatThrownBy(() -> realMedia.fetch(USER, token)).isInstanceOf(NotFoundException.class);
+        verify(tmdb, never()).getImageBytes("/frame6.jpg");
+        verify(tmdb, never()).getImageBytes("/frame7.jpg");
+        verifyNoInteractions(media, mutations);
+    }
+
+    @Test
+    void episodeWithFewerThanSixDistinctFramesRemainsUnavailable() {
+        DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME).toBuilder()
+                .displaySnapshot(Map.of("imagePaths", List.of("/a.jpg", "/b.jpg", "/c.jpg",
+                        "/d.jpg", "/e.jpg", "/a.jpg", " "))).build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+        when(results.findByUserIdAndDailyChallengeIdIn(USER, List.of(challenge.getId()))).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service().readToday(USER, challenge.getGameType()))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+        verifyNoInteractions(media, mutations);
     }
 
     @Test

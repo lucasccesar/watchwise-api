@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot;
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
+import com.watchwise.watchwise_api.dailygame.service.impl.DailyGameMediaServiceImpl;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
@@ -38,10 +39,12 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.Mockito.*;
@@ -91,6 +94,32 @@ class DailyGameMediaControllerIntegrationTest {
                 .andExpect(content().contentType(MediaType.IMAGE_PNG))
                 .andExpect(content().bytes(new byte[] {1, 2}));
         verify(throttler).checkAllowed("daily-game-media|" + user, 120, Duration.ofMinutes(5));
+    }
+
+    @Test
+    void unavailableImageReturnsBadGatewayApiErrorWhileMissingImageRemainsNotFound() throws Exception {
+        UUID user = UUID.randomUUID();
+        UUID challengeId = UUID.randomUUID();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, List.of()));
+        DailyChallengeRepository challenges = mock(DailyChallengeRepository.class);
+        when(challenges.findById(challengeId)).thenReturn(Optional.of(
+                DailyChallenge.builder().id(challengeId).imagePath("/clue.png").build()));
+        var service = new DailyGameMediaServiceImpl(tmdbClient, challenges, Clock.systemUTC());
+        String url = service.issue(user, challengeId, DailyGameMediaSlot.CLUE,
+                DailyGameImageVariant.BLUR_26, "/clue.png").url();
+        var mvc = MockMvcBuilders.standaloneSetup(new DailyGameMediaController(
+                        service, mock(RequestThrottler.class)))
+                .setControllerAdvice(new GlobalExceptionHandler()).build();
+        when(tmdbClient.getImageBytes("/clue.png")).thenReturn(new TmdbLookupResult.Unavailable<>(),
+                new TmdbLookupResult.NotFound<>());
+
+        mvc.perform(get(url)).andExpect(status().isBadGateway())
+                .andExpect(jsonPath("status").value(502))
+                .andExpect(jsonPath("error").value("Bad Gateway"))
+                .andExpect(jsonPath("path").value(url));
+        mvc.perform(get(url)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("status").value(404));
     }
 
     @Test

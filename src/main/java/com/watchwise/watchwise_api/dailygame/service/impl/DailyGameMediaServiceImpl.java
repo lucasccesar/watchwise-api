@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageBytes;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageTransport;
@@ -111,13 +112,9 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
     }
 
     private static String framePath(Map<String, Object> snapshot, DailyGameMediaSlot slot) {
-        Object paths = snapshot == null ? null : snapshot.get("imagePaths");
+        List<String> paths = DailyGameFramePaths.select(snapshot);
         int index = slot.ordinal() - DailyGameMediaSlot.FRAME_0.ordinal();
-        if (!(paths instanceof List<?> list) || index >= list.size()) {
-            return null;
-        }
-        Object path = list.get(index);
-        return path instanceof String text ? text : null;
+        return index < paths.size() ? paths.get(index) : null;
     }
 
     private static String seriesPosterPath(Map<String, Object> snapshot) {
@@ -134,6 +131,9 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
 
     private DailyGameMediaResponseDTO load(Grant grant) {
         TmdbLookupResult<TmdbImageBytes> result = tmdbClient.getImageBytes(grant.sourcePath());
+        if (result instanceof TmdbLookupResult.Unavailable<TmdbImageBytes>) {
+            throw new TmdbUnavailableException("TMDB is temporarily unavailable");
+        }
         if (!(result instanceof TmdbLookupResult.Found<TmdbImageBytes> found)) {
             throw new NotFoundException("TMDB image unavailable");
         }
@@ -159,7 +159,7 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
             }
             return encode(safeImage, png ? "png" : "jpeg", png ? MediaType.IMAGE_PNG : MediaType.IMAGE_JPEG);
         }
-        int resolution = switch (grant.variant()) {
+        int downsampleFactor = switch (grant.variant()) {
             case BLUR_26 -> 26;
             case BLUR_20 -> 20;
             case BLUR_14 -> 14;
@@ -168,11 +168,14 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
             case BLUR_2 -> 2;
             case ORIGINAL -> throw new IllegalStateException();
         };
-        BufferedImage small = new BufferedImage(resolution, resolution, BufferedImage.TYPE_INT_RGB);
+        // Blur strength is the reduction factor: smaller values retain more source detail.
+        int width = Math.max(1, decoded.getWidth() / downsampleFactor);
+        int height = Math.max(1, decoded.getHeight() / downsampleFactor);
+        BufferedImage small = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D down = small.createGraphics();
         try {
             down.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            down.drawImage(decoded, 0, 0, resolution, resolution, null);
+            down.drawImage(decoded, 0, 0, width, height, null);
         } finally {
             down.dispose();
         }

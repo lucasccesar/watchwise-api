@@ -101,6 +101,42 @@ class DailyGameServiceImplTest {
     private DailyGameMediaService mediaService;
 
     @Test
+    void overviewUsesTheSameDistinctLegacyFrameSlotsAsPlay() {
+        List<DailyChallenge> challenges = allChallenges().stream().map(challenge ->
+                challenge.getGameType() == DailyGameType.EPISODE_BY_FRAME ? challenge.toBuilder()
+                        .displaySnapshot(Map.of("imagePaths", List.of(" ", "/still-1.jpg", "/still-1.jpg",
+                                "/still-2.jpg", "/still-3.jpg", "/still-4.jpg", "/still-5.jpg",
+                                "/still-6.jpg", "/still-7.jpg"))).build() : challenge).toList();
+        DailyChallenge episode = challenges.stream()
+                .filter(challenge -> challenge.getGameType() == DailyGameType.EPISODE_BY_FRAME)
+                .findFirst().orElseThrow();
+        when(challengeRepository.findByChallengeDateOrderByGameTypeAsc(TODAY)).thenReturn(challenges);
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(
+                USER_ID, challenges.stream().map(DailyChallenge::getId).toList()))
+                .thenReturn(List.of(result(episode, 2, 0, DailyGameResultStatus.IN_PROGRESS, null)));
+        when(mediaService.issue(eq(USER_ID), any(), any(), any(), any()))
+                .thenAnswer(call -> new DailyGameMediaRefDTO(call.getArgument(2),
+                        "/games/play/media/" + call.getArgument(2) + call.getArgument(4),
+                        call.getArgument(3), true));
+
+        var card = service().getTodayOverview(USER_ID).games().stream()
+                .filter(game -> game.gameType() == DailyGameType.EPISODE_BY_FRAME).findFirst().orElseThrow();
+
+        assertThat(card.visibleImageUrls()).containsExactly("/games/play/media/FRAME_0/still-1.jpg",
+                "/games/play/media/FRAME_1/still-2.jpg", "/games/play/media/FRAME_2/still-3.jpg");
+
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(
+                USER_ID, challenges.stream().map(DailyChallenge::getId).toList()))
+                .thenReturn(List.of(result(episode, 2, 4, DailyGameResultStatus.COMPLETED, NOW)));
+        when(hintRepository.findByDailyChallengeIdInOrderByDailyChallengeIdAscPositionAsc(any()))
+                .thenReturn(allHints(challenges));
+        var raw = service().getToday(USER_ID).games().stream()
+                .filter(game -> game.gameType() == DailyGameType.EPISODE_BY_FRAME).findFirst().orElseThrow();
+        assertThat(raw.imageUrls()).hasSize(7).contains(
+                "https://image.tmdb.org/t/p/w300/still-7.jpg");
+    }
+
+    @Test
     void rawCurrentDayRouteAllowsRepeatingAValidCandidate() {
         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);

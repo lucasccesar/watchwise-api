@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageBytes;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -62,6 +63,44 @@ class DailyGameMediaServiceTest {
         byte[] transformed = service.fetch(user, token(ref)).body();
         assertNotEquals(java.util.Arrays.toString(source), java.util.Arrays.toString(transformed));
         assertNotNull(ImageIO.read(new java.io.ByteArrayInputStream(transformed)));
+    }
+
+    @Test
+    void laterBlurVariantsPreserveProgressivelyMoreImageDetail() throws Exception {
+        BufferedImage source = new BufferedImage(520, 260, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                int level = (int) (128 + 120 * Math.sin(2 * Math.PI * x / 64));
+                source.setRGB(x, y, new Color(level, level, level).getRGB());
+            }
+        }
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        ImageIO.write(source, "png", bytes);
+        when(tmdb.getImageBytes("/gradient.png")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbImageBytes(bytes.toByteArray(), MediaType.IMAGE_PNG)));
+
+        double previousError = Double.POSITIVE_INFINITY;
+        for (DailyGameImageVariant variant : List.of(DailyGameImageVariant.BLUR_26,
+                DailyGameImageVariant.BLUR_20, DailyGameImageVariant.BLUR_14,
+                DailyGameImageVariant.BLUR_9, DailyGameImageVariant.BLUR_5,
+                DailyGameImageVariant.BLUR_2, DailyGameImageVariant.ORIGINAL)) {
+            var ref = issue(DailyGameMediaSlot.CLUE, variant, "/gradient.png");
+            BufferedImage actual = ImageIO.read(new java.io.ByteArrayInputStream(
+                    service.fetch(user, token(ref)).body()));
+            assertEquals(source.getWidth(), actual.getWidth());
+            assertEquals(source.getHeight(), actual.getHeight());
+            double error = 0;
+            for (int y = 0; y < source.getHeight(); y++) {
+                for (int x = 0; x < source.getWidth(); x++) {
+                    int difference = (source.getRGB(x, y) & 255) - (actual.getRGB(x, y) & 255);
+                    error += difference * difference;
+                }
+            }
+            assertTrue(error < previousError,
+                    variant + " must preserve more detail: " + error + " >= " + previousError);
+            previousError = error;
+        }
+        assertEquals(0, previousError, "ORIGINAL preserves all source pixels");
     }
 
     @Test
@@ -180,6 +219,28 @@ class DailyGameMediaServiceTest {
         assertThrows(NotFoundException.class, () -> service.fetch(UUID.randomUUID(), token(second)));
         assertArrayEquals(one, service.fetch(user, token(second)).body());
         verify(tmdb, times(1)).getImageBytes("/same.png");
+    }
+
+    @Test
+    void unavailableImageUsesUpstreamFailureAndCanBeRetried() throws Exception {
+        byte[] source = image(80, 80, "png");
+        when(tmdb.getImageBytes("/clue.png")).thenReturn(new TmdbLookupResult.Unavailable<>(),
+                new TmdbLookupResult.Found<>(new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "/clue.png");
+
+        assertThrows(TmdbUnavailableException.class, () -> service.fetch(user, token(ref)));
+        assertNotNull(ImageIO.read(new java.io.ByteArrayInputStream(service.fetch(user, token(ref)).body())));
+        verify(tmdb, times(2)).getImageBytes("/clue.png");
+    }
+
+    @Test
+    void missingImageAndUnknownGrantsRemainNotFound() {
+        assertThrows(NotFoundException.class, () -> service.fetch(user, "unknown"));
+        assertThrows(NotFoundException.class, () -> service.fetch(user, null));
+        verifyNoInteractions(tmdb);
+        when(tmdb.getImageBytes("/missing.png")).thenReturn(new TmdbLookupResult.NotFound<>());
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "/missing.png");
+        assertThrows(NotFoundException.class, () -> service.fetch(user, token(ref)));
     }
 
     private static String token(DailyGameMediaRefDTO ref) {
