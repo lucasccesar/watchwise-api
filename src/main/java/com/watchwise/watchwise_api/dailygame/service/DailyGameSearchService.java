@@ -14,8 +14,14 @@ public interface DailyGameSearchService {
     Page<DailyGameSearchResultDTO> search(
             UUID userId, DailyGameType type, String query, Integer page, Integer size);
 
+    Page<DailyGameSearchResultDTO> search(
+            UUID userId, DailyGameType type, String query, Integer page, Integer size, boolean view);
+
     Page<DailyGameSearchResultDTO> searchEpisodeSeries(
             UUID userId, String query, Integer page, Integer size);
+
+    Page<DailyGameSearchResultDTO> searchEpisodeSeries(
+            UUID userId, String query, Integer page, Integer size, boolean view);
 
     List<DailyGameSeasonOptionDTO> listEpisodeSeasons(UUID userId, String seriesTmdbId);
 

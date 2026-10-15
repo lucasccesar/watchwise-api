@@ -159,6 +159,28 @@ class DailyGameControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[search] Should Pass Visual Mode - When The Search View Parameter Is True")
+    void shouldPassVisualModeWhenSearchViewParameterIsTrue() throws Exception {
+        RegisteredUser user = registerUser("dailycontrollersrchview");
+        DailyGameSearchResultDTO result = new DailyGameSearchResultDTO(
+                DailyGameTargetKind.MOVIE, "550", null, null, null, null,
+                "Fight Club", "/poster.jpg", LocalDate.of(1999, 10, 15), List.of("Drama"), null);
+        when(dailyGameSearchService.search(user.id(), DailyGameType.MOVIE_BY_INFO,
+                "fight", 1, 6, true))
+                .thenReturn(new PageImpl<>(List.of(result), PageRequest.of(0, 6), 1));
+
+        mockMvc.perform(get("/games/{gameType}/search", DailyGameType.MOVIE_BY_INFO)
+                        .param("q", "fight").param("page", "1").param("size", "6")
+                        .param("view", "true").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].tmdbId").value("550"))
+                .andExpect(jsonPath("$.content[0].genres[0]").value("Drama"));
+
+        verify(dailyGameSearchService).search(user.id(), DailyGameType.MOVIE_BY_INFO,
+                "fight", 1, 6, true);
+    }
+
+    @Test
     void visualReadReturnsProtectedMediaAndMapsUnavailableSet() throws Exception {
         RegisteredUser user = registerUser("dailyvisualread");
         when(dailyGamePlayService.readToday(user.id(), DailyGameType.MOVIE_BY_POSTER))

@@ -74,6 +74,11 @@ class TmdbClientCachingTest {
         }
 
         @Bean
+        TmdbImageTransport tmdbImageTransport() {
+            return org.mockito.Mockito.mock(TmdbImageTransport.class);
+        }
+
+        @Bean
         MockRestServiceServer mockRestServiceServer(RestClient.Builder builder) {
             return MockRestServiceServer.bindTo(builder).build();
         }

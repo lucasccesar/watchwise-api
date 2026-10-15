@@ -3,6 +3,8 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadataKey;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
@@ -10,6 +12,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.TmdbSeriesHierarchyService;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
@@ -25,7 +29,9 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -35,6 +41,7 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
 
     private static final int MAX_QUERY_LENGTH = 100;
     private static final int MAX_SEARCH_PAGE_SIZE = 100;
+    private static final int MAX_VISUAL_SEARCH_PAGE_SIZE = 6;
     private static final int TMDB_SEARCH_PAGE_SIZE = 20;
     private static final String LANGUAGE = TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE;
 
@@ -54,8 +61,15 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
     @Override
     public Page<DailyGameSearchResultDTO> search(
             UUID userId, DailyGameType type, String query, Integer page, Integer size) {
+        return search(userId, type, query, page, size, false);
+    }
+
+    @Override
+    public Page<DailyGameSearchResultDTO> search(
+            UUID userId, DailyGameType type, String query, Integer page, Integer size, boolean view) {
         String normalizedQuery = normalizeQuery(query);
-        PageRequest pageRequest = buildPageRequest(page, size);
+        PageRequest pageRequest = pageRequestFactory.build(page, size,
+                view ? MAX_VISUAL_SEARCH_PAGE_SIZE : MAX_SEARCH_PAGE_SIZE);
         if (type == null) {
             throw new BadRequestException("A daily game type is required");
         }
@@ -63,20 +77,29 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
             throw new BadRequestException("Episode searches require the episode search endpoints");
         }
 
-        return switch (type.targetKind()) {
+        Page<DailyGameSearchResultDTO> results = switch (type.targetKind()) {
             case MOVIE -> searchMovies(normalizedQuery, pageRequest);
             case SERIES -> searchSeries(normalizedQuery, pageRequest);
             case PERSON -> searchPeople(normalizedQuery, pageRequest);
             case EPISODE -> throw new BadRequestException("Episode searches require the episode search endpoints");
         };
+        return view && type.targetKind() != DailyGameTargetKind.PERSON ? enrich(results) : results;
     }
 
     @Override
     public Page<DailyGameSearchResultDTO> searchEpisodeSeries(
             UUID userId, String query, Integer page, Integer size) {
+        return searchEpisodeSeries(userId, query, page, size, false);
+    }
+
+    @Override
+    public Page<DailyGameSearchResultDTO> searchEpisodeSeries(
+            UUID userId, String query, Integer page, Integer size, boolean view) {
         String normalizedQuery = normalizeQuery(query);
-        PageRequest pageRequest = buildPageRequest(page, size);
-        return searchSeries(normalizedQuery, pageRequest);
+        PageRequest pageRequest = pageRequestFactory.build(page, size,
+                view ? MAX_VISUAL_SEARCH_PAGE_SIZE : MAX_SEARCH_PAGE_SIZE);
+        Page<DailyGameSearchResultDTO> results = searchSeries(normalizedQuery, pageRequest);
+        return view ? enrich(results) : results;
     }
 
     @Override
@@ -207,8 +230,37 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         return (int) page;
     }
 
-    private PageRequest buildPageRequest(Integer page, Integer size) {
-        return pageRequestFactory.build(page, size, MAX_SEARCH_PAGE_SIZE);
+    private Page<DailyGameSearchResultDTO> enrich(Page<DailyGameSearchResultDTO> results) {
+        Map<String, TmdbCardMetadata> metadataById = new LinkedHashMap<>();
+        for (DailyGameSearchResultDTO result : results.getContent()) {
+            if (result.tmdbId() != null && !metadataById.containsKey(result.tmdbId())) {
+                try {
+                    ContentCoordinate coordinate = new ContentCoordinate(
+                            result.targetKind() == DailyGameTargetKind.MOVIE ? ContentType.MOVIE : ContentType.SERIES,
+                            result.tmdbId(), null, null, null);
+                    TmdbCardMetadataKey.Type type = result.targetKind() == DailyGameTargetKind.MOVIE
+                            ? TmdbCardMetadataKey.Type.MOVIE : TmdbCardMetadataKey.Type.SERIES;
+                    TmdbLookupResult<TmdbCardMetadata> lookup = tmdbClient.getCardMetadata(
+                            new TmdbCardMetadataKey(type, coordinate.tmdbId(), null, null, null), LANGUAGE);
+                    if (lookup instanceof TmdbLookupResult.Found<TmdbCardMetadata> found
+                            && found.value() != null) {
+                        metadataById.put(result.tmdbId(), found.value());
+                    } else {
+                        metadataById.put(result.tmdbId(), null);
+                    }
+                } catch (RuntimeException ignored) {
+                    metadataById.put(result.tmdbId(), null);
+                }
+            }
+        }
+        List<DailyGameSearchResultDTO> enriched = results.getContent().stream().map(result -> {
+            TmdbCardMetadata metadata = metadataById.get(result.tmdbId());
+            return new DailyGameSearchResultDTO(result.targetKind(), result.tmdbId(), result.personTmdbId(),
+                    result.seriesTmdbId(), result.seasonNumber(), result.episodeNumber(), result.title(),
+                    result.imageUrl(), result.date(), metadata == null ? null : metadata.genres(),
+                    metadata == null ? null : metadata.numberOfSeasons());
+        }).toList();
+        return new PageImpl<>(enriched, results.getPageable(), results.getTotalElements());
     }
 
     private String normalizeQuery(String query) {

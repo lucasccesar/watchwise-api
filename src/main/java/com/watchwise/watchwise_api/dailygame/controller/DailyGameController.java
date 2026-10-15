@@ -129,13 +129,16 @@ public class DailyGameController {
             @PathVariable("gameType") DailyGameType gameType,
             @RequestParam("q") String query,
             @RequestParam(value = "page", required = false) Integer page,
-            @RequestParam(value = "size", required = false) Integer size) {
+            @RequestParam(value = "size", required = false) Integer size,
+            @RequestParam(value = "view", defaultValue = "false") boolean view) {
         if (gameType == DailyGameType.EPISODE_BY_FRAME) {
             throw new BadRequestException("Episode searches require the episode search endpoints");
         }
         UUID userId = currentUserId();
         throttleSearch(userId);
-        Page<DailyGameSearchResultDTO> results = dailyGameSearchService.search(userId, gameType, query, page, size);
+        Page<DailyGameSearchResultDTO> results = view
+                ? dailyGameSearchService.search(userId, gameType, query, page, size, true)
+                : dailyGameSearchService.search(userId, gameType, query, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(results));
     }
 
@@ -143,10 +146,13 @@ public class DailyGameController {
     public ResponseEntity<PageResponseDTO<DailyGameSearchResultDTO>> searchEpisodeSeries(
             @RequestParam("q") String query,
             @RequestParam(value = "page", required = false) Integer page,
-            @RequestParam(value = "size", required = false) Integer size) {
+            @RequestParam(value = "size", required = false) Integer size,
+            @RequestParam(value = "view", defaultValue = "false") boolean view) {
         UUID userId = currentUserId();
         throttleSearch(userId);
-        Page<DailyGameSearchResultDTO> results = dailyGameSearchService.searchEpisodeSeries(userId, query, page, size);
+        Page<DailyGameSearchResultDTO> results = view
+                ? dailyGameSearchService.searchEpisodeSeries(userId, query, page, size, true)
+                : dailyGameSearchService.searchEpisodeSeries(userId, query, page, size);
         return ResponseEntity.ok(PageResponseDTO.of(results));
     }
 

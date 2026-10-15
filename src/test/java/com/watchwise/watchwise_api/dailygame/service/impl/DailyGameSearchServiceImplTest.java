@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbCardMetadata;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
@@ -42,6 +43,7 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -175,6 +177,86 @@ class DailyGameSearchServiceImplTest {
                 USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 101);
 
         assertThat(result.getSize()).isEqualTo(100);
+    }
+
+    @Test
+    @DisplayName("[search view] Should Clamp Results And Enrich Movie Metadata - When Visual Mode Is Requested")
+    void shouldClampResultsAndEnrichMovieMetadataWhenVisualModeIsRequested() {
+        List<TmdbMovieSearchResult> movies = IntStream.rangeClosed(1, 12)
+                .mapToObj(index -> movie(String.valueOf(index), "Movie " + index)).toList();
+        stubMovieSearchPage("movie", 1, movies, 1, 12);
+        when(tmdbClient.getCardMetadata(any(), eq(LANGUAGE))).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbCardMetadata("Detail", "/detail.jpg", "2000-01-01", 90,
+                        List.of("Drama"), null)));
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "movie", 1, 100, true);
+
+        assertThat(result.getContent()).hasSize(6);
+        assertThat(result.getSize()).isEqualTo(6);
+        assertThat(result.getContent()).extracting(DailyGameSearchResultDTO::tmdbId)
+                .containsExactly("1", "2", "3", "4", "5", "6");
+        assertThat(result.getContent()).allSatisfy(item -> assertThat(item.genres()).containsExactly("Drama"));
+        verify(tmdbClient, org.mockito.Mockito.times(6)).getCardMetadata(any(), eq(LANGUAGE));
+    }
+
+    @Test
+    @DisplayName("[search view] Should Keep Candidate Selectable - When Decorative Metadata Is Unavailable")
+    void shouldKeepCandidateSelectableWhenDecorativeMetadataIsUnavailable() {
+        stubMovieSearchPage("fight", 1, List.of(movie("550", "Fight Club")), 1, 1);
+        when(tmdbClient.getCardMetadata(any(), eq(LANGUAGE))).thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 20, true);
+
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().getFirst().tmdbId()).isEqualTo("550");
+        assertThat(result.getContent().getFirst().genres()).isNull();
+    }
+
+    @Test
+    @DisplayName("[search view] Should Reuse Enrichment Per ID - When TMDB Returns Duplicate Movies")
+    void shouldReuseEnrichmentPerIdWhenTmdbReturnsDuplicateMovies() {
+        stubMovieSearchPage("fight", 1, List.of(movie("550", "Fight Club"), movie("550", "Fight Club")), 1, 2);
+        when(tmdbClient.getCardMetadata(any(), eq(LANGUAGE))).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbCardMetadata("Fight Club", "/poster.jpg", "1999-10-15", 139,
+                        List.of("Drama"), null)));
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 20, true);
+
+        assertThat(result.getContent()).hasSize(2);
+        verify(tmdbClient, org.mockito.Mockito.times(1)).getCardMetadata(any(), eq(LANGUAGE));
+    }
+
+    @Test
+    @DisplayName("[search view] Should Include Season Count - When Series Metadata Is Found")
+    void shouldIncludeSeasonCountWhenSeriesMetadataIsFound() {
+        when(tmdbClient.searchTv("office", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, List.of(new TmdbTvSearchResult("2316", "The Office", "/office.jpg", "2005-03-24")), 1, 1)));
+        when(tmdbClient.getCardMetadata(any(), eq(LANGUAGE))).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbCardMetadata("The Office", "/office.jpg", "2005-03-24", null,
+                        List.of("Comedy"), 9)));
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.SERIES_BY_INFO, "office", 1, 20, true);
+
+        assertThat(result.getContent().getFirst().genres()).containsExactly("Comedy");
+        assertThat(result.getContent().getFirst().numberOfSeasons()).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("[search view] Should Skip Detail Lookups - When Results Are People")
+    void shouldSkipDetailLookupsWhenResultsArePeople() {
+        when(tmdbClient.searchPeople("fincher", LANGUAGE, 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, List.of(new TmdbPersonSearchResult("7467", "David Fincher", "/profile.jpg")), 1, 1)));
+
+        Page<DailyGameSearchResultDTO> result = service().search(
+                USER_ID, DailyGameType.PERSON_BY_FACE, "fincher", 1, 20, true);
+
+        assertThat(result.getContent().getFirst().personTmdbId()).isEqualTo("7467");
+        assertThat(result.getContent().getFirst().genres()).isNull();
+        verify(tmdbClient, never()).getCardMetadata(any(), anyString());
     }
 
     @Test
