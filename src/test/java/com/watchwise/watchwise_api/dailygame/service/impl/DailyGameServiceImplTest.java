@@ -6,6 +6,9 @@ import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableExcepti
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonDetails;
+import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
@@ -34,6 +37,8 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaRefDTO;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -94,6 +99,47 @@ class DailyGameServiceImplTest {
 
     @Mock
     private DailyGameMediaService mediaService;
+
+    @ParameterizedTest
+    @EnumSource(value = DailyGameType.class, names = {
+            "MOVIE_BY_POSTER", "SERIES_BY_POSTER", "PERSON_BY_FACE", "EPISODE_BY_FRAME"})
+    void shouldRejectRepeatedCurrentDayCandidateWithoutChangingResult(DailyGameType type) {
+        DailyChallenge challenge = type == DailyGameType.EPISODE_BY_FRAME
+                ? challenge(type, "1396", 1, 1) : challenge(type, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        DailyGameAttemptRequest guess = switch (type.targetKind()) {
+            case MOVIE, SERIES -> request("551", null, null, null, null);
+            case PERSON -> request(null, "551", null, null, null);
+            case EPISODE -> request(null, null, "999", 1, 1);
+        };
+        switch (type.targetKind()) {
+            case MOVIE -> when(tmdbClient.getMovieFullDetails("551", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbMovieFullDetails.class)));
+            case SERIES -> when(tmdbClient.getTvFullDetails("551", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbTvFullDetails.class)));
+            case PERSON -> when(tmdbClient.getPersonDetails("551"))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbPersonDetails.class)));
+            case EPISODE -> when(tmdbClient.getEpisodeFullDetails("999", 1, 1,
+                    TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbEpisodeFullDetails.class)));
+        }
+
+        DailyGameServiceImpl service = service();
+        service.submitAttempt(USER_ID, type, guess);
+        assertThatThrownBy(() -> service.submitAttempt(USER_ID, type,
+                new DailyGameAttemptRequest(guess.tmdbId(), guess.personTmdbId(), guess.seriesTmdbId(),
+                        guess.seasonNumber(), guess.episodeNumber(), true)))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This candidate was already guessed");
+
+        assertThat(result.getAttemptsUsed()).isEqualTo(1);
+        assertThat(result.getScore()).isZero();
+        assertThat(result.getStatus()).isEqualTo(DailyGameResultStatus.IN_PROGRESS);
+        assertThat(result.isShareOnCompletion()).isFalse();
+        assertThat(new com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec()
+                .read(result.getAttemptDetails())).hasSize(1);
+    }
 
     @Test
     @DisplayName("[getToday] Should Return Eight NotPlayed States Without Creating Results - When The User Has No Results")

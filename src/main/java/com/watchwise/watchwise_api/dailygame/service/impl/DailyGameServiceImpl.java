@@ -201,6 +201,7 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
                 .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
         assertOpenAndHasAttempts(result, gameType);
+        assertNotPreviouslyGuessed(challenge, result, candidate);
         if (request.shareOnCompletion() != null) {
             result.setShareOnCompletion(request.shareOnCompletion());
         }
@@ -309,6 +310,24 @@ public class DailyGameServiceImpl implements DailyGameService {
                 result.getAttemptDetails(),
                 new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, infoFeedback,
                         filmographyFeedback)));
+    }
+
+    private void assertNotPreviouslyGuessed(DailyChallenge challenge, UserDailyGameResult result,
+                                             DailyGameCandidateIdentity candidate) {
+        if (!challenge.getChallengeDate().equals(LocalDate.now(clock))) {
+            return;
+        }
+        String candidateKey = candidate.answerKey();
+        boolean alreadyGuessed = attemptDetailsCodec.read(result.getAttemptDetails()).stream()
+                .map(DailyGameAttemptDTO::candidate)
+                .filter(prior -> prior != null && prior.targetKind() != null)
+                .map(prior -> new DailyGameCandidateIdentity(prior.targetKind(), prior.tmdbId(),
+                        prior.personTmdbId(), prior.seriesTmdbId(), prior.seasonNumber(),
+                        prior.episodeNumber()).answerKey())
+                .anyMatch(candidateKey::equals);
+        if (alreadyGuessed) {
+            throw new ConflictException("This candidate was already guessed");
+        }
     }
 
     private void requireGameType(DailyGameType gameType) {

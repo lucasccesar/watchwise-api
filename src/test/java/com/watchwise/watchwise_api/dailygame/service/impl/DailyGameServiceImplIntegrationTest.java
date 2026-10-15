@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeHintReposi
 import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGamePlayService;
@@ -79,6 +80,9 @@ class DailyGameServiceImplIntegrationTest {
     private UserDailyGameResultRepository resultRepository;
 
     @Autowired
+    private DailyGameAttemptDetailsCodec codec;
+
+    @Autowired
     private UserRepository userRepository;
 
     @Autowired
@@ -129,21 +133,42 @@ class DailyGameServiceImplIntegrationTest {
     }
 
     @Test
-    @DisplayName("[submitAttempt] Should Create One Result And Consume One Attempt - When Two First Submissions Race")
-    void shouldCreateOneResultAndConsumeOneAttemptWhenTwoFirstSubmissionsRace() throws Exception {
+    void repeatedCurrentDayGuessLeavesPersistedResultUnchanged() {
+        User user = userRepository.saveAndFlush(user());
+        DailyChallenge challenge = persistChallenge();
+        DailyGameAttemptRequest guess = new DailyGameAttemptRequest("551", null, null, null, null);
+        when(challengeRepository.findByChallengeDateAndGameType(LocalDate.now(clock), DailyGameType.MOVIE_BY_POSTER))
+                .thenReturn(Optional.of(challenge));
+        when(candidateValidator.validate(DailyGameType.MOVIE_BY_POSTER, guess))
+                .thenReturn(new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, "551", null, null, null, null));
+
+        dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER, guess);
+        assertThatThrownBy(() -> dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER, guess))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This candidate was already guessed");
+
+        UserDailyGameResult result = resultRepository.findAll().getFirst();
+        assertThat(result.getAttemptsUsed()).isEqualTo(1);
+        assertThat(result.getScore()).isZero();
+        assertThat(codec.read(result.getAttemptDetails())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Persist One Attempt - When Two Same Candidate Submissions Race")
+    void shouldPersistOneAttemptWhenTwoSameCandidateSubmissionsRace() throws Exception {
         User user = userRepository.saveAndFlush(user());
         DailyChallenge challenge = persistChallenge();
 
         when(challengeRepository.findByChallengeDateAndGameType(LocalDate.now(clock), DailyGameType.MOVIE_BY_POSTER))
                 .thenReturn(Optional.of(challenge));
         when(candidateValidator.validate(DailyGameType.MOVIE_BY_POSTER,
-                new DailyGameAttemptRequest("550", null, null, null, null)))
-                .thenReturn(new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, "550", null, null, null, null));
+                new DailyGameAttemptRequest("551", null, null, null, null)))
+                .thenReturn(new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, "551", null, null, null, null));
 
         Callable<SubmissionOutcome> submission = () -> {
             try {
                 dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER,
-                        new DailyGameAttemptRequest("550", null, null, null, null));
+                        new DailyGameAttemptRequest("551", null, null, null, null));
                 return new SubmissionOutcome(true, null);
             } catch (ConflictException exception) {
                 return new SubmissionOutcome(false, exception);
@@ -161,7 +186,9 @@ class DailyGameServiceImplIntegrationTest {
             assertThat(outcomes).extracting(SubmissionOutcome::succeeded).containsExactlyInAnyOrder(true, false);
             assertThat(outcomes).extracting(SubmissionOutcome::failure)
                     .filteredOn(failure -> failure != null)
-                    .allSatisfy(failure -> assertThat(failure).isInstanceOf(ConflictException.class));
+                    .allSatisfy(failure -> assertThat(failure)
+                            .isInstanceOf(ConflictException.class)
+                            .hasMessage("This candidate was already guessed"));
         } finally {
             executor.shutdownNow();
             if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
@@ -173,6 +200,8 @@ class DailyGameServiceImplIntegrationTest {
         assertThat(results).hasSize(1);
         assertThat(results.getFirst().getDailyChallenge().getId()).isEqualTo(challenge.getId());
         assertThat(results.getFirst().getAttemptsUsed()).isEqualTo(1);
+        assertThat(results.getFirst().getScore()).isZero();
+        assertThat(codec.read(results.getFirst().getAttemptDetails())).hasSize(1);
     }
 
     private User user() {
