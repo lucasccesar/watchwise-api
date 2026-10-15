@@ -63,79 +63,7 @@ public class DailyGameServiceImpl implements DailyGameService {
     private final DailyGameFilmographyService filmographyService;
     private final NewTransactionExecutor newTransactionExecutor;
     private final Clock clock;
-    private DailyGameMediaService mediaService;
-
-    @Autowired(required = false)
-    void setMediaService(DailyGameMediaService mediaService) {
-        this.mediaService = mediaService;
-    }
-
-    public DailyGameServiceImpl(
-            DailyChallengeRepository challengeRepository,
-            DailyChallengeHintRepository hintRepository,
-            UserDailyGameResultRepository resultRepository,
-            DailyGameCandidateValidator candidateValidator,
-            DailyChallengeResponseAssembler responseAssembler,
-            Clock clock) {
-        this(challengeRepository, hintRepository, resultRepository, candidateValidator,
-                responseAssembler, new DailyGameAttemptDetailsCodec(), null, null,
-                new NewTransactionExecutor(), clock);
-    }
-
-    public DailyGameServiceImpl(
-            DailyChallengeRepository challengeRepository,
-            DailyChallengeHintRepository hintRepository,
-            UserDailyGameResultRepository resultRepository,
-            DailyGameCandidateValidator candidateValidator,
-            DailyChallengeResponseAssembler responseAssembler,
-            DailyGameInfoComparisonService infoComparisonService,
-            Clock clock) {
-        this(challengeRepository, hintRepository, resultRepository, candidateValidator,
-                responseAssembler, new DailyGameAttemptDetailsCodec(), infoComparisonService, null,
-                new NewTransactionExecutor(), clock);
-    }
-
-    public DailyGameServiceImpl(
-            DailyChallengeRepository challengeRepository,
-            DailyChallengeHintRepository hintRepository,
-            UserDailyGameResultRepository resultRepository,
-            DailyGameCandidateValidator candidateValidator,
-            DailyChallengeResponseAssembler responseAssembler,
-            DailyGameAttemptDetailsCodec attemptDetailsCodec,
-            DailyGameInfoComparisonService infoComparisonService,
-            Clock clock) {
-        this(challengeRepository, hintRepository, resultRepository, candidateValidator, responseAssembler,
-                attemptDetailsCodec, infoComparisonService, null, new NewTransactionExecutor(), clock);
-    }
-
-    public DailyGameServiceImpl(
-            DailyChallengeRepository challengeRepository,
-            DailyChallengeHintRepository hintRepository,
-            UserDailyGameResultRepository resultRepository,
-            DailyGameCandidateValidator candidateValidator,
-            DailyChallengeResponseAssembler responseAssembler,
-            DailyGameInfoComparisonService infoComparisonService,
-            DailyGameFilmographyService filmographyService,
-            Clock clock) {
-        this(challengeRepository, hintRepository, resultRepository, candidateValidator, responseAssembler,
-                new DailyGameAttemptDetailsCodec(), infoComparisonService, filmographyService,
-                new NewTransactionExecutor(), clock);
-    }
-
-    public DailyGameServiceImpl(
-            DailyChallengeRepository challengeRepository,
-            DailyChallengeHintRepository hintRepository,
-            UserDailyGameResultRepository resultRepository,
-            DailyGameCandidateValidator candidateValidator,
-            DailyChallengeResponseAssembler responseAssembler,
-            DailyGameInfoComparisonService infoComparisonService,
-            DailyGameFilmographyService filmographyService,
-            NewTransactionExecutor newTransactionExecutor,
-            Clock clock) {
-        this(challengeRepository, hintRepository, resultRepository, candidateValidator, responseAssembler,
-                new DailyGameAttemptDetailsCodec(), infoComparisonService, filmographyService,
-                newTransactionExecutor, clock);
-    }
+    private final DailyGameMediaService mediaService;
 
     @Autowired
     public DailyGameServiceImpl(
@@ -148,6 +76,7 @@ public class DailyGameServiceImpl implements DailyGameService {
             DailyGameInfoComparisonService infoComparisonService,
             DailyGameFilmographyService filmographyService,
             NewTransactionExecutor newTransactionExecutor,
+            DailyGameMediaService mediaService,
             Clock clock) {
         this.challengeRepository = challengeRepository;
         this.hintRepository = hintRepository;
@@ -158,6 +87,7 @@ public class DailyGameServiceImpl implements DailyGameService {
         this.infoComparisonService = infoComparisonService;
         this.filmographyService = filmographyService;
         this.newTransactionExecutor = newTransactionExecutor;
+        this.mediaService = Objects.requireNonNull(mediaService);
         this.clock = clock;
     }
 
@@ -250,20 +180,22 @@ public class DailyGameServiceImpl implements DailyGameService {
         DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
                 .orElseThrow(DailyGamesUnavailableException::new);
 
-        newTransactionExecutor.runInNewTransaction(() ->
-                resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now));
         UserDailyGameResult initialResult = resultRepository
                 .findByUserIdAndDailyChallengeIdIn(userId, List.of(challenge.getId()))
                 .stream()
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
-        assertOpenAndHasAttempts(initialResult, gameType);
+                .orElse(null);
+        if (initialResult != null) {
+            assertOpenAndHasAttempts(initialResult, gameType);
+        }
 
         DailyGameCandidateIdentity candidate = candidateValidator.validate(gameType, request);
         DailyGameGuessFeedbackDTO episodeFeedback = guessFeedback(gameType, challenge, candidate);
         DailyGameInfoFeedbackDTO infoFeedback = infoFeedback(gameType, challenge, candidate);
         DailyGameFilmographyFeedbackDTO filmographyFeedback = filmographyFeedback(
                 gameType, challenge, candidate, majorRoles);
+        newTransactionExecutor.runInNewTransaction(() ->
+                resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now));
         return newTransactionExecutor.runInNewTransaction(() -> {
         UserDailyGameResult result = resultRepository
                 .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
@@ -433,7 +365,7 @@ public class DailyGameServiceImpl implements DailyGameService {
     private DailyGameOverviewCardDTO overviewCard(UUID userId, DailyChallenge challenge,
             UserDailyGameResult result) {
         DailyGameOverviewCardDTO card = responseAssembler.toOverviewCard(challenge, result);
-        if (mediaService == null || card.imageUrl() == null
+        if (card.imageUrl() == null
                 || card.status() == com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus.COMPLETED
                 || card.status() == com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus.FAILED) {
             return card;

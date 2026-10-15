@@ -30,6 +30,8 @@ import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepos
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaRefDTO;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -89,6 +91,9 @@ class DailyGameServiceImplTest {
 
     @Mock
     private DailyGameFilmographyService filmographyService;
+
+    @Mock
+    private DailyGameMediaService mediaService;
 
     @Test
     @DisplayName("[getToday] Should Return Eight NotPlayed States Without Creating Results - When The User Has No Results")
@@ -151,6 +156,9 @@ class DailyGameServiceImplTest {
     @Test
     @DisplayName("[getTodayOverview] Should Return Eight Safe Cards And A UTC Reset - When The Daily Set Is Complete")
     void shouldReturnEightSafeCardsAndAUtcResetWhenTheDailySetIsComplete() {
+        org.mockito.Mockito.lenient().when(mediaService.issue(eq(USER_ID), any(), any(), any(), any()))
+                .thenAnswer(call -> new DailyGameMediaRefDTO(call.getArgument(2),
+                        "/games/play/media/grant", call.getArgument(3), true));
         List<DailyChallenge> challenges = allChallenges();
         DailyChallenge completedChallenge = challenges.stream()
                 .filter(item -> item.getGameType() == DailyGameType.MOVIE_BY_POSTER)
@@ -188,10 +196,16 @@ class DailyGameServiceImplTest {
         assertThat(inProgressCard.attemptsRemaining()).isEqualTo(5);
         assertThat(inProgressCard.status()).isEqualTo(DailyGameViewStatus.IN_PROGRESS);
         assertThat(inProgressCard.score()).isZero();
-        assertThat(inProgressCard.imageUrl()).isEqualTo("https://image.tmdb.org/t/p/w300/still-2.jpg");
+        assertThat(inProgressCard.imageUrl()).isEqualTo("/games/play/media/grant");
         assertThat(inProgressCard.visibleImageUrls()).containsExactly(
-                "https://image.tmdb.org/t/p/w300/still-1.jpg",
-                "https://image.tmdb.org/t/p/w300/still-2.jpg");
+                "/games/play/media/grant", "/games/play/media/grant");
+        assertThat(response.games()).filteredOn(item -> item.status() != DailyGameViewStatus.COMPLETED
+                        && item.status() != DailyGameViewStatus.FAILED && item.imageUrl() != null)
+                .allSatisfy(item -> {
+                    assertThat(item.imageUrl()).startsWith("/games/play/media/");
+                    assertThat(item.visibleImageUrls()).allSatisfy(url ->
+                            assertThat(url).startsWith("/games/play/media/"));
+                });
         assertThat(response.games()).filteredOn(item -> item.gameType() == DailyGameType.MOVIE_BY_INFO
                         || item.gameType() == DailyGameType.SERIES_BY_INFO
                         || item.gameType() == DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY
@@ -209,6 +223,9 @@ class DailyGameServiceImplTest {
     @Test
     @DisplayName("[getDay/getToday/overview] Should Preserve Raw Repository Order And Sort Only The Overview")
     void shouldPreserveRawRepositoryOrderAndSortOnlyTheOverview() {
+        when(mediaService.issue(eq(USER_ID), any(), any(), any(), any()))
+                .thenAnswer(call -> new DailyGameMediaRefDTO(call.getArgument(2),
+                        "/games/play/media/grant", call.getArgument(3), true));
         List<DailyChallenge> challenges = allChallenges();
         List<DailyChallenge> shuffledChallenges = List.of(
                 challenges.get(3), challenges.get(0), challenges.get(7), challenges.get(2),
@@ -908,9 +925,9 @@ class DailyGameServiceImplTest {
 
         InOrder order = inOrder(challengeRepository, resultRepository, tmdbClient);
         order.verify(challengeRepository).findByChallengeDateAndGameType(TODAY, DailyGameType.MOVIE_BY_POSTER);
-        order.verify(resultRepository).insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW));
         order.verify(resultRepository).findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId()));
         order.verify(tmdbClient).getMovieFullDetails("550", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        order.verify(resultRepository).insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW));
         order.verify(resultRepository).findByUserIdAndDailyChallengeIdForUpdate(USER_ID, challenge.getId());
     }
 
@@ -941,8 +958,11 @@ class DailyGameServiceImplTest {
                 resultRepository,
                 new com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator(tmdbClient),
                 new DailyChallengeResponseAssembler(),
+                new com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec(),
                 infoComparisonService,
                 filmographyService,
+                new com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor(),
+                mediaService,
                 CLOCK);
     }
 
@@ -955,7 +975,8 @@ class DailyGameServiceImplTest {
     private void stubOpenSubmission(DailyChallenge challenge, UserDailyGameResult result) {
         when(challengeRepository.findByChallengeDateAndGameType(TODAY, challenge.getGameType()))
                 .thenReturn(Optional.of(challenge));
-        when(resultRepository.insertIfAbsent(any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
+        org.mockito.Mockito.lenient().when(resultRepository.insertIfAbsent(
+                any(), eq(USER_ID), eq(challenge.getId()), eq(NOW))).thenReturn(1);
         when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
                 .thenReturn(List.of(result));
         org.mockito.Mockito.lenient()

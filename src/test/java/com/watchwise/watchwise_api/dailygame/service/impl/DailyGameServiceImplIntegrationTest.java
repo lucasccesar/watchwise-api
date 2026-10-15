@@ -1,7 +1,10 @@
 package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.ConflictException;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageTransport;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
@@ -12,6 +15,7 @@ import com.watchwise.watchwise_api.dailygame.repository.UserDailyGameResultRepos
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateIdentity;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameCandidateValidator;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGamePlayService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -41,6 +45,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
@@ -61,6 +66,9 @@ class DailyGameServiceImplIntegrationTest {
     @Autowired
     private DailyGameService dailyGameService;
 
+    @Autowired
+    private DailyGamePlayService dailyGamePlayService;
+
     @MockitoBean
     private DailyChallengeRepository challengeRepository;
 
@@ -79,6 +87,9 @@ class DailyGameServiceImplIntegrationTest {
     @MockitoBean
     private DailyGameCandidateValidator candidateValidator;
 
+    @MockitoBean
+    private TmdbImageTransport tmdbImageTransport;
+
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -95,6 +106,26 @@ class DailyGameServiceImplIntegrationTest {
     @AfterEach
     void tearDown() {
         removeInsertDelay();
+    }
+
+    @Test
+    void invalidFirstVisualAttemptLeavesNextReadNotPlayedWithoutResultOrAttempt() {
+        User user = userRepository.saveAndFlush(user());
+        DailyChallenge challenge = persistChallenge();
+        DailyGameAttemptRequest invalid = new DailyGameAttemptRequest(null, "287", null, null, null);
+        when(challengeRepository.findByChallengeDateAndGameType(LocalDate.now(clock), DailyGameType.MOVIE_BY_POSTER))
+                .thenReturn(Optional.of(challenge));
+        when(candidateValidator.validate(DailyGameType.MOVIE_BY_POSTER, invalid))
+                .thenThrow(new BadRequestException("Candidate fields do not match the daily game target"));
+
+        assertThatThrownBy(() -> dailyGamePlayService.submitToday(user.getId(), DailyGameType.MOVIE_BY_POSTER, invalid))
+                .isInstanceOf(BadRequestException.class);
+
+        var nextRead = dailyGamePlayService.readToday(user.getId(), DailyGameType.MOVIE_BY_POSTER);
+        assertThat(nextRead.status()).isEqualTo(DailyGameViewStatus.NOT_PLAYED);
+        assertThat(nextRead.attemptsUsed()).isZero();
+        assertThat(nextRead.attempts()).isEmpty();
+        assertThat(resultRepository.findAll()).isEmpty();
     }
 
     @Test
