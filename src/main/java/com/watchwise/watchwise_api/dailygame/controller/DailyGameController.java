@@ -14,11 +14,14 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSeasonOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayViewDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayActionResponseDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingViewService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGamePlayService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,6 +46,7 @@ import java.util.UUID;
 public class DailyGameController {
 
     private final DailyGameService dailyGameService;
+    private final DailyGamePlayService dailyGamePlayService;
     private final DailyGameSearchService dailyGameSearchService;
     private final DailyGameRankingService dailyGameRankingService;
     private final DailyGameRankingViewService dailyGameRankingViewService;
@@ -68,6 +72,26 @@ public class DailyGameController {
     @GetMapping("/games/today/view")
     public ResponseEntity<DailyGamesOverviewDTO> getTodayOverview() {
         return ResponseEntity.ok(dailyGameService.getTodayOverview(currentUserId()));
+    }
+
+    @GetMapping("/games/{gameType}/play")
+    public ResponseEntity<DailyGamePlayViewDTO> getPlay(@PathVariable DailyGameType gameType) {
+        return ResponseEntity.ok(dailyGamePlayService.readToday(currentUserId(), gameType));
+    }
+
+    @PostMapping("/games/{gameType}/play/attempt")
+    public ResponseEntity<DailyGamePlayActionResponseDTO> submitPlayAttempt(
+            @PathVariable DailyGameType gameType, @Valid @RequestBody DailyGameAttemptRequest request) {
+        UUID userId = currentUserId();
+        throttleAttempt(userId);
+        return ResponseEntity.ok(dailyGamePlayService.submitToday(userId, gameType, request));
+    }
+
+    @PostMapping("/games/{gameType}/play/give-up")
+    public ResponseEntity<DailyGamePlayActionResponseDTO> giveUpPlay(@PathVariable DailyGameType gameType) {
+        UUID userId = currentUserId();
+        throttleAttempt(userId);
+        return ResponseEntity.ok(dailyGamePlayService.giveUpToday(userId, gameType));
     }
 
     @GetMapping("/games/rankings/view")

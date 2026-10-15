@@ -29,6 +29,9 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCode
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameInfoComparisonService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
+import com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant;
+import com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,6 +63,12 @@ public class DailyGameServiceImpl implements DailyGameService {
     private final DailyGameFilmographyService filmographyService;
     private final NewTransactionExecutor newTransactionExecutor;
     private final Clock clock;
+    private DailyGameMediaService mediaService;
+
+    @Autowired(required = false)
+    void setMediaService(DailyGameMediaService mediaService) {
+        this.mediaService = mediaService;
+    }
 
     public DailyGameServiceImpl(
             DailyChallengeRepository challengeRepository,
@@ -163,8 +172,8 @@ public class DailyGameServiceImpl implements DailyGameService {
         DailyGameDay day = loadDay(userId, date);
         List<DailyGameOverviewCardDTO> games = day.challenges().stream()
                 .sorted(Comparator.comparing(DailyChallenge::getGameType))
-                .map(challenge -> responseAssembler.toOverviewCard(
-                        challenge, day.resultsByChallengeId().get(challenge.getId())))
+                .map(challenge -> overviewCard(userId, challenge,
+                        day.resultsByChallengeId().get(challenge.getId())))
                 .toList();
         int totalMaxScore = games.stream().mapToInt(DailyGameOverviewCardDTO::maxAttempts).sum();
         int currentScore = games.stream().mapToInt(DailyGameOverviewCardDTO::score).sum();
@@ -230,6 +239,11 @@ public class DailyGameServiceImpl implements DailyGameService {
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request,
             boolean majorRoles) {
+        return toRawAttemptResponse(mutateAttempt(userId, challengeDate, gameType, request, majorRoles), majorRoles);
+    }
+
+    MutationResult mutateAttempt(UUID userId, LocalDate challengeDate, DailyGameType gameType,
+                                 DailyGameAttemptRequest request, boolean majorRoles) {
         requireGameType(gameType);
         assertAvailableDate(challengeDate);
         LocalDateTime now = LocalDateTime.now(clock);
@@ -280,15 +294,14 @@ public class DailyGameServiceImpl implements DailyGameService {
         appendAttemptDetails(challenge, result, attemptNumber, candidate, episodeFeedback, infoFeedback,
                 filmographyFeedback);
         resultRepository.save(result);
-        List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
         DailyGameCandidateDTO candidateDto = new DailyGameCandidateDTO(
                 candidate.targetKind(), candidate.tmdbId(), candidate.personTmdbId(), candidate.seriesTmdbId(),
                 candidate.seasonNumber(), candidate.episodeNumber(), candidate.title(), candidate.imageUrl(),
                 candidate.date());
-        return responseAssembler.toAttemptResponse(challenge, result, hints,
-                episodeFeedback, challengeDate.equals(LocalDate.now(clock)), majorRoles,
-                new DailyGameAttemptDTO(attemptNumber, candidateDto, episodeFeedback, infoFeedback,
-                        filmographyFeedback));
+        DailyGameAttemptDTO current = new DailyGameAttemptDTO(attemptNumber, candidateDto,
+                episodeFeedback, infoFeedback, filmographyFeedback);
+        return new MutationResult(challenge, result, attemptDetailsCodec.read(result.getAttemptDetails()),
+                current, episodeFeedback);
         });
     }
 
@@ -301,12 +314,18 @@ public class DailyGameServiceImpl implements DailyGameService {
     @Override
     @Transactional
     public DailyGameAttemptResponseDTO giveUp(UUID userId, LocalDate challengeDate, DailyGameType gameType) {
+        return toRawAttemptResponse(mutateGiveUp(userId, challengeDate, gameType), true);
+    }
+
+    MutationResult mutateGiveUp(UUID userId, LocalDate challengeDate, DailyGameType gameType) {
         requireGameType(gameType);
         assertAvailableDate(challengeDate);
         LocalDateTime now = LocalDateTime.now(clock);
         DailyChallenge challenge = challengeRepository.findByChallengeDateAndGameType(challengeDate, gameType)
                 .orElseThrow(DailyGamesUnavailableException::new);
-        resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now);
+        newTransactionExecutor.runInNewTransaction(() ->
+                resultRepository.insertIfAbsent(UUID.randomUUID(), userId, challenge.getId(), now));
+        return newTransactionExecutor.runInNewTransaction(() -> {
         UserDailyGameResult result = resultRepository
                 .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
                 .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
@@ -318,9 +337,25 @@ public class DailyGameServiceImpl implements DailyGameService {
         if (result.isShareOnCompletion()) {
             result.markSharedAt(now);
         }
+        return new MutationResult(challenge, result, attemptDetailsCodec.read(result.getAttemptDetails()),
+                null, null);
+        });
+    }
+
+    private DailyGameAttemptResponseDTO toRawAttemptResponse(MutationResult mutation, boolean majorRoles) {
+        DailyChallenge challenge = mutation.challenge();
         List<DailyChallengeHint> hints = hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId());
-        return responseAssembler.toAttemptResponse(
-                challenge, result, hints, null, challengeDate.equals(LocalDate.now(clock)));
+        return responseAssembler.toAttemptResponse(challenge, mutation.result(), hints,
+                mutation.feedback(), challenge.getChallengeDate().equals(LocalDate.now(clock)),
+                majorRoles, mutation.currentAttempt());
+    }
+
+    record MutationResult(DailyChallenge challenge, UserDailyGameResult result,
+                          List<DailyGameAttemptDTO> attempts, DailyGameAttemptDTO currentAttempt,
+                          DailyGameGuessFeedbackDTO feedback) {
+        MutationResult {
+            attempts = List.copyOf(attempts);
+        }
     }
 
     private void appendAttemptDetails(
@@ -393,6 +428,36 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .stream()
                 .collect(Collectors.toMap(result -> result.getDailyChallenge().getId(), Function.identity()));
         return new DailyGameDay(challenges, results);
+    }
+
+    private DailyGameOverviewCardDTO overviewCard(UUID userId, DailyChallenge challenge,
+            UserDailyGameResult result) {
+        DailyGameOverviewCardDTO card = responseAssembler.toOverviewCard(challenge, result);
+        if (mediaService == null || card.imageUrl() == null
+                || card.status() == com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus.COMPLETED
+                || card.status() == com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus.FAILED) {
+            return card;
+        }
+        List<String> paths = challenge.getDisplaySnapshot() != null
+                && challenge.getDisplaySnapshot().get("imagePaths") instanceof List<?> raw
+                ? raw.stream().filter(String.class::isInstance).map(String.class::cast).toList()
+                : List.of(challenge.getImagePath());
+        List<String> visible = new java.util.ArrayList<>();
+        for (int index = 0; index < card.visibleImageUrls().size(); index++) {
+            DailyGameMediaSlot slot = challenge.getGameType() == DailyGameType.EPISODE_BY_FRAME
+                    ? DailyGameMediaSlot.values()[index + 1] : DailyGameMediaSlot.CLUE;
+            visible.add(mediaService.issue(userId, challenge.getId(), slot,
+                    challenge.getGameType() == DailyGameType.EPISODE_BY_FRAME
+                            ? DailyGameImageVariant.ORIGINAL
+                            : List.of(DailyGameImageVariant.BLUR_26, DailyGameImageVariant.BLUR_20,
+                            DailyGameImageVariant.BLUR_14, DailyGameImageVariant.BLUR_9,
+                            DailyGameImageVariant.BLUR_5, DailyGameImageVariant.BLUR_2)
+                            .get(Math.min(card.attemptsUsed(), 5)),
+                    paths.get(Math.min(index, paths.size() - 1))).url());
+        }
+        return new DailyGameOverviewCardDTO(card.gameType(), card.targetKind(), card.maxAttempts(),
+                card.attemptsUsed(), card.attemptsRemaining(), card.status(), card.score(),
+                visible.isEmpty() ? null : visible.getLast(), List.copyOf(visible));
     }
 
     private void assertAvailableDate(LocalDate challengeDate) {

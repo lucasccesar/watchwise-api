@@ -20,6 +20,8 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameRankingViewerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameSearchResultDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameTodayResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayViewDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayActionResponseDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameViewStatus;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
@@ -28,6 +30,8 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingViewService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGamePlayService;
+import com.watchwise.watchwise_api.common.tmdb.TmdbImageTransport;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -62,6 +66,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -104,6 +109,12 @@ class DailyGameControllerIntegrationTest {
     private DailyGameService dailyGameService;
 
     @MockitoBean
+    private DailyGamePlayService dailyGamePlayService;
+
+    @MockitoBean
+    private TmdbImageTransport tmdbImageTransport;
+
+    @MockitoBean
     private DailyGameSearchService dailyGameSearchService;
 
     @MockitoBean
@@ -116,7 +127,8 @@ class DailyGameControllerIntegrationTest {
     void setUp() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
-        reset(dailyGameService, dailyGameSearchService, dailyGameRankingService, dailyGameRankingViewService);
+        reset(dailyGameService, dailyGamePlayService, dailyGameSearchService,
+                dailyGameRankingService, dailyGameRankingViewService);
         RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
@@ -136,6 +148,44 @@ class DailyGameControllerIntegrationTest {
                 .andExpect(jsonPath("$.games[0].answer").doesNotExist());
 
         verify(dailyGameService).getToday(user.id());
+    }
+
+    @Test
+    void visualRoutesRequireAuthentication() throws Exception {
+        mockMvc.perform(get("/games/MOVIE_BY_POSTER/play")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/games/MOVIE_BY_POSTER/play/attempt")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"tmdbId\":\"42\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void visualReadReturnsProtectedMediaAndMapsUnavailableSet() throws Exception {
+        RegisteredUser user = registerUser("dailyvisualread");
+        when(dailyGamePlayService.readToday(user.id(), DailyGameType.MOVIE_BY_POSTER))
+                .thenThrow(new DailyGamesUnavailableException());
+        mockMvc.perform(get("/games/MOVIE_BY_POSTER/play").cookie(user.accessToken()))
+                .andExpect(status().isServiceUnavailable());
+        doReturn(new DailyGamePlayViewDTO(LocalDate.of(2026, 10, 14),
+                        Instant.parse("2026-10-15T00:00:00Z"), DailyGameType.MOVIE_BY_POSTER,
+                        DailyGameTargetKind.MOVIE, 6, 0, 6, DailyGameViewStatus.NOT_PLAYED,
+                        0, 6, List.of(new com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaRefDTO(
+                        com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot.CLUE,
+                        "/games/play/media/grant", com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant.BLUR_26,
+                        false)), List.of(), null, true, true, false, false))
+                .when(dailyGamePlayService).readToday(user.id(), DailyGameType.MOVIE_BY_POSTER);
+        mockMvc.perform(get("/games/MOVIE_BY_POSTER/play").cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.media[0].url").value("/games/play/media/grant"))
+                .andExpect(jsonPath("$.answer").doesNotExist());
+    }
+
+    @Test
+    void visualReadRejectsUnsupportedType() throws Exception {
+        RegisteredUser user = registerUser("dailyvisualtype");
+        when(dailyGamePlayService.readToday(user.id(), DailyGameType.MOVIE_BY_INFO))
+                .thenThrow(new BadRequestException("Unsupported visual daily game type"));
+        mockMvc.perform(get("/games/MOVIE_BY_INFO/play").cookie(user.accessToken()))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

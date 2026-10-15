@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameRankingViewService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameSearchService;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameService;
+import com.watchwise.watchwise_api.dailygame.service.DailyGamePlayService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -65,6 +66,9 @@ class DailyGameControllerTest {
 
     @Mock
     private DailyGameService dailyGameService;
+
+    @Mock
+    private DailyGamePlayService dailyGamePlayService;
 
     @Mock
     private DailyGameSearchService dailyGameSearchService;
@@ -126,6 +130,21 @@ class DailyGameControllerTest {
 
         verify(dailyGameService).getTodayOverview(CURRENT_USER_ID);
         verifyNoInteractions(dailyGameRankingService, dailyGameSearchService);
+    }
+
+    @Test
+    void visualRoutesDelegateWithAuthenticatedUser() throws Exception {
+        mockMvc.perform(get("/games/MOVIE_BY_POSTER/play"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/games/MOVIE_BY_POSTER/play/attempt")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"tmdbId\":\"42\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/games/MOVIE_BY_POSTER/play/give-up"))
+                .andExpect(status().isOk());
+
+        verify(dailyGamePlayService).readToday(CURRENT_USER_ID, DailyGameType.MOVIE_BY_POSTER);
+        verify(dailyGamePlayService).submitToday(eq(CURRENT_USER_ID), eq(DailyGameType.MOVIE_BY_POSTER), any());
+        verify(dailyGamePlayService).giveUpToday(CURRENT_USER_ID, DailyGameType.MOVIE_BY_POSTER);
     }
 
     @Test
