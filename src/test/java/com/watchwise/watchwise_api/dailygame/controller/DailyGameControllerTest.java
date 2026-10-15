@@ -142,9 +142,10 @@ class DailyGameControllerTest {
         mockMvc.perform(post("/games/MOVIE_BY_POSTER/play/give-up"))
                 .andExpect(status().isOk());
 
-        verify(dailyGamePlayService).readToday(CURRENT_USER_ID, DailyGameType.MOVIE_BY_POSTER);
-        verify(dailyGamePlayService).submitToday(eq(CURRENT_USER_ID), eq(DailyGameType.MOVIE_BY_POSTER), any());
-        verify(dailyGamePlayService).giveUpToday(CURRENT_USER_ID, DailyGameType.MOVIE_BY_POSTER);
+        verify(dailyGamePlayService).readToday(CURRENT_USER_ID, DailyGameType.MOVIE_BY_POSTER, true);
+        verify(dailyGamePlayService).submitToday(
+                eq(CURRENT_USER_ID), eq(DailyGameType.MOVIE_BY_POSTER), any(), eq(true));
+        verify(dailyGamePlayService).giveUpToday(CURRENT_USER_ID, DailyGameType.MOVIE_BY_POSTER, true);
     }
 
     @Test

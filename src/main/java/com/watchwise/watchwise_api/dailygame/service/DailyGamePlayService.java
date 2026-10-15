@@ -10,8 +10,15 @@ import java.util.UUID;
 public interface DailyGamePlayService {
     DailyGamePlayViewDTO readToday(UUID userId, DailyGameType gameType);
 
+    DailyGamePlayViewDTO readToday(UUID userId, DailyGameType gameType, boolean majorRoles);
+
     DailyGamePlayActionResponseDTO submitToday(
             UUID userId, DailyGameType gameType, DailyGameAttemptRequest request);
 
+    DailyGamePlayActionResponseDTO submitToday(
+            UUID userId, DailyGameType gameType, DailyGameAttemptRequest request, boolean majorRoles);
+
     DailyGamePlayActionResponseDTO giveUpToday(UUID userId, DailyGameType gameType);
+
+    DailyGamePlayActionResponseDTO giveUpToday(UUID userId, DailyGameType gameType, boolean majorRoles);
 }

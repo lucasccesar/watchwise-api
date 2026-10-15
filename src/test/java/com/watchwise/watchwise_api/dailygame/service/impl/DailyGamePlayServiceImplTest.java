@@ -143,6 +143,66 @@ class DailyGamePlayServiceImplTest {
     }
 
     @Test
+    void terminalFilmographyIssuesProtectedOriginalAnswerMedia() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY);
+        UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
+                .attemptsUsed(1).score(0).status(DailyGameResultStatus.FAILED).build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+        when(results.findByUserIdAndDailyChallengeIdIn(USER, List.of(challenge.getId())))
+                .thenReturn(List.of(result));
+        when(media.issue(USER, challenge.getId(), DailyGameMediaSlot.CLUE,
+                DailyGameImageVariant.ORIGINAL, "/clue.jpg"))
+                .thenReturn(new DailyGameMediaRefDTO(DailyGameMediaSlot.CLUE,
+                        "/games/play/media/protected-filmography-answer", DailyGameImageVariant.ORIGINAL, true));
+
+        var view = service().readToday(USER, challenge.getGameType());
+
+        assertThat(view.media()).singleElement().satisfies(ref -> {
+            assertThat(ref.variant()).isEqualTo(DailyGameImageVariant.ORIGINAL);
+            assertThat(ref.url()).isEqualTo("/games/play/media/protected-filmography-answer")
+                    .isNotEqualTo(challenge.getImagePath());
+        });
+        assertThat(view.answer()).isNotNull();
+        assertThat(view.answer().image().url()).isEqualTo("/games/play/media/protected-filmography-answer");
+        verify(media).issue(USER, challenge.getId(), DailyGameMediaSlot.CLUE,
+                DailyGameImageVariant.ORIGINAL, "/clue.jpg");
+    }
+
+    @Test
+    void readTodayUsesRequestedAllRolesModeForSeriesFilmography() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY).toBuilder()
+                .answerSnapshot(Map.of("filmography", List.of(
+                        Map.of("workId", "100", "title", "Major Series", "mediaType", "tv",
+                                "year", 2020, "genres", List.of("Drama"), "episodeCount", 5,
+                                "totalEpisodes", 10, "period", "2018-01-01/2022-01-01"),
+                        Map.of("workId", "200", "title", "Guest Series", "mediaType", "tv",
+                                "year", 2019, "genres", List.of("Drama"), "episodeCount", 2,
+                                "totalEpisodes", 10, "period", "2019-01-01/2019-01-01"))))
+                .build();
+        DailyGameAttemptDTO previous = new DailyGameAttemptDTO(1,
+                new DailyGameCandidateDTO(DailyGameTargetKind.PERSON, null, "501", null,
+                        null, null, "Actor", "/actor.jpg", null), null, null,
+                new DailyGameFilmographyFeedbackDTO(new DailyGameActorGuessDTO("501", "Actor"),
+                        List.of("SERIES:100"), List.of("SERIES:100", "SERIES:200"), List.of()));
+        UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
+                .attemptsUsed(1).score(0).status(DailyGameResultStatus.IN_PROGRESS)
+                .attemptDetails(new DailyGameAttemptDetailsCodec().append(null, previous)).build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+        when(results.findByUserIdAndDailyChallengeIdIn(USER, List.of(challenge.getId())))
+                .thenReturn(List.of(result));
+
+        var view = service().readToday(USER, challenge.getGameType(), false);
+
+        assertThat(view.filmography().majorRoles()).isFalse();
+        assertThat(view.filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
+                .containsExactly("100:Major Series", "200:Guest Series");
+        assertThat(view.filmography().entries().get(1).sharedWith()).containsExactly("Actor");
+        verifyNoInteractions(media, mutations);
+    }
+
+    @Test
     void infoFeedbackSurvivesAttemptAndPlayProjection() {
         DailyChallenge challenge = challenge(DailyGameType.SERIES_BY_INFO);
         UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
@@ -202,6 +262,38 @@ class DailyGamePlayServiceImplTest {
                 });
         assertThat(action.state().media()).isEmpty();
         assertThat(action.state().answer()).isNull();
+        verifyNoInteractions(challenges, results, media);
+    }
+
+    @Test
+    void filmographyPlayAttemptPassesRequestedRoleModeToMutationAndProjection() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY).toBuilder()
+                .answerSnapshot(Map.of("filmography", List.of(
+                        Map.of("workId", "100", "title", "Major Series", "mediaType", "tv",
+                                "year", 2020, "genres", List.of("Drama"), "episodeCount", 5,
+                                "totalEpisodes", 10),
+                        Map.of("workId", "200", "title", "Guest Series", "mediaType", "tv",
+                                "year", 2019, "genres", List.of("Drama"), "episodeCount", 2,
+                                "totalEpisodes", 10))))
+                .build();
+        UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
+                .attemptsUsed(1).score(0).status(DailyGameResultStatus.IN_PROGRESS).build();
+        DailyGameAttemptDTO current = new DailyGameAttemptDTO(1,
+                new DailyGameCandidateDTO(DailyGameTargetKind.PERSON, null, "501", null,
+                        null, null, "Actor", "/actor.jpg", null), null, null,
+                new DailyGameFilmographyFeedbackDTO(new DailyGameActorGuessDTO("501", "Actor"),
+                        List.of("SERIES:100"), List.of("SERIES:100", "SERIES:200"), List.of()));
+        when(mutations.mutateAttempt(eq(USER), eq(DATE), eq(challenge.getGameType()), any(), eq(false), eq(true)))
+                .thenReturn(new DailyGameServiceImpl.MutationResult(challenge, result, List.of(current), current, null));
+
+        var action = service().submitToday(USER, challenge.getGameType(),
+                new DailyGameAttemptRequest(null, "501", null, null, null), false);
+
+        assertThat(action.state().filmography().majorRoles()).isFalse();
+        assertThat(action.state().filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
+                .containsExactly("100:Major Series", "200:Guest Series");
+        verify(mutations).mutateAttempt(USER, DATE, challenge.getGameType(),
+                new DailyGameAttemptRequest(null, "501", null, null, null), false, true);
         verifyNoInteractions(challenges, results, media);
     }
 

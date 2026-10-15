@@ -49,6 +49,12 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     @Override
     @Transactional(readOnly = true)
     public DailyGamePlayViewDTO readToday(UUID userId, DailyGameType gameType) {
+        return readToday(userId, gameType, true);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DailyGamePlayViewDTO readToday(UUID userId, DailyGameType gameType, boolean majorRoles) {
         requireGameType(gameType);
         LocalDate today = LocalDate.now(clock);
         DailyChallenge challenge = challenges.findByChallengeDateAndGameType(today, gameType)
@@ -56,28 +62,39 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
         UserDailyGameResult result = results.findByUserIdAndDailyChallengeIdIn(userId, List.of(challenge.getId()))
                 .stream().findFirst().orElse(null);
         return view(userId, challenge, result,
-                result == null ? List.of() : codec.read(result.getAttemptDetails()));
+                result == null ? List.of() : codec.read(result.getAttemptDetails()), majorRoles);
     }
 
     @Override
     public DailyGamePlayActionResponseDTO submitToday(UUID userId, DailyGameType gameType,
             DailyGameAttemptRequest request) {
+        return submitToday(userId, gameType, request, true);
+    }
+
+    @Override
+    public DailyGamePlayActionResponseDTO submitToday(UUID userId, DailyGameType gameType,
+            DailyGameAttemptRequest request, boolean majorRoles) {
         requireGameType(gameType);
-        var mutation = mutations.mutateAttempt(userId, LocalDate.now(clock), gameType, request, true, true);
+        var mutation = mutations.mutateAttempt(userId, LocalDate.now(clock), gameType, request, majorRoles, true);
         return new DailyGamePlayActionResponseDTO(view(userId, mutation.challenge(), mutation.result(),
-                mutation.attempts()), attempt(mutation.challenge(), mutation.currentAttempt()));
+                mutation.attempts(), majorRoles), attempt(mutation.challenge(), mutation.currentAttempt()));
     }
 
     @Override
     public DailyGamePlayActionResponseDTO giveUpToday(UUID userId, DailyGameType gameType) {
+        return giveUpToday(userId, gameType, true);
+    }
+
+    @Override
+    public DailyGamePlayActionResponseDTO giveUpToday(UUID userId, DailyGameType gameType, boolean majorRoles) {
         requireGameType(gameType);
         var mutation = mutations.mutateGiveUp(userId, LocalDate.now(clock), gameType);
         return new DailyGamePlayActionResponseDTO(view(userId, mutation.challenge(), mutation.result(),
-                mutation.attempts()), null);
+                mutation.attempts(), majorRoles), null);
     }
 
     private DailyGamePlayViewDTO view(UUID userId, DailyChallenge challenge, UserDailyGameResult result,
-            List<DailyGameAttemptDTO> details) {
+            List<DailyGameAttemptDTO> details, boolean majorRoles) {
         int used = result == null ? 0 : result.getAttemptsUsed();
         DailyGameViewStatus status = result == null ? DailyGameViewStatus.NOT_PLAYED
                 : DailyGameViewStatus.valueOf(result.getStatus().name());
@@ -86,7 +103,7 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
         List<DailyGameAttemptViewDTO> attempts = details.stream().map(detail -> attempt(challenge, detail)).toList();
         DailyGameAnswerPreviewDTO answer = terminal ? answer(userId, challenge, refs) : null;
         DailyGameFilmographyPlayStateDTO filmography = isFilmographyGame(challenge.getGameType())
-                ? filmography(challenge, details, used) : null;
+                ? filmography(challenge, details, used, majorRoles) : null;
         LocalDate date = challenge.getChallengeDate();
         return assembler.assemble(new DailyGamePlayProjection(date,
                 date.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant(), challenge.getGameType(),
@@ -97,9 +114,9 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     }
 
     private DailyGameFilmographyPlayStateDTO filmography(
-            DailyChallenge challenge, List<DailyGameAttemptDTO> details, int attemptsUsed) {
+            DailyChallenge challenge, List<DailyGameAttemptDTO> details, int attemptsUsed, boolean majorRoles) {
         DailyGameFilmographyPlayStateDTO assembled = filmographyAssembler.assemble(
-                challenge, details, true, challenge.getGameType().maxAttempts());
+                challenge, details, majorRoles, challenge.getGameType().maxAttempts());
         int maxAttempts = challenge.getGameType().maxAttempts();
         return new DailyGameFilmographyPlayStateDTO(assembled.majorRoles(), assembled.guessedActors(),
                 assembled.entries(), attemptsUsed, Math.max(0, maxAttempts - attemptsUsed), maxAttempts);

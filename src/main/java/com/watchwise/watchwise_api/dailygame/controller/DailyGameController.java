@@ -75,23 +75,29 @@ public class DailyGameController {
     }
 
     @GetMapping("/games/{gameType}/play")
-    public ResponseEntity<DailyGamePlayViewDTO> getPlay(@PathVariable DailyGameType gameType) {
-        return ResponseEntity.ok(dailyGamePlayService.readToday(currentUserId(), gameType));
+    public ResponseEntity<DailyGamePlayViewDTO> getPlay(
+            @PathVariable DailyGameType gameType,
+            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles) {
+        return ResponseEntity.ok(dailyGamePlayService.readToday(currentUserId(), gameType, majorRoles));
     }
 
     @PostMapping("/games/{gameType}/play/attempt")
     public ResponseEntity<DailyGamePlayActionResponseDTO> submitPlayAttempt(
-            @PathVariable DailyGameType gameType, @Valid @RequestBody DailyGameAttemptRequest request) {
+            @PathVariable DailyGameType gameType,
+            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles,
+            @Valid @RequestBody DailyGameAttemptRequest request) {
         UUID userId = currentUserId();
         throttleAttempt(userId);
-        return ResponseEntity.ok(dailyGamePlayService.submitToday(userId, gameType, request));
+        return ResponseEntity.ok(dailyGamePlayService.submitToday(userId, gameType, request, majorRoles));
     }
 
     @PostMapping("/games/{gameType}/play/give-up")
-    public ResponseEntity<DailyGamePlayActionResponseDTO> giveUpPlay(@PathVariable DailyGameType gameType) {
+    public ResponseEntity<DailyGamePlayActionResponseDTO> giveUpPlay(
+            @PathVariable DailyGameType gameType,
+            @RequestParam(value = "majorRoles", defaultValue = "true") boolean majorRoles) {
         UUID userId = currentUserId();
         throttleAttempt(userId);
-        return ResponseEntity.ok(dailyGamePlayService.giveUpToday(userId, gameType));
+        return ResponseEntity.ok(dailyGamePlayService.giveUpToday(userId, gameType, majorRoles));
     }
 
     @GetMapping("/games/rankings/view")

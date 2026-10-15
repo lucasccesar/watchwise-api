@@ -184,7 +184,7 @@ class DailyGameControllerIntegrationTest {
     @Test
     void visualReadReturnsProtectedMediaAndMapsUnavailableSet() throws Exception {
         RegisteredUser user = registerUser("dailyvisualread");
-        when(dailyGamePlayService.readToday(user.id(), DailyGameType.MOVIE_BY_POSTER))
+        when(dailyGamePlayService.readToday(user.id(), DailyGameType.MOVIE_BY_POSTER, true))
                 .thenThrow(new DailyGamesUnavailableException());
         mockMvc.perform(get("/games/MOVIE_BY_POSTER/play").cookie(user.accessToken()))
                 .andExpect(status().isServiceUnavailable());
@@ -195,7 +195,7 @@ class DailyGameControllerIntegrationTest {
                         com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot.CLUE,
                         "/games/play/media/grant", com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant.BLUR_26,
                         false)), List.of(), null, true, true, false, false))
-                .when(dailyGamePlayService).readToday(user.id(), DailyGameType.MOVIE_BY_POSTER);
+                .when(dailyGamePlayService).readToday(user.id(), DailyGameType.MOVIE_BY_POSTER, true);
         mockMvc.perform(get("/games/MOVIE_BY_POSTER/play").cookie(user.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.media[0].url").value("/games/play/media/grant"))
@@ -212,10 +212,10 @@ class DailyGameControllerIntegrationTest {
                     type.targetKind(), type.maxAttempts(), 0, type.maxAttempts(), DailyGameViewStatus.NOT_PLAYED,
                     0, type.maxAttempts(), List.of(), List.of(), null, true, true, false, false);
             DailyGamePlayActionResponseDTO action = new DailyGamePlayActionResponseDTO(state, null);
-            when(dailyGamePlayService.readToday(user.id(), type)).thenReturn(state);
-            when(dailyGamePlayService.submitToday(eq(user.id()), eq(type), any(DailyGameAttemptRequest.class)))
+            when(dailyGamePlayService.readToday(user.id(), type, true)).thenReturn(state);
+            when(dailyGamePlayService.submitToday(eq(user.id()), eq(type), any(DailyGameAttemptRequest.class), eq(true)))
                     .thenReturn(action);
-            when(dailyGamePlayService.giveUpToday(user.id(), type)).thenReturn(action);
+            when(dailyGamePlayService.giveUpToday(user.id(), type, true)).thenReturn(action);
 
             mockMvc.perform(get("/games/{gameType}/play", type).cookie(user.accessToken()))
                     .andExpect(status().isOk())
@@ -223,7 +223,7 @@ class DailyGameControllerIntegrationTest {
                     .andExpect(jsonPath("$.media").isEmpty())
                     .andExpect(jsonPath("$.answer").doesNotExist());
 
-            verify(dailyGamePlayService).readToday(user.id(), type);
+            verify(dailyGamePlayService).readToday(user.id(), type, true);
 
             mockMvc.perform(post("/games/{gameType}/play/attempt", type)
                             .cookie(user.accessToken(), user.csrfToken())
@@ -232,15 +232,51 @@ class DailyGameControllerIntegrationTest {
                             .content("{\"tmdbId\":\"42\",\"personTmdbId\":\"501\"}"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.state.gameType").value(type.name()));
-            verify(dailyGamePlayService).submitToday(eq(user.id()), eq(type), any(DailyGameAttemptRequest.class));
+            verify(dailyGamePlayService).submitToday(
+                    eq(user.id()), eq(type), any(DailyGameAttemptRequest.class), eq(true));
 
             mockMvc.perform(post("/games/{gameType}/play/give-up", type)
                             .cookie(user.accessToken(), user.csrfToken())
                             .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.state.gameType").value(type.name()));
-            verify(dailyGamePlayService).giveUpToday(user.id(), type);
+            verify(dailyGamePlayService).giveUpToday(user.id(), type, true);
         }
+    }
+
+    @Test
+    void visualPlayRoutesForwardRequestedMajorRolesMode() throws Exception {
+        RegisteredUser user = registerUser("dailyvisualrolesmode");
+        DailyGameType type = DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
+        DailyGamePlayViewDTO state = new DailyGamePlayViewDTO(
+                LocalDate.of(2026, 10, 15), Instant.parse("2026-10-16T00:00:00Z"), type,
+                type.targetKind(), type.maxAttempts(), 0, type.maxAttempts(), DailyGameViewStatus.NOT_PLAYED,
+                0, type.maxAttempts(), List.of(), List.of(), null, true, true, false, false);
+        DailyGamePlayActionResponseDTO action = new DailyGamePlayActionResponseDTO(state, null);
+        when(dailyGamePlayService.readToday(user.id(), type, false)).thenReturn(state);
+        when(dailyGamePlayService.submitToday(eq(user.id()), eq(type), any(DailyGameAttemptRequest.class), eq(false)))
+                .thenReturn(action);
+        when(dailyGamePlayService.giveUpToday(user.id(), type, false)).thenReturn(action);
+
+        mockMvc.perform(get("/games/{gameType}/play", type).param("majorRoles", "false")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk());
+        verify(dailyGamePlayService).readToday(user.id(), type, false);
+
+        mockMvc.perform(post("/games/{gameType}/play/attempt", type).param("majorRoles", "false")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"personTmdbId\":\"501\"}"))
+                .andExpect(status().isOk());
+        verify(dailyGamePlayService).submitToday(
+                eq(user.id()), eq(type), any(DailyGameAttemptRequest.class), eq(false));
+
+        mockMvc.perform(post("/games/{gameType}/play/give-up", type).param("majorRoles", "false")
+                        .cookie(user.accessToken(), user.csrfToken())
+                        .header("X-XSRF-TOKEN", user.csrfToken().getValue()))
+                .andExpect(status().isOk());
+        verify(dailyGamePlayService).giveUpToday(user.id(), type, false);
     }
 
     @Test
