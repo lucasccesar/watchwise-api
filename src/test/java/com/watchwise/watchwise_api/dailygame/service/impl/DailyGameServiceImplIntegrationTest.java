@@ -133,7 +133,7 @@ class DailyGameServiceImplIntegrationTest {
     }
 
     @Test
-    void repeatedCurrentDayGuessLeavesPersistedResultUnchanged() {
+    void rawCurrentDayGuessCanRepeatAndPersistsBothAttempts() {
         User user = userRepository.saveAndFlush(user());
         DailyChallenge challenge = persistChallenge();
         DailyGameAttemptRequest guess = new DailyGameAttemptRequest("551", null, null, null, null);
@@ -143,19 +143,17 @@ class DailyGameServiceImplIntegrationTest {
                 .thenReturn(new DailyGameCandidateIdentity(DailyGameTargetKind.MOVIE, "551", null, null, null, null));
 
         dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER, guess);
-        assertThatThrownBy(() -> dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER, guess))
-                .isInstanceOf(ConflictException.class)
-                .hasMessage("This candidate was already guessed");
+        dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER, guess);
 
         UserDailyGameResult result = resultRepository.findAll().getFirst();
-        assertThat(result.getAttemptsUsed()).isEqualTo(1);
+        assertThat(result.getAttemptsUsed()).isEqualTo(2);
         assertThat(result.getScore()).isZero();
-        assertThat(codec.read(result.getAttemptDetails())).hasSize(1);
+        assertThat(codec.read(result.getAttemptDetails())).hasSize(2);
     }
 
     @Test
-    @DisplayName("[submitAttempt] Should Persist One Attempt - When Two Same Candidate Submissions Race")
-    void shouldPersistOneAttemptWhenTwoSameCandidateSubmissionsRace() throws Exception {
+    @DisplayName("[visual submit] Should Persist One Attempt - When Two Same Candidate Submissions Race")
+    void shouldPersistOneVisualAttemptWhenTwoSameCandidateSubmissionsRace() throws Exception {
         User user = userRepository.saveAndFlush(user());
         DailyChallenge challenge = persistChallenge();
 
@@ -167,7 +165,7 @@ class DailyGameServiceImplIntegrationTest {
 
         Callable<SubmissionOutcome> submission = () -> {
             try {
-                dailyGameService.submitAttempt(user.getId(), DailyGameType.MOVIE_BY_POSTER,
+                dailyGamePlayService.submitToday(user.getId(), DailyGameType.MOVIE_BY_POSTER,
                         new DailyGameAttemptRequest("551", null, null, null, null));
                 return new SubmissionOutcome(true, null);
             } catch (ConflictException exception) {

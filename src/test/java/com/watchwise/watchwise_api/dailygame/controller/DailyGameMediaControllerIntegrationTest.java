@@ -8,8 +8,12 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbImageBytes;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageTransport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaResponseDTO;
+import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
+import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
+import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot;
+import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
@@ -34,7 +38,10 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.Mockito.*;
@@ -59,11 +66,15 @@ class DailyGameMediaControllerIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private UserRepository userRepository;
+    @Autowired private DailyChallengeRepository challengeRepository;
     @Autowired private DailyGameMediaService realMediaService;
     @MockitoBean private TmdbClient tmdbClient;
     @MockitoBean private TmdbImageTransport imageTransport;
 
-    @AfterEach void clear() { SecurityContextHolder.clearContext(); }
+    @AfterEach void clear() {
+        SecurityContextHolder.clearContext();
+        challengeRepository.deleteAll();
+    }
 
     @Test
     void servesAuthenticatedImageWithPrivateNoStoreAndDedicatedThrottle() throws Exception {
@@ -91,7 +102,15 @@ class DailyGameMediaControllerIntegrationTest {
         byte[] source = png();
         when(tmdbClient.getImageBytes("/frame.png")).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
-        String url = realMediaService.issue(ownerId, UUID.randomUUID(), DailyGameMediaSlot.FRAME_0,
+        LocalDateTime now = LocalDateTime.now();
+        DailyChallenge challenge = challengeRepository.save(DailyChallenge.builder()
+                .challengeDate(LocalDate.now()).gameType(DailyGameType.EPISODE_BY_FRAME)
+                .targetKind(DailyGameTargetKind.EPISODE).seriesTmdbId("42")
+                .seasonNumber(1).episodeNumber(1).answerKey("EPISODE:42:1:1")
+                .imagePath("/frame.png").answerSnapshot(Map.of("title", "Episode"))
+                .displaySnapshot(Map.of("imagePaths", List.of("/frame.png")))
+                .createdAt(now).updatedAt(now).build());
+        String url = realMediaService.issue(ownerId, challenge.getId(), DailyGameMediaSlot.FRAME_0,
                 DailyGameImageVariant.ORIGINAL, "/frame.png").url();
 
         mockMvc.perform(get(url)).andExpect(status().isUnauthorized());

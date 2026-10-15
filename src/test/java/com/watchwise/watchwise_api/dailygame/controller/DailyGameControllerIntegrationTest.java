@@ -165,18 +165,18 @@ class DailyGameControllerIntegrationTest {
         DailyGameSearchResultDTO result = new DailyGameSearchResultDTO(
                 DailyGameTargetKind.MOVIE, "550", null, null, null, null,
                 "Fight Club", "/poster.jpg", LocalDate.of(1999, 10, 15), List.of("Drama"), null);
-        when(dailyGameSearchService.search(user.id(), DailyGameType.MOVIE_BY_INFO,
+        when(dailyGameSearchService.search(user.id(), DailyGameType.MOVIE_BY_POSTER,
                 "fight", 1, 6, true))
                 .thenReturn(new PageImpl<>(List.of(result), PageRequest.of(0, 6), 1));
 
-        mockMvc.perform(get("/games/{gameType}/search", DailyGameType.MOVIE_BY_INFO)
+        mockMvc.perform(get("/games/{gameType}/search", DailyGameType.MOVIE_BY_POSTER)
                         .param("q", "fight").param("page", "1").param("size", "6")
                         .param("view", "true").cookie(user.accessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].tmdbId").value("550"))
                 .andExpect(jsonPath("$.content[0].genres[0]").value("Drama"));
 
-        verify(dailyGameSearchService).search(user.id(), DailyGameType.MOVIE_BY_INFO,
+        verify(dailyGameSearchService).search(user.id(), DailyGameType.MOVIE_BY_POSTER,
                 "fight", 1, 6, true);
     }
 

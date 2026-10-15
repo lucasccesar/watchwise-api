@@ -97,7 +97,7 @@ class DailyGamePlayServiceImplTest {
         DailyGameAttemptDTO current = new DailyGameAttemptDTO(1,
                 new DailyGameCandidateDTO(DailyGameTargetKind.MOVIE, "99", null, null,
                         null, null, "Other", null, null), null, null, null);
-        when(mutations.mutateAttempt(eq(USER), eq(DATE), eq(challenge.getGameType()), any(), eq(true)))
+        when(mutations.mutateAttempt(eq(USER), eq(DATE), eq(challenge.getGameType()), any(), eq(true), eq(true)))
                 .thenReturn(new DailyGameServiceImpl.MutationResult(challenge, result, List.of(current),
                         current, null));
         when(media.issue(eq(USER), eq(challenge.getId()), any(), any(), anyString()))

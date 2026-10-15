@@ -180,6 +180,15 @@ class DailyGameSearchServiceImplTest {
     }
 
     @Test
+    void visualSearchRejectsATypeWithoutAPlayScreen() {
+        assertThatThrownBy(() -> service().search(
+                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 6, true))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Unsupported visual daily game type");
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
     @DisplayName("[search view] Should Clamp Results And Enrich Movie Metadata - When Visual Mode Is Requested")
     void shouldClampResultsAndEnrichMovieMetadataWhenVisualModeIsRequested() {
         List<TmdbMovieSearchResult> movies = IntStream.rangeClosed(1, 12)
@@ -190,7 +199,7 @@ class DailyGameSearchServiceImplTest {
                         List.of("Drama"), null)));
 
         Page<DailyGameSearchResultDTO> result = service().search(
-                USER_ID, DailyGameType.MOVIE_BY_INFO, "movie", 1, 100, true);
+                USER_ID, DailyGameType.MOVIE_BY_POSTER, "movie", 1, 100, true);
 
         assertThat(result.getContent()).hasSize(6);
         assertThat(result.getSize()).isEqualTo(6);
@@ -207,7 +216,7 @@ class DailyGameSearchServiceImplTest {
         when(tmdbClient.getCardMetadata(any(), eq(LANGUAGE))).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         Page<DailyGameSearchResultDTO> result = service().search(
-                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 20, true);
+                USER_ID, DailyGameType.MOVIE_BY_POSTER, "fight", 1, 20, true);
 
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getContent().getFirst().tmdbId()).isEqualTo("550");
@@ -223,7 +232,7 @@ class DailyGameSearchServiceImplTest {
                         List.of("Drama"), null)));
 
         Page<DailyGameSearchResultDTO> result = service().search(
-                USER_ID, DailyGameType.MOVIE_BY_INFO, "fight", 1, 20, true);
+                USER_ID, DailyGameType.MOVIE_BY_POSTER, "fight", 1, 20, true);
 
         assertThat(result.getContent()).hasSize(2);
         verify(tmdbClient, org.mockito.Mockito.times(1)).getCardMetadata(any(), eq(LANGUAGE));
@@ -239,7 +248,7 @@ class DailyGameSearchServiceImplTest {
                         List.of("Comedy"), 9)));
 
         Page<DailyGameSearchResultDTO> result = service().search(
-                USER_ID, DailyGameType.SERIES_BY_INFO, "office", 1, 20, true);
+                USER_ID, DailyGameType.SERIES_BY_POSTER, "office", 1, 20, true);
 
         assertThat(result.getContent().getFirst().genres()).containsExactly("Comedy");
         assertThat(result.getContent().getFirst().numberOfSeasons()).isEqualTo(9);

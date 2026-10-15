@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.common.tmdb;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
@@ -15,7 +16,7 @@ public class TmdbImageTransport {
     public static final int MAX_BYTES = 5 * 1024 * 1024;
     private final RestClient client;
 
-    TmdbImageTransport(RestClient client) {
+    TmdbImageTransport(@Qualifier("tmdbImageRestClient") RestClient client) {
         this.client = client;
     }
 

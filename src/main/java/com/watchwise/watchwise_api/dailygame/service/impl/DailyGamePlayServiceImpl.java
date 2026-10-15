@@ -60,7 +60,7 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     public DailyGamePlayActionResponseDTO submitToday(UUID userId, DailyGameType gameType,
             DailyGameAttemptRequest request) {
         requireVisual(gameType);
-        var mutation = mutations.mutateAttempt(userId, LocalDate.now(clock), gameType, request, true);
+        var mutation = mutations.mutateAttempt(userId, LocalDate.now(clock), gameType, request, true, true);
         return new DailyGamePlayActionResponseDTO(view(userId, mutation.challenge(), mutation.result(),
                 mutation.attempts()), attempt(mutation.challenge(), mutation.currentAttempt()));
     }

@@ -10,8 +10,10 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbImageTransport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaRefDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaResponseDTO;
+import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot;
+import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameMediaService;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -36,6 +38,8 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -44,6 +48,7 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
     private static final int MAX_DIMENSION = 4096;
     private static final long MAX_PIXELS = 16_000_000;
     private final TmdbClient tmdbClient;
+    private final DailyChallengeRepository challenges;
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
     private final Cache<String, Grant> grants = Caffeine.newBuilder()
@@ -53,8 +58,9 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
             .weigher((MediaKey key, DailyGameMediaResponseDTO value) -> value.body().length)
             .expireAfterWrite(Duration.ofMinutes(10)).build();
 
-    public DailyGameMediaServiceImpl(TmdbClient tmdbClient, Clock clock) {
+    public DailyGameMediaServiceImpl(TmdbClient tmdbClient, DailyChallengeRepository challenges, Clock clock) {
         this.tmdbClient = tmdbClient;
+        this.challenges = challenges;
         this.clock = clock;
     }
 
@@ -78,12 +84,52 @@ public class DailyGameMediaServiceImpl implements DailyGameMediaService {
     public DailyGameMediaResponseDTO fetch(UUID userId, String grantToken) {
         Grant grant = grantToken == null ? null : grants.getIfPresent(grantToken);
         if (grant == null || !grant.userId().equals(userId) || !clock.instant().isBefore(grant.expiresAt())
-                || !fingerprint(grant.sourcePath()).equals(grant.sourceFingerprint())) {
+                || !matchesCurrentSource(grant)) {
             throw new NotFoundException("Daily game media grant not found");
         }
         MediaKey key = new MediaKey(grant.challengeId(), grant.slot(), grant.variant(), grant.sourceFingerprint());
         DailyGameMediaResponseDTO response = transformed.get(key, ignored -> load(grant));
         return new DailyGameMediaResponseDTO(response.body().clone(), response.mediaType());
+    }
+
+    private boolean matchesCurrentSource(Grant grant) {
+        DailyChallenge challenge = challenges.findById(grant.challengeId()).orElse(null);
+        if (challenge == null) {
+            return false;
+        }
+        String currentPath = switch (grant.slot()) {
+            case CLUE -> challenge.getImagePath();
+            case SERIES_POSTER -> seriesPosterPath(challenge.getAnswerSnapshot());
+            case FRAME_0, FRAME_1, FRAME_2, FRAME_3, FRAME_4, FRAME_5 ->
+                    framePath(challenge.getDisplaySnapshot(), grant.slot());
+        };
+        try {
+            return fingerprint(TmdbClient.normalizeImagePath(currentPath)).equals(grant.sourceFingerprint());
+        } catch (BadRequestException invalidSource) {
+            return false;
+        }
+    }
+
+    private static String framePath(Map<String, Object> snapshot, DailyGameMediaSlot slot) {
+        Object paths = snapshot == null ? null : snapshot.get("imagePaths");
+        int index = slot.ordinal() - DailyGameMediaSlot.FRAME_0.ordinal();
+        if (!(paths instanceof List<?> list) || index >= list.size()) {
+            return null;
+        }
+        Object path = list.get(index);
+        return path instanceof String text ? text : null;
+    }
+
+    private static String seriesPosterPath(Map<String, Object> snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        Object presentation = snapshot.get("presentation");
+        Object path = presentation instanceof Map<?, ?> map ? map.get("seriesPosterPath") : null;
+        if (!(path instanceof String text) || text.isBlank()) {
+            path = snapshot.get("seriesPosterPath");
+        }
+        return path instanceof String text ? text : null;
     }
 
     private DailyGameMediaResponseDTO load(Grant grant) {

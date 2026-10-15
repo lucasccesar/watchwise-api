@@ -100,6 +100,24 @@ class DailyGameServiceImplTest {
     @Mock
     private DailyGameMediaService mediaService;
 
+    @Test
+    void rawCurrentDayRouteAllowsRepeatingAValidCandidate() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        when(tmdbClient.getMovieFullDetails("551", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbMovieFullDetails.class)));
+
+        DailyGameServiceImpl service = service();
+        DailyGameAttemptRequest guess = request("551", null, null, null, null);
+        service.submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER, guess);
+        DailyGameAttemptResponseDTO second = service.submitAttempt(
+                USER_ID, DailyGameType.MOVIE_BY_POSTER, guess);
+
+        assertThat(second.attemptsUsed()).isEqualTo(2);
+        assertThat(result.getAttemptsUsed()).isEqualTo(2);
+    }
+
     @ParameterizedTest
     @EnumSource(value = DailyGameType.class, names = {
             "MOVIE_BY_POSTER", "SERIES_BY_POSTER", "PERSON_BY_FACE", "EPISODE_BY_FRAME"})
@@ -126,10 +144,10 @@ class DailyGameServiceImplTest {
         }
 
         DailyGameServiceImpl service = service();
-        service.submitAttempt(USER_ID, type, guess);
-        assertThatThrownBy(() -> service.submitAttempt(USER_ID, type,
+        service.mutateAttempt(USER_ID, TODAY, type, guess, true, true);
+        assertThatThrownBy(() -> service.mutateAttempt(USER_ID, TODAY, type,
                 new DailyGameAttemptRequest(guess.tmdbId(), guess.personTmdbId(), guess.seriesTmdbId(),
-                        guess.seasonNumber(), guess.episodeNumber(), true)))
+                        guess.seasonNumber(), guess.episodeNumber(), true), true, true))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("This candidate was already guessed");
 

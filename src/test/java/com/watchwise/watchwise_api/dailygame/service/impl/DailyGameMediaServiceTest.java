@@ -2,15 +2,18 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
-import com.github.benmanes.caffeine.cache.Cache;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageBytes;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameMediaRefDTO;
+import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameImageVariant;
 import com.watchwise.watchwise_api.dailygame.media.DailyGameMediaSlot;
+import com.watchwise.watchwise_api.dailygame.repository.DailyChallengeRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.MediaType;
 
 import javax.imageio.ImageIO;
@@ -21,9 +24,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.lang.reflect.Constructor;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.CRC32;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -33,19 +39,22 @@ class DailyGameMediaServiceTest {
     private final UUID user = UUID.randomUUID();
     private final UUID challenge = UUID.randomUUID();
     private final TmdbClient tmdb = mock(TmdbClient.class);
+    private final DailyChallengeRepository challenges = mock(DailyChallengeRepository.class);
+    private final AtomicReference<DailyChallenge> currentChallenge = new AtomicReference<>();
     private final MutableClock clock = new MutableClock();
     private DailyGameMediaServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new DailyGameMediaServiceImpl(tmdb, clock);
+        when(challenges.findById(challenge)).thenAnswer(ignored -> Optional.ofNullable(currentChallenge.get()));
+        service = new DailyGameMediaServiceImpl(tmdb, challenges, clock);
     }
 
     @Test
     void openClueUsesOpaqueGrantAndTransformsPixels() throws Exception {
         byte[] source = image(160, 160, "png");
         when(tmdb.getImageBytes("/clue.png")).thenReturn(new TmdbLookupResult.Found<>(new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
-        DailyGameMediaRefDTO ref = service.issue(user, challenge, DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "/clue.png");
+        DailyGameMediaRefDTO ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "/clue.png");
         assertTrue(ref.url().startsWith("/games/play/media/"));
         assertFalse(ref.url().contains("clue"));
         assertFalse(ref.url().contains(user.toString()));
@@ -59,7 +68,7 @@ class DailyGameMediaServiceTest {
     void originalGrantReencodesAtSourceDimensionsWithoutMetadata() throws Exception {
         byte[] source = metadataBearingPng(image(80, 80, "png"));
         when(tmdb.getImageBytes("/frame.png")).thenReturn(new TmdbLookupResult.Found<>(new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
-        var ref = service.issue(user, challenge, DailyGameMediaSlot.FRAME_0, DailyGameImageVariant.ORIGINAL, "/frame.png");
+        var ref = issue(DailyGameMediaSlot.FRAME_0, DailyGameImageVariant.ORIGINAL, "/frame.png");
         var response = service.fetch(user, token(ref));
         byte[] output = response.body();
         assertEquals(MediaType.IMAGE_PNG, response.mediaType());
@@ -77,25 +86,43 @@ class DailyGameMediaServiceTest {
 
     @Test
     void expiredAndForeignGrantsAreRejectedBeforeImageLookup() {
-        var ref = service.issue(user, challenge, DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_9, "/clue.png");
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_9, "/clue.png");
         assertThrows(NotFoundException.class, () -> service.fetch(UUID.randomUUID(), token(ref)));
         clock.advanceSeconds(601);
         assertThrows(NotFoundException.class, () -> service.fetch(user, token(ref)));
         verifyNoInteractions(tmdb);
     }
 
-    @Test
-    @SuppressWarnings("unchecked")
-    void sourceFingerprintMismatchRejectsGrantBeforeImageLookup() throws Exception {
-        var ref = service.issue(user, challenge, DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_9, "/clue.png");
-        Cache<String, Object> grants = (Cache<String, Object>) org.springframework.test.util.ReflectionTestUtils.getField(service, "grants");
-        Constructor<?> constructor = grants.getIfPresent(token(ref)).getClass().getDeclaredConstructors()[0];
-        constructor.setAccessible(true);
-        grants.put(token(ref), constructor.newInstance(user, challenge, DailyGameMediaSlot.CLUE,
-                DailyGameImageVariant.BLUR_9, "/swapped.png", "wrong-fingerprint",
-                clock.instant().plusSeconds(600)));
+    @ParameterizedTest
+    @EnumSource(value = DailyGameMediaSlot.class, names = {"CLUE", "FRAME_2", "SERIES_POSTER"})
+    void changedChallengeSourceRejectsGrantBeforeImageLookup(DailyGameMediaSlot slot) {
+        var ref = issue(slot, DailyGameImageVariant.ORIGINAL, "/original.png");
+        DailyChallenge previous = currentChallenge.get();
+        currentChallenge.set(switch (slot) {
+            case CLUE -> previous.toBuilder().imagePath("/replacement.png").build();
+            case FRAME_2 -> previous.toBuilder().displaySnapshot(Map.of("imagePaths", List.of(
+                    "/other-0.png", "/other-1.png", "/replacement.png",
+                    "/other-3.png", "/other-4.png", "/other-5.png"))).build();
+            case SERIES_POSTER -> previous.toBuilder().answerSnapshot(Map.of(
+                    "presentation", Map.of("seriesPosterPath", "/replacement.png"))).build();
+            default -> throw new IllegalStateException();
+        });
         assertThrows(NotFoundException.class, () -> service.fetch(user, token(ref)));
         verifyNoInteractions(tmdb);
+    }
+
+    @Test
+    void changedChallengeSourceRejectsPreviouslyFetchedGrantDespiteCachedBytes() throws Exception {
+        byte[] source = image(80, 80, "png");
+        when(tmdb.getImageBytes("/original.png")).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.ORIGINAL, "/original.png");
+        assertNotNull(service.fetch(user, token(ref)));
+
+        currentChallenge.set(currentChallenge.get().toBuilder().imagePath("/replacement.png").build());
+
+        assertThrows(NotFoundException.class, () -> service.fetch(user, token(ref)));
+        verify(tmdb, times(1)).getImageBytes("/original.png");
     }
 
     @Test
@@ -110,8 +137,7 @@ class DailyGameMediaServiceTest {
 
     @Test
     void acceptsRelativeTmdbImagePathWithoutLeadingSlash() {
-        var ref = service.issue(user, challenge, DailyGameMediaSlot.CLUE,
-                DailyGameImageVariant.BLUR_26, "poster.jpg");
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_26, "poster.jpg");
         assertTrue(ref.url().startsWith("/games/play/media/"));
     }
 
@@ -122,7 +148,7 @@ class DailyGameMediaServiceTest {
                 new TmdbImageBytes(new byte[5 * 1024 * 1024 + 1], MediaType.IMAGE_PNG),
                 new TmdbImageBytes(new byte[] {1, 2, 3}, MediaType.IMAGE_PNG)}) {
             when(tmdb.getImageBytes("/bad.png")).thenReturn(new TmdbLookupResult.Found<>(result));
-            var ref = service.issue(user, challenge, DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_20, "/bad.png");
+            var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_20, "/bad.png");
             assertThrows(BadRequestException.class, () -> service.fetch(user, token(ref)));
         }
     }
@@ -131,7 +157,7 @@ class DailyGameMediaServiceTest {
     void oversizedPixelsAreRejected() throws Exception {
         byte[] source = image(4200, 2, "png");
         when(tmdb.getImageBytes("/wide.png")).thenReturn(new TmdbLookupResult.Found<>(new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
-        var ref = service.issue(user, challenge, DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_20, "/wide.png");
+        var ref = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_20, "/wide.png");
         assertThrows(BadRequestException.class, () -> service.fetch(user, token(ref)));
     }
 
@@ -140,7 +166,7 @@ class DailyGameMediaServiceTest {
         byte[] jpeg = image(80, 80, "jpeg");
         when(tmdb.getImageBytes("/wrong.png")).thenReturn(new TmdbLookupResult.Found<>(
                 new TmdbImageBytes(jpeg, MediaType.IMAGE_PNG)));
-        var ref = service.issue(user, challenge, DailyGameMediaSlot.FRAME_0, DailyGameImageVariant.ORIGINAL, "/wrong.png");
+        var ref = issue(DailyGameMediaSlot.FRAME_0, DailyGameImageVariant.ORIGINAL, "/wrong.png");
         assertThrows(BadRequestException.class, () -> service.fetch(user, token(ref)));
     }
 
@@ -148,8 +174,8 @@ class DailyGameMediaServiceTest {
     void authorizedGrantsShareTransformedBytesButForeignUserCannotReadCache() throws Exception {
         byte[] source = image(80, 80, "png");
         when(tmdb.getImageBytes("/same.png")).thenReturn(new TmdbLookupResult.Found<>(new TmdbImageBytes(source, MediaType.IMAGE_PNG)));
-        var first = service.issue(user, challenge, DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_5, "/same.png");
-        var second = service.issue(user, challenge, DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_5, "/same.png");
+        var first = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_5, "/same.png");
+        var second = issue(DailyGameMediaSlot.CLUE, DailyGameImageVariant.BLUR_5, "/same.png");
         byte[] one = service.fetch(user, token(first)).body();
         assertThrows(NotFoundException.class, () -> service.fetch(UUID.randomUUID(), token(second)));
         assertArrayEquals(one, service.fetch(user, token(second)).body());
@@ -158,6 +184,20 @@ class DailyGameMediaServiceTest {
 
     private static String token(DailyGameMediaRefDTO ref) {
         return ref.url().substring(ref.url().lastIndexOf('/') + 1);
+    }
+
+    private DailyGameMediaRefDTO issue(DailyGameMediaSlot slot, DailyGameImageVariant variant, String path) {
+        List<String> frames = new java.util.ArrayList<>(List.of(
+                "/other-0.png", "/other-1.png", "/other-2.png",
+                "/other-3.png", "/other-4.png", "/other-5.png"));
+        if (slot.name().startsWith("FRAME_")) {
+            frames.set(slot.ordinal() - DailyGameMediaSlot.FRAME_0.ordinal(), path);
+        }
+        currentChallenge.set(DailyChallenge.builder().id(challenge).imagePath(path)
+                .displaySnapshot(Map.of("imagePaths", frames))
+                .answerSnapshot(Map.of("presentation", Map.of("seriesPosterPath", path)))
+                .build());
+        return service.issue(user, challenge, slot, variant, path);
     }
 
     private static byte[] image(int width, int height, String format) throws Exception {

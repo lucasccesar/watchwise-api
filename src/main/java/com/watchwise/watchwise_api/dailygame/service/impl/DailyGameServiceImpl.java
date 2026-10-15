@@ -169,11 +169,11 @@ public class DailyGameServiceImpl implements DailyGameService {
     public DailyGameAttemptResponseDTO submitAttempt(
             UUID userId, LocalDate challengeDate, DailyGameType gameType, DailyGameAttemptRequest request,
             boolean majorRoles) {
-        return toRawAttemptResponse(mutateAttempt(userId, challengeDate, gameType, request, majorRoles), majorRoles);
+        return toRawAttemptResponse(mutateAttempt(userId, challengeDate, gameType, request, majorRoles, false), majorRoles);
     }
 
     MutationResult mutateAttempt(UUID userId, LocalDate challengeDate, DailyGameType gameType,
-                                 DailyGameAttemptRequest request, boolean majorRoles) {
+                                 DailyGameAttemptRequest request, boolean majorRoles, boolean rejectDuplicate) {
         requireGameType(gameType);
         assertAvailableDate(challengeDate);
         LocalDateTime now = LocalDateTime.now(clock);
@@ -201,7 +201,9 @@ public class DailyGameServiceImpl implements DailyGameService {
                 .findByUserIdAndDailyChallengeIdForUpdate(userId, challenge.getId())
                 .orElseThrow(() -> new IllegalStateException("Daily game result was not created"));
         assertOpenAndHasAttempts(result, gameType);
-        assertNotPreviouslyGuessed(challenge, result, candidate);
+        if (rejectDuplicate) {
+            assertNotPreviouslyGuessed(challenge, result, candidate);
+        }
         if (request.shareOnCompletion() != null) {
             result.setShareOnCompletion(request.shareOnCompletion());
         }

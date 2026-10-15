@@ -73,6 +73,12 @@ public class DailyGameSearchServiceImpl implements DailyGameSearchService {
         if (type == null) {
             throw new BadRequestException("A daily game type is required");
         }
+        if (view && type != DailyGameType.MOVIE_BY_POSTER
+                && type != DailyGameType.SERIES_BY_POSTER
+                && type != DailyGameType.PERSON_BY_FACE
+                && type != DailyGameType.EPISODE_BY_FRAME) {
+            throw new BadRequestException("Unsupported visual daily game type");
+        }
         if (type == DailyGameType.EPISODE_BY_FRAME) {
             throw new BadRequestException("Episode searches require the episode search endpoints");
         }
