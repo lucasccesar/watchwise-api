@@ -2,65 +2,80 @@ package com.watchwise.watchwise_api.common.tmdb;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
-import java.io.ByteArrayInputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.springframework.test.web.client.ExpectedCount.once;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 class TmdbImageTransportTest {
-    private final HttpClient client = mock(HttpClient.class);
-    private final TmdbImageTransport transport = new TmdbImageTransport(client);
+    private final RestClient.Builder builder = RestClient.builder();
+    private final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    private final TmdbImageTransport transport = new TmdbImageTransport(builder.build());
 
     @Test
-    void relativePathUsesOnlyTmdbImageHost() throws Exception {
-        when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenAnswer(invocation -> {
-                    HttpRequest request = invocation.getArgument(0);
-                    assertEquals(URI.create("https://image.tmdb.org/t/p/w500/poster.jpg"), request.uri());
-                    return response(200, "image/jpeg", new byte[] {1, 2, 3});
-                });
+    void relativePathUsesOnlyTmdbImageHostWithoutApiAuthorization() {
+        server.expect(once(), requestTo(URI.create("https://image.tmdb.org/t/p/w500/poster.jpg")))
+                .andExpect(headerDoesNotExist(HttpHeaders.AUTHORIZATION))
+                .andRespond(withStatus(HttpStatus.OK).contentType(MediaType.IMAGE_JPEG).body(new byte[] {1, 2, 3}));
+
         assertArrayEquals(new byte[] {1, 2, 3}, transport.fetch("/poster.jpg").body());
+        server.verify();
     }
 
     @Test
-    void rejectsRedirectWithoutFollowingIt() throws Exception {
-        HttpResponse<java.io.InputStream> redirect = response(302, "image/png", new byte[0]);
-        when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(redirect);
+    void rejectsRedirectWithoutRequestingItsLocation() {
+        server.expect(once(), requestTo("https://image.tmdb.org/t/p/w500/poster.png"))
+                .andRespond(withStatus(HttpStatus.FOUND).header(HttpHeaders.LOCATION, "https://evil.example/poster.png"));
+
         assertThrows(BadRequestException.class, () -> transport.fetch("/poster.png"));
-        verify(client, times(1)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        server.verify();
     }
 
     @Test
-    void rejectsOversizedBodyAndUnsupportedType() throws Exception {
-        HttpResponse<java.io.InputStream> oversized = response(200, "image/png", new byte[TmdbImageTransport.MAX_BYTES + 1]);
-        HttpResponse<java.io.InputStream> unsupported = response(200, "text/html", new byte[] {1});
-        when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(oversized, unsupported);
+    void rejectsOversizedBodyAndUnsupportedType() {
+        server.expect(once(), requestTo("https://image.tmdb.org/t/p/w500/poster.png"))
+                .andRespond(withStatus(HttpStatus.OK).contentType(MediaType.IMAGE_PNG)
+                        .body(new byte[TmdbImageTransport.MAX_BYTES + 1]));
+        server.expect(once(), requestTo("https://image.tmdb.org/t/p/w500/poster.png"))
+                .andRespond(withStatus(HttpStatus.OK).contentType(MediaType.TEXT_HTML).body(new byte[] {1}));
+
         assertThrows(BadRequestException.class, () -> transport.fetch("/poster.png"));
         assertThrows(BadRequestException.class, () -> transport.fetch("/poster.png"));
+        server.verify();
     }
 
     @Test
     void rejectsNonTmdbHostBeforeNetwork() {
         assertThrows(BadRequestException.class, () -> transport.fetch("https://evil.example/poster.png"));
-        verifyNoInteractions(client);
+        server.verify();
     }
 
-    @SuppressWarnings("unchecked")
-    private static HttpResponse<java.io.InputStream> response(int status, String type, byte[] body) {
-        HttpResponse<java.io.InputStream> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(status);
-        when(response.headers()).thenReturn(HttpHeaders.of(Map.of("Content-Type", java.util.List.of(type)), (a, b) -> true));
-        when(response.body()).thenReturn(new ByteArrayInputStream(body));
-        return response;
+    @Test
+    void mapsMissingImageToTypedNotFoundError() {
+        server.expect(once(), requestTo("https://image.tmdb.org/t/p/w500/missing.jpg"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThrows(HttpClientErrorException.NotFound.class, () -> transport.fetch("/missing.jpg"));
+        server.verify();
+    }
+
+    @Test
+    void mapsOtherUpstreamErrorsToRestClientException() {
+        server.expect(once(), requestTo("https://image.tmdb.org/t/p/w500/poster.jpg"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY));
+
+        assertThrows(RestClientException.class, () -> transport.fetch("/poster.jpg"));
+        server.verify();
     }
 }
