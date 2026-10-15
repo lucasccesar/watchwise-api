@@ -34,11 +34,13 @@ class DailyGameFilmographyPlayAssemblerTest {
         DailyGameFilmographyFeedbackDTO feedback = feedback("2", "Actor One",
                 List.of("MOVIE:100"), List.of("MOVIE:100", "MOVIE:200"));
         DailyGameAttemptDTO attempt = attempt("2", "Actor One", "/actor.jpg", "1964-10-16", feedback);
+        DailyGameAttemptDTO duplicateAttempt = attempt("2", "Duplicate Name", "/duplicate-profile.jpg", null,
+                feedback("2", "Duplicate Name", List.of("MOVIE:100"), List.of("MOVIE:100")));
 
-        var state = assembler.assemble(challenge, List.of(attempt), true, 10);
+        var state = assembler.assemble(challenge, List.of(attempt, duplicateAttempt), true, 10);
 
         assertThat(state.majorRoles()).isFalse();
-        assertThat(state.guessedActors()).singleElement().satisfies(actor -> {
+        assertThat(state.guessedActors()).first().satisfies(actor -> {
             assertThat(actor.personTmdbId()).isEqualTo("2");
             assertThat(actor.name()).isEqualTo("Actor One");
             assertThat(actor.profileUrl()).isEqualTo("/actor.jpg");
@@ -54,15 +56,23 @@ class DailyGameFilmographyPlayAssemblerTest {
             assertThat(entry.posterUrl()).isEqualTo("/100.jpg");
             assertThat(entry.character()).isEqualTo("First Role");
             assertThat(entry.period()).isEqualTo("1990-01-01");
-            assertThat(entry.sharedWith()).containsExactly("Actor One");
+            assertThat(entry.sharedWith()).singleElement().satisfies(actor -> {
+                assertThat(actor.personTmdbId()).isEqualTo("2");
+                assertThat(actor.name()).isEqualTo("Actor One");
+                assertThat(actor.profileUrl()).isEqualTo("/actor.jpg");
+            });
         });
         assertThat(state.entries()).filteredOn(entry -> entry.workId().equals("300")).singleElement().satisfies(entry -> {
             assertThat(entry.posterUrl()).isNull();
             assertThat(entry.character()).isNull();
             assertThat(entry.sharedWith()).isEmpty();
         });
-        assertThat(state.attemptsUsed()).isEqualTo(1);
-        assertThat(state.attemptsRemaining()).isEqualTo(9);
+        var secondSharedWork = state.entries().stream()
+                .filter(entry -> entry.workId().equals("200")).findFirst().orElseThrow();
+        assertThat(secondSharedWork.sharedWith()).singleElement()
+                .satisfies(actor -> assertThat(actor.personTmdbId()).isEqualTo("2"));
+        assertThat(state.attemptsUsed()).isEqualTo(2);
+        assertThat(state.attemptsRemaining()).isEqualTo(8);
         assertThat(state.maxAttempts()).isEqualTo(10);
     }
 
@@ -92,12 +102,19 @@ class DailyGameFilmographyPlayAssemblerTest {
         assertThat(major.entries().getFirst()).satisfies(entry -> {
             assertThat(entry.episodeCount()).isEqualTo(5);
             assertThat(entry.period()).isEqualTo("2018-01-01/2022-01-01");
-            assertThat(entry.sharedWith()).containsExactly("Actor Two");
+            assertThat(entry.sharedWith()).singleElement().satisfies(actor -> {
+                assertThat(actor.personTmdbId()).isEqualTo("3");
+                assertThat(actor.name()).isEqualTo("Actor Two");
+                assertThat(actor.profileUrl()).isEqualTo("/actor-two.jpg");
+            });
         });
         assertThat(all.majorRoles()).isFalse();
         assertThat(all.entries()).extracting(entry -> entry.workId() + ":" + entry.title())
                 .containsExactly("100:Major Series", "200:Guest Series");
-        assertThat(all.entries().get(1).sharedWith()).containsExactly("Actor Two");
+        assertThat(all.entries().get(1).sharedWith()).singleElement().satisfies(actor -> {
+            assertThat(actor.personTmdbId()).isEqualTo("3");
+            assertThat(actor.name()).isEqualTo("Actor Two");
+        });
     }
 
     @Test

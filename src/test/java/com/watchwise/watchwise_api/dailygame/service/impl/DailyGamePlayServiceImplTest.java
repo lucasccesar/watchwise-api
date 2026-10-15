@@ -199,7 +199,11 @@ class DailyGamePlayServiceImplTest {
         assertThat(view.filmography().majorRoles()).isFalse();
         assertThat(view.filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
                 .containsExactly("100:Major Series", "200:Guest Series");
-        assertThat(view.filmography().entries().get(1).sharedWith()).containsExactly("Actor");
+        assertThat(view.filmography().entries().get(1).sharedWith()).singleElement().satisfies(actor -> {
+            assertThat(actor.personTmdbId()).isEqualTo("501");
+            assertThat(actor.name()).isEqualTo("Actor");
+            assertThat(actor.profileUrl()).isEqualTo("/actor.jpg");
+        });
         verifyNoInteractions(media, mutations);
     }
 
@@ -283,7 +287,11 @@ class DailyGamePlayServiceImplTest {
                 .satisfies(entry -> {
                     assertThat(entry.title()).isEqualTo("Shared series");
                     assertThat(entry.revealed()).isTrue();
-                    assertThat(entry.sharedWith()).containsExactly("Actor");
+                    assertThat(entry.sharedWith()).singleElement().satisfies(actor -> {
+                        assertThat(actor.personTmdbId()).isEqualTo("501");
+                        assertThat(actor.name()).isEqualTo("Actor");
+                        assertThat(actor.profileUrl()).isEqualTo("/actor.jpg");
+                    });
                 });
         assertThat(action.state().media()).isEmpty();
         assertThat(action.state().answer()).isNull();

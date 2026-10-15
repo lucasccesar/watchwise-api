@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyActorReferenceDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyActorViewDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyPlayStateDTO;
@@ -35,7 +36,8 @@ public class DailyGameFilmographyPlayAssembler {
         String keyPrefix = series ? "SERIES:" : "MOVIE:";
         Set<String> revealedWorkKeys = new LinkedHashSet<>();
         List<DailyGameFilmographyActorViewDTO> actorViews = new ArrayList<>();
-        Map<String, LinkedHashMap<String, String>> sharedNamesByWorkKey = new LinkedHashMap<>();
+        Map<String, LinkedHashMap<String, DailyGameFilmographyActorReferenceDTO>> sharedActorsByWorkKey =
+                new LinkedHashMap<>();
 
         for (DailyGameAttemptDTO attempt : safeAttempts) {
             if (attempt == null || attempt.filmographyFeedback() == null) {
@@ -47,9 +49,10 @@ public class DailyGameFilmographyPlayAssembler {
                 continue;
             }
             DailyGameCandidateDTO candidate = matchingActorCandidate(attempt.candidate(), guessedActor.personTmdbId());
+            String profileUrl = candidate == null ? null : candidate.imageUrl();
             actorViews.add(new DailyGameFilmographyActorViewDTO(
                     guessedActor.personTmdbId(), guessedActor.name(),
-                    candidate == null ? null : candidate.imageUrl(),
+                    profileUrl,
                     ageAtChallengeDate(candidate == null ? null : candidate.date(), challenge.getChallengeDate()),
                     distinctCount(feedback.sharedAllRoleWorkKeys()),
                     distinctCount(feedback.sharedMajorRoleWorkKeys())));
@@ -61,14 +64,15 @@ public class DailyGameFilmographyPlayAssembler {
                 }
                 revealedWorkKeys.add(workKey);
                 if (guessedActor.name() != null) {
-                    sharedNamesByWorkKey.computeIfAbsent(workKey, ignored -> new LinkedHashMap<>())
-                            .putIfAbsent(guessedActor.personTmdbId(), guessedActor.name());
+                    sharedActorsByWorkKey.computeIfAbsent(workKey, ignored -> new LinkedHashMap<>())
+                            .putIfAbsent(guessedActor.personTmdbId(), new DailyGameFilmographyActorReferenceDTO(
+                                    guessedActor.personTmdbId(), guessedActor.name(), profileUrl));
                 }
             }
         }
 
         List<DailyGameFilmographyWorkViewDTO> workViews = snapshotEntries(challenge, series, effectiveMajorRoles,
-                revealedWorkKeys, sharedNamesByWorkKey);
+                revealedWorkKeys, sharedActorsByWorkKey);
         int normalizedMaxAttempts = Math.max(0, maxAttempts);
         int attemptsUsed = safeAttempts.size();
         return new DailyGameFilmographyPlayStateDTO(
@@ -81,7 +85,7 @@ public class DailyGameFilmographyPlayAssembler {
             boolean series,
             boolean majorRoles,
             Set<String> revealedWorkKeys,
-            Map<String, LinkedHashMap<String, String>> sharedNamesByWorkKey) {
+            Map<String, LinkedHashMap<String, DailyGameFilmographyActorReferenceDTO>> sharedActorsByWorkKey) {
         Map<String, Object> snapshot = challenge.getAnswerSnapshot();
         Object rawFilmography = snapshot == null ? null : snapshot.get("filmography");
         if (!(rawFilmography instanceof List<?> entries)) {
@@ -109,7 +113,8 @@ public class DailyGameFilmographyPlayAssembler {
 
             String workKey = (series ? "SERIES:" : "MOVIE:") + workId;
             boolean revealed = revealedWorkKeys.contains(workKey);
-            LinkedHashMap<String, String> sharedNames = sharedNamesByWorkKey.get(workKey);
+            LinkedHashMap<String, DailyGameFilmographyActorReferenceDTO> sharedActors =
+                    sharedActorsByWorkKey.get(workKey);
             works.add(new DailyGameFilmographyWorkViewDTO(
                     workId,
                     revealed ? title : null,
@@ -121,7 +126,7 @@ public class DailyGameFilmographyPlayAssembler {
                     episodeCount,
                     string(raw.get("period")),
                     revealed ? string(raw.get("character")) : null,
-                    sharedNames == null ? List.of() : List.copyOf(sharedNames.values())));
+                    sharedActors == null ? List.of() : List.copyOf(sharedActors.values())));
         }
         works.sort(Comparator.comparing(DailyGameFilmographyWorkViewDTO::year,
                 Comparator.nullsLast(Comparator.reverseOrder())));

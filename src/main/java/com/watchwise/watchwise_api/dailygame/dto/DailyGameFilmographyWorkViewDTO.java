@@ -13,7 +13,7 @@ public record DailyGameFilmographyWorkViewDTO(
         Integer episodeCount,
         String period,
         String character,
-        List<String> sharedWith) {
+        List<DailyGameFilmographyActorReferenceDTO> sharedWith) {
 
     public DailyGameFilmographyWorkViewDTO {
         genres = genres == null ? List.of() : List.copyOf(genres);

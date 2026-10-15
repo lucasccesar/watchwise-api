@@ -164,7 +164,9 @@ class DailyGameControllerTest {
 
         var visualEntry = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyWorkViewDTO(
                 "77", null, false, false, 2018, List.of("Drama"), null, 8,
-                "2018-01-01/2022-01-01", null, List.of());
+                "2018-01-01/2022-01-01", null, List.of(
+                        new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyActorReferenceDTO(
+                                "person-77", "Actor Seven", "/person-77.jpg")));
         var visualFilmography = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyPlayStateDTO(
                 true, List.of(), List.of(visualEntry), 0, 10, 10);
         when(dailyGamePlayService.readToday(CURRENT_USER_ID, type, true)).thenReturn(
@@ -179,7 +181,10 @@ class DailyGameControllerTest {
                 .andExpect(jsonPath("$.filmography.entries[0].period").value(org.hamcrest.Matchers.nullValue()));
         mockMvc.perform(get("/games/{gameType}/play", type))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.filmography.entries[0].period").value("2018-01-01/2022-01-01"));
+                .andExpect(jsonPath("$.filmography.entries[0].period").value("2018-01-01/2022-01-01"))
+                .andExpect(jsonPath("$.filmography.entries[0].sharedWith[0].personTmdbId").value("person-77"))
+                .andExpect(jsonPath("$.filmography.entries[0].sharedWith[0].name").value("Actor Seven"))
+                .andExpect(jsonPath("$.filmography.entries[0].sharedWith[0].profileUrl").value("/person-77.jpg"));
     }
 
     @Test

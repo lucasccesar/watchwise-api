@@ -42,7 +42,9 @@ class DailyGameInfoPlayAssemblerTest {
     @Test
     void filmographyViewRecordsDefensivelyCopyAndNormalizeCollections() {
         var genres = new ArrayList<>(List.of("Drama"));
-        var sharedWith = new ArrayList<>(List.of("person-1"));
+        var actorReference = new DailyGameFilmographyActorReferenceDTO(
+                "person-1", "Actor One", "/actor-one.jpg");
+        var sharedWith = new ArrayList<>(List.of(actorReference));
         var work = new DailyGameFilmographyWorkViewDTO("work-1", "Work", true, false, 2020,
                 genres, "/poster.jpg", 8, "2020-01-01", "Detective", sharedWith);
         var actors = new ArrayList<>(List.of(new DailyGameFilmographyActorViewDTO(
@@ -51,12 +53,13 @@ class DailyGameInfoPlayAssemblerTest {
         var state = new DailyGameFilmographyPlayStateDTO(true, actors, entries, 2, 4, 6);
 
         genres.add("Comedy");
-        sharedWith.add("person-2");
+        sharedWith.add(new DailyGameFilmographyActorReferenceDTO(
+                "person-2", "Actor Two", "/actor-two.jpg"));
         actors.clear();
         entries.clear();
 
         assertThat(work.genres()).containsExactly("Drama");
-        assertThat(work.sharedWith()).containsExactly("person-1");
+        assertThat(work.sharedWith()).containsExactly(actorReference);
         assertThat(state.guessedActors()).hasSize(1);
         assertThat(state.entries()).containsExactly(work);
         assertThat(state.attemptsUsed()).isEqualTo(2);
@@ -65,7 +68,8 @@ class DailyGameInfoPlayAssemblerTest {
                 null, null, null, null, null, null).genres()).isEmpty();
         assertThat(new DailyGameFilmographyPlayStateDTO(false, null, null, 0, 6, 6).guessedActors())
                 .isEmpty();
-        assertThatThrownBy(() -> work.sharedWith().add("person-3"))
+        assertThatThrownBy(() -> work.sharedWith().add(new DailyGameFilmographyActorReferenceDTO(
+                "person-3", "Actor Three", "/actor-three.jpg")))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
