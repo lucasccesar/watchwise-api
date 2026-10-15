@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.dailygame.media.*;
 import com.watchwise.watchwise_api.dailygame.repository.*;
 import com.watchwise.watchwise_api.dailygame.service.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -199,6 +200,30 @@ class DailyGamePlayServiceImplTest {
         assertThat(view.filmography().entries()).extracting(entry -> entry.workId() + ":" + entry.title())
                 .containsExactly("100:Major Series", "200:Guest Series");
         assertThat(view.filmography().entries().get(1).sharedWith()).containsExactly("Actor");
+        verifyNoInteractions(media, mutations);
+    }
+
+    @Test
+    @DisplayName("[readToday] Should Ignore Major Roles Mode For Movie Filmography - When The Visual Game Is Read")
+    void readTodayIgnoresMajorRolesModeForMovieFilmography() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY).toBuilder()
+                .answerSnapshot(Map.of("filmography", List.of(Map.of(
+                        "workId", "100", "title", "Movie", "mediaType", "movie", "year", 2020,
+                        "genres", List.of("Drama"), "period", "2020-01-01"))))
+                .build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+        when(results.findByUserIdAndDailyChallengeIdIn(USER, List.of(challenge.getId())))
+                .thenReturn(List.of());
+
+        var defaultMode = service().readToday(USER, challenge.getGameType(), true).filmography();
+        var disabledMode = service().readToday(USER, challenge.getGameType(), false).filmography();
+
+        assertThat(defaultMode.majorRoles()).isFalse();
+        assertThat(disabledMode.majorRoles()).isFalse();
+        assertThat(disabledMode.entries()).isEqualTo(defaultMode.entries());
+        assertThat(disabledMode.entries()).singleElement()
+                .extracting(entry -> entry.workId()).isEqualTo("100");
         verifyNoInteractions(media, mutations);
     }
 

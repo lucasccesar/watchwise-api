@@ -136,27 +136,42 @@ class DailyGameServiceImplTest {
                 "https://image.tmdb.org/t/p/w300/still-7.jpg");
     }
 
-    @Test
-    void rawCurrentDayRouteAllowsRepeatingAValidCandidate() {
-        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER, "550");
+    @ParameterizedTest
+    @EnumSource(value = DailyGameType.class)
+    void rawCurrentDayRouteAllowsRepeatingAValidCandidate(DailyGameType type) {
+        DailyChallenge challenge = type == DailyGameType.EPISODE_BY_FRAME
+                ? challenge(type, "1396", 1, 1) : challenge(type, "550");
         UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
         stubOpenSubmission(challenge, result);
-        when(tmdbClient.getMovieFullDetails("551", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbMovieFullDetails.class)));
+        DailyGameAttemptRequest guess = switch (type.targetKind()) {
+            case MOVIE, SERIES -> request("551", null, null, null, null);
+            case PERSON -> request(null, "551", null, null, null);
+            case EPISODE -> request(null, null, "999", 1, 1);
+        };
+        switch (type.targetKind()) {
+            case MOVIE -> when(tmdbClient.getMovieFullDetails(
+                    "551", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbMovieFullDetails.class)));
+            case SERIES -> when(tmdbClient.getTvFullDetails(
+                    "551", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbTvFullDetails.class)));
+            case PERSON -> when(tmdbClient.getPersonDetails("551"))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbPersonDetails.class)));
+            case EPISODE -> when(tmdbClient.getEpisodeFullDetails(
+                    "999", 1, 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                    .thenReturn(new TmdbLookupResult.Found<>(mock(TmdbEpisodeFullDetails.class)));
+        }
 
         DailyGameServiceImpl service = service();
-        DailyGameAttemptRequest guess = request("551", null, null, null, null);
-        service.submitAttempt(USER_ID, DailyGameType.MOVIE_BY_POSTER, guess);
-        DailyGameAttemptResponseDTO second = service.submitAttempt(
-                USER_ID, DailyGameType.MOVIE_BY_POSTER, guess);
+        service.submitAttempt(USER_ID, type, guess);
+        DailyGameAttemptResponseDTO second = service.submitAttempt(USER_ID, type, guess);
 
         assertThat(second.attemptsUsed()).isEqualTo(2);
         assertThat(result.getAttemptsUsed()).isEqualTo(2);
     }
 
     @ParameterizedTest
-    @EnumSource(value = DailyGameType.class, names = {
-            "MOVIE_BY_POSTER", "SERIES_BY_POSTER", "PERSON_BY_FACE", "EPISODE_BY_FRAME"})
+    @EnumSource(value = DailyGameType.class)
     void shouldRejectRepeatedCurrentDayCandidateWithoutChangingResult(DailyGameType type) {
         DailyChallenge challenge = type == DailyGameType.EPISODE_BY_FRAME
                 ? challenge(type, "1396", 1, 1) : challenge(type, "550");
@@ -821,6 +836,53 @@ class DailyGameServiceImplTest {
         assertThat(response.status()).isEqualTo(DailyGameViewStatus.NOT_PLAYED);
         assertThat(response.attemptsUsed()).isZero();
         assertThat(response.answer()).isNull();
+    }
+
+    @Test
+    @DisplayName("[getGame] Should Keep Frozen Period Out Of Raw Filmography - When The Visual Route Exposes It")
+    void shouldKeepFrozenPeriodOutOfRawFilmographyWhenTheVisualRouteExposesIt() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, "1").toBuilder()
+                .answerSnapshot(Map.of("filmography", List.of(Map.of(
+                        "workId", "77", "title", "Frozen Series", "mediaType", "tv",
+                        "year", 2018, "genres", List.of("Drama"), "episodeCount", 8,
+                        "totalEpisodes", 8, "period", "2018-01-01/2022-01-01"))))
+                .build();
+        when(challengeRepository.findByChallengeDateAndGameType(
+                TODAY, DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY)).thenReturn(Optional.of(challenge));
+        when(resultRepository.findByUserIdAndDailyChallengeIdIn(USER_ID, List.of(challenge.getId())))
+                .thenReturn(List.of());
+        when(hintRepository.findByDailyChallengeIdOrderByPositionAsc(challenge.getId())).thenReturn(List.of());
+
+        DailyGameStateDTO response = service().getGame(
+                USER_ID, TODAY, DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY, true);
+
+        assertThat(response.filmography().entries()).singleElement().satisfies(entry -> {
+            assertThat(entry.title()).isNull();
+            assertThat(entry.period()).isNull();
+        });
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[submitAttempt] Should Preserve Season And Episode Display Metadata - When A Series Guess Is Compared")
+    void shouldPreserveSeasonAndEpisodeDisplayMetadataWhenASeriesGuessIsCompared() {
+        DailyChallenge challenge = challenge(DailyGameType.SERIES_BY_INFO, "550");
+        UserDailyGameResult result = result(challenge, 0, 0, DailyGameResultStatus.IN_PROGRESS, null);
+        stubOpenSubmission(challenge, result);
+        TmdbTvFullDetails candidate = mock(TmdbTvFullDetails.class);
+        when(tmdbClient.getTvFullDetails("551", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
+                .thenReturn(new TmdbLookupResult.Found<>(candidate));
+        DailyGameComparisonCellDTO seasons = new DailyGameComparisonCellDTO(
+                DailyGameComparisonStatus.NO_MATCH, null, 3, List.of(), null);
+        DailyGameInfoFeedbackDTO feedback = new DailyGameInfoFeedbackDTO(
+                null, null, null, null, null, null, null, seasons, 24);
+        when(infoComparisonService.compare(eq(challenge), any())).thenReturn(feedback);
+
+        DailyGameAttemptResponseDTO response = service().submitAttempt(
+                USER_ID, DailyGameType.SERIES_BY_INFO, request("551", null, null, null, null));
+
+        assertThat(response.currentAttempt().infoFeedback().revenueOrSeasons().displayValue()).isEqualTo(3);
+        assertThat(response.currentAttempt().infoFeedback().candidateEpisodeCount()).isEqualTo(24);
     }
 
     @Test

@@ -160,6 +160,23 @@ class DailyGameControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[visual play actions] Should Reject Missing Csrf - When Attempt Or Give Up Is Posted")
+    void shouldRejectMissingCsrfWhenAttemptOrGiveUpIsPosted() throws Exception {
+        RegisteredUser user = registerUser("dailyvisualcsrf");
+
+        mockMvc.perform(post("/games/{gameType}/play/attempt", DailyGameType.MOVIE_BY_INFO)
+                        .cookie(user.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tmdbId\":\"550\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/games/{gameType}/play/give-up", DailyGameType.MOVIE_BY_INFO)
+                        .cookie(user.accessToken()))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(dailyGamePlayService);
+    }
+
+    @Test
     @DisplayName("[search] Should Pass Visual Mode - When The Search View Parameter Is True")
     void shouldPassVisualModeWhenSearchViewParameterIsTrue() throws Exception {
         RegisteredUser user = registerUser("dailycontrollersrchview");

@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAnswerDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptRequest;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptResponseDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonCellDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameEpisodeOptionDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameHistoryDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGamesOverviewDTO;
@@ -146,6 +147,62 @@ class DailyGameControllerTest {
         verify(dailyGamePlayService).submitToday(
                 eq(CURRENT_USER_ID), eq(DailyGameType.MOVIE_BY_POSTER), any(), eq(true));
         verify(dailyGamePlayService).giveUpToday(CURRENT_USER_ID, DailyGameType.MOVIE_BY_POSTER, true);
+    }
+
+    @Test
+    @DisplayName("[getGame and getPlay] Should Keep Raw And Visual Filmography Period Contracts Separate - When Both Routes Are Read")
+    void shouldKeepRawAndVisualFilmographyPeriodContractsSeparateWhenBothRoutesAreRead() throws Exception {
+        DailyGameType type = DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
+        var rawEntry = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO(
+                "77", null, false, false, 2018, List.of("Drama"), null, 8, null, null);
+        var rawFilmography = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyStateDTO(
+                true, List.of(), List.of(rawEntry));
+        when(dailyGameService.getGameToday(CURRENT_USER_ID, type, true)).thenReturn(
+                new DailyGameStateDTO(type, DailyGameTargetKind.PERSON, 10, 0, 10,
+                        DailyGameViewStatus.NOT_PLAYED, "/actor.jpg", List.of(), 0, null, null,
+                        List.of(), null, List.of(), rawFilmography));
+
+        var visualEntry = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyWorkViewDTO(
+                "77", null, false, false, 2018, List.of("Drama"), null, 8,
+                "2018-01-01/2022-01-01", null, List.of());
+        var visualFilmography = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyPlayStateDTO(
+                true, List.of(), List.of(visualEntry), 0, 10, 10);
+        when(dailyGamePlayService.readToday(CURRENT_USER_ID, type, true)).thenReturn(
+                new com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayViewDTO(
+                        LocalDate.of(2026, 9, 27), Instant.parse("2026-09-28T00:00:00Z"), type,
+                        DailyGameTargetKind.PERSON, 10, 0, 10, DailyGameViewStatus.NOT_PLAYED,
+                        0, 10, List.of(), List.of(), null, true, true, false, false, visualFilmography));
+
+        mockMvc.perform(get("/games/{gameType}/today", type))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.filmography.entries[0].title").doesNotExist())
+                .andExpect(jsonPath("$.filmography.entries[0].period").value(org.hamcrest.Matchers.nullValue()));
+        mockMvc.perform(get("/games/{gameType}/play", type))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.filmography.entries[0].period").value("2018-01-01/2022-01-01"));
+    }
+
+    @Test
+    @DisplayName("[getPlay] Should Expose Typed Series Info Feedback - When A Series Guess Is Present")
+    void shouldExposeTypedSeriesInfoFeedbackWhenASeriesGuessIsPresent() throws Exception {
+        DailyGameComparisonCellDTO seasons = new DailyGameComparisonCellDTO(
+                com.watchwise.watchwise_api.dailygame.dto.DailyGameComparisonStatus.NO_MATCH,
+                null, 3, List.of(), null);
+        var feedback = new com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO(
+                null, null, null, null, null, null, null, seasons, 24);
+        var attempt = new com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptViewDTO(
+                1, null, null, feedback);
+        when(dailyGamePlayService.readToday(CURRENT_USER_ID, DailyGameType.SERIES_BY_INFO, true)).thenReturn(
+                new com.watchwise.watchwise_api.dailygame.dto.DailyGamePlayViewDTO(
+                        LocalDate.of(2026, 9, 27), Instant.parse("2026-09-28T00:00:00Z"),
+                        DailyGameType.SERIES_BY_INFO, DailyGameTargetKind.SERIES, 10, 1, 9,
+                        DailyGameViewStatus.IN_PROGRESS, 0, 9, List.of(), List.of(attempt), null,
+                        true, true, false, false, null));
+
+        mockMvc.perform(get("/games/{gameType}/play", DailyGameType.SERIES_BY_INFO))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attempts[0].infoFeedback.revenueOrSeasons.displayValue").value(3))
+                .andExpect(jsonPath("$.attempts[0].infoFeedback.candidateEpisodeCount").value(24));
     }
 
     @Test
