@@ -46,6 +46,11 @@ public class PersonCreditViewerStateResolver {
                 .map(DiaryEntryRepository.PersonCreditMedia::getTmdbId)
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toSet());
+        Set<String> seasonActivitySeries = activity.stream()
+                .filter(media -> media.getSourceType() == ContentType.SEASON)
+                .map(DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
 
         List<String> seriesIds = credits.stream().filter(credit -> credit.type() == MovieOrSeriesType.SERIES)
                 .map(PersonFilmographyCredit::tmdbId).distinct().toList();
@@ -70,9 +75,9 @@ public class PersonCreditViewerStateResolver {
                 long watched = watchedCounts.getOrDefault(credit.tmdbId(), 0L);
                 Integer released = releasedCounts.get(credit.tmdbId());
                 boolean direct = directlyWatchedSeries.contains(credit.tmdbId());
-                boolean hasEpisodeActivity = watched > 0;
+                boolean hasActivity = watched > 0 || seasonActivitySeries.contains(credit.tmdbId());
                 WatchStatus status = direct ? WatchStatus.WATCHED
-                        : !hasEpisodeActivity ? WatchStatus.UNWATCHED
+                        : !hasActivity ? WatchStatus.UNWATCHED
                         : released == null ? WatchStatus.UNKNOWN
                         : watched >= released ? WatchStatus.WATCHED : WatchStatus.PARTIALLY_WATCHED;
                 Integer watchedEpisodeCount = released == null ? null : Math.toIntExact(watched);

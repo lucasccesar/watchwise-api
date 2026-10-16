@@ -118,6 +118,56 @@ class PersonCreditViewerStateResolverTest {
         assertThat(result.statesByCoordinate().get(coordinate).releasedEpisodeCount()).isEqualTo(3);
     }
 
+    @Test
+    void shouldReturnUnknownForSeasonOnlyActivityWhenReleasedMetadataIsMissing() {
+        UUID viewerId = UUID.randomUUID();
+        var viewerStateService = mock(ContentViewerStateService.class);
+        var diaryRepository = mock(DiaryEntryRepository.class);
+        var metadataRepository = mock(SeriesProgressMetadataRepository.class);
+        var credit = series("42");
+        ContentCoordinate coordinate = seriesCoordinate("42");
+        when(viewerStateService.resolve(viewerId, List.of(coordinate), Map.of()))
+                .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, emptyState()), Map.of()));
+        when(diaryRepository.findWatchedMediaForPersonCredits(viewerId, List.of("42")))
+                .thenReturn(List.of(media(ContentType.SERIES, "42", "42", ContentType.SEASON)));
+        when(diaryRepository.findEpisodeSeriesCountsByUserIdAndSeriesTmdbIdIn(viewerId, List.of("42")))
+                .thenReturn(List.of());
+        when(metadataRepository.findAllBySeriesTmdbIdIn(List.of("42"))).thenReturn(List.of());
+
+        var result = new PersonCreditViewerStateResolver(viewerStateService, diaryRepository, metadataRepository)
+                .resolve(viewerId, List.of(credit));
+
+        var state = result.statesByCoordinate().get(coordinate);
+        assertThat(state.watchStatus()).isEqualTo(WatchStatus.UNKNOWN);
+        assertThat(state.watchedEpisodeCount()).isNull();
+        assertThat(state.releasedEpisodeCount()).isNull();
+    }
+
+    @Test
+    void shouldTreatSeasonOnlyActivityAsPartialProgressWhenReleasedMetadataExists() {
+        UUID viewerId = UUID.randomUUID();
+        var viewerStateService = mock(ContentViewerStateService.class);
+        var diaryRepository = mock(DiaryEntryRepository.class);
+        var metadataRepository = mock(SeriesProgressMetadataRepository.class);
+        var credit = series("42");
+        ContentCoordinate coordinate = seriesCoordinate("42");
+        when(viewerStateService.resolve(viewerId, List.of(coordinate), Map.of()))
+                .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, emptyState()), Map.of()));
+        when(diaryRepository.findWatchedMediaForPersonCredits(viewerId, List.of("42")))
+                .thenReturn(List.of(media(ContentType.SERIES, "42", "42", ContentType.SEASON)));
+        when(diaryRepository.findEpisodeSeriesCountsByUserIdAndSeriesTmdbIdIn(viewerId, List.of("42")))
+                .thenReturn(List.of());
+        when(metadataRepository.findAllBySeriesTmdbIdIn(List.of("42"))).thenReturn(List.of(metadata("42", 3)));
+
+        var result = new PersonCreditViewerStateResolver(viewerStateService, diaryRepository, metadataRepository)
+                .resolve(viewerId, List.of(credit));
+
+        var state = result.statesByCoordinate().get(coordinate);
+        assertThat(state.watchStatus()).isEqualTo(WatchStatus.PARTIALLY_WATCHED);
+        assertThat(state.watchedEpisodeCount()).isZero();
+        assertThat(state.releasedEpisodeCount()).isEqualTo(3);
+    }
+
     private static PersonFilmographyCredit series(String id) {
         return new PersonFilmographyCredit(com.watchwise.watchwise_api.content.entity.MovieOrSeriesType.SERIES,
                 id, "Series " + id, null, null, null, null, null, List.of(), List.of(), PersonParticipation.CAST);
@@ -133,11 +183,16 @@ class PersonCreditViewerStateResolverTest {
     }
 
     private static DiaryEntryRepository.PersonCreditMedia media(ContentType type, String tmdbId, String seriesId) {
+        return media(type, tmdbId, seriesId, type);
+    }
+
+    private static DiaryEntryRepository.PersonCreditMedia media(
+            ContentType type, String tmdbId, String seriesId, ContentType sourceType) {
         return new DiaryEntryRepository.PersonCreditMedia() {
             @Override public ContentType getType() { return type; }
             @Override public String getTmdbId() { return tmdbId; }
             @Override public String getSeriesTmdbId() { return seriesId; }
-            @Override public ContentType getSourceType() { return type; }
+            @Override public ContentType getSourceType() { return sourceType; }
         };
     }
 
