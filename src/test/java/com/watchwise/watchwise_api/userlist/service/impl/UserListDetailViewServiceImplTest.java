@@ -180,7 +180,7 @@ class UserListDetailViewServiceImplTest {
         when(userListItemService.getItemsCountByListIds(List.of(childId))).thenReturn(Map.of(childId, 6L));
         when(userListItemService.getItemScopeByListIds(List.of(childId)))
                 .thenReturn(Map.of(childId, UserListItemScope.MOVIE_OR_SERIES));
-        when(commentRepository.countByListIdIn(List.of(childId))).thenReturn(List.of());
+        when(commentRepository.countVisibleListComments(VIEWER_ID, List.of(childId))).thenReturn(List.of());
         when(userRepository.findById(VIEWER_ID)).thenReturn(Optional.of(viewer));
         when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
                 .thenAnswer(invocation -> {

@@ -30,16 +30,16 @@ public class CommentPreviewAssembler {
     private final LikeService likeService;
     private final CommentMapper commentMapper;
 
-    public Map<UUID, Long> countDiaryEntries(Collection<UUID> diaryEntryIds) {
+    public Map<UUID, Long> countDiaryEntries(Collection<UUID> diaryEntryIds, UUID viewerId) {
         return countOnly(diaryEntryIds,
-                ids -> commentRepository.countByDiaryEntryIdIn(ids).stream()
+                ids -> commentRepository.countVisibleDiaryComments(viewerId, ids).stream()
                         .collect(Collectors.toMap(CommentRepository.DiaryCommentCount::getDiaryEntryId,
                                 CommentRepository.DiaryCommentCount::getCount)));
     }
 
-    public Map<UUID, Long> countDroppedEntries(Collection<UUID> droppedEntryIds) {
+    public Map<UUID, Long> countDroppedEntries(Collection<UUID> droppedEntryIds, UUID viewerId) {
         return countOnly(droppedEntryIds,
-                ids -> commentRepository.countByDroppedEntryIdIn(ids).stream()
+                ids -> commentRepository.countVisibleDroppedComments(viewerId, ids).stream()
                         .collect(Collectors.toMap(CommentRepository.DroppedCommentCount::getDroppedEntryId,
                                 CommentRepository.DroppedCommentCount::getCount)));
     }
@@ -47,31 +47,41 @@ public class CommentPreviewAssembler {
     public Map<UUID, CommentPreviewData> assembleDiaryEntryPreviews(
             Collection<UUID> diaryEntryIds, UUID viewerId) {
         return assemble(diaryEntryIds,
-                ids -> commentRepository.countByDiaryEntryIdIn(ids).stream()
+                ids -> commentRepository.countVisibleDiaryComments(viewerId, ids).stream()
                         .collect(Collectors.toMap(CommentRepository.DiaryCommentCount::getDiaryEntryId,
                                 CommentRepository.DiaryCommentCount::getCount)),
-                commentRepository::findRecentByDiaryEntryIdIn,
+                ids -> commentRepository.findRecentVisibleByDiaryEntryIds(viewerId, ids),
                 comment -> comment.getDiaryEntry().getId(),
+                viewerId);
+    }
+
+    public Map<UUID, CommentPreviewData> assembleListPreviews(Collection<UUID> listIds, UUID viewerId) {
+        return assemble(listIds,
+                ids -> commentRepository.countVisibleListComments(viewerId, ids).stream()
+                        .collect(Collectors.toMap(CommentRepository.ListCommentCount::getListId,
+                                CommentRepository.ListCommentCount::getCount)),
+                ids -> commentRepository.findRecentVisibleByListIds(viewerId, ids),
+                comment -> comment.getList().getId(),
                 viewerId);
     }
 
     public Map<UUID, CommentPreviewData> assembleDroppedEntryPreviews(
             Collection<UUID> droppedEntryIds, UUID viewerId) {
         return assemble(droppedEntryIds,
-                ids -> commentRepository.countByDroppedEntryIdIn(ids).stream()
+                ids -> commentRepository.countVisibleDroppedComments(viewerId, ids).stream()
                         .collect(Collectors.toMap(CommentRepository.DroppedCommentCount::getDroppedEntryId,
                                 CommentRepository.DroppedCommentCount::getCount)),
-                commentRepository::findRecentByDroppedEntryIdIn,
+                ids -> commentRepository.findRecentVisibleByDroppedEntryIds(viewerId, ids),
                 comment -> comment.getDroppedEntry().getId(),
                 viewerId);
     }
 
     public Map<UUID, CommentPreviewData> assemblePickPreviews(Collection<UUID> pickIds, UUID viewerId) {
         return assemble(pickIds,
-                ids -> commentRepository.countByPickIdIn(ids).stream()
+                ids -> commentRepository.countVisiblePickComments(viewerId, ids).stream()
                         .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId,
                                 CommentRepository.PickCommentCount::getCount)),
-                commentRepository::findRecentByPickIdIn,
+                ids -> commentRepository.findRecentVisibleByPickIds(viewerId, ids),
                 comment -> comment.getPick().getId(),
                 viewerId);
     }
@@ -79,10 +89,10 @@ public class CommentPreviewAssembler {
     public Map<UUID, CommentPreviewData> assemblePicksTemplatePreviews(
             Collection<UUID> templateIds, UUID viewerId) {
         return assemble(templateIds,
-                ids -> commentRepository.countByPicksTemplateIdIn(ids).stream()
+                ids -> commentRepository.countVisibleTemplateComments(viewerId, ids).stream()
                         .collect(Collectors.toMap(CommentRepository.TemplateCommentCount::getTemplateId,
                                 CommentRepository.TemplateCommentCount::getCount)),
-                commentRepository::findRecentByPicksTemplateIdIn,
+                ids -> commentRepository.findRecentVisibleByTemplateIds(viewerId, ids),
                 comment -> comment.getPicksTemplate().getId(),
                 viewerId);
     }

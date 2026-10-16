@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.notification.service.FollowNotificationService;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +55,9 @@ class FollowerServiceImplTest {
 
     @Mock
     private FollowNotificationService followNotificationService;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -135,6 +139,17 @@ class FollowerServiceImplTest {
         assertThat(followerCaptor.getValue().getFollower()).isEqualTo(followerUser);
         assertThat(followerCaptor.getValue().getFollowed()).isEqualTo(followedUser);
         verify(followNotificationService).notifyNewFollower(followerUser, followedUser);
+    }
+
+    @Test
+    void shouldRejectFollowWhenEitherUserBlocksTheOther() {
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(followerId, followedId);
+
+        assertThatThrownBy(() -> followerService.followUser(followerId, followedId))
+                .isInstanceOf(ForbiddenException.class);
+
+        verifyNoInteractions(userRepository, followerRepository, followNotificationService);
     }
 
     @Test
@@ -277,6 +292,21 @@ class FollowerServiceImplTest {
         verify(followerRepository).save(followerCaptor.capture());
         assertThat(followerCaptor.getValue().getStatus()).isEqualTo(FollowStatus.ACCEPTED);
         verify(followNotificationService).notifyFollowRequestsAccepted(followedUser, List.of(followerUser));
+    }
+
+    @Test
+    void shouldRejectFollowRequestAcceptanceWhenEitherUserBlocksTheOther() {
+        Follower pending = buildFollow(FollowStatus.PENDING);
+        when(followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId))
+                .thenReturn(Optional.of(pending));
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(followedId, followerId);
+
+        assertThatThrownBy(() -> followerService.acceptFollowRequest(followedId, followerId))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(followerRepository, never()).save(any());
+        verifyNoInteractions(followNotificationService);
     }
 
     @Test

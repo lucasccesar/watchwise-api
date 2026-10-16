@@ -126,7 +126,7 @@ public class UserListDetailViewServiceImpl implements UserListDetailViewService 
                 : userListItemService.getItemScopeByListIds(nestedListIds);
         Map<UUID, Long> commentCounts = nestedListIds.isEmpty()
                 ? Map.of()
-                : commentRepository.countByListIdIn(nestedListIds).stream()
+                : commentRepository.countVisibleListComments(request.viewerId(), nestedListIds).stream()
                         .collect(Collectors.toMap(CommentRepository.ListCommentCount::getListId,
                                 CommentRepository.ListCommentCount::getCount));
 

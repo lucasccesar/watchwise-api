@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
@@ -97,6 +98,9 @@ class CommentServiceImplTest {
 
     @Mock
     private SocialNotificationService socialNotificationService;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -250,7 +254,7 @@ class CommentServiceImplTest {
     void shouldReturnPageOfCommentResponseDtoWhenContentExists() {
         Comment comment = buildContentComment(fightClub);
         when(contentRepository.existsById(contentId)).thenReturn(true);
-        when(commentRepository.findByContentIdOrderByCreatedAtAsc(eq(contentId), any(PageRequest.class)))
+        when(commentRepository.findVisibleByContentId(any(UUID.class), eq(contentId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(comment)));
         when(commentMapper.commentToResponseDto(comment, false)).thenReturn(responseDto);
 
@@ -263,7 +267,7 @@ class CommentServiceImplTest {
     @DisplayName("[getCommentsForContent] Should Return Empty Page - When Content Has No Comments")
     void shouldReturnEmptyPageWhenContentHasNoComments() {
         when(contentRepository.existsById(contentId)).thenReturn(true);
-        when(commentRepository.findByContentIdOrderByCreatedAtAsc(eq(contentId), any(PageRequest.class)))
+        when(commentRepository.findVisibleByContentId(any(UUID.class), eq(contentId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         Page<CommentResponseDTO> result = commentService.getCommentsForContent(lucasId, contentId, 1, 10);
@@ -291,7 +295,7 @@ class CommentServiceImplTest {
 
         commentService.getCommentsForContent(lucasId, contentId, null, 10);
 
-        verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByContentId(any(UUID.class), eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
@@ -302,7 +306,7 @@ class CommentServiceImplTest {
 
         commentService.getCommentsForContent(lucasId, contentId, 0, 10);
 
-        verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByContentId(any(UUID.class), eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
     }
 
@@ -313,7 +317,7 @@ class CommentServiceImplTest {
 
         commentService.getCommentsForContent(lucasId, contentId, 3, 10);
 
-        verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByContentId(any(UUID.class), eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(2);
     }
 
@@ -325,7 +329,7 @@ class CommentServiceImplTest {
         assertThatThrownBy(() -> commentService.getCommentsForContent(lucasId, contentId, -1, 10))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(commentRepository, never()).findByContentIdOrderByCreatedAtAsc(any(), any());
+        verify(commentRepository, never()).findVisibleByContentId(any(UUID.class), any(), any());
     }
 
     @Test
@@ -335,7 +339,7 @@ class CommentServiceImplTest {
 
         commentService.getCommentsForContent(lucasId, contentId, 1, null);
 
-        verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByContentId(any(UUID.class), eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
 
@@ -346,7 +350,7 @@ class CommentServiceImplTest {
 
         commentService.getCommentsForContent(lucasId, contentId, 1, 1001);
 
-        verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByContentId(any(UUID.class), eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
     }
 
@@ -357,7 +361,7 @@ class CommentServiceImplTest {
 
         commentService.getCommentsForContent(lucasId, contentId, 1, 25);
 
-        verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByContentId(any(UUID.class), eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(25);
     }
 
@@ -368,7 +372,7 @@ class CommentServiceImplTest {
 
         commentService.getCommentsForContent(lucasId, contentId, 1, 1000);
 
-        verify(commentRepository).findByContentIdOrderByCreatedAtAsc(eq(contentId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByContentId(any(UUID.class), eq(contentId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(1000);
     }
 
@@ -380,7 +384,7 @@ class CommentServiceImplTest {
         assertThatThrownBy(() -> commentService.getCommentsForContent(lucasId, contentId, 1, -5))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(commentRepository, never()).findByContentIdOrderByCreatedAtAsc(any(), any());
+        verify(commentRepository, never()).findVisibleByContentId(any(UUID.class), any(), any());
     }
 
     @Test
@@ -391,12 +395,12 @@ class CommentServiceImplTest {
         assertThatThrownBy(() -> commentService.getCommentsForContent(lucasId, contentId, 1, 0))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(commentRepository, never()).findByContentIdOrderByCreatedAtAsc(any(), any());
+        verify(commentRepository, never()).findVisibleByContentId(any(UUID.class), any(), any());
     }
 
     private void stubContentCommentsEmptyPage() {
         when(contentRepository.existsById(contentId)).thenReturn(true);
-        when(commentRepository.findByContentIdOrderByCreatedAtAsc(any(), any(PageRequest.class))).thenReturn(Page.empty());
+        when(commentRepository.findVisibleByContentId(any(UUID.class), any(), any(PageRequest.class))).thenReturn(Page.empty());
     }
 
     // ---------- getCommentsForList ----------
@@ -406,7 +410,7 @@ class CommentServiceImplTest {
     void shouldReturnPageWhenListIsPublic() {
         Comment comment = buildListComment(scifi);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(commentRepository.findByListIdOrderByCreatedAtAsc(eq(listId), any(PageRequest.class)))
+        when(commentRepository.findVisibleByListId(any(UUID.class), eq(listId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(comment)));
         when(commentMapper.commentToResponseDto(comment, false)).thenReturn(responseDto);
 
@@ -419,7 +423,7 @@ class CommentServiceImplTest {
     @DisplayName("[getCommentsForList] Should Return Empty Page - When List Has No Comments")
     void shouldReturnEmptyPageWhenListHasNoComments() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(commentRepository.findByListIdOrderByCreatedAtAsc(eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
+        when(commentRepository.findVisibleByListId(any(UUID.class), eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
 
         Page<CommentResponseDTO> result = commentService.getCommentsForList(lucasId, listId, 1, 10);
 
@@ -444,7 +448,7 @@ class CommentServiceImplTest {
     void shouldReturnPageWhenListIsPrivateAndViewerIsTheOwner() {
         scifi.setVisibility(UserListVisibility.PRIVATE);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(commentRepository.findByListIdOrderByCreatedAtAsc(eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
+        when(commentRepository.findVisibleByListId(any(UUID.class), eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
 
         assertThat(commentService.getCommentsForList(marinaId, listId, 1, 10).getContent()).isEmpty();
     }
@@ -456,7 +460,7 @@ class CommentServiceImplTest {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(commentRepository.findByListIdOrderByCreatedAtAsc(eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
+        when(commentRepository.findVisibleByListId(any(UUID.class), eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
 
         assertThat(commentService.getCommentsForList(lucasId, listId, 1, 10).getContent()).isEmpty();
     }
@@ -493,7 +497,7 @@ class CommentServiceImplTest {
     @DisplayName("[getCommentsForList] Should Return Empty Page - When List Is A List Of Lists")
     void shouldReturnEmptyPageWhenListIsAListOfLists() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(commentRepository.findByListIdOrderByCreatedAtAsc(eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
+        when(commentRepository.findVisibleByListId(any(UUID.class), eq(listId), any(PageRequest.class))).thenReturn(Page.empty());
 
         assertThat(commentService.getCommentsForList(lucasId, listId, 1, 10).getContent()).isEmpty();
     }
@@ -502,11 +506,11 @@ class CommentServiceImplTest {
     @DisplayName("[getCommentsForList] Should Default Page And Size - When Both Are Null")
     void shouldDefaultPageAndSizeWhenBothAreNullForList() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
-        when(commentRepository.findByListIdOrderByCreatedAtAsc(any(), any(PageRequest.class))).thenReturn(Page.empty());
+        when(commentRepository.findVisibleByListId(any(UUID.class), any(), any(PageRequest.class))).thenReturn(Page.empty());
 
         commentService.getCommentsForList(lucasId, listId, null, null);
 
-        verify(commentRepository).findByListIdOrderByCreatedAtAsc(eq(listId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByListId(any(UUID.class), eq(listId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
@@ -518,7 +522,7 @@ class CommentServiceImplTest {
     void shouldReturnPageWhenOwnerProfileIsPublic() {
         Comment comment = buildDiaryEntryComment(diaryEntry);
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
-        when(commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(eq(diaryEntryId), any(PageRequest.class)))
+        when(commentRepository.findVisibleByDiaryEntryId(any(UUID.class), eq(diaryEntryId), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(comment)));
         when(commentMapper.commentToResponseDto(comment, false)).thenReturn(responseDto);
 
@@ -531,7 +535,7 @@ class CommentServiceImplTest {
     @DisplayName("[getCommentsForDiaryEntry] Should Return Empty Page - When Diary Entry Has No Comments")
     void shouldReturnEmptyPageWhenDiaryEntryHasNoComments() {
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
-        when(commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(eq(diaryEntryId), any(PageRequest.class)))
+        when(commentRepository.findVisibleByDiaryEntryId(any(UUID.class), eq(diaryEntryId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         Page<CommentResponseDTO> result = commentService.getCommentsForDiaryEntry(lucasId, diaryEntryId, 1, 10);
@@ -557,7 +561,7 @@ class CommentServiceImplTest {
     void shouldReturnPageWhenOwnerProfileIsPrivateAndViewerIsTheOwner() {
         marina.setIsProfilePublic(false);
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
-        when(commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(eq(diaryEntryId), any(PageRequest.class)))
+        when(commentRepository.findVisibleByDiaryEntryId(any(UUID.class), eq(diaryEntryId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         assertThat(commentService.getCommentsForDiaryEntry(marinaId, diaryEntryId, 1, 10).getContent()).isEmpty();
@@ -571,7 +575,7 @@ class CommentServiceImplTest {
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
-        when(commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(eq(diaryEntryId), any(PageRequest.class)))
+        when(commentRepository.findVisibleByDiaryEntryId(any(UUID.class), eq(diaryEntryId), any(PageRequest.class)))
                 .thenReturn(Page.empty());
 
         assertThat(commentService.getCommentsForDiaryEntry(lucasId, diaryEntryId, 1, 10).getContent()).isEmpty();
@@ -596,11 +600,11 @@ class CommentServiceImplTest {
     @DisplayName("[getCommentsForDiaryEntry] Should Default Page And Size - When Both Are Null")
     void shouldDefaultPageAndSizeWhenBothAreNullForDiaryEntry() {
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
-        when(commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(any(), any(PageRequest.class))).thenReturn(Page.empty());
+        when(commentRepository.findVisibleByDiaryEntryId(any(UUID.class), any(), any(PageRequest.class))).thenReturn(Page.empty());
 
         commentService.getCommentsForDiaryEntry(lucasId, diaryEntryId, null, null);
 
-        verify(commentRepository).findByDiaryEntryIdOrderByCreatedAtAsc(eq(diaryEntryId), pageRequestCaptor.capture());
+        verify(commentRepository).findVisibleByDiaryEntryId(any(UUID.class), eq(diaryEntryId), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isEqualTo(PageRequestFactory.DEFAULT_PAGE);
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
     }
@@ -734,6 +738,35 @@ class CommentServiceImplTest {
         assertThat(saved.getUser()).isEqualTo(lucas);
         notificationOrder.verify(socialNotificationService).notifyCommentReceived(
                 lucasId, marinaId, NotificationTargetType.USER_LIST, listId);
+    }
+
+    @Test
+    void shouldRejectCommentOnBlockedListOwner() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+
+        assertThatThrownBy(() -> commentService.createCommentOnList(
+                lucasId, listId, new CommentCreationDTO("Nice picks", null, null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
+    }
+
+    @Test
+    void shouldRejectReplyToBlockedCommentAuthor() {
+        Comment parent = Comment.builder().id(UUID.randomUUID()).user(marina).content(fightClub).build();
+        when(contentRepository.findById(contentId)).thenReturn(Optional.of(fightClub));
+        when(commentRepository.findById(parent.getId())).thenReturn(Optional.of(parent));
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+
+        assertThatThrownBy(() -> commentService.createCommentOnContent(
+                lucasId, contentId, new CommentCreationDTO("Reply", parent.getId(), null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(commentRepository, never()).save(any());
     }
 
     @Test

@@ -348,7 +348,7 @@ class DiaryEntryServiceImplTest {
         ContentCardDTO card = cardFor(fightClub, "Fight Club", ContentPreviewStatus.AVAILABLE);
         when(diaryEntryRepository.findByIdWithContentAndUser(entry.getId())).thenReturn(Optional.of(entry));
         when(likeService.getLikedDiaryEntryIds(lucasId, List.of(entry.getId()))).thenReturn(Set.of(entry.getId()));
-        when(commentPreviewAssembler.countDiaryEntries(List.of(entry.getId())))
+        when(commentPreviewAssembler.countDiaryEntries(List.of(entry.getId()), lucasId))
                 .thenReturn(Map.of(entry.getId(), 7L));
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, true, List.of())).thenReturn(mapped);
         when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
@@ -1835,7 +1835,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(entry));
         when(diaryEntryMapper.diaryEntryToResponseDto(entry, false, List.of())).thenReturn(dto);
         when(userMapper.userToUserPreviewDto(marina)).thenReturn(reviewer);
-        when(commentPreviewAssembler.countDiaryEntries(List.of(entry.getId())))
+        when(commentPreviewAssembler.countDiaryEntries(List.of(entry.getId()), lucasId))
                 .thenReturn(Map.of(entry.getId(), 3L));
         when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
                 .thenAnswer(invocation -> {

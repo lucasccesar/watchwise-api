@@ -159,7 +159,7 @@ public class UserListServiceImpl implements UserListService {
         Set<UUID> likedListIds = likeService.getLikedListIds(viewerId, listIds);
         Map<UUID, Long> itemsCountByListId = userListItemService.getItemsCountByListIds(listIds);
         Map<UUID, Long> totalRuntimeMinutesByListId = userListItemService.getTotalRuntimeMinutesByListIds(listIds);
-        Map<UUID, Long> commentsCountByListId = commentsCountByListIds(listIds);
+        Map<UUID, Long> commentsCountByListId = commentsCountByListIds(listIds, viewerId);
         Map<UUID, UserListItemScope> itemScopeByListId =
                 userListItemService.getItemScopeByListIds(listIds, nestedListsCountByListId);
         Set<UUID> listIdsContainingContent = contentId != null
@@ -179,12 +179,12 @@ public class UserListServiceImpl implements UserListService {
                 listIdsContainingContent == null ? null : listIdsContainingContent.contains(list.getId())));
     }
 
-    private Map<UUID, Long> commentsCountByListIds(Collection<UUID> listIds) {
+    private Map<UUID, Long> commentsCountByListIds(Collection<UUID> listIds, UUID viewerId) {
         if (listIds.isEmpty()) {
             return Map.of();
         }
 
-        return commentRepository.countByListIdIn(listIds).stream()
+        return commentRepository.countVisibleListComments(viewerId, listIds).stream()
                 .collect(Collectors.toMap(
                         CommentRepository.ListCommentCount::getListId,
                         CommentRepository.ListCommentCount::getCount));
@@ -197,7 +197,9 @@ public class UserListServiceImpl implements UserListService {
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(userList.getId())).contains(userList.getId());
         long itemsCount = userListItemService.getItemsCount(userList.getId());
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(userList.getId());
-        long commentsCount = commentRepository.countByListId(userList.getId());
+        long commentsCount = commentRepository.countVisibleListComments(viewerId, List.of(userList.getId())).stream()
+                .mapToLong(CommentRepository.ListCommentCount::getCount)
+                .sum();
         UserListItemScope itemScope = userListItemService
                 .getItemScopeByListIds(List.of(userList.getId()), Map.of(userList.getId(), nestedListsCount))
                 .get(userList.getId());

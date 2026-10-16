@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.user.dto.PublicUserDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -34,6 +35,7 @@ public class FollowerServiceImpl implements FollowerService {
     private final UserMapper userMapper;
     private final PageRequestFactory pageRequestFactory;
     private final FollowNotificationService followNotificationService;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     @Transactional
@@ -41,6 +43,7 @@ public class FollowerServiceImpl implements FollowerService {
         if (followerId.equals(followedId)) {
             throw new BadRequestException("Cannot follow yourself");
         }
+        userBlockAccessService.assertInteractionAllowed(followerId, followedId);
 
         User followed = userRepository.findByIdForFollowStatus(followedId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
@@ -86,6 +89,8 @@ public class FollowerServiceImpl implements FollowerService {
         Follower follow = followerRepository
                 .findPendingByFollowerIdAndFollowedIdForUpdate(requesterId, targetUserId)
                 .orElseThrow(() -> new NotFoundException("Follow request not found"));
+
+        userBlockAccessService.assertInteractionAllowed(targetUserId, requesterId);
 
         follow.setStatus(FollowStatus.ACCEPTED);
         followerRepository.save(follow);

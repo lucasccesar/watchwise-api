@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.comment.mapper.CommentMapper;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.comment.service.CommentPreviewData;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.pick.entity.Pick;
@@ -24,6 +25,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -60,34 +62,36 @@ class CommentPreviewAssemblerTest {
 
     @Test
     void countsDiaryEntriesWithoutLoadingRecentCommentsOrLikes() {
+        UUID viewerId = UUID.randomUUID();
         UUID firstTargetId = UUID.randomUUID();
         UUID secondTargetId = UUID.randomUUID();
         List<UUID> targetIds = List.of(firstTargetId, secondTargetId);
 
         CommentRepository.DiaryCommentCount firstCount = diaryCount(firstTargetId, 3);
-        when(commentRepository.countByDiaryEntryIdIn(targetIds)).thenReturn(List.of(firstCount));
+        when(commentRepository.countVisibleDiaryComments(viewerId, targetIds)).thenReturn(List.of(firstCount));
 
-        assertThat(assembler.countDiaryEntries(targetIds))
+        assertThat(assembler.countDiaryEntries(targetIds, viewerId))
                 .containsEntry(firstTargetId, 3L)
                 .containsEntry(secondTargetId, 0L);
 
-        verify(commentRepository).countByDiaryEntryIdIn(targetIds);
+        verify(commentRepository).countVisibleDiaryComments(viewerId, targetIds);
         verify(commentRepository, never()).findRecentByDiaryEntryIdIn(any());
         verifyNoInteractions(likeService, commentMapper);
     }
 
     @Test
     void countsDroppedEntriesWithoutLoadingRecentCommentsOrLikes() {
+        UUID viewerId = UUID.randomUUID();
         UUID firstTargetId = UUID.randomUUID();
         List<UUID> targetIds = List.of(firstTargetId);
 
         CommentRepository.DroppedCommentCount firstCount = droppedCount(firstTargetId, 4);
-        when(commentRepository.countByDroppedEntryIdIn(targetIds)).thenReturn(List.of(firstCount));
+        when(commentRepository.countVisibleDroppedComments(viewerId, targetIds)).thenReturn(List.of(firstCount));
 
-        assertThat(assembler.countDroppedEntries(targetIds))
+        assertThat(assembler.countDroppedEntries(targetIds, viewerId))
                 .containsEntry(firstTargetId, 4L);
 
-        verify(commentRepository).countByDroppedEntryIdIn(targetIds);
+        verify(commentRepository).countVisibleDroppedComments(viewerId, targetIds);
         verify(commentRepository, never()).findRecentByDroppedEntryIdIn(any());
         verifyNoInteractions(likeService, commentMapper);
     }
@@ -100,14 +104,14 @@ class CommentPreviewAssemblerTest {
         UUID pickId = UUID.randomUUID();
         UUID templateId = UUID.randomUUID();
 
-        when(commentRepository.countByDiaryEntryIdIn(List.of(diaryEntryId))).thenReturn(List.of());
-        when(commentRepository.findRecentByDiaryEntryIdIn(List.of(diaryEntryId))).thenReturn(List.of());
-        when(commentRepository.countByDroppedEntryIdIn(List.of(droppedEntryId))).thenReturn(List.of());
-        when(commentRepository.findRecentByDroppedEntryIdIn(List.of(droppedEntryId))).thenReturn(List.of());
-        when(commentRepository.countByPickIdIn(List.of(pickId))).thenReturn(List.of());
-        when(commentRepository.findRecentByPickIdIn(List.of(pickId))).thenReturn(List.of());
-        when(commentRepository.countByPicksTemplateIdIn(List.of(templateId))).thenReturn(List.of());
-        when(commentRepository.findRecentByPicksTemplateIdIn(List.of(templateId))).thenReturn(List.of());
+        when(commentRepository.countVisibleDiaryComments(viewerId, List.of(diaryEntryId))).thenReturn(List.of());
+        when(commentRepository.findRecentVisibleByDiaryEntryIds(viewerId, List.of(diaryEntryId))).thenReturn(List.of());
+        when(commentRepository.countVisibleDroppedComments(viewerId, List.of(droppedEntryId))).thenReturn(List.of());
+        when(commentRepository.findRecentVisibleByDroppedEntryIds(viewerId, List.of(droppedEntryId))).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, List.of(pickId))).thenReturn(List.of());
+        when(commentRepository.findRecentVisibleByPickIds(viewerId, List.of(pickId))).thenReturn(List.of());
+        when(commentRepository.countVisibleTemplateComments(viewerId, List.of(templateId))).thenReturn(List.of());
+        when(commentRepository.findRecentVisibleByTemplateIds(viewerId, List.of(templateId))).thenReturn(List.of());
         when(likeService.getLikedCommentIds(viewerId, List.of())).thenReturn(Set.of());
 
         assertThat(assembler.assembleDiaryEntryPreviews(List.of(diaryEntryId), viewerId))
@@ -142,8 +146,8 @@ class CommentPreviewAssemblerTest {
 
         CommentRepository.DiaryCommentCount firstCount = diaryCount(firstTargetId, 8);
         CommentRepository.DiaryCommentCount secondCount = diaryCount(secondTargetId, 1);
-        when(commentRepository.countByDiaryEntryIdIn(targetIds)).thenReturn(List.of(firstCount, secondCount));
-        when(commentRepository.findRecentByDiaryEntryIdIn(targetIds)).thenReturn(comments);
+        when(commentRepository.countVisibleDiaryComments(viewerId, targetIds)).thenReturn(List.of(firstCount, secondCount));
+        when(commentRepository.findRecentVisibleByDiaryEntryIds(viewerId, targetIds)).thenReturn(comments);
         stubCommentDtos(previewComments(comments), likedCommentIds);
         when(likeService.getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId())))
@@ -155,17 +159,55 @@ class CommentPreviewAssemblerTest {
                 List.of(comments.get(0), comments.get(1), comments.get(2)), List.of(false, true, false));
         assertPreview(result, secondTargetId, 1, List.of(comments.get(4)), List.of(true));
         assertPreview(result, emptyTargetId, 0, List.of(), List.of());
-        verify(commentRepository).countByDiaryEntryIdIn(targetIds);
-        verify(commentRepository).findRecentByDiaryEntryIdIn(targetIds);
-        verify(commentRepository, never()).countByDroppedEntryIdIn(any());
-        verify(commentRepository, never()).findRecentByDroppedEntryIdIn(any());
-        verify(commentRepository, never()).countByPickIdIn(any());
-        verify(commentRepository, never()).findRecentByPickIdIn(any());
-        verify(commentRepository, never()).countByPicksTemplateIdIn(any());
-        verify(commentRepository, never()).findRecentByPicksTemplateIdIn(any());
+        verify(commentRepository).countVisibleDiaryComments(viewerId, targetIds);
+        verify(commentRepository).findRecentVisibleByDiaryEntryIds(viewerId, targetIds);
+        verify(commentRepository, never()).countVisibleDroppedComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByDroppedEntryIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisiblePickComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByPickIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisibleTemplateComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByTemplateIds(eq(viewerId), any());
         verify(likeService).getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId()));
         verifyNoMoreInteractions(commentRepository, likeService);
+    }
+
+    @Test
+    void assemblesDiaryAndListPreviewsFromViewerFilteredCountsAndRecentRows() {
+        UUID viewerId = UUID.randomUUID();
+        UUID diaryId = UUID.randomUUID();
+        UUID listId = UUID.randomUUID();
+        Comment allowedDiaryComment = diaryComment(UUID.randomUUID(), diaryId);
+        Comment allowedListComment = listComment(UUID.randomUUID(), listId);
+        CommentRepository.DiaryCommentCount diaryVisibleCount = diaryCount(diaryId, 1);
+        CommentRepository.ListCommentCount listVisibleCount = listCount(listId, 1);
+
+        when(commentRepository.countVisibleDiaryComments(viewerId, List.of(diaryId)))
+                .thenReturn(List.of(diaryVisibleCount));
+        when(commentRepository.findRecentVisibleByDiaryEntryIds(viewerId, List.of(diaryId)))
+                .thenReturn(List.of(allowedDiaryComment));
+        when(commentRepository.countVisibleListComments(viewerId, List.of(listId)))
+                .thenReturn(List.of(listVisibleCount));
+        when(commentRepository.findRecentVisibleByListIds(viewerId, List.of(listId)))
+                .thenReturn(List.of(allowedListComment));
+        when(likeService.getLikedCommentIds(viewerId, List.of(allowedDiaryComment.getId())))
+                .thenReturn(Set.of());
+        when(likeService.getLikedCommentIds(viewerId, List.of(allowedListComment.getId())))
+                .thenReturn(Set.of());
+        when(commentMapper.commentToResponseDto(allowedDiaryComment, false))
+                .thenReturn(commentDto(allowedDiaryComment.getId(), false));
+        when(commentMapper.commentToResponseDto(allowedListComment, false))
+                .thenReturn(commentDto(allowedListComment.getId(), false));
+
+        Map<UUID, CommentPreviewData> diaryResult = assembler.assembleDiaryEntryPreviews(List.of(diaryId), viewerId);
+        Map<UUID, CommentPreviewData> listResult = assembler.assembleListPreviews(List.of(listId), viewerId);
+
+        assertPreview(diaryResult, diaryId, 1, List.of(allowedDiaryComment), List.of(false));
+        assertPreview(listResult, listId, 1, List.of(allowedListComment), List.of(false));
+        verify(commentRepository).countVisibleDiaryComments(viewerId, List.of(diaryId));
+        verify(commentRepository).findRecentVisibleByDiaryEntryIds(viewerId, List.of(diaryId));
+        verify(commentRepository).countVisibleListComments(viewerId, List.of(listId));
+        verify(commentRepository).findRecentVisibleByListIds(viewerId, List.of(listId));
     }
 
     @Test
@@ -187,8 +229,8 @@ class CommentPreviewAssemblerTest {
 
         CommentRepository.DroppedCommentCount firstCount = droppedCount(firstTargetId, 8);
         CommentRepository.DroppedCommentCount secondCount = droppedCount(secondTargetId, 1);
-        when(commentRepository.countByDroppedEntryIdIn(targetIds)).thenReturn(List.of(firstCount, secondCount));
-        when(commentRepository.findRecentByDroppedEntryIdIn(targetIds)).thenReturn(comments);
+        when(commentRepository.countVisibleDroppedComments(viewerId, targetIds)).thenReturn(List.of(firstCount, secondCount));
+        when(commentRepository.findRecentVisibleByDroppedEntryIds(viewerId, targetIds)).thenReturn(comments);
         stubCommentDtos(previewComments(comments), likedCommentIds);
         when(likeService.getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId())))
@@ -200,14 +242,14 @@ class CommentPreviewAssemblerTest {
                 List.of(comments.get(0), comments.get(1), comments.get(2)), List.of(false, true, false));
         assertPreview(result, secondTargetId, 1, List.of(comments.get(4)), List.of(true));
         assertPreview(result, emptyTargetId, 0, List.of(), List.of());
-        verify(commentRepository).countByDroppedEntryIdIn(targetIds);
-        verify(commentRepository).findRecentByDroppedEntryIdIn(targetIds);
-        verify(commentRepository, never()).countByDiaryEntryIdIn(any());
-        verify(commentRepository, never()).findRecentByDiaryEntryIdIn(any());
-        verify(commentRepository, never()).countByPickIdIn(any());
-        verify(commentRepository, never()).findRecentByPickIdIn(any());
-        verify(commentRepository, never()).countByPicksTemplateIdIn(any());
-        verify(commentRepository, never()).findRecentByPicksTemplateIdIn(any());
+        verify(commentRepository).countVisibleDroppedComments(viewerId, targetIds);
+        verify(commentRepository).findRecentVisibleByDroppedEntryIds(viewerId, targetIds);
+        verify(commentRepository, never()).countVisibleDiaryComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByDiaryEntryIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisiblePickComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByPickIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisibleTemplateComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByTemplateIds(eq(viewerId), any());
         verify(likeService).getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId()));
         verifyNoMoreInteractions(commentRepository, likeService);
@@ -232,8 +274,8 @@ class CommentPreviewAssemblerTest {
 
         CommentRepository.PickCommentCount firstCount = pickCount(firstTargetId, 8);
         CommentRepository.PickCommentCount secondCount = pickCount(secondTargetId, 1);
-        when(commentRepository.countByPickIdIn(targetIds)).thenReturn(List.of(firstCount, secondCount));
-        when(commentRepository.findRecentByPickIdIn(targetIds)).thenReturn(comments);
+        when(commentRepository.countVisiblePickComments(viewerId, targetIds)).thenReturn(List.of(firstCount, secondCount));
+        when(commentRepository.findRecentVisibleByPickIds(viewerId, targetIds)).thenReturn(comments);
         stubCommentDtos(previewComments(comments), likedCommentIds);
         when(likeService.getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId())))
@@ -245,14 +287,14 @@ class CommentPreviewAssemblerTest {
                 List.of(comments.get(0), comments.get(1), comments.get(2)), List.of(false, true, false));
         assertPreview(result, secondTargetId, 1, List.of(comments.get(4)), List.of(true));
         assertPreview(result, emptyTargetId, 0, List.of(), List.of());
-        verify(commentRepository).countByPickIdIn(targetIds);
-        verify(commentRepository).findRecentByPickIdIn(targetIds);
-        verify(commentRepository, never()).countByDiaryEntryIdIn(any());
-        verify(commentRepository, never()).findRecentByDiaryEntryIdIn(any());
-        verify(commentRepository, never()).countByDroppedEntryIdIn(any());
-        verify(commentRepository, never()).findRecentByDroppedEntryIdIn(any());
-        verify(commentRepository, never()).countByPicksTemplateIdIn(any());
-        verify(commentRepository, never()).findRecentByPicksTemplateIdIn(any());
+        verify(commentRepository).countVisiblePickComments(viewerId, targetIds);
+        verify(commentRepository).findRecentVisibleByPickIds(viewerId, targetIds);
+        verify(commentRepository, never()).countVisibleDiaryComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByDiaryEntryIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisibleDroppedComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByDroppedEntryIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisibleTemplateComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByTemplateIds(eq(viewerId), any());
         verify(likeService).getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId()));
         verifyNoMoreInteractions(commentRepository, likeService);
@@ -277,8 +319,8 @@ class CommentPreviewAssemblerTest {
 
         CommentRepository.TemplateCommentCount firstCount = templateCount(firstTargetId, 8);
         CommentRepository.TemplateCommentCount secondCount = templateCount(secondTargetId, 1);
-        when(commentRepository.countByPicksTemplateIdIn(targetIds)).thenReturn(List.of(firstCount, secondCount));
-        when(commentRepository.findRecentByPicksTemplateIdIn(targetIds)).thenReturn(comments);
+        when(commentRepository.countVisibleTemplateComments(viewerId, targetIds)).thenReturn(List.of(firstCount, secondCount));
+        when(commentRepository.findRecentVisibleByTemplateIds(viewerId, targetIds)).thenReturn(comments);
         stubCommentDtos(previewComments(comments), likedCommentIds);
         when(likeService.getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId())))
@@ -290,14 +332,14 @@ class CommentPreviewAssemblerTest {
                 List.of(comments.get(0), comments.get(1), comments.get(2)), List.of(false, true, false));
         assertPreview(result, secondTargetId, 1, List.of(comments.get(4)), List.of(true));
         assertPreview(result, emptyTargetId, 0, List.of(), List.of());
-        verify(commentRepository).countByPicksTemplateIdIn(targetIds);
-        verify(commentRepository).findRecentByPicksTemplateIdIn(targetIds);
-        verify(commentRepository, never()).countByDiaryEntryIdIn(any());
-        verify(commentRepository, never()).findRecentByDiaryEntryIdIn(any());
-        verify(commentRepository, never()).countByDroppedEntryIdIn(any());
-        verify(commentRepository, never()).findRecentByDroppedEntryIdIn(any());
-        verify(commentRepository, never()).countByPickIdIn(any());
-        verify(commentRepository, never()).findRecentByPickIdIn(any());
+        verify(commentRepository).countVisibleTemplateComments(viewerId, targetIds);
+        verify(commentRepository).findRecentVisibleByTemplateIds(viewerId, targetIds);
+        verify(commentRepository, never()).countVisibleDiaryComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByDiaryEntryIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisibleDroppedComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByDroppedEntryIds(eq(viewerId), any());
+        verify(commentRepository, never()).countVisiblePickComments(eq(viewerId), any());
+        verify(commentRepository, never()).findRecentVisibleByPickIds(eq(viewerId), any());
         verify(likeService).getLikedCommentIds(viewerId,
                 List.of(comments.get(0).getId(), comments.get(1).getId(), comments.get(2).getId(), comments.get(4).getId()));
         verifyNoMoreInteractions(commentRepository, likeService);
@@ -336,6 +378,10 @@ class CommentPreviewAssemblerTest {
         return Comment.builder().id(commentId).diaryEntry(DiaryEntry.builder().id(targetId).build()).build();
     }
 
+    private Comment listComment(UUID commentId, UUID targetId) {
+        return Comment.builder().id(commentId).list(UserList.builder().id(targetId).build()).build();
+    }
+
     private Comment droppedComment(UUID commentId, UUID targetId) {
         return Comment.builder().id(commentId).droppedEntry(DroppedEntry.builder().id(targetId).build()).build();
     }
@@ -351,6 +397,13 @@ class CommentPreviewAssemblerTest {
     private CommentRepository.DiaryCommentCount diaryCount(UUID targetId, long count) {
         CommentRepository.DiaryCommentCount row = org.mockito.Mockito.mock(CommentRepository.DiaryCommentCount.class);
         when(row.getDiaryEntryId()).thenReturn(targetId);
+        when(row.getCount()).thenReturn(count);
+        return row;
+    }
+
+    private CommentRepository.ListCommentCount listCount(UUID targetId, long count) {
+        CommentRepository.ListCommentCount row = org.mockito.Mockito.mock(CommentRepository.ListCommentCount.class);
+        when(row.getListId()).thenReturn(targetId);
         when(row.getCount()).thenReturn(count);
         return row;
     }

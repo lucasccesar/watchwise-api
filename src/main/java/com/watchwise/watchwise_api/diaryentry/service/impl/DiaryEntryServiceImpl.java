@@ -220,7 +220,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             UUID viewerId, UUID userId, User target, Page<DiaryEntry> entries) {
         List<UUID> entryIds = entries.getContent().stream().map(DiaryEntry::getId).toList();
         Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, entryIds);
-        Map<UUID, Long> commentCountsByEntryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(entryIds))
+        Map<UUID, Long> commentCountsByEntryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(entryIds, viewerId))
                 .orElseGet(Map::of);
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(entryIds);
         Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate = assembleDiaryCards(viewerId, target, entries.getContent());
@@ -247,7 +247,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         assertCanViewDiary(viewerId, owner.getId(), owner);
 
         Set<UUID> likedEntryIds = likeService.getLikedDiaryEntryIds(viewerId, List.of(diaryEntryId));
-        long commentsCount = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(List.of(diaryEntryId)))
+        long commentsCount = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(List.of(diaryEntryId), viewerId))
                 .orElseGet(Map::of)
                 .getOrDefault(diaryEntryId, 0L);
         List<UserPreviewDTO> watchedWith = loadWatchedWith(List.of(diaryEntryId))
@@ -650,9 +650,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         Set<UUID> likedDiaryIds = likeService.getLikedDiaryEntryIds(viewerId, diaryIds);
         Set<UUID> likedDroppedIds = likeService.getLikedDroppedEntryIds(viewerId, droppedIds);
-        Map<UUID, Long> commentCountsByDiaryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(diaryIds))
+        Map<UUID, Long> commentCountsByDiaryId = Optional.ofNullable(commentPreviewAssembler.countDiaryEntries(diaryIds, viewerId))
                 .orElseGet(Map::of);
-        Map<UUID, Long> commentCountsByDroppedId = Optional.ofNullable(commentPreviewAssembler.countDroppedEntries(droppedIds))
+        Map<UUID, Long> commentCountsByDroppedId = Optional.ofNullable(commentPreviewAssembler.countDroppedEntries(droppedIds, viewerId))
                 .orElseGet(Map::of);
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(diaryIds);
         List<UserContentPosterService.UserContentPosterKey> posterKeys = diaryIds.stream()

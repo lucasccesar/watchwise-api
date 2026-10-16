@@ -64,7 +64,7 @@ public class UserListViewServiceImpl implements UserListViewService {
         Map<UUID, Long> itemsCounts = itemService.getItemsCountByListIds(ids);
         Map<UUID, UserListItemScope> scopes = itemService.getItemScopeByListIds(ids, nestedCounts);
         Set<UUID> likedIds = likes.getLikedListIds(query.viewerId(), ids);
-        Map<UUID, Long> commentCounts = comments.countByListIdIn(ids).stream()
+        Map<UUID, Long> commentCounts = comments.countVisibleListComments(query.viewerId(), ids).stream()
                 .collect(Collectors.toMap(CommentRepository.ListCommentCount::getListId,
                         CommentRepository.ListCommentCount::getCount));
         Map<UUID, Long> likeCounts = lists.stream().collect(Collectors.toMap(UserList::getId,

@@ -166,7 +166,7 @@ class UserListViewServiceImplTest {
         assertThat(result.getContent().get(0).ownedByMe()).isTrue();
         verify(itemService, never()).getWatchedPercentagesByListIds(any(), any());
         verify(itemService, never()).getTotalRuntimeMinutesByListIds(any());
-        verify(comments).countByListIdIn(List.of(list.getId()));
+        verify(comments).countVisibleListComments(eq(viewer), eq(List.of(list.getId())));
     }
 
     @Test

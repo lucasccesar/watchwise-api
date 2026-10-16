@@ -301,7 +301,7 @@ class UserListServiceImplTest {
         when(userListItemService.getWatchedPercentagesByListIds(List.of(list.getId()), lucasId)).thenReturn(Map.of());
         when(userListItemService.getItemsCountByListIds(List.of(list.getId()))).thenReturn(Map.of(list.getId(), 4L));
         when(userListItemService.getTotalRuntimeMinutesByListIds(List.of(list.getId()))).thenReturn(Map.of(list.getId(), 360L));
-        when(commentRepository.countByListIdIn(List.of(list.getId())))
+        when(commentRepository.countVisibleListComments(lucasId, List.of(list.getId())))
                 .thenReturn(List.of(buildListCommentCount(list.getId(), 7L)));
         when(userListMapper.userListToResponseDto(eq(list), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any()))
                 .thenReturn(buildResponseDto(list));
@@ -2232,7 +2232,7 @@ class UserListServiceImplTest {
         when(likeService.getLikedListIds(viewerId, listIds)).thenReturn(Set.of());
         when(userListItemService.getItemsCountByListIds(listIds)).thenReturn(Map.of());
         when(userListItemService.getTotalRuntimeMinutesByListIds(listIds)).thenReturn(Map.of());
-        when(commentRepository.countByListIdIn(listIds)).thenReturn(List.of());
+        when(commentRepository.countVisibleListComments(viewerId, listIds)).thenReturn(List.of());
         when(userListItemService.getItemScopeByListIds(listIds, Map.of())).thenReturn(Map.of());
     }
 

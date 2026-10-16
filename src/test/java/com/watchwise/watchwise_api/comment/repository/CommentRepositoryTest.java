@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
@@ -66,6 +68,9 @@ class CommentRepositoryTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private UserBlockRepository userBlockRepository;
 
     @Autowired
     private ContentRepository contentRepository;
@@ -466,6 +471,37 @@ class CommentRepositoryTest {
                 .containsExactlyInAnyOrder(
                         tuple(template.getId(), 2L),
                         tuple(secondTemplate.getId(), 1L));
+    }
+
+    @Test
+    void shouldExcludeBlockedAuthorsFromDiaryAndListPreviewsAndPaginatedListCounts() {
+        Comment diaryVisible = commentRepository.saveAndFlush(buildDiaryEntryComment(lucas, diaryEntry, "Visible diary"));
+        commentRepository.saveAndFlush(buildDiaryEntryComment(marina, diaryEntry, "Blocked diary"));
+        Comment listVisible = commentRepository.saveAndFlush(buildListComment(lucas, scifi, "Visible list"));
+        commentRepository.saveAndFlush(buildListComment(marina, scifi, "Blocked list"));
+        userBlockRepository.saveAndFlush(UserBlock.builder()
+                .blocker(userRepository.getReferenceById(lucas.getId()))
+                .blocked(userRepository.getReferenceById(marina.getId()))
+                .createdAt(LocalDateTime.now())
+                .build());
+        entityManager.flush();
+        entityManager.clear();
+
+        List<CommentRepository.DiaryCommentCount> diaryCounts = commentRepository
+                .countVisibleDiaryComments(lucas.getId(), List.of(diaryEntry.getId()));
+        List<Comment> diaryRecent = commentRepository
+                .findRecentVisibleByDiaryEntryIds(lucas.getId(), List.of(diaryEntry.getId()));
+        List<CommentRepository.ListCommentCount> listCounts = commentRepository
+                .countVisibleListComments(lucas.getId(), List.of(scifi.getId()));
+        List<Comment> listRecent = commentRepository.findRecentVisibleByListIds(lucas.getId(), List.of(scifi.getId()));
+        Page<Comment> listPage = commentRepository.findVisibleByListId(lucas.getId(), scifi.getId(), PageRequest.of(0, 1));
+
+        assertThat(diaryCounts).extracting(CommentRepository.DiaryCommentCount::getCount).containsExactly(1L);
+        assertThat(diaryRecent).extracting(Comment::getId).containsExactly(diaryVisible.getId());
+        assertThat(listCounts).extracting(CommentRepository.ListCommentCount::getCount).containsExactly(1L);
+        assertThat(listRecent).extracting(Comment::getId).containsExactly(listVisible.getId());
+        assertThat(listPage.getContent()).extracting(Comment::getId).containsExactly(listVisible.getId());
+        assertThat(listPage.getTotalElements()).isEqualTo(1L);
     }
 
     @Test

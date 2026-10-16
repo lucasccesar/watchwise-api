@@ -27,6 +27,7 @@ import com.watchwise.watchwise_api.pick.repository.PickRepository;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
@@ -58,6 +59,7 @@ public class CommentServiceImpl implements CommentService {
     private final LikeService likeService;
     private final SocialNotificationService socialNotificationService;
     private final PageRequestFactory pageRequestFactory;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public Page<CommentResponseDTO> getCommentsForContent(UUID viewerId, UUID contentId, Integer pageNumber, Integer pageSize) {
@@ -67,7 +69,7 @@ public class CommentServiceImpl implements CommentService {
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
-        Page<Comment> comments = commentRepository.findByContentIdOrderByCreatedAtAsc(contentId, pageRequest);
+        Page<Comment> comments = commentRepository.findVisibleByContentId(viewerId, contentId, pageRequest);
         return mapToResponseDtos(comments, viewerId);
     }
 
@@ -80,7 +82,7 @@ public class CommentServiceImpl implements CommentService {
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
-        Page<Comment> comments = commentRepository.findByListIdOrderByCreatedAtAsc(listId, pageRequest);
+        Page<Comment> comments = commentRepository.findVisibleByListId(viewerId, listId, pageRequest);
         return mapToResponseDtos(comments, viewerId);
     }
 
@@ -93,7 +95,7 @@ public class CommentServiceImpl implements CommentService {
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
-        Page<Comment> comments = commentRepository.findByDiaryEntryIdOrderByCreatedAtAsc(diaryEntryId, pageRequest);
+        Page<Comment> comments = commentRepository.findVisibleByDiaryEntryId(viewerId, diaryEntryId, pageRequest);
         return mapToResponseDtos(comments, viewerId);
     }
 
@@ -106,7 +108,7 @@ public class CommentServiceImpl implements CommentService {
         assertDroppedEntryIsVisibleTo(viewerId, droppedEntry);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        Page<Comment> comments = commentRepository.findByDroppedEntryIdOrderByCreatedAtAsc(droppedEntryId, pageRequest);
+        Page<Comment> comments = commentRepository.findVisibleByDroppedEntryId(viewerId, droppedEntryId, pageRequest);
         return mapToResponseDtos(comments, viewerId);
     }
 
@@ -115,7 +117,7 @@ public class CommentServiceImpl implements CommentService {
         Pick pick = pickRepository.findById(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
         assertPickIsVisibleTo(viewerId, pick);
-        Page<Comment> comments = commentRepository.findByPickIdOrderByCreatedAtAsc(pickId,
+        Page<Comment> comments = commentRepository.findVisibleByPickId(viewerId, pickId,
                 pageRequestFactory.build(pageNumber, pageSize));
         return mapToResponseDtos(comments, viewerId);
     }
@@ -125,7 +127,7 @@ public class CommentServiceImpl implements CommentService {
         if (!picksTemplateRepository.existsById(templateId)) {
             throw new NotFoundException("Picks template not found");
         }
-        Page<Comment> comments = commentRepository.findByPicksTemplateIdOrderByCreatedAtAsc(templateId,
+        Page<Comment> comments = commentRepository.findVisibleByPicksTemplateId(viewerId, templateId,
                 pageRequestFactory.build(pageNumber, pageSize));
         return mapToResponseDtos(comments, viewerId);
     }
@@ -143,7 +145,7 @@ public class CommentServiceImpl implements CommentService {
         Content content = contentRepository.findById(contentId)
                 .orElseThrow(() -> new NotFoundException("Content not found"));
 
-        Comment parentComment = resolveParentCommentOnContent(commentCreationDTO.parentCommentId(), contentId);
+        Comment parentComment = resolveParentCommentOnContent(userId, commentCreationDTO.parentCommentId(), contentId);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .content(content)
@@ -159,8 +161,9 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
         assertListIsVisibleTo(userId, list);
+        userBlockAccessService.assertInteractionAllowed(userId, list.getUser().getId());
 
-        Comment parentComment = resolveParentCommentOnList(commentCreationDTO.parentCommentId(), listId);
+        Comment parentComment = resolveParentCommentOnList(userId, commentCreationDTO.parentCommentId(), listId);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .list(list)
@@ -178,8 +181,9 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("Diary entry not found"));
 
         assertDiaryEntryIsVisibleTo(userId, diaryEntry);
+        userBlockAccessService.assertInteractionAllowed(userId, diaryEntry.getUser().getId());
 
-        Comment parentComment = resolveParentCommentOnDiaryEntry(commentCreationDTO.parentCommentId(), diaryEntryId);
+        Comment parentComment = resolveParentCommentOnDiaryEntry(userId, commentCreationDTO.parentCommentId(), diaryEntryId);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .diaryEntry(diaryEntry)
@@ -198,8 +202,9 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
 
         assertDroppedEntryIsVisibleTo(userId, droppedEntry);
+        userBlockAccessService.assertInteractionAllowed(userId, droppedEntry.getUser().getId());
 
-        Comment parentComment = resolveParentCommentOnDroppedEntry(commentCreationDTO.parentCommentId(), droppedEntryId);
+        Comment parentComment = resolveParentCommentOnDroppedEntry(userId, commentCreationDTO.parentCommentId(), droppedEntryId);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .droppedEntry(droppedEntry)
@@ -216,7 +221,8 @@ public class CommentServiceImpl implements CommentService {
         Pick pick = pickRepository.findById(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
         assertPickIsVisibleTo(userId, pick);
-        Comment parentComment = resolveParentCommentOnPick(commentCreationDTO.parentCommentId(), pickId);
+        userBlockAccessService.assertInteractionAllowed(userId, pick.getUser().getId());
+        Comment parentComment = resolveParentCommentOnPick(userId, commentCreationDTO.parentCommentId(), pickId);
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .pick(pick)
                 .build();
@@ -230,7 +236,10 @@ public class CommentServiceImpl implements CommentService {
     public CommentResponseDTO createCommentOnPicksTemplate(UUID userId, UUID templateId, CommentCreationDTO commentCreationDTO) {
         PicksTemplate template = picksTemplateRepository.findById(templateId)
                 .orElseThrow(() -> new NotFoundException("Picks template not found"));
-        Comment parentComment = resolveParentCommentOnPicksTemplate(commentCreationDTO.parentCommentId(), templateId);
+        if (template.getCreator() != null) {
+            userBlockAccessService.assertInteractionAllowed(userId, template.getCreator().getId());
+        }
+        Comment parentComment = resolveParentCommentOnPicksTemplate(userId, commentCreationDTO.parentCommentId(), templateId);
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .picksTemplate(template)
                 .build();
@@ -275,12 +284,12 @@ public class CommentServiceImpl implements CommentService {
                 .updatedAt(now);
     }
 
-    private Comment resolveParentCommentOnContent(UUID parentCommentId, UUID contentId) {
+    private Comment resolveParentCommentOnContent(UUID userId, UUID parentCommentId, UUID contentId) {
         if (parentCommentId == null) {
             return null;
         }
 
-        Comment parent = findParentComment(parentCommentId);
+        Comment parent = findParentComment(userId, parentCommentId);
         if (parent.getContent() == null || !parent.getContent().getId().equals(contentId)) {
             throw new BadRequestException("Parent comment must target the same content");
         }
@@ -288,12 +297,12 @@ public class CommentServiceImpl implements CommentService {
         return parent;
     }
 
-    private Comment resolveParentCommentOnList(UUID parentCommentId, UUID listId) {
+    private Comment resolveParentCommentOnList(UUID userId, UUID parentCommentId, UUID listId) {
         if (parentCommentId == null) {
             return null;
         }
 
-        Comment parent = findParentComment(parentCommentId);
+        Comment parent = findParentComment(userId, parentCommentId);
         if (parent.getList() == null || !parent.getList().getId().equals(listId)) {
             throw new BadRequestException("Parent comment must target the same list");
         }
@@ -301,12 +310,12 @@ public class CommentServiceImpl implements CommentService {
         return parent;
     }
 
-    private Comment resolveParentCommentOnDiaryEntry(UUID parentCommentId, UUID diaryEntryId) {
+    private Comment resolveParentCommentOnDiaryEntry(UUID userId, UUID parentCommentId, UUID diaryEntryId) {
         if (parentCommentId == null) {
             return null;
         }
 
-        Comment parent = findParentComment(parentCommentId);
+        Comment parent = findParentComment(userId, parentCommentId);
         if (parent.getDiaryEntry() == null || !parent.getDiaryEntry().getId().equals(diaryEntryId)) {
             throw new BadRequestException("Parent comment must target the same diary entry");
         }
@@ -314,12 +323,12 @@ public class CommentServiceImpl implements CommentService {
         return parent;
     }
 
-    private Comment resolveParentCommentOnDroppedEntry(UUID parentCommentId, UUID droppedEntryId) {
+    private Comment resolveParentCommentOnDroppedEntry(UUID userId, UUID parentCommentId, UUID droppedEntryId) {
         if (parentCommentId == null) {
             return null;
         }
 
-        Comment parent = findParentComment(parentCommentId);
+        Comment parent = findParentComment(userId, parentCommentId);
         if (parent.getDroppedEntry() == null || !parent.getDroppedEntry().getId().equals(droppedEntryId)) {
             throw new BadRequestException("Parent comment must target the same dropped entry");
         }
@@ -327,31 +336,33 @@ public class CommentServiceImpl implements CommentService {
         return parent;
     }
 
-    private Comment resolveParentCommentOnPick(UUID parentCommentId, UUID pickId) {
+    private Comment resolveParentCommentOnPick(UUID userId, UUID parentCommentId, UUID pickId) {
         if (parentCommentId == null) {
             return null;
         }
-        Comment parent = findParentComment(parentCommentId);
+        Comment parent = findParentComment(userId, parentCommentId);
         if (parent.getPick() == null || !parent.getPick().getId().equals(pickId)) {
             throw new BadRequestException("Parent comment must target the same Pick");
         }
         return parent;
     }
 
-    private Comment resolveParentCommentOnPicksTemplate(UUID parentCommentId, UUID templateId) {
+    private Comment resolveParentCommentOnPicksTemplate(UUID userId, UUID parentCommentId, UUID templateId) {
         if (parentCommentId == null) {
             return null;
         }
-        Comment parent = findParentComment(parentCommentId);
+        Comment parent = findParentComment(userId, parentCommentId);
         if (parent.getPicksTemplate() == null || !parent.getPicksTemplate().getId().equals(templateId)) {
             throw new BadRequestException("Parent comment must target the same picks template");
         }
         return parent;
     }
 
-    private Comment findParentComment(UUID parentCommentId) {
-        return commentRepository.findById(parentCommentId)
+    private Comment findParentComment(UUID userId, UUID parentCommentId) {
+        Comment parent = commentRepository.findById(parentCommentId)
                 .orElseThrow(() -> new NotFoundException("Parent comment not found"));
+        userBlockAccessService.assertInteractionAllowed(userId, parent.getUser().getId());
+        return parent;
     }
 
     private void notifyCommentReceived(
