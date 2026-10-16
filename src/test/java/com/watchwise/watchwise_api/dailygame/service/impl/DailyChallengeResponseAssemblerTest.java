@@ -19,6 +19,8 @@ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -312,7 +314,64 @@ class DailyChallengeResponseAssemblerTest {
             assertThat(entry.posterUrl()).isNull();
         });
         assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::workId)
+                .containsOnlyNulls();
+        assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::entryKey)
+                .doesNotContainNull().doesNotHaveDuplicates();
+    }
+
+    @Test
+    @DisplayName("[filmography] Should Redact Hidden Raw IDs And Share Stable Entry Keys - When Challenge Is Open")
+    void shouldRedactHiddenRawIdsAndShareStableEntryKeysWhenChallengeIsOpen() {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "First Movie", "movie", 2000),
+                filmographyWork("20", "Second Movie", "movie", 2001),
+                filmographyWork("30", "Third Movie", "movie", 2002)));
+
+        DailyGameStateDTO firstRaw = assembler.toState(challenge, null, List.of(), false, true);
+        DailyGameStateDTO secondRaw = assembler.toState(challenge, null, List.of(), false, true);
+        var play = new DailyGameFilmographyPlayAssembler().assemble(
+                challenge, List.of(), true, challenge.getGameType().maxAttempts(), false);
+        ObjectMapper objectMapper = new ObjectMapper();
+        List<JsonNode> rawEntries = firstRaw.filmography().entries().stream()
+                .map(entry -> objectMapper.<JsonNode>valueToTree(entry)).toList();
+
+        assertThat(rawEntries).allSatisfy(entry -> {
+            assertThat(entry.get("workId").isNull()).isTrue();
+            assertThat(entry.get("entryKey").asText()).isNotBlank();
+        });
+        assertThat(rawEntries).extracting(entry -> entry.get("entryKey").asText())
+                .containsExactlyElementsOf(play.entries().stream()
+                        .map(com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyWorkViewDTO::entryKey)
+                        .toList());
+        assertThat(secondRaw.filmography().entries().stream()
+                .map(entry -> objectMapper.<JsonNode>valueToTree(entry).get("entryKey").asText()).toList())
+                .containsExactlyElementsOf(rawEntries.stream().map(entry -> entry.get("entryKey").asText()).toList());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DailyGameResultStatus.class, names = {"COMPLETED", "FAILED"})
+    @DisplayName("[filmography] Should Reveal Terminal Raw Works And Keep Highlights Exact - When Result Is Terminal")
+    void shouldRevealTerminalRawWorksAndKeepHighlightsExactWhenResultIsTerminal(DailyGameResultStatus status) {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "First Movie", "movie", 2000),
+                filmographyWork("20", "Shared Movie", "movie", 2001),
+                filmographyWork("30", "Third Movie", "movie", 2002)));
+        UserDailyGameResult result = result(1, status);
+        DailyGameFilmographyFeedbackDTO feedback = new DailyGameFilmographyFeedbackDTO(
+                new DailyGameActorGuessDTO("2", "Guessed Actor"),
+                List.of(), List.of("MOVIE:20"), List.of());
+        result.setAttemptDetails(new DailyGameAttemptDetailsCodec().append(null,
+                new DailyGameAttemptDTO(1, null, null, null, feedback)));
+
+        DailyGameStateDTO state = assembler.toState(challenge, result, List.of(), false, true);
+
+        assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::title)
+                .containsExactly("Third Movie", "Shared Movie", "First Movie");
+        assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::workId)
                 .containsExactly("30", "20", "10");
+        assertThat(state.filmography().entries()).extracting(DailyGameFilmographyEntryDTO::highlighted)
+                .containsExactly(false, true, false);
+        assertThat(state.attempts()).isNull();
     }
 
     @Test
@@ -326,13 +385,14 @@ class DailyChallengeResponseAssemblerTest {
 
         assertThat(state.filmography().majorRoles()).isTrue();
         assertThat(state.filmography().entries()).singleElement().satisfies(entry -> {
-            assertThat(entry.workId()).isEqualTo("10");
+            assertThat(entry.workId()).isNull();
             assertThat(entry.title()).isNull();
             assertThat(entry.revealed()).isFalse();
             assertThat(entry.highlighted()).isFalse();
             assertThat(entry.year()).isEqualTo(2000);
             assertThat(entry.genres()).containsExactly("18");
             assertThat(entry.posterUrl()).isNull();
+            assertThat(entry.entryKey()).isNotBlank();
         });
     }
 
@@ -356,9 +416,9 @@ class DailyChallengeResponseAssemblerTest {
                 .extracting(entry -> entry.workId() + ":" + entry.title() + ":"
                         + entry.revealed() + ":" + entry.highlighted())
                 .containsExactly(
-                        "30:null:false:false",
+                        "null:null:false:false",
                         "20:Shared Movie:true:true",
-                        "10:null:false:false");
+                        "null:null:false:false");
     }
 
     @Test

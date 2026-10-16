@@ -154,7 +154,7 @@ class DailyGameControllerTest {
     void shouldKeepRawAndVisualFilmographyPeriodContractsSeparateWhenBothRoutesAreRead() throws Exception {
         DailyGameType type = DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
         var rawEntry = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO(
-                "77", null, false, false, 2018, List.of("Drama"), null, 8, null, null);
+                null, null, false, false, 2018, List.of("Drama"), null, 8, null, null, "opaque-entry-key");
         var rawFilmography = new com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyStateDTO(
                 true, List.of(), List.of(rawEntry));
         when(dailyGameService.getGameToday(CURRENT_USER_ID, type, true)).thenReturn(
@@ -178,6 +178,8 @@ class DailyGameControllerTest {
         mockMvc.perform(get("/games/{gameType}/today", type))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.filmography.entries[0].title").doesNotExist())
+                .andExpect(jsonPath("$.filmography.entries[0].workId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.filmography.entries[0].entryKey").value("opaque-entry-key"))
                 .andExpect(jsonPath("$.filmography.entries[0].period").value(org.hamcrest.Matchers.nullValue()));
         mockMvc.perform(get("/games/{gameType}/play", type))
                 .andExpect(status().isOk())

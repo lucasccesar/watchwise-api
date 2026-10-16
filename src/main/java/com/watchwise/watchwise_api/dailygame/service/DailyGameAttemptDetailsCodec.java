@@ -153,6 +153,7 @@ public class DailyGameAttemptDetailsCodec {
         encoded.put("episodeCount", entry.episodeCount());
         encoded.put("period", entry.period());
         encoded.put("character", entry.character());
+        encoded.put("entryKey", entry.entryKey());
         return encoded;
     }
 
@@ -257,7 +258,7 @@ public class DailyGameAttemptDetailsCodec {
                 bool(entry.get("highlighted")), nullableInteger(entry.get("year")),
                 strings(entry.get("genres")), string(entry.get("posterUrl")),
                 nullableInteger(entry.get("episodeCount")), string(entry.get("period")),
-                string(entry.get("character")));
+                string(entry.get("character")), string(entry.get("entryKey")));
     }
 
     private Object copyValue(Object value) {

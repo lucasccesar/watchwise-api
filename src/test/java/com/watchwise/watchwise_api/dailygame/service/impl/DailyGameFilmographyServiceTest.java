@@ -8,10 +8,12 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregateCredit;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregateCredits;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyLookupBudget;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -60,7 +62,9 @@ class DailyGameFilmographyServiceTest {
         assertThat(feedback.sharedMajorRoleWorkKeys()).isEmpty();
         assertThat(feedback.sharedAllRoleWorkKeys()).isEmpty();
         assertThat(feedback.entries()).singleElement().satisfies(entry -> {
-            assertThat(entry.workId()).isEqualTo("100");
+            assertThat(entry.workId()).isNull();
+            assertThat(entry.entryKey()).isEqualTo(
+                    DailyGameFilmographyEntryKey.forSnapshotEntry(challenge.getId(), 0));
             assertThat(entry.title()).isNull();
             assertThat(entry.revealed()).isFalse();
             assertThat(entry.highlighted()).isFalse();
@@ -88,7 +92,11 @@ class DailyGameFilmographyServiceTest {
         assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("MOVIE:200");
         assertThat(feedback.entries()).extracting(entry -> entry.workId() + ":" + entry.title() + ":"
                         + entry.revealed() + ":" + entry.highlighted())
-                .containsExactly("200:Shared Movie:true:true", "100:null:false:false");
+                .containsExactly("200:Shared Movie:true:true", "null:null:false:false");
+        assertThat(feedback.entries()).extracting(DailyGameFilmographyEntryDTO::entryKey)
+                .containsExactly(
+                        DailyGameFilmographyEntryKey.forSnapshotEntry(challenge.getId(), 1),
+                        DailyGameFilmographyEntryKey.forSnapshotEntry(challenge.getId(), 0));
         verify(tmdbClient).getPersonAggregate("2", LANGUAGE);
     }
 
@@ -108,7 +116,7 @@ class DailyGameFilmographyServiceTest {
         assertThat(feedback.sharedMajorRoleWorkKeys()).containsExactly("MOVIE:200", "MOVIE:100");
         assertThat(feedback.sharedAllRoleWorkKeys()).containsExactly("MOVIE:200", "MOVIE:100");
         assertThat(feedback.entries()).extracting(entry -> entry.workId() + ":" + entry.title())
-                .containsExactly("300:null", "200:Second Shared", "100:First Shared");
+                .containsExactly("null:null", "200:Second Shared", "100:First Shared");
     }
 
     @Test

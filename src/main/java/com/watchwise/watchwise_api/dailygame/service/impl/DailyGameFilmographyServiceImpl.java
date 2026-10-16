@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyLookupBudget;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -76,10 +77,11 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
                 ? filterMajorRoles(secret) : secret;
         Set<String> selectedShared = isSeries(challenge.getGameType()) && majorRoles
                 ? sharedMajor : sharedAll;
+        Map<String, String> entryKeysByWork = snapshotEntryKeys(challenge, expectedMediaType);
 
         List<DailyGameFilmographyEntryDTO> entries = selectedSecret.stream()
                 .map(work -> toEntry(work, selectedShared.contains(work.key()),
-                        selectedShared.contains(work.key())))
+                        selectedShared.contains(work.key()), entryKeysByWork.get(work.key())))
                 .toList();
         return new DailyGameFilmographyFeedbackDTO(
                 new DailyGameActorGuessDTO(guessedPersonTmdbId,
@@ -258,6 +260,32 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
                 .toList();
     }
 
+    private Map<String, String> snapshotEntryKeys(DailyChallenge challenge, String expectedMediaType) {
+        Object value = challenge.getAnswerSnapshot() == null
+                ? null : challenge.getAnswerSnapshot().get(FILMOGRAPHY_KEY);
+        if (!(value instanceof List<?> rawEntries)) {
+            return Map.of();
+        }
+        Map<String, String> entryKeys = new LinkedHashMap<>();
+        for (int index = 0; index < rawEntries.size(); index++) {
+            if (!(rawEntries.get(index) instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            String workId = string(raw.get("workId"));
+            String mediaType = string(raw.get("mediaType"));
+            if (mediaType == null) {
+                mediaType = expectedMediaType;
+            }
+            if (!validId(workId) || !expectedMediaType.equalsIgnoreCase(mediaType)) {
+                continue;
+            }
+            String workKey = canonicalWorkKey(mediaType, workId);
+            entryKeys.putIfAbsent(workKey,
+                    DailyGameFilmographyEntryKey.forSnapshotEntry(challenge.getId(), index));
+        }
+        return Map.copyOf(entryKeys);
+    }
+
     private Work snapshotWork(Object value, String expectedMediaType) {
         if (!(value instanceof Map<?, ?> raw)) {
             return null;
@@ -302,10 +330,11 @@ public class DailyGameFilmographyServiceImpl implements DailyGameFilmographyServ
                 .intValueExact();
     }
 
-    private DailyGameFilmographyEntryDTO toEntry(Work work, boolean revealed, boolean highlighted) {
-        return new DailyGameFilmographyEntryDTO(work.id(), revealed ? work.title() : null,
+    private DailyGameFilmographyEntryDTO toEntry(
+            Work work, boolean revealed, boolean highlighted, String entryKey) {
+        return new DailyGameFilmographyEntryDTO(revealed ? work.id() : null, revealed ? work.title() : null,
                 revealed, highlighted, work.year(), work.genres(), null, work.episodeCount(),
-                null, null);
+                null, null, entryKey);
     }
 
     private Comparator<Work> workComparator() {

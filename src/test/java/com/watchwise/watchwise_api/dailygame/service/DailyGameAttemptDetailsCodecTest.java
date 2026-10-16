@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameAttemptDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameCandidateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameGuessFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameInfoFeedbackDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyEntryDTO;
+import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import org.junit.jupiter.api.Test;
 
@@ -71,5 +73,20 @@ class DailyGameAttemptDetailsCodecTest {
                 .getFirst().infoFeedback();
 
         assertThat(decoded.candidateEpisodeCount()).isNull();
+    }
+
+    @Test
+    void shouldPreserveFilmographyEntryKeyInAttemptDetails() {
+        DailyGameFilmographyEntryDTO hiddenWork = new DailyGameFilmographyEntryDTO(
+                null, null, false, false, 1999, List.of("18"), null, null, null, null, "stable-entry-key");
+        DailyGameFilmographyFeedbackDTO feedback = new DailyGameFilmographyFeedbackDTO(
+                null, List.of(), List.of(), List.of(hiddenWork));
+        DailyGameAttemptDTO attempt = new DailyGameAttemptDTO(1, null, null, null, feedback);
+
+        DailyGameFilmographyEntryDTO decoded = codec.read(codec.append(null, attempt)).getFirst()
+                .filmographyFeedback().entries().getFirst();
+
+        assertThat(decoded.workId()).isNull();
+        assertThat(decoded.entryKey()).isEqualTo("stable-entry-key");
     }
 }

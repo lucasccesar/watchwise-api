@@ -10,11 +10,11 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyWorkViewDTO
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.Period;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -142,7 +142,7 @@ public class DailyGameFilmographyPlayAssembler {
                     string(raw.get("period")),
                     revealed ? string(raw.get("character")) : null,
                     sharedActors == null ? List.of() : List.copyOf(sharedActors.values()),
-                    opaqueEntryKey(challenge, index)));
+                    DailyGameFilmographyEntryKey.forSnapshotEntry(challenge.getId(), index)));
         }
         if (works.isEmpty()) {
             throw new DailyGamesUnavailableException();
@@ -150,11 +150,6 @@ public class DailyGameFilmographyPlayAssembler {
         works.sort(Comparator.comparing(DailyGameFilmographyWorkViewDTO::year,
                 Comparator.nullsLast(Comparator.reverseOrder())));
         return List.copyOf(works);
-    }
-
-    private String opaqueEntryKey(DailyChallenge challenge, int index) {
-        String scopedRow = challenge.getId() + ":filmography-entry:" + index;
-        return java.util.UUID.nameUUIDFromBytes(scopedRow.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private DailyGameCandidateDTO matchingActorCandidate(DailyGameCandidateDTO candidate, String actorId) {

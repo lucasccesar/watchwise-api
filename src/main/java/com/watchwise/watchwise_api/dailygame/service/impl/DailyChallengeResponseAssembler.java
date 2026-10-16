@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import com.watchwise.watchwise_api.dailygame.entity.UserDailyGameResult;
 import com.watchwise.watchwise_api.dailygame.service.DailyGameAttemptDetailsCodec;
+import com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -105,14 +106,7 @@ public class DailyChallengeResponseAssembler {
             List<DailyChallengeHint> allHints,
             DailyGameGuessFeedbackDTO guessFeedback,
             boolean includeAttempts) {
-        DailyGameView view = view(challenge, result, allHints);
-        List<DailyGameAttemptDTO> attempts = attempts(result, includeAttempts);
-        return new DailyGameAttemptResponseDTO(
-                view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
-                view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), attempts, null,
-                filmography(challenge, attempts, true), guessFeedback,
-                view.shareOnCompletion(), view.sharedToFeed());
+        return toAttemptResponse(challenge, result, allHints, guessFeedback, includeAttempts, true, null);
     }
 
     public DailyGameAttemptResponseDTO toAttemptResponse(
@@ -140,7 +134,7 @@ public class DailyChallengeResponseAssembler {
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
                 view.visibleImageUrls(), view.imageUrls(), attempts, currentAttempt,
-                filmography(challenge, attempts, majorRoles), guessFeedback,
+                filmography(challenge, filmographyAttempts(result), majorRoles, isTerminal(result)), guessFeedback,
                 view.shareOnCompletion(), view.sharedToFeed());
     }
 
@@ -169,7 +163,8 @@ public class DailyChallengeResponseAssembler {
         return new DailyGameStateDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, true),
+                view.visibleImageUrls(), view.imageUrls(), attempts,
+                filmography(challenge, filmographyAttempts(result), true, isTerminal(result)),
                 view.shareOnCompletion(), view.sharedToFeed());
     }
 
@@ -184,7 +179,8 @@ public class DailyChallengeResponseAssembler {
         return new DailyGameStateDTO(
                 view.gameType(), view.targetKind(), view.maxAttempts(), view.attemptsUsed(), view.attemptsRemaining(),
                 view.status(), view.imageUrl(), view.hints(), view.score(), view.completedAt(), view.answer(),
-                view.visibleImageUrls(), view.imageUrls(), attempts, filmography(challenge, attempts, majorRoles),
+                view.visibleImageUrls(), view.imageUrls(), attempts,
+                filmography(challenge, filmographyAttempts(result), majorRoles, isTerminal(result)),
                 view.shareOnCompletion(), view.sharedToFeed());
     }
 
@@ -249,7 +245,10 @@ public class DailyChallengeResponseAssembler {
     }
 
     private DailyGameFilmographyStateDTO filmography(
-            DailyChallenge challenge, List<DailyGameAttemptDTO> attempts, boolean majorRoles) {
+            DailyChallenge challenge,
+            List<DailyGameAttemptDTO> attempts,
+            boolean majorRoles,
+            boolean terminal) {
         boolean series = challenge.getGameType()
                 == com.watchwise.watchwise_api.dailygame.entity.DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
         if (!series && challenge.getGameType()
@@ -269,16 +268,24 @@ public class DailyChallengeResponseAssembler {
         Object rawFilmography = challenge.getAnswerSnapshot() == null ? null
                 : challenge.getAnswerSnapshot().get("filmography");
         List<DailyGameFilmographyEntryDTO> entries = rawFilmography instanceof List<?> values
-                ? values.stream().map(value -> filmographyEntry(value, series, majorRoles, revealed))
-                .filter(java.util.Objects::nonNull)
-                .sorted(Comparator.comparing(DailyGameFilmographyEntryDTO::year,
-                        Comparator.nullsLast(Comparator.reverseOrder())))
-                .toList() : List.of();
+                ? IntStream.range(0, values.size())
+                        .mapToObj(index -> filmographyEntry(
+                                challenge, values.get(index), index, series, majorRoles, revealed, terminal))
+                        .filter(java.util.Objects::nonNull)
+                        .sorted(Comparator.comparing(DailyGameFilmographyEntryDTO::year,
+                                Comparator.nullsLast(Comparator.reverseOrder())))
+                        .toList() : List.of();
         return new DailyGameFilmographyStateDTO(majorRoles, guessedActors, entries);
     }
 
     private DailyGameFilmographyEntryDTO filmographyEntry(
-            Object value, boolean series, boolean majorRoles, java.util.Set<String> revealed) {
+            DailyChallenge challenge,
+            Object value,
+            int snapshotIndex,
+            boolean series,
+            boolean majorRoles,
+            java.util.Set<String> revealed,
+            boolean terminal) {
         if (!(value instanceof Map<?, ?> raw)) return null;
         String workId = string(raw.get("workId"));
         String mediaType = string(raw.get("mediaType"));
@@ -289,10 +296,22 @@ public class DailyChallengeResponseAssembler {
         Integer totalEpisodes = integer(raw.get("totalEpisodes"));
         if (series && (episodeCount == null || episodeCount < 1
                 || (majorRoles && !isMajorRole(episodeCount, totalEpisodes)))) return null;
-        boolean isRevealed = revealed.contains((series ? "SERIES:" : "MOVIE:") + workId);
-        return new DailyGameFilmographyEntryDTO(workId, isRevealed ? title : null, isRevealed, isRevealed,
+        boolean highlighted = revealed.contains((series ? "SERIES:" : "MOVIE:") + workId);
+        boolean isRevealed = terminal || highlighted;
+        return new DailyGameFilmographyEntryDTO(isRevealed ? workId : null, isRevealed ? title : null,
+                isRevealed, highlighted,
                 integer(raw.get("year")), strings(raw.get("genres")), null,
-                episodeCount, null, null);
+                episodeCount, null, null,
+                DailyGameFilmographyEntryKey.forSnapshotEntry(challenge.getId(), snapshotIndex));
+    }
+
+    private List<DailyGameAttemptDTO> filmographyAttempts(UserDailyGameResult result) {
+        return result == null ? List.of() : attemptDetailsCodec.read(result.getAttemptDetails());
+    }
+
+    private boolean isTerminal(UserDailyGameResult result) {
+        return result != null && (result.getStatus() == DailyGameResultStatus.COMPLETED
+                || result.getStatus() == DailyGameResultStatus.FAILED);
     }
 
     private boolean isMajorRole(int episodeCount, Integer totalEpisodes) {
