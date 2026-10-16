@@ -40,6 +40,10 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
 
     long countByFollowerIdAndStatus(UUID followerId, FollowStatus status);
 
+    @Modifying
+    @Transactional
+    void deleteByFollowerIdAndFollowedId(UUID followerId, UUID followedId);
+
     @Query("""
             SELECT f FROM Follower f JOIN FETCH f.follower
             WHERE f.followed.id = :followedId AND f.status = :status
