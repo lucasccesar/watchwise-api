@@ -68,12 +68,37 @@ class PicksTemplatePreviewAssemblerTest {
         PicksTemplate template = buildTemplate();
         List<UUID> ids = List.of(template.getId());
         stubTemplateSources(viewerId, ids);
-        when(commentRepository.countByPicksTemplateIdIn(ids)).thenReturn(List.of());
+        when(commentRepository.countVisibleTemplateComments(viewerId, ids)).thenReturn(List.of());
 
         PicksTemplatePreviewDTO preview = assembler.assembleOne(template, viewerId);
 
         assertThat(preview.recentComments()).isEmpty();
         verify(commentPreviewAssembler, never()).assemblePicksTemplatePreviews(any(), any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"collection", "page", "detail"})
+    void excludesBlockedAuthorsFromStandardPreviewCounts(String path) {
+        UUID viewerId = UUID.randomUUID();
+        PicksTemplate template = buildTemplate();
+        List<UUID> ids = List.of(template.getId());
+        stubTemplateSources(viewerId, ids);
+        org.mockito.Mockito.lenient().when(commentRepository.countVisibleTemplateComments(viewerId, ids))
+                .thenReturn(List.of(new CommentRepository.TemplateCommentCount() {
+                    public UUID getTemplateId() { return template.getId(); }
+                    public long getCount() { return 1L; }
+                }));
+
+        PicksTemplatePreviewDTO preview = switch (path) {
+            case "page" -> assembler.assemblePage(new org.springframework.data.domain.PageImpl<>(List.of(template)), viewerId)
+                    .getContent().getFirst();
+            case "detail" -> assembler.assembleOne(template, viewerId);
+            default -> assembler.assemble(List.of(template), viewerId).get(template.getId());
+        };
+
+        assertThat(preview.commentsCount()).isEqualTo(1L);
+        assertThat(preview.recentComments()).isEmpty();
+        verify(commentRepository, never()).countByPicksTemplateIdIn(any());
     }
 
     private void stubTemplateSources(UUID viewerId, List<UUID> ids) {

@@ -101,7 +101,7 @@ class PickPreviewAssemblerTest {
                 .thenReturn(List.of(category));
         when(targetService.isStructurallyValid(same(category), same(selection), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(selection)).thenReturn(selectionDto);
-        when(commentRepository.countByPickIdIn(List.of(pick.getId()))).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, List.of(pick.getId()))).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, List.of(pick.getId()))).thenReturn(Set.of(pick.getId()));
         UserPreviewDTO userPreview = new UserPreviewDTO(user.getId(), user.getUsername(), null, true);
         when(userMapper.userToUserPreviewDto(user)).thenReturn(userPreview);
@@ -116,6 +116,35 @@ class PickPreviewAssemblerTest {
         assertThat(preview.isLikedByViewer()).isTrue();
         assertThat(preview.answeredCategories()).hasSize(1);
         assertThat(preview.answeredCategories().getFirst().target()).isEqualTo(selectionDto);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"collection", "page", "view", "templateView", "detail"})
+    void excludesBlockedAuthorsFromStandardPickCounts(String path) {
+        UUID viewerId = UUID.randomUUID();
+        User owner = User.builder().id(UUID.randomUUID()).build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).name("Awards").build();
+        Pick pick = pick(owner, template);
+        List<UUID> ids = List.of(pick.getId());
+        org.mockito.Mockito.lenient().when(commentRepository.countVisiblePickComments(viewerId, ids))
+                .thenReturn(List.of(new CommentRepository.PickCommentCount() {
+                    public UUID getPickId() { return pick.getId(); }
+                    public long getCount() { return 1L; }
+                }));
+        org.mockito.Mockito.lenient().when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))
+                .thenReturn(Map.of(template.getId(), preview(template)));
+        PageImpl<Pick> page = new PageImpl<>(List.of(pick));
+
+        long count = switch (path) {
+            case "page" -> assembler.assemblePage(page, viewerId).getContent().getFirst().commentsCount();
+            case "view" -> assembler.assembleViewPage(page, viewerId).getContent().getFirst().commentsCount();
+            case "templateView" -> assembler.assembleTemplateViewPage(page, viewerId).getContent().getFirst().commentsCount();
+            case "detail" -> assembler.assembleDetail(pick, viewerId).commentsCount();
+            default -> assembler.assemble(List.of(pick), viewerId).get(pick.getId()).commentsCount();
+        };
+
+        assertThat(count).isEqualTo(1L);
+        verify(commentRepository, never()).countByPickIdIn(any());
     }
 
     @Test
@@ -154,7 +183,7 @@ class PickPreviewAssemblerTest {
         when(selectionRepository.findByPickIdIn(List.of(pick.getId()))).thenReturn(List.of());
         when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId())))
                 .thenReturn(List.of());
-        when(commentRepository.countByPickIdIn(List.of(pick.getId()))).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, List.of(pick.getId()))).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, List.of(pick.getId()))).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(user)).thenReturn(new UserPreviewDTO(user.getId(), "marina", null, true));
 
@@ -193,7 +222,7 @@ class PickPreviewAssemblerTest {
         when(targetService.isStructurallyValid(invalidPartial, invalidSelection, List.of())).thenReturn(false);
         when(targetService.isStructurallyValid(completeCategory, completeSelection, List.of())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(any())).thenReturn(target);
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(user)).thenReturn(new UserPreviewDTO(user.getId(), "marina", null, true));
         when(templatePreviewAssembler.assemble(anyCollection(), org.mockito.ArgumentMatchers.eq(viewerId)))
@@ -210,7 +239,7 @@ class PickPreviewAssemblerTest {
         assertThat(partial.totalCategoriesCount()).isEqualTo(3);
         assertThat(partial.answeredCategories()).extracting(answer -> answer.categoryId()).containsExactly(validPartial.getId());
         verify(templatePreviewAssembler, times(1)).assemble(anyCollection(), org.mockito.ArgumentMatchers.eq(viewerId));
-        verify(commentRepository).countByPickIdIn(pickIds);
+        verify(commentRepository).countVisiblePickComments(viewerId, pickIds);
     }
 
     @Test
@@ -248,7 +277,7 @@ class PickPreviewAssemblerTest {
         when(targetPreviewAssembler.assemble(List.of(movieTarget, personTarget),
                 new ContentCardContext("pt-BR", "BR", null, null)))
                 .thenReturn(List.of(moviePreview, personPreview));
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
         when(templatePreviewAssembler.assemble(anyCollection(), org.mockito.ArgumentMatchers.eq(viewerId)))
@@ -287,7 +316,7 @@ class PickPreviewAssemblerTest {
         when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(selection)).thenReturn(target);
         when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(preview));
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
 
@@ -327,7 +356,7 @@ class PickPreviewAssemblerTest {
                     ContentType.MOVIE), null, null);
         });
         when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of());
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
 
@@ -360,7 +389,7 @@ class PickPreviewAssemblerTest {
         when(targetService.isStructurallyValid(any(), any(), any())).thenReturn(true);
         when(pickMapper.pickSelectionToSearchDto(selection)).thenReturn(target);
         when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(preview));
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
         when(templatePreviewAssembler.assemble(anyCollection(), org.mockito.ArgumentMatchers.eq(viewerId)))
@@ -406,7 +435,7 @@ class PickPreviewAssemblerTest {
         when(pickMapper.pickSelectionToSearchDto(partialSelection)).thenReturn(partialTarget);
         when(pickMapper.pickSelectionToSearchDto(unavailableSelection)).thenReturn(unavailableTarget);
         when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(partialPreview, unavailablePreview));
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
         when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))
@@ -446,7 +475,7 @@ class PickPreviewAssemblerTest {
         when(pickMapper.pickSelectionToSearchDto(firstSelection)).thenReturn(firstTarget);
         when(pickMapper.pickSelectionToSearchDto(secondSelection)).thenReturn(secondTarget);
         when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(firstPreview, secondPreview));
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
         when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))
@@ -486,7 +515,7 @@ class PickPreviewAssemblerTest {
         when(pickMapper.pickSelectionToSearchDto(firstSelection)).thenReturn(firstTarget);
         when(pickMapper.pickSelectionToSearchDto(secondSelection)).thenReturn(secondTarget);
         when(targetPreviewAssembler.assemble(any(), any())).thenReturn(List.of(firstPreview, secondPreview));
-        when(commentRepository.countByPickIdIn(pickIds)).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(viewerId, pickIds)).thenReturn(List.of());
         when(likeService.getLikedPickIds(viewerId, pickIds)).thenReturn(Set.of());
         when(userMapper.userToUserPreviewDto(owner)).thenReturn(new UserPreviewDTO(owner.getId(), "marina", null, true));
         when(templatePreviewAssembler.assemble(anyCollection(), eq(viewerId)))

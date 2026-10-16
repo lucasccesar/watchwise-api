@@ -156,7 +156,7 @@ public class PickPreviewAssembler {
                 : optionRepository.findByCategoryIdIn(fixedCategoryIds).stream()
                 .collect(Collectors.groupingBy(option -> option.getCategory().getId()));
         Map<UUID, Long> commentsByPickId = commentPreviews != null ? Map.of()
-                : commentRepository.countByPickIdIn(pickIds).stream()
+                : commentRepository.countVisiblePickComments(viewerId, pickIds).stream()
                 .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId,
                         CommentRepository.PickCommentCount::getCount));
         Set<UUID> likedPickIds = likeService.getLikedPickIds(viewerId, pickIds);

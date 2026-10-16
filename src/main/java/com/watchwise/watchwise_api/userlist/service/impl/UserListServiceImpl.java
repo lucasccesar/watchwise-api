@@ -340,7 +340,7 @@ public class UserListServiceImpl implements UserListService {
                 watchedMovieRuntimeMinutes,
                 movieRuntimeMinutes - watchedMovieRuntimeMinutes);
         SeriesInProgressAggregateDTO seriesProgressAggregate = aggregateSeriesProgress(seriesProgressById);
-        long commentsCount = commentRepository.countByListId(listId);
+        long commentsCount = commentsCountByListIds(List.of(listId), viewerId).getOrDefault(listId, 0L);
         long totalRuntimeMinutes = userListItemService.getTotalRuntimeMinutes(listId);
         boolean likedByMe = likeService.getLikedListIds(viewerId, List.of(listId)).contains(listId);
         UserListItemScope itemScope = userListItemService.getItemScope(listId);

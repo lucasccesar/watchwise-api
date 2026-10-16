@@ -68,7 +68,7 @@ public class PicksTemplatePreviewAssembler {
         Map<UUID, Long> visiblePickCounts = pickRepository.countVisibleByTemplateIds(viewerId, templateIds).stream()
                 .collect(Collectors.toMap(PickRepository.VisiblePickCount::getTemplateId, PickRepository.VisiblePickCount::getCount));
         Map<UUID, Long> commentsCounts = commentPreviews != null ? Map.of()
-                : commentRepository.countByPicksTemplateIdIn(templateIds).stream()
+                : commentRepository.countVisibleTemplateComments(viewerId, templateIds).stream()
                 .collect(Collectors.toMap(CommentRepository.TemplateCommentCount::getTemplateId, CommentRepository.TemplateCommentCount::getCount));
         Set<UUID> likedTemplateIds = likeService.getLikedPicksTemplateIds(viewerId, templateIds);
         Map<UUID, Long> ownPickCounts = pickRepository.countByUserIdAndTemplateIds(viewerId, templateIds).stream()

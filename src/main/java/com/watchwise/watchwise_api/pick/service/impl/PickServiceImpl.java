@@ -246,7 +246,7 @@ public class PickServiceImpl implements PickService {
                         pick -> templateMapper.picksTemplateToPreviewDto(pick.getPicksTemplate()), (first, ignored) -> first))
                 : templatePreviewAssembler.assemble(picks.stream().map(Pick::getPicksTemplate)
                         .collect(Collectors.toMap(PicksTemplate::getId, Function.identity(), (first, ignored) -> first)).values(), viewerId);
-        Map<UUID, Long> commentsByPickId = commentRepository == null ? Map.of() : commentRepository.countByPickIdIn(pickIds).stream()
+        Map<UUID, Long> commentsByPickId = commentRepository == null ? Map.of() : commentRepository.countVisiblePickComments(viewerId, pickIds).stream()
                 .collect(Collectors.toMap(CommentRepository.PickCommentCount::getPickId, CommentRepository.PickCommentCount::getCount));
         Set<UUID> likedPickIds = likeService == null ? Set.of() : likeService.getLikedPickIds(viewerId, pickIds);
         Map<UUID, PickResponseDTO> responses = new LinkedHashMap<>();

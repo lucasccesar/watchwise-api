@@ -116,7 +116,8 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
                 totalPages,
                 pageRequest.getPageNumber() + 1 < totalPages,
                 allItems.size(),
-                commentRepository.countByListId(request.listId()),
+                commentRepository.countVisibleListComments(request.viewerId(), List.of(request.listId())).stream()
+                        .mapToLong(CommentRepository.ListCommentCount::getCount).sum(),
                 userListItemService.getTotalRuntimeMinutes(request.listId()),
                 userList.getRank(),
                 itemScope);

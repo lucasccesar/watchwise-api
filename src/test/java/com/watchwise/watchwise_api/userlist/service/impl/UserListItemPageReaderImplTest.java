@@ -91,7 +91,11 @@ class UserListItemPageReaderImplTest {
                 .visibility(UserListVisibility.PUBLIC).likesCount(7).rank(3).build();
         lenient().when(likeService.getLikedListIds(any(), anyCollection())).thenReturn(Set.of());
         lenient().when(userListItemService.getTotalRuntimeMinutes(any())).thenReturn(90L);
-        lenient().when(commentRepository.countByListId(any())).thenReturn(4L);
+        lenient().when(commentRepository.countVisibleListComments(viewerId, List.of(listId)))
+                .thenReturn(List.of(new CommentRepository.ListCommentCount() {
+                    public UUID getListId() { return listId; }
+                    public long getCount() { return 4L; }
+                }));
         lenient().when(userListItemService.getItemScope(any())).thenReturn(UserListItemScope.MOVIE_OR_SERIES);
         lenient().when(diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(anyCollection()))
                 .thenReturn(List.of());
@@ -121,6 +125,21 @@ class UserListItemPageReaderImplTest {
         assertThat(result.totalRuntimeMinutes()).isEqualTo(90);
         assertThat(result.rank()).isEqualTo(3);
         verify(userListItemService).getItemsWithState(viewerId, listId);
+    }
+
+    @Test
+    void shouldExcludeBlockedAuthorsFromItemPageCommentCount() {
+        stubListRead(List.of(), 0.0);
+        lenient().when(commentRepository.countVisibleListComments(viewerId, List.of(listId)))
+                .thenReturn(List.of(new CommentRepository.ListCommentCount() {
+                    public UUID getListId() { return listId; }
+                    public long getCount() { return 1L; }
+                }));
+
+        UserListItemPage result = reader.read(request(null, null, null, null, null, null, null));
+
+        assertThat(result.commentsCount()).isEqualTo(1L);
+        verify(commentRepository, never()).countByListId(any());
     }
 
     @Test

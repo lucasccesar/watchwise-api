@@ -770,6 +770,64 @@ class CommentServiceImplTest {
     }
 
     @Test
+    void shouldRejectCommentOnBlockedDiaryEntryOwner() {
+        when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+
+        assertThatThrownBy(() -> commentService.createCommentOnDiaryEntry(
+                lucasId, diaryEntryId, new CommentCreationDTO("Comment", null, null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
+    }
+
+    @Test
+    void shouldRejectCommentOnBlockedDroppedEntryOwner() {
+        UUID droppedId = UUID.randomUUID();
+        DroppedEntry dropped = DroppedEntry.builder().id(droppedId).user(marina).content(fightClub).build();
+        when(droppedEntryRepository.findByIdWithUserAndContent(droppedId)).thenReturn(Optional.of(dropped));
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+
+        assertThatThrownBy(() -> commentService.createCommentOnDroppedEntry(
+                lucasId, droppedId, new CommentCreationDTO("Comment", null, null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
+    }
+
+    @Test
+    void shouldRejectCommentOnBlockedPickOwner() {
+        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+
+        assertThatThrownBy(() -> commentService.createCommentOnPick(
+                lucasId, pickId, new CommentCreationDTO("Comment", null, null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
+    }
+
+    @Test
+    void shouldRejectCommentOnBlockedTemplateCreator() {
+        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(template));
+        doThrow(new ForbiddenException("Blocked interaction"))
+                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+
+        assertThatThrownBy(() -> commentService.createCommentOnPicksTemplate(
+                lucasId, templateId, new CommentCreationDTO("Comment", null, null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(commentRepository, never()).save(any());
+        verifyNoInteractions(socialNotificationService);
+    }
+
+    @Test
     @DisplayName("[createCommentOnList] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExistOnCreate() {
         when(userListRepository.findById(listId)).thenReturn(Optional.empty());

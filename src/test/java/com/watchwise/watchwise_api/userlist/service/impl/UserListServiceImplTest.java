@@ -1541,6 +1541,22 @@ class UserListServiceImplTest {
     // ---------- getUserListProgress ----------
 
     @Test
+    void shouldExcludeBlockedAuthorsFromListProgressCommentCount() {
+        UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);
+        when(userListRepository.findById(list.getId())).thenReturn(Optional.of(list));
+        org.mockito.Mockito.lenient().when(commentRepository.countVisibleListComments(marinaId, List.of(list.getId())))
+                .thenReturn(List.of(new CommentRepository.ListCommentCount() {
+                    public UUID getListId() { return list.getId(); }
+                    public long getCount() { return 1L; }
+                }));
+
+        UserListProgressResponseDTO result = userListService.getUserListProgress(marinaId, list.getId());
+
+        assertThat(result.commentsCount()).isEqualTo(1L);
+        verify(commentRepository, never()).countByListId(any());
+    }
+
+    @Test
     @DisplayName("[getUserListProgress] Should Return Aggregated Movie Progress Without Item State - When The List Contains Movie Items")
     void shouldReturnAggregatedMovieProgressWithoutItemStateWhenTheListContainsMovieItems() {
         UserList list = buildList(lucas, "Movies", null, UserListVisibility.PUBLIC);

@@ -98,7 +98,7 @@ class PickServiceImplTest {
         when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId()))).thenReturn(List.of());
         when(templatePreviewAssembler.assemble(anyCollection(), eq(ownerId)))
                 .thenReturn(java.util.Map.of(template.getId(), templatePreview(template)));
-        when(commentRepository.countByPickIdIn(List.of(newer.getId()))).thenReturn(List.of());
+        when(commentRepository.countVisiblePickComments(ownerId, List.of(newer.getId()))).thenReturn(List.of());
         when(likeService.getLikedPickIds(ownerId, List.of(newer.getId()))).thenReturn(java.util.Set.of());
 
         Page<PickViewCardDTO> result = service.getMyPicksView(ownerId, 2, 5);
@@ -349,6 +349,25 @@ class PickServiceImplTest {
 
         when(pickRepository.findById(privatePick.getId())).thenReturn(Optional.of(privatePick));
         assertThatThrownBy(() -> service.getPick(viewerId, privatePick.getId())).isInstanceOf(ForbiddenException.class);
+    }
+
+    @Test
+    void shouldExcludeBlockedAuthorsFromPickResponseCommentCount() {
+        UUID viewerId = UUID.randomUUID();
+        PicksTemplate template = template();
+        Pick pick = pick(UUID.randomUUID(), template, PickVisibility.PUBLIC);
+        service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
+                userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
+                templatePreviewAssembler, commentRepository, likeService, null);
+        when(pickRepository.findById(pick.getId())).thenReturn(Optional.of(pick));
+        lenient().when(commentRepository.countVisiblePickComments(viewerId, List.of(pick.getId())))
+                .thenReturn(List.of(new CommentRepository.PickCommentCount() {
+                    public UUID getPickId() { return pick.getId(); }
+                    public long getCount() { return 1L; }
+                }));
+
+        assertThat(service.getPick(viewerId, pick.getId()).commentsCount()).isEqualTo(1L);
+        verify(commentRepository, never()).countByPickIdIn(any());
     }
 
     @Test

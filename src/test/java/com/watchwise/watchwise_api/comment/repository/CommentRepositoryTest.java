@@ -504,6 +504,42 @@ class CommentRepositoryTest {
         assertThat(listPage.getTotalElements()).isEqualTo(1L);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void shouldKeepPickAndTemplateVisibleCountsConsistentWithoutChangingGlobalCounts(boolean reverseBlock) {
+        PicksTemplate template = savePicksTemplate(lucas, "Awards");
+        Pick pick = savePick(template, lucas);
+        Comment visiblePick = commentRepository.saveAndFlush(buildPickComment(lucas, pick, "Visible"));
+        commentRepository.saveAndFlush(buildPickComment(marina, pick, "Hidden"));
+        Comment visibleTemplate = commentRepository.saveAndFlush(buildPicksTemplateComment(lucas, template, "Visible"));
+        commentRepository.saveAndFlush(buildPicksTemplateComment(marina, template, "Hidden"));
+        userBlockRepository.saveAndFlush(UserBlock.builder()
+                .blocker(reverseBlock ? marina : lucas)
+                .blocked(reverseBlock ? lucas : marina)
+                .createdAt(LocalDateTime.now()).build());
+        entityManager.clear();
+
+        assertThat(commentRepository.countVisiblePickComments(lucas.getId(), List.of(pick.getId())))
+                .extracting(CommentRepository.PickCommentCount::getCount).containsExactly(1L);
+        assertThat(commentRepository.countVisibleTemplateComments(lucas.getId(), List.of(template.getId())))
+                .extracting(CommentRepository.TemplateCommentCount::getCount).containsExactly(1L);
+        assertThat(commentRepository.findRecentVisibleByPickIds(lucas.getId(), List.of(pick.getId())))
+                .extracting(Comment::getId).containsExactly(visiblePick.getId());
+        assertThat(commentRepository.findRecentVisibleByTemplateIds(lucas.getId(), List.of(template.getId())))
+                .extracting(Comment::getId).containsExactly(visibleTemplate.getId());
+        Page<Comment> pickPage = commentRepository.findVisibleByPickId(lucas.getId(), pick.getId(), PageRequest.of(0, 1));
+        Page<Comment> templatePage = commentRepository.findVisibleByPicksTemplateId(
+                lucas.getId(), template.getId(), PageRequest.of(0, 1));
+        assertThat(pickPage.getContent()).extracting(Comment::getId).containsExactly(visiblePick.getId());
+        assertThat(pickPage.getTotalElements()).isEqualTo(1L);
+        assertThat(templatePage.getContent()).extracting(Comment::getId).containsExactly(visibleTemplate.getId());
+        assertThat(templatePage.getTotalElements()).isEqualTo(1L);
+        assertThat(commentRepository.countByPickIdIn(List.of(pick.getId())))
+                .extracting(CommentRepository.PickCommentCount::getCount).containsExactly(2L);
+        assertThat(commentRepository.countByPicksTemplateIdIn(List.of(template.getId())))
+                .extracting(CommentRepository.TemplateCommentCount::getCount).containsExactly(2L);
+    }
+
     @Test
     @DisplayName("[findRecentByDiaryEntryIdIn] Should Return At Most Three Newest Comments Per Diary Entry")
     void shouldReturnThreeRecentCommentsPerDiaryEntryInNewestFirstOrder() {
