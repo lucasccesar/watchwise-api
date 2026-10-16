@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.person.controller;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.person.dto.PersonResponseDTO;
 import com.watchwise.watchwise_api.person.entity.PersonParticipation;
+import com.watchwise.watchwise_api.person.service.PersonViewService;
 import com.watchwise.watchwise_api.person.service.PersonService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +29,9 @@ class PersonControllerTest {
 
     @Mock
     private PersonService personService;
+
+    @Mock
+    private PersonViewService personViewService;
 
     @InjectMocks
     private PersonController personController;
@@ -68,4 +72,5 @@ class PersonControllerTest {
         assertThat(result.getBody()).isSameAs(expected);
         verify(personService).getPerson(viewerId, "12345", PersonParticipation.ALL, null, null);
     }
+
 }
