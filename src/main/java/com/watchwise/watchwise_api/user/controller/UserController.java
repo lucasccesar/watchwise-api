@@ -80,6 +80,12 @@ public class UserController {
         return ResponseEntity.ok(user);
     }
 
+    @DeleteMapping("/me/banner")
+    public ResponseEntity<Void> removeBanner() {
+        userService.removeBanner(getCurrentUserId());
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/me/settings")
     public ResponseEntity<SettingsViewDTO> getSettings() {
         return ResponseEntity.ok(settingsViewService.getSettings(getCurrentUserId()));

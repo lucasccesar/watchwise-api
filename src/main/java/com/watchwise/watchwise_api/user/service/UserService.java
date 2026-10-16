@@ -21,6 +21,8 @@ public interface UserService {
 
     UserResponseDTO getCurrentUser(UUID id);
 
+    UserResponseDTO removeBanner(UUID id);
+
     Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize);
 
     UserResponseDTO updateUser(User user, PatchUserDTO patchUserDTO);

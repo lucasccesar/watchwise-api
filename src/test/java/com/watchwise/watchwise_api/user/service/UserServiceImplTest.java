@@ -166,6 +166,54 @@ class UserServiceImplTest {
     }
 
     @Test
+    void shouldRemoveBannerAndPreserveProfilePicture() {
+        UUID userId = savedUser.getId();
+        savedUser.setBanner("https://picture.com/banner.png");
+        savedUser.setProfilePicture("https://picture.com/avatar.png");
+        UserResponseDTO response = new UserResponseDTO(userId, savedUser.getUsername(), savedUser.getName(), savedUser.getEmail(),
+                savedUser.getDescription(), savedUser.getProfilePicture(), savedUser.getIsProfilePublic(), savedUser.getCreatedAt(),
+                LocalDateTime.now(), 0, 0, 0, 0, 0, List.of(), List.of(), null, 0, 0, null, null);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(savedUser)).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong()))
+                .thenReturn(response);
+
+        UserResponseDTO result = userService.removeBanner(userId);
+
+        assertThat(result.banner()).isNull();
+        assertThat(result.profilePicture()).isEqualTo("https://picture.com/avatar.png");
+        assertThat(savedUser.getBanner()).isNull();
+        assertThat(savedUser.getProfilePicture()).isEqualTo("https://picture.com/avatar.png");
+        verify(userRepository).save(savedUser);
+    }
+
+    @Test
+    void shouldRemoveBannerIdempotentlyWhenBannerIsAlreadyNull() {
+        UUID userId = savedUser.getId();
+        savedUser.setBanner(null);
+        when(userRepository.findById(userId)).thenReturn(Optional.of(savedUser));
+        when(userRepository.save(savedUser)).thenReturn(savedUser);
+        when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong()))
+                .thenReturn(userResponseDTO);
+
+        UserResponseDTO result = userService.removeBanner(userId);
+
+        assertThat(result.banner()).isNull();
+        verify(userRepository).save(savedUser);
+    }
+
+    @Test
+    void shouldThrowNotFoundWhenRemovingBannerForMissingUser() {
+        UUID userId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.removeBanner(userId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("User not found");
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("[saveNewUser] Should Return UserResponseDTO - When Save Is Successful")
     void shouldReturnUserResponseDtoWhenSaveIsSuccessful() {
         when(userMapper.postUserDtoToUser(postUserDTO)).thenReturn(mappedUser);

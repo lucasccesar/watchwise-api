@@ -258,6 +258,50 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    void shouldRemoveBannerAndKeepProfilePictureAcrossCurrentUserRead() throws Exception {
+        MvcResult registration = mockMvc.perform(registerRequest("bannerremoveuser", "bannerremoveuser@email.com"))
+                .andExpect(status().isCreated()).andReturn();
+        Cookie access = registration.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrf = registration.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        User owner = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("bannerremoveuser", "bannerremoveuser").orElseThrow();
+        owner.setProfilePicture("https://picture.com/avatar.png");
+        owner.setBanner("https://picture.com/banner.png");
+        userRepository.saveAndFlush(owner);
+
+        mockMvc.perform(deleteBannerRequest(access, csrf))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(deleteBannerRequest(access, csrf))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/users/me").cookie(access))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.banner").doesNotExist())
+                .andExpect(jsonPath("$.profilePicture").value("https://picture.com/avatar.png"));
+    }
+
+    @Test
+    void shouldRequireAuthenticationToRemoveBanner() throws Exception {
+        MvcResult registration = mockMvc.perform(registerRequest("bannerunauthuser", "bannerunauthuser@email.com"))
+                .andExpect(status().isCreated()).andReturn();
+        Cookie csrf = registration.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        mockMvc.perform(delete("/users/me/banner").cookie(csrf).header("X-XSRF-TOKEN", csrf.getValue()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldRequireValidCsrfToRemoveBanner() throws Exception {
+        MvcResult registration = mockMvc.perform(registerRequest("bannercsrfuser", "bannercsrfuser@email.com"))
+                .andExpect(status().isCreated()).andReturn();
+        Cookie access = registration.getResponse().getCookie(CookieUtil.ACCESS_TOKEN_COOKIE);
+        Cookie csrf = registration.getResponse().getCookie(CookieUtil.CSRF_TOKEN_COOKIE);
+        mockMvc.perform(delete("/users/me/banner").cookie(access, csrf).header("X-XSRF-TOKEN", "invalid"))
+                .andExpect(status().isForbidden());
+    }
+
+    private MockHttpServletRequestBuilder deleteBannerRequest(Cookie access, Cookie csrf) {
+        return delete("/users/me/banner").cookie(access, csrf).header("X-XSRF-TOKEN", csrf.getValue());
+    }
+
+    @Test
     @DisplayName("[updateCurrentUser] Should Accept The Same Csrf Token Twice - When Two Authenticated Requests Are Made In A Row")
     void shouldAcceptTheSameCsrfTokenTwiceWhenTwoAuthenticatedRequestsAreMadeInARow() throws Exception {
         MvcResult registerResult = mockMvc.perform(registerRequest("repeatuser", "repeatuser@email.com"))

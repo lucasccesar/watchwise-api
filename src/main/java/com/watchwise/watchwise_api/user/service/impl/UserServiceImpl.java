@@ -300,6 +300,16 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional
+    public UserResponseDTO removeBanner(UUID id) {
+        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
+        user.setBanner(null);
+        user.setUpdatedAt(LocalDateTime.now());
+        User saved = userRepository.save(user);
+        return toUserResponseDto(saved, computeProfileStats(id));
+    }
+
+    @Override
     public Page<UserPreviewDTO> getUsersByUsername(String username, Integer pageNumber, Integer pageSize) {
 
         String trimmedUsername = username == null ? null : username.trim();
