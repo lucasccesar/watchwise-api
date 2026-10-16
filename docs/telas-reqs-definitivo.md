@@ -2795,12 +2795,13 @@ não exibir `PARTIAL` para uma linha sem resultados. `UNAVAILABLE` não é um es
 placeholder de carregamento ou estado vazio enquanto a leitura não termina, e tratar `401` e `400` conforme
 o `ApiError` retornado pelo backend. A leitura visual é autenticada pelo cookie JWT e não exige CSRF.
 
-# Games — telas de gameplay visual
+# Games — telas de gameplay visual (oito modalidades)
 
-As telas **Movie by poster**, **Series by poster**, **Person by face** e **Episode by frame** usam o mesmo
-read model específico de gameplay. Elas não devem montar a experiência a partir de `GET /games/{gameType}/today`,
-porque essa rota mantém o contrato raw das oito modalidades. Também não devem resolver títulos por
-`/contents/details?ids=...` nem criar referências locais de Content durante a leitura.
+As oito telas de gameplay — **Movie by poster**, **Series by poster**, **Person by face**, **Episode by frame**,
+**Movie by info**, **Series by info**, **Actor by movie filmography** e **Actor by series filmography** — usam
+o mesmo read model visual. Use as rotas `/play` para montar essas experiências; `GET /games/{gameType}/today`
+permanece como contrato raw e preserva seu próprio formato. A leitura visual usa snapshots e tentativas já
+persistidos: não consulta TMDB, não chama `/contents/details?ids=...` e não cria referências locais de Content.
 
 ## Rotas comuns
 
@@ -2811,15 +2812,22 @@ POST /games/{gameType}/play/give-up
 GET  /games/play/media/{grantToken}
 ```
 
-`gameType` só pode ser `MOVIE_BY_POSTER`, `SERIES_BY_POSTER`, `PERSON_BY_FACE` ou `EPISODE_BY_FRAME`.
-As leituras exigem autenticação pelo cookie JWT e não exigem CSRF. Os dois POSTs exigem cookie/header CSRF,
+`gameType` aceita qualquer uma das oito modalidades. Todas as leituras exigem autenticação pelo cookie JWT e
+não exigem CSRF. Os dois POSTs exigem cookie/header CSRF,
 passam pelo limite de tentativas e retornam `DailyGamePlayActionResponseDTO`, contendo o estado completo da
 tela e `currentAttempt` quando aplicável.
 
+As três rotas aceitam `majorRoles` (booleano, padrão `true`). Esse filtro só altera `ACTOR_BY_SERIES_FILMOGRAPHY`;
+nos demais jogos o parâmetro é ignorado. Para filmografia de filmes, `filmography.majorRoles` permanece `false`.
+
+`view=true` na busca é aceito somente nos quatro jogos baseados em imagem. As telas de informação e filmografia
+usam a busca padrão, que já retorna `title`, `imageUrl` e `date` para os resultados selecionáveis.
+
 O estado visual contém `challengeDate`, `nextResetAt`, `gameType`, `targetKind`, `maxAttempts`,
 `attemptsUsed`, `attemptsRemaining`, `status`, `score`, `potentialScore`, `media`, `attempts`, `answer`,
-`canAttempt`, `canGiveUp`, `shareOnCompletion` e `sharedToFeed`. `nextResetAt` deve ser usado como instante
-absoluto UTC para o contador; não recalcular a virada no frontend.
+`canAttempt`, `canGiveUp`, `shareOnCompletion` e `sharedToFeed`; também inclui `filmography` somente para jogos
+de filmografia. Cada `attempts[]` pode incluir `infoFeedback` nos jogos de informação. `nextResetAt` deve ser
+usado como instante absoluto UTC para o contador; não recalcular a virada no frontend.
 
 Enquanto o jogo está aberto, `answer` é nulo, a mídia ainda não liberada possui `url` nula e `attempts`
 contém somente os candidatos já submetidos, com metadados visuais seguros e o resultado da comparação.
@@ -2902,9 +2910,68 @@ O feedback de cada tentativa informa separadamente `seriesCorrect`, `seasonCorre
 legados com mais de seis frames utilizáveis são reduzidos aos seis primeiros caminhos distintos e válidos;
 menos de seis continuam indisponíveis.
 
+## Tela Movie by info
+
+Usar `GET /games/MOVIE_BY_INFO/play` e `GET /games/MOVIE_BY_INFO/search?q=<texto>&page=1&size=20`
+e `POST /games/MOVIE_BY_INFO/play/attempt`. O estado aberto não contém mídia nem resposta. Cada tentativa traz
+o candidato visual e `infoFeedback`, com células de plataforma, gêneros, ano, classificação, diretor, elenco,
+produtoras e receita. `displayValue` mostra o valor do candidato; os estados `MATCH`, `PARTIAL`, `NO_MATCH` e
+`NO_DATA` dirigem as cores e indicadores da tabela.
+
+## Tela Series by info
+
+Usar `GET /games/SERIES_BY_INFO/play` e `GET /games/SERIES_BY_INFO/search?q=<texto>&page=1&size=20`
+e `POST /games/SERIES_BY_INFO/play/attempt`. O feedback usa as mesmas células da tela Movie by info, com
+`revenueOrSeasons.displayValue` contendo a quantidade de temporadas do candidato e
+`candidateEpisodeCount` contendo a quantidade de episódios. A contagem de episódios é apenas metadado de
+exibição; a comparação continua avaliando temporadas. Tentativas antigas sem essa contagem devem exibir
+fallback sem número, sem buscar os dados novamente.
+
+## Tela Actor by movie filmography
+
+Usar `GET /games/ACTOR_BY_MOVIE_FILMOGRAPHY/play` e `GET /games/ACTOR_BY_MOVIE_FILMOGRAPHY/search?q=<texto>&page=1&size=20`
+e `POST /games/ACTOR_BY_MOVIE_FILMOGRAPHY/play/attempt`. A seção `filmography.guessedActors` fornece nome,
+foto e idade do ator na data do desafio, além das contagens de obras compartilhadas. `filmography.entries`
+fornece `entryKey` estável e opaco, ano, gêneros, estado de revelação, `period` congelado quando disponível
+e `sharedWith` como referências de ator com `personTmdbId`, nome e `profileUrl`, deduplicadas por ID.
+Enquanto a obra estiver oculta, `workId` é nulo; use `entryKey` para identificar a linha sem inferir o ID TMDB.
+Após sucesso, esgotamento ou desistência, todas as obras elegíveis revelam título, pôster e personagem.
+`highlighted` e `sharedWith` continuam indicando somente interseções reais. O parâmetro `majorRoles` não muda
+essa modalidade.
+
+## Tela Actor by series filmography
+
+Usar `GET /games/ACTOR_BY_SERIES_FILMOGRAPHY/play` e
+`GET /games/ACTOR_BY_SERIES_FILMOGRAPHY/search?q=<texto>&page=1&size=20`, além de
+`POST /games/ACTOR_BY_SERIES_FILMOGRAPHY/play/attempt`. A busca padrão retorna nome e foto para selecionar
+uma pessoa. O parâmetro
+`majorRoles` seleciona todos os papéis ou somente os principais, padrão `true`; as chaves de interseção já
+persistidas permitem alternar sem nova chamada TMDB. Cada obra pode incluir ano, gêneros, número de episódios
+do papel, período e atores correspondentes em `sharedWith`. `period` é nulo em snapshots legados que não o
+armazenaram; nesses casos usar o ano disponível como fallback visual. `sharedWith` contém referências tipadas
+com ID, nome e `profileUrl`, deduplicadas por ID. Enquanto a obra estiver oculta, `workId` é nulo e
+`entryKey` identifica a linha sem expor uma chave TMDB. Ao encerrar o jogo, a lista revela as obras elegíveis;
+`highlighted` e `sharedWith` continuam baseados somente nas interseções efetivas dos palpites.
+
+## Regras comuns para as oito telas
+
+- Enquanto qualquer jogo de informação ou filmografia estiver aberto, `media` é vazio e `answer` é nulo.
+  Após conclusão ou desistência, a imagem da resposta é uma referência protegida por grant; usar somente a
+  URL retornada pelo backend.
+- Em um mesmo dia GMT, `/play/attempt` rejeita uma identidade de candidato já submetida com `409`, sem
+  consumir tentativa. O POST raw `/games/{gameType}/attempt` mantém o comportamento anterior de aceitar
+  repetições.
+- Os campos raw de filmografia mantêm `period` nulo e não expõem fotos de obras nem personagens. Enquanto
+  abertas, as obras não reveladas têm `workId` nulo no estado raw e em
+  `attempts[].filmographyFeedback.entries`, além de `entryKey` opaco e estável; a mesma chave identifica a
+  linha em `/play`. Ao encerrar, todas as obras elegíveis são reveladas e somente as interseções reais ficam
+  `highlighted`. `period` e `sharedWith` continuam exclusivos da projeção visual `/play`.
+- `majorRoles` é efetivo somente para `ACTOR_BY_SERIES_FILMOGRAPHY`; nos outros tipos de filmografia não
+  altera o conjunto de obras.
+
 ## Erros e compatibilidade
 
-- `400`: modalidade incompatível, identificador inválido ou busca visual usada em tipo não visual;
+- `400`: `gameType` ou identidade do candidato inválidos, ou `view=true` usado fora dos quatro jogos baseados em imagem;
 - `401`: usuário não autenticado;
 - `403`: CSRF inválido em tentativa/desistência;
 - `409`: candidato repetido na data atual ou jogo já encerrado;
@@ -2912,5 +2979,11 @@ menos de seis continuam indisponíveis.
 - `502`: indisponibilidade do TMDB ao carregar mídia;
 - `503`: desafio do dia indisponível.
 
-As rotas raw de estado, tentativa, desistência, histórico e ranking permanecem compatíveis e continuam sendo
-usadas pelas telas de informação/filmografia e pelas integrações que dependem do contrato anterior.
+Snapshots essenciais de filmografia ausentes, vazios ou sem obras utilizáveis retornam `503`. Os POSTs visuais
+validam antes da mutação o caminho de imagem do desafio, o conjunto de seis frames de Episode by frame e o
+snapshot de filmografia; uma falha não consome tentativa nem grava desistência. A validação usa apenas dados
+congelados e não consulta TMDB.
+
+As rotas raw mantêm a identidade canônica e a semântica de envio, tentativa e desistência; a apresentação de
+filmografia mudou deliberadamente: `workId` oculto agora é nulo e `entryKey` identifica a linha. As oito telas
+de gameplay usam as rotas visuais `/play` acima.

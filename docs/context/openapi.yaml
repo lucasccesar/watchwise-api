@@ -3815,14 +3815,20 @@ paths:
       tags: [Games]
       summary: Consultar o estado visual de uma modalidade do dia
       description: >
-        Retorna a projeção específica para as telas Movie by poster, Series by poster, Person by face
-        e Episode by frame. A rota aceita somente essas quatro modalidades, mantém a resposta redigida
-        enquanto o jogo está aberto e entrega referências de mídia protegidas por usuário. Não cria
-        Content nem faz chamadas de detalhes do TMDB durante a leitura.
+        Retorna a projeção visual das oito modalidades diárias, incluindo os jogos de informação e
+        filmografia. Mantém a resposta redigida enquanto o jogo está aberto e entrega referências de
+        mídia protegidas por usuário somente quando permitidas pelo estado. Os campos de filmografia
+        usam snapshots congelados e tentativas persistidas; a leitura não cria Content nem consulta
+        detalhes do TMDB. majorRoles só altera Actor by series filmography e assume true por padrão.
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/dailyGameType"
+        - name: majorRoles
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: Aplica o filtro de papéis principais somente em ACTOR_BY_SERIES_FILMOGRAPHY; ignorado nos demais tipos.
       responses:
         "200":
           description: Estado visual do jogo.
@@ -3830,7 +3836,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DailyGamePlayViewDTO" }
         "400":
-          description: Modalidade sem tela visual; retorna ApiError.
+          description: gameType inválido; retorna ApiError.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
@@ -3840,7 +3846,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
         "503":
-          description: Desafio visual indisponível; retorna ApiError.
+          description: Desafio ausente ou snapshot essencial de filmografia/frames inválido; retorna ApiError sem consultar TMDB. Caminhos de imagem inválidos em uma leitura terminal seguem o ApiError correspondente.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
@@ -3857,6 +3863,11 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/dailyGameType"
+        - name: majorRoles
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: Aplica o filtro de papéis principais somente em ACTOR_BY_SERIES_FILMOGRAPHY; ignorado nos demais tipos.
       requestBody:
         required: true
         content:
@@ -3869,7 +3880,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DailyGamePlayActionResponseDTO" }
         "400":
-          description: Candidato inválido ou modalidade sem tela visual; retorna ApiError.
+          description: Candidato inválido ou gameType inválido; retorna ApiError.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
@@ -3894,7 +3905,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
         "503":
-          description: Desafio visual indisponível; retorna ApiError.
+          description: Desafio ausente ou snapshot, imagem ou frames inválidos; a tentativa não é gravada e retorna ApiError.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
@@ -3908,6 +3919,11 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/dailyGameType"
+        - name: majorRoles
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: Aplica o filtro de papéis principais somente em ACTOR_BY_SERIES_FILMOGRAPHY; ignorado nos demais tipos.
       responses:
         "200":
           description: Estado visual encerrado.
@@ -3915,7 +3931,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DailyGamePlayActionResponseDTO" }
         "400":
-          description: Modalidade sem tela visual; retorna ApiError.
+          description: gameType inválido; retorna ApiError.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
@@ -3935,7 +3951,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
         "503":
-          description: Desafio visual indisponível; retorna ApiError.
+          description: Desafio ausente ou snapshot, imagem ou frames inválidos; a desistência não é gravada e retorna ApiError.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ApiError" }
@@ -4106,7 +4122,9 @@ paths:
         serve somente para encontrar candidatos; a tentativa posterior envia IDs, nunca o título
          digitado. `EPISODE_BY_FRAME` não aceita esta rota genérica: a seleção usa as três leituras
          hierárquicas específicas — busca de séries, temporadas da série e episódios da temporada.
-         A autenticação usa o cookie JWT e a busca não exige CSRF.
+         `view=true` enriquece resultados somente nos quatro jogos baseados em imagem; jogos de informação
+         e filmografia usam os campos básicos de título, imagem e data. A autenticação usa o cookie JWT e
+         a busca não exige CSRF.
       security:
         - cookieAuth: []
       parameters:
@@ -4956,7 +4974,7 @@ components:
       name: view
       in: query
       required: false
-      description: Quando true, limita o resultado a seis candidatos e inclui metadados visuais seguros; só é aceito nas quatro modalidades visuais.
+      description: Quando true, limita o resultado a seis candidatos e inclui metadados visuais seguros; só é aceito nos quatro jogos baseados em imagem.
       schema: { type: boolean, default: false }
     dailyGamePage:
       name: page
@@ -8843,6 +8861,9 @@ components:
         attemptNumber: { type: integer, minimum: 1 }
         candidate: { $ref: "#/components/schemas/DailyGameCandidateViewDTO" }
         outcome: { $ref: "#/components/schemas/DailyGameAttemptOutcomeDTO" }
+        infoFeedback:
+          allOf: [{ $ref: "#/components/schemas/DailyGameInfoFeedbackDTO" }]
+          nullable: true
 
     DailyGameAnswerPreviewDTO:
       type: object
@@ -8875,9 +8896,10 @@ components:
     DailyGamePlayViewDTO:
       type: object
       description: >
-        Read model das quatro telas visuais. Enquanto aberto, answer é nulo, mídia futura não tem URL
-        e media contém no máximo seis slots de episódio; em estado terminal a resposta e a mídia original
-        selecionada podem ser exibidas.
+        Read model das oito modalidades nas telas visuais. Enquanto aberto, answer é nulo, mídia futura
+        não tem URL e media contém no máximo seis slots de episódio; em estado terminal a resposta e a
+        mídia original selecionada podem ser exibidas. filmography é preenchido somente para jogos de
+        filmografia e usa metadados congelados; tentativas de jogos de informação incluem infoFeedback.
       required: [challengeDate, nextResetAt, gameType, targetKind, maxAttempts, attemptsUsed, attemptsRemaining, status, score, potentialScore, media, attempts, canAttempt, canGiveUp, shareOnCompletion, sharedToFeed]
       properties:
         challengeDate: { type: string, format: date }
@@ -8903,6 +8925,9 @@ components:
         canGiveUp: { type: boolean }
         shareOnCompletion: { type: boolean }
         sharedToFeed: { type: boolean }
+        filmography:
+          allOf: [{ $ref: "#/components/schemas/DailyGameFilmographyPlayStateDTO" }]
+          nullable: true
 
     DailyGamePlayActionResponseDTO:
       type: object
@@ -8982,9 +9007,11 @@ components:
         Feedback do candidato nos jogos MOVIE_BY_INFO e SERIES_BY_INFO. Listas exigem igualdade para
         MATCH e sobreposição não vazia para PARTIAL; elenco só atinge MATCH com pelo menos três nomes
         coincidentes. Campos escalares exigem igualdade. Ano é PARTIAL quando difere por um; receita é
-        MATCH até 10% e PARTIAL até 30% de diferença; temporadas exigem igualdade exata. O elenco do
-        candidato é limitado aos dez primeiros nomes recebidos do TMDB, preservando a ordem. NO_DATA
-        significa que o snapshot secreto ou o candidato não tem dado comparável.
+        MATCH até 10% e PARTIAL até 30% de diferença; temporadas exigem igualdade exata. Em
+        SERIES_BY_INFO, revenueOrSeasons.displayValue contém a quantidade de temporadas do candidato,
+        enquanto candidateEpisodeCount contém somente a quantidade de episódios para exibição e não
+        participa da comparação. O elenco do candidato é limitado aos dez primeiros nomes recebidos do
+        TMDB, preservando a ordem. NO_DATA significa que o snapshot secreto ou o candidato não tem dado comparável.
       properties:
         platforms: { $ref: "#/components/schemas/DailyGameComparisonCellDTO" }
         genres: { $ref: "#/components/schemas/DailyGameComparisonCellDTO" }
@@ -8994,6 +9021,64 @@ components:
         cast: { $ref: "#/components/schemas/DailyGameComparisonCellDTO" }
         productionCompanies: { $ref: "#/components/schemas/DailyGameComparisonCellDTO" }
         revenueOrSeasons: { $ref: "#/components/schemas/DailyGameComparisonCellDTO" }
+        candidateEpisodeCount: { type: integer, nullable: true, description: Quantidade de episódios do candidato em SERIES_BY_INFO; dado de exibição, não de comparação. }
+
+    DailyGameFilmographyActorViewDTO:
+      type: object
+      properties:
+        personTmdbId: { type: string }
+        name: { type: string }
+        profileUrl: { type: string, nullable: true, format: uri }
+        ageAtChallengeDate: { type: integer, nullable: true }
+        sharedWorksCount: { type: integer }
+        majorRoleSharedWorksCount: { type: integer }
+
+    DailyGameFilmographyWorkViewDTO:
+      type: object
+      description: >
+        Linha visual de filmografia. entryKey é estável e opaco, escopado ao desafio e à posição congelada;
+        não deriva do ID TMDB. workId é nulo enquanto a obra estiver oculta e só aparece após a descoberta
+        por interseção ou no estado terminal. Em estado terminal todas as obras elegíveis são reveladas,
+        mas highlighted e sharedWith continuam refletindo somente interseções reais.
+      required: [entryKey, revealed, highlighted, genres, sharedWith]
+      properties:
+        workId: { type: string, nullable: true }
+        entryKey: { type: string, format: uuid }
+        title: { type: string, nullable: true }
+        revealed: { type: boolean }
+        highlighted: { type: boolean }
+        year: { type: integer, nullable: true }
+        genres:
+          type: array
+          items: { type: string }
+        posterUrl: { type: string, nullable: true, format: uri }
+        episodeCount: { type: integer, nullable: true }
+        period: { type: string, nullable: true, description: Valor congelado no snapshot; pode ser nulo em snapshots legados. }
+        character: { type: string, nullable: true }
+        sharedWith:
+          type: array
+          items: { $ref: "#/components/schemas/DailyGameFilmographyActorReferenceDTO" }
+
+    DailyGameFilmographyActorReferenceDTO:
+      type: object
+      properties:
+        personTmdbId: { type: string }
+        name: { type: string }
+        profileUrl: { type: string, nullable: true, format: uri }
+
+    DailyGameFilmographyPlayStateDTO:
+      type: object
+      properties:
+        majorRoles: { type: boolean, description: Efetivo somente em ACTOR_BY_SERIES_FILMOGRAPHY; false nos demais tipos de filmografia. }
+        guessedActors:
+          type: array
+          items: { $ref: "#/components/schemas/DailyGameFilmographyActorViewDTO" }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/DailyGameFilmographyWorkViewDTO" }
+        attemptsUsed: { type: integer }
+        attemptsRemaining: { type: integer }
+        maxAttempts: { type: integer }
 
     DailyGameActorGuessDTO:
       type: object
@@ -9004,11 +9089,14 @@ components:
     DailyGameFilmographyEntryDTO:
       type: object
       description: >
-        Obra da filmografia congelada, ordenada por ano decrescente. Enquanto o jogo está aberto, o título
-        permanece nulo quando a obra não foi revelada pela interseção. A entrada expõe somente título, ano,
-        gêneros e episodeCount para séries; imagens das obras não são retornadas, e period/character ficam nulos.
+        Obra da filmografia congelada, ordenada por ano decrescente. Enquanto o jogo está aberto, workId e título
+        ficam nulos para obras não reveladas; entryKey é opaco e estável, compartilhado com a projeção visual e
+        derivado do desafio e da posição congelada, nunca do ID TMDB. Em estado terminal todas as obras elegíveis
+        são reveladas; highlighted permanece verdadeiro somente para interseções reais dos palpites. A entrada
+        expõe ano, gêneros e episodeCount para séries; imagens das obras não são retornadas, e period/character
+        ficam nulos na projeção raw.
       properties:
-        workId: { type: string }
+        workId: { type: string, nullable: true }
         title: { type: string, nullable: true }
         revealed: { type: boolean }
         highlighted: { type: boolean }
@@ -9020,10 +9108,14 @@ components:
         episodeCount: { type: integer, nullable: true }
         period: { type: string, nullable: true, description: "Sempre nulo na projeção dos jogos de filmografia." }
         character: { type: string, nullable: true, description: "Sempre nulo na projeção dos jogos de filmografia." }
+        entryKey: { type: string, nullable: true, description: Sempre preenchida nas linhas de estado e nos itens de feedback retornados que correspondem ao snapshot congelado; itens legados recebem a chave reconstruída pela posição do snapshot. }
 
     DailyGameFilmographyFeedbackDTO:
       type: object
-      description: Feedback da interseção entre o ator escolhido e o ator secreto; as duas listas de chaves permitem reprojectar Major roles sem nova consulta.
+      description: >
+        Feedback da interseção entre o ator escolhido e o ator secreto; as duas listas de chaves permitem
+        reprojectar Major roles sem nova consulta. Em entries, workId e título ficam nulos para obras sem
+        interseção; entryKey identifica a linha sem revelar o ID TMDB.
       properties:
         guessedActor: { $ref: "#/components/schemas/DailyGameActorGuessDTO", nullable: true }
         sharedMajorRoleWorkKeys:

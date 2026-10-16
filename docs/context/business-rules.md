@@ -2728,11 +2728,17 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   Jogos de informação preservam a ordem de plataforma, gêneros, ano, classificação `BR` e créditos definidos
   pela modalidade; campos ausentes são omitidos, nunca fabricados.
 - **Política de imagem e pistas** — enquanto `MOVIE_BY_INFO`, `SERIES_BY_INFO`, `ACTOR_BY_MOVIE_FILMOGRAPHY` e
-  `ACTOR_BY_SERIES_FILMOGRAPHY` estão abertos, `DailyChallengeResponseAssembler` retorna `imageUrl = null` e
-  `visibleImageUrls = []`. Os jogos de filmografia não retornam fotos das obras, nem personagem ou período
-  das obras; suas entradas são ordenadas pelo ano decrescente e expõem título somente após a descoberta.
-  A foto congelada do ator permanece oculta enquanto aberto e é liberada quando o resultado fica terminal,
-  junto de `answer.imageUrl`. Os dois
+  `ACTOR_BY_SERIES_FILMOGRAPHY` estão abertos, a projeção raw de `DailyChallengeResponseAssembler` retorna
+  `imageUrl = null` e `visibleImageUrls = []`. O contrato raw dos jogos de filmografia não retorna fotos das
+  obras, personagem ou período; suas entradas são ordenadas pelo ano decrescente e expõem título somente após
+  a descoberta. Enquanto abertas, obras ocultas têm `workId = null` também nos itens de
+  `attempts[].filmographyFeedback.entries`, e recebem `entryKey` opaco e estável,
+  compartilhado com `/play` e derivado do UUID do desafio e da posição congelada da obra, sem usar identidade
+  TMDB. Em `COMPLETED` ou `FAILED`, todas as obras elegíveis são reveladas; `highlighted` continua limitado às
+  interseções efetivas persistidas, mesmo quando `attempts` não é solicitado. A projeção visual `/play` usa a
+  mesma chave e também pode expor `period` congelado do snapshot, quando disponível.
+  Na resposta raw, a foto congelada do ator permanece oculta enquanto aberto e é liberada quando o resultado
+  fica terminal, junto de `answer.imageUrl`. Os dois
   jogos de informação (`MOVIE_BY_INFO` e `SERIES_BY_INFO`) sempre retornam `hints` vazio, inclusive quando
   existem pistas legadas persistidas. As comparações de informação aparecem em `attempts[].infoFeedback` e,
   na resposta da tentativa, em `currentAttempt.infoFeedback`.
@@ -2809,7 +2815,17 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **Filmografia e Major roles** — `DailyGameFilmographyServiceImpl` compara a interseção por chave de obra
   entre o ator secreto e o escolhido. A projeção inicial de uma filmografia aberta inclui as obras elegíveis
   e seus metadados congelados, mas mantém os títulos nulos e `revealed`/`highlighted` falsos; somente obras
-  reveladas pela interseção recebem título. Em séries, `majorRoles=true`
+  reveladas pela interseção recebem título. Na projeção visual `/play`, `workId` é nulo enquanto a obra está
+  oculta e `entryKey` é um UUID estável, escopado pelo desafio e posição congelada, sem derivação do ID TMDB.
+  Quando o resultado fica terminal, todas as obras elegíveis revelam título, pôster e personagem; `highlighted`
+  e `sharedWith` continuam representando somente interseções reais. A identidade canônica e a semântica de
+  envio raw permanecem compatíveis; a redaction de `workId` e o `entryKey` são uma mudança deliberada na
+  apresentação raw.
+  Snapshots de filmografia ausentes, vazios ou sem nenhuma obra utilizável tornam o read model visual
+  indisponível (`DailyGamesUnavailableException`), sem tentativa de reidratação TMDB. Antes de uma mutação
+  visual, `DailyGamePlayServiceImpl.preflight` valida o caminho da imagem, os seis frames do jogo de episódio
+  e a filmografia essencial; falhas retornam indisponibilidade antes de chegar ao fluxo de gravação com lock.
+  Em séries, `majorRoles=true`
   restringe tanto a projeção quanto a interseção a papéis com `episodeCount >= ceil(totalEpisodes * ratio)`,
   onde ratio é 33% para até 6 episódios, 40% para 7–20 e 50% acima de 20. `majorRoles` acompanha a leitura e
   a tentativa; os dois conjuntos de chaves (todos os papéis e papéis principais) são persistidos nos detalhes
@@ -2878,10 +2894,23 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   buscas (30 requisições em 5 minutos) e tentativas/desistências (20 em 5 minutos), retornando 429. Todas as
   rotas exigem autenticação pelo cookie JWT; os POSTs de tentativa e de desistência alteram estado e exigem
   também o cookie/header CSRF.
-- **Gameplay visual é uma projeção aditiva** — `DailyGamePlayServiceImpl` atende somente
-  `MOVIE_BY_POSTER`, `SERIES_BY_POSTER`, `PERSON_BY_FACE` e `EPISODE_BY_FRAME` pelas rotas `/play`. As rotas
-  raw existentes continuam preservando o contrato das oito modalidades; a leitura visual não cria `Content`,
-  não chama detalhes em lote e não modifica `DailyChallenge` ou `UserDailyGameResult`.
+- **Gameplay visual é uma projeção aditiva** — `DailyGamePlayServiceImpl` atende as oito modalidades por
+  `/games/{gameType}/play` e suas rotas de tentativa/desistência. A leitura usa snapshots e detalhes de
+  tentativa persistidos; não consulta TMDB, não cria `Content`, não chama detalhes em lote e não modifica
+  `DailyChallenge` ou `UserDailyGameResult`. As rotas raw mantêm a semântica de envio de palpites e recebem
+  a alteração de apresentação de filmografia documentada acima.
+- **Projeções de informação e filmografia são específicas da tela** — tentativas visuais de
+  `MOVIE_BY_INFO` e `SERIES_BY_INFO` incluem `infoFeedback` tipado. Em `SERIES_BY_INFO`,
+  `revenueOrSeasons.displayValue` mantém a quantidade de temporadas e `candidateEpisodeCount` acrescenta a
+  quantidade de episódios somente para exibição; episódios não entram no cálculo de comparação. O estado
+  visual de filmografia lê `period`, contagem de episódios do papel e gêneros do snapshot congelado; monta
+  previews do ator, calcula idade na data do desafio e inverte as chaves persistidas para preencher
+  `sharedWith` com referências tipadas (`personTmdbId`, nome e `profileUrl`), deduplicadas por ID e na ordem
+  da primeira tentativa. Valores ausentes em snapshots antigos permanecem nulos, sem reidratação remota. O parâmetro
+  `majorRoles` só afeta `ACTOR_BY_SERIES_FILMOGRAPHY`; é ignorado nos demais tipos.
+- **Mídia dos jogos de informação e filmografia só é liberada no estado terminal** — enquanto abertos,
+  esses jogos retornam `media=[]` e `answer=null`. Após conclusão ou desistência, a resposta usa o grant
+  `ORIGINAL` vinculado ao usuário; uma URL direta do TMDB não é exposta na projeção visual.
 - **Tentativas visuais rejeitam candidatos repetidos da data atual** — o caminho visual passa a flag de
   rejeição ao núcleo transacional de `DailyGameServiceImpl`, que verifica a chave canônica do candidato sob
   o lock do resultado antes de inserir a tentativa. As rotas raw mantêm a semântica histórica e continuam
@@ -2896,10 +2925,11 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   aberto. O estado visual de `EPISODE_BY_FRAME` seleciona os seis primeiros caminhos TMDB distintos e válidos
   por `DailyGameFramePaths`; caminhos extras de snapshots legados são ignorados e menos de seis caminhos
   tornam o desafio indisponível.
-- **Busca visual enriquecida e limitada** — `DailyGameSearchServiceImpl` aceita `view=true` somente nas
-  quatro modalidades visuais, limita o resultado a seis candidatos e reutiliza o cache de metadados de card
-  para títulos, imagens, gêneros e número de temporadas. A busca raw permanece sem enriquecimento visual e
-  a busca de episódios continua hierárquica por série, temporada e episódio.
+- **Busca visual enriquecida e limitada** — `DailyGameSearchServiceImpl` aceita `view=true` somente nos quatro
+  jogos baseados em imagem, limita o resultado a seis candidatos e reutiliza o cache de metadados de card para
+  títulos, imagens, gêneros e número de temporadas. Os jogos de informação e filmografia usam a busca padrão,
+  que já retorna título, imagem e data necessários para selecionar o candidato. A busca raw permanece sem
+  enriquecimento visual e a busca de episódios continua hierárquica por série, temporada e episódio.
 
 ## Person
 

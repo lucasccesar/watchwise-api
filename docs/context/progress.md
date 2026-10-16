@@ -5047,3 +5047,31 @@ monotônica.
 A suíte diária passou com 322 testes e a suíte completa passou com 3.952 testes, sem falhas ou erros. O
 Surefire registrou apenas o aviso de encerramento tardio do fork após `System.exit(0)`; os totais finais
 foram zero falhas e zero erros.
+
+As mesmas rotas de gameplay visual foram ampliadas para as oito modalidades. As telas Movie by info e
+Series by info recebem feedback tipado por tentativa; a tela de séries expõe separadamente a quantidade
+de temporadas comparada e a quantidade de episódios para exibição. Actor by movie filmography e Actor by
+series filmography recebem estado visual montado dos snapshots e tentativas, incluindo períodos congelados,
+previews dos atores e obras compartilhadas. `sharedWith` fornece referências de ator com ID, nome e foto,
+deduplicadas pelo ID em ordem de primeira tentativa. Períodos ausentes em snapshots antigos permanecem nulos.
+O parâmetro `majorRoles` atua somente na filmografia de séries; leituras e mídia terminal seguem a política
+protegida existente, e as rotas raw mantêm identidade/semântica de envio, com redaction deliberada dos IDs
+ocultos na apresentação.
+
+A suíte focada das rotas, projeções, geração, reparo, mídia, busca, integração e repositório passou com 297
+testes, sem falhas nem erros; a suíte Maven completa não foi executada nesta etapa.
+
+Uma revisão de segurança acrescentou `entryKey` opaco e estável às linhas visuais de filmografia e oculta
+`workId` enquanto a obra não foi revelada. Em estado terminal, a projeção revela todas as obras elegíveis,
+mantendo `highlighted` e `sharedWith` limitados às interseções reais. Snapshots essenciais inválidos retornam
+indisponibilidade; as ações visuais validam imagem, frames e filmografia antes de gravar, sem consultar TMDB.
+
+## 2026-10-16 — Redação de IDs na filmografia raw
+
+As rotas raw de jogos de filmografia passaram a ocultar `workId` junto do título enquanto a obra não foi
+revelada e a retornar `entryKey` opaco e estável, compartilhado com `/play` e calculado a partir do desafio e
+da posição da obra no snapshot, inclusive nos itens `attempts[].filmographyFeedback.entries`. Em estado
+`COMPLETED` ou `FAILED`, todas as obras elegíveis são reveladas;
+`highlighted` continua indicando somente as interseções efetivas dos palpites, inclusive quando a resposta
+omite a lista de tentativas. A mudança afeta apenas a apresentação raw; identidade canônica e comportamento
+de envio de palpites permanecem os mesmos.
