@@ -134,6 +134,19 @@ class FollowedPersonRepositoryTest {
     }
 
     @Test
+    @DisplayName("[countByPersonTmdbId] Should Return Aggregate Count - Without Returning Follower Identities")
+    void shouldReturnAggregateCountWithoutReturningFollowerIdentities() {
+        followedPersonRepository.saveAndFlush(buildFollowedPerson(lucas, "287"));
+        followedPersonRepository.saveAndFlush(buildFollowedPerson(marina, "287"));
+        followedPersonRepository.saveAndFlush(buildFollowedPerson(lucas, "999"));
+        entityManager.clear();
+
+        assertThat(followedPersonRepository.countByPersonTmdbId("287")).isEqualTo(2L);
+        assertThat(followedPersonRepository.countByPersonTmdbId("999")).isEqualTo(1L);
+        assertThat(followedPersonRepository.countByPersonTmdbId("123")).isZero();
+    }
+
+    @Test
     @DisplayName("[deleteAll] Should Cascade Delete Followed People Rows - When The User Is Deleted")
     void shouldCascadeDeleteFollowedPeopleRowsWhenTheUserIsDeleted() {
         FollowedPerson saved = followedPersonRepository.saveAndFlush(buildFollowedPerson(lucas, "321"));
