@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.exception.UnauthorizedException;
 import com.watchwise.watchwise_api.common.security.AttemptLockout;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.settings.dto.SettingsViewDTO;
+import com.watchwise.watchwise_api.settings.service.SettingsViewService;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.dto.PatchUserDTO;
 import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
@@ -36,6 +38,7 @@ import java.util.UUID;
 public class UserController {
 
     private final UserService userService;
+    private final SettingsViewService settingsViewService;
     private final CookieUtil cookieUtil;
     private final AttemptLockout attemptLockout;
     private final RequestThrottler requestThrottler;
@@ -75,6 +78,11 @@ public class UserController {
     public ResponseEntity<UserResponseDTO> getCurrentUser() {
         UserResponseDTO user = userService.getCurrentUser(getCurrentUserId());
         return ResponseEntity.ok(user);
+    }
+
+    @GetMapping("/me/settings")
+    public ResponseEntity<SettingsViewDTO> getSettings() {
+        return ResponseEntity.ok(settingsViewService.getSettings(getCurrentUserId()));
     }
 
     @PatchMapping("/me")

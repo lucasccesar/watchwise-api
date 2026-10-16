@@ -19,6 +19,8 @@ import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -99,8 +101,12 @@ class UserControllerIntegrationTest {
     @Autowired
     private WatchCompanionRepository watchCompanionRepository;
 
+    @Autowired
+    private UserBlockRepository userBlockRepository;
+
     @BeforeEach
     void setUp() {
+        userBlockRepository.deleteAll();
         watchCompanionRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         contentRepository.deleteAll();
@@ -1082,6 +1088,92 @@ class UserControllerIntegrationTest {
 
         mockMvc.perform(get("/users").param("username", "nomatch").cookie(otherViewerAccessToken))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void shouldReturnNewestTenSettingsPreviewsWithFullCountsAndHidePendingWhenPublic() throws Exception {
+        Cookie token = registerAndGetAccessToken("settingsowner", "settingsowner@email.com");
+        User owner = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase("settingsowner", "settingsowner").orElseThrow();
+        owner.setIsProfilePublic(false);
+        owner.setName("Settings Owner");
+        owner.setDescription("Settings bio");
+        owner.setProfilePicture("https://example.com/avatar");
+        owner.setBanner("https://example.com/banner");
+        owner.setPreferredLanguage("pt-BR");
+        owner.setPreferredRegion("BR");
+        userRepository.saveAndFlush(owner);
+        LocalDateTime base = LocalDateTime.of(2026, 10, 16, 12, 0);
+        for (int i = 0; i < 11; i++) {
+            User requester = userRepository.saveAndFlush(buildUser("requester" + i, "requester" + i + "@email.com"));
+            User blocked = userRepository.saveAndFlush(buildUser("blocked" + i, "blocked" + i + "@email.com"));
+            followerRepository.saveAndFlush(Follower.builder().follower(requester).followed(owner)
+                    .status(FollowStatus.PENDING).createdAt(base.plusMinutes(i)).build());
+            userBlockRepository.saveAndFlush(UserBlock.builder().blocker(owner).blocked(blocked)
+                    .createdAt(base.plusMinutes(i)).build());
+        }
+        User accepted = userRepository.saveAndFlush(buildUser("acceptedsettings", "acceptedsettings@email.com"));
+        persistFollow(accepted, owner, FollowStatus.ACCEPTED);
+        persistFollow(owner, accepted, FollowStatus.ACCEPTED);
+        // An incoming block must not enter the owner's outgoing block section.
+        userBlockRepository.saveAndFlush(UserBlock.builder().blocker(accepted).blocked(owner).createdAt(base).build());
+
+        mockMvc.perform(get("/users/me/settings").cookie(token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profile.id").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.profile.username").value("settingsowner"))
+                .andExpect(jsonPath("$.profile.name").value("Settings Owner"))
+                .andExpect(jsonPath("$.profile.description").value("Settings bio"))
+                .andExpect(jsonPath("$.profile.profilePicture").value("https://example.com/avatar"))
+                .andExpect(jsonPath("$.profile.banner").value("https://example.com/banner"))
+                .andExpect(jsonPath("$.profile.isProfilePublic").value(false))
+                .andExpect(jsonPath("$.privacy.isProfilePublic").doesNotExist())
+                .andExpect(jsonPath("$.privacy.followersCount").value(1))
+                .andExpect(jsonPath("$.privacy.followingCount").value(1))
+                .andExpect(jsonPath("$.privacy.pendingFollowRequestsCount").value(11))
+                .andExpect(jsonPath("$.privacy.pendingFollowRequests.length()").value(10))
+                .andExpect(jsonPath("$.privacy.pendingFollowRequests[*].username", org.hamcrest.Matchers.contains(
+                        "requester10", "requester9", "requester8", "requester7", "requester6", "requester5", "requester4", "requester3", "requester2", "requester1")))
+                .andExpect(jsonPath("$.privacy.blockedUsersCount").value(11))
+                .andExpect(jsonPath("$.privacy.blockedUsers.length()").value(10))
+                .andExpect(jsonPath("$.privacy.blockedUsers[*].username", org.hamcrest.Matchers.contains(
+                        "blocked10", "blocked9", "blocked8", "blocked7", "blocked6", "blocked5", "blocked4", "blocked3", "blocked2", "blocked1")))
+                .andExpect(jsonPath("$.contentPreferences.preferredLanguage").value("pt-BR"))
+                .andExpect(jsonPath("$.contentPreferences.preferredRegion").value("BR"))
+                .andExpect(jsonPath("$.account.email").value("settingsowner@email.com"))
+                .andExpect(jsonPath("$..password").isEmpty())
+                .andExpect(jsonPath("$..role").isEmpty())
+                .andExpect(jsonPath("$..sessionsInvalidatedAt").isEmpty())
+                .andExpect(jsonPath("$.privacy..email").isEmpty())
+                .andExpect(jsonPath("$..genreCountsMovies").isEmpty())
+                .andExpect(jsonPath("$..totalMinutesWatchedMovies").isEmpty());
+
+        owner.setIsProfilePublic(true);
+        userRepository.saveAndFlush(owner);
+        mockMvc.perform(get("/users/me/settings").cookie(token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profile.isProfilePublic").value(true))
+                .andExpect(jsonPath("$.privacy.pendingFollowRequestsCount").value(0))
+                .andExpect(jsonPath("$.privacy.pendingFollowRequests").isEmpty())
+                .andExpect(jsonPath("$.privacy.blockedUsersCount").value(11));
+    }
+
+    @Test
+    void shouldRequireAuthenticationForSettings() throws Exception {
+        mockMvc.perform(get("/users/me/settings"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldReturnOnlyAuthenticatedUsersSettings() throws Exception {
+        Cookie first = registerAndGetAccessToken("settingsfirst", "settingsfirst@email.com");
+        Cookie second = registerAndGetAccessToken("settingssecond", "settingssecond@email.com");
+        mockMvc.perform(get("/users/me/settings").cookie(first))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.account.email").value("settingsfirst@email.com"))
+                .andExpect(jsonPath("$.privacy.blockedUsersCount").value(0));
+        mockMvc.perform(get("/users/me/settings").cookie(second))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.account.email").value("settingssecond@email.com"));
     }
 
     private void seedMovieWatch(User user, String tmdbId, int runtimeMinutes, List<String> genres, LocalDate watchedDate) {
