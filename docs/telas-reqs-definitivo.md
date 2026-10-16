@@ -1,4 +1,4 @@
-# Requisitos definitivos — Home, User Progress, Episode Ratings Map, User Profile, Diary History, Diary Reviews, Review, Month in Review, Year in Review, All Time Stats, Watchlist, My Lists, Community Lists, Create List, List, Episodes List, List of Lists, List Progress, Picks Explore, My Picks, Create Picks Template, Calendar, TMDB Trending, Social/Feed, Notifications, Games, Games Ranking e Content Detail
+# Requisitos definitivos — Home, User Progress, Episode Ratings Map, User Profile, Diary History, Diary Reviews, Review, Month in Review, Year in Review, All Time Stats, Watchlist, My Lists, Community Lists, Create List, List, Episodes List, List of Lists, List Progress, Picks Explore, My Picks, Create Picks Template, Calendar, TMDB Trending, Social/Feed, Notifications, Games, Games Ranking, Movie by Poster, Series by Poster, Person by Face, Episode by Frame, Movie by Info, Series by Info, Actor by Movie Filmography, Actor by Series Filmography e Content Detail
 
 Este documento descreve as requisições necessárias para montar as telas
 **Home**, **User Progress**, **Episode Ratings Map**, **Episode Ratings Map (Show)**,
