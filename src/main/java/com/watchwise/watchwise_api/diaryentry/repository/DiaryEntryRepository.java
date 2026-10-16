@@ -309,7 +309,8 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                      THEN NULL
                      WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
                      THEN d.content.tmdbId
-                     ELSE d.content.seriesTmdbId END AS seriesTmdbId
+                     ELSE d.content.seriesTmdbId END AS seriesTmdbId,
+                d.content.type AS sourceType
             FROM DiaryEntry d
             WHERE d.user.id = :userId
             AND ((d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
@@ -327,6 +328,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
         ContentType getType();
         String getTmdbId();
         String getSeriesTmdbId();
+        ContentType getSourceType();
     }
 
     @Query("""
@@ -587,6 +589,23 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
         String getSeriesTmdbId();
         Long getWatchedEpisodeCount();
     }
+
+    @Query(value = """
+            WITH watched_coordinates AS (
+                SELECT DISTINCT c.series_tmdb_id, c.season_number, c.episode_number
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type = 'EPISODE'
+                  AND c.season_number > 0
+                  AND c.series_tmdb_id IN :seriesTmdbIds
+            )
+            SELECT series_tmdb_id AS \"seriesTmdbId\", COUNT(*) AS \"watchedEpisodeCount\"
+            FROM watched_coordinates
+            GROUP BY series_tmdb_id
+            """, nativeQuery = true)
+    List<SeriesEpisodeCount> findEpisodeSeriesCountsByUserIdAndSeriesTmdbIdIn(
+            @Param("userId") UUID userId, @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
     interface SeasonProgressCount {
         String getSeriesTmdbId();

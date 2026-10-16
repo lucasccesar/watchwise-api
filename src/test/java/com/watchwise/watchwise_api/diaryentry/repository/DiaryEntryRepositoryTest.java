@@ -139,11 +139,13 @@ class DiaryEntryRepositoryTest {
         assertThat(result)
                 .extracting(DiaryEntryRepository.PersonCreditMedia::getType,
                         DiaryEntryRepository.PersonCreditMedia::getTmdbId,
-                        DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId)
+                        DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId,
+                        DiaryEntryRepository.PersonCreditMedia::getSourceType)
                 .containsExactlyInAnyOrder(
-                        tuple(ContentType.MOVIE, "550", null),
-                        tuple(ContentType.SERIES, "1396", "1396"),
-                        tuple(ContentType.SERIES, "1399", "1399"));
+                        tuple(ContentType.MOVIE, "550", null, ContentType.MOVIE),
+                        tuple(ContentType.SERIES, "1396", "1396", ContentType.EPISODE),
+                        tuple(ContentType.SERIES, "1399", "1399", ContentType.SERIES),
+                        tuple(ContentType.SERIES, "1399", "1399", ContentType.SEASON));
     }
 
     @Test
@@ -603,6 +605,27 @@ class DiaryEntryRepositoryTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple("1396", 1L),
                         org.assertj.core.groups.Tuple.tuple("1399", 2L));
+    }
+
+    @Test
+    @DisplayName("[findEpisodeSeriesCountsByUserIdAndSeriesTmdbIdIn] Should Count Only Requested Distinct Regular Episode Coordinates")
+    void shouldCountRequestedRegularEpisodeCoordinatesOnce() {
+        Content firstEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content secondEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
+        Content specialEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
+        Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 1));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 2));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, specialEpisode));
+        diaryEntryRepository.saveAndFlush(buildEntry(marina, otherSeriesEpisode));
+        entityManager.clear();
+
+        var counts = diaryEntryRepository.findEpisodeSeriesCountsByUserIdAndSeriesTmdbIdIn(
+                lucas.getId(), List.of("1399", "1396", "999"));
+
+        assertThat(counts).extracting("seriesTmdbId", "watchedEpisodeCount")
+                .containsExactly(tuple("1399", 2L));
     }
 
     @Test
