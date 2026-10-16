@@ -93,6 +93,9 @@ class UserBlockControllerIntegrationTest {
                         .header("X-XSRF-TOKEN", actor.csrf().getValue()))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/users/me/blocked/" + target).cookie(actor.access())).andExpect(status().isForbidden());
+        mockMvc.perform(action("POST", actor, target)
+                        .headers(headers -> headers.set("X-XSRF-TOKEN", "invalid")))
+                .andExpect(status().isForbidden());
     }
 
     @Test void shouldListBlockedUsersUsingPageResponse() throws Exception {
