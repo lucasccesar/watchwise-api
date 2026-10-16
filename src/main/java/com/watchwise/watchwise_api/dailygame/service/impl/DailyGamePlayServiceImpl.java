@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.dailygame.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.dailygame.dto.*;
 import com.watchwise.watchwise_api.dailygame.entity.*;
 import com.watchwise.watchwise_api.dailygame.media.*;
@@ -75,7 +76,9 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     public DailyGamePlayActionResponseDTO submitToday(UUID userId, DailyGameType gameType,
             DailyGameAttemptRequest request, boolean majorRoles) {
         requireGameType(gameType);
-        var mutation = mutations.mutateAttempt(userId, LocalDate.now(clock), gameType, request, majorRoles, true);
+        LocalDate challengeDate = LocalDate.now(clock);
+        preflight(challengeDate, gameType, majorRoles);
+        var mutation = mutations.mutateAttempt(userId, challengeDate, gameType, request, majorRoles, true);
         return new DailyGamePlayActionResponseDTO(view(userId, mutation.challenge(), mutation.result(),
                 mutation.attempts(), majorRoles), attempt(mutation.challenge(), mutation.currentAttempt()));
     }
@@ -88,7 +91,9 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     @Override
     public DailyGamePlayActionResponseDTO giveUpToday(UUID userId, DailyGameType gameType, boolean majorRoles) {
         requireGameType(gameType);
-        var mutation = mutations.mutateGiveUp(userId, LocalDate.now(clock), gameType);
+        LocalDate challengeDate = LocalDate.now(clock);
+        preflight(challengeDate, gameType, majorRoles);
+        var mutation = mutations.mutateGiveUp(userId, challengeDate, gameType);
         return new DailyGamePlayActionResponseDTO(view(userId, mutation.challenge(), mutation.result(),
                 mutation.attempts(), majorRoles), null);
     }
@@ -103,7 +108,7 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
         List<DailyGameAttemptViewDTO> attempts = details.stream().map(detail -> attempt(challenge, detail)).toList();
         DailyGameAnswerPreviewDTO answer = terminal ? answer(userId, challenge, refs) : null;
         DailyGameFilmographyPlayStateDTO filmography = isFilmographyGame(challenge.getGameType())
-                ? filmography(challenge, details, used, majorRoles) : null;
+                ? filmography(challenge, details, used, majorRoles, terminal) : null;
         LocalDate date = challenge.getChallengeDate();
         return assembler.assemble(new DailyGamePlayProjection(date,
                 date.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant(), challenge.getGameType(),
@@ -114,12 +119,46 @@ public class DailyGamePlayServiceImpl implements DailyGamePlayService {
     }
 
     private DailyGameFilmographyPlayStateDTO filmography(
-            DailyChallenge challenge, List<DailyGameAttemptDTO> details, int attemptsUsed, boolean majorRoles) {
+            DailyChallenge challenge, List<DailyGameAttemptDTO> details, int attemptsUsed,
+            boolean majorRoles, boolean terminal) {
         DailyGameFilmographyPlayStateDTO assembled = filmographyAssembler.assemble(
-                challenge, details, majorRoles, challenge.getGameType().maxAttempts());
+                challenge, details, majorRoles, challenge.getGameType().maxAttempts(),
+                terminal);
         int maxAttempts = challenge.getGameType().maxAttempts();
         return new DailyGameFilmographyPlayStateDTO(assembled.majorRoles(), assembled.guessedActors(),
                 assembled.entries(), attemptsUsed, Math.max(0, maxAttempts - attemptsUsed), maxAttempts);
+    }
+
+    private void preflight(LocalDate challengeDate, DailyGameType gameType, boolean majorRoles) {
+        DailyChallenge challenge = challenges.findByChallengeDateAndGameType(challengeDate, gameType)
+                .orElseThrow(DailyGamesUnavailableException::new);
+        try {
+            TmdbClient.normalizeImagePath(challenge.getImagePath());
+            if (gameType == DailyGameType.EPISODE_BY_FRAME
+                    && DailyGameFramePaths.select(challenge.getDisplaySnapshot()).size() != FRAMES.length) {
+                throw new DailyGamesUnavailableException();
+            }
+            if (isFilmographyGame(gameType)) {
+                filmographyAssembler.assemble(challenge, List.of(), majorRoles,
+                        gameType.maxAttempts(), false);
+            }
+            String seriesPoster = seriesPosterPath(challenge.getAnswerSnapshot());
+            if (seriesPoster != null) {
+                TmdbClient.normalizeImagePath(seriesPoster);
+            }
+        } catch (BadRequestException invalidImage) {
+            throw new DailyGamesUnavailableException();
+        }
+    }
+
+    private String seriesPosterPath(Map<String, Object> snapshot) {
+        if (snapshot == null) return null;
+        Object presentation = snapshot.get("presentation");
+        if (presentation instanceof Map<?, ?> map
+                && map.get("seriesPosterPath") instanceof String path && !path.isBlank()) {
+            return path;
+        }
+        return snapshot.get("seriesPosterPath") instanceof String path && !path.isBlank() ? path : null;
     }
 
     private List<DailyGameMediaRefDTO> media(UUID userId, DailyChallenge challenge, int used, boolean terminal) {

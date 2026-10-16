@@ -7,12 +7,14 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyActorViewDT
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyPlayStateDTO;
 import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyWorkViewDTO;
+import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.Period;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -30,6 +32,15 @@ public class DailyGameFilmographyPlayAssembler {
             List<DailyGameAttemptDTO> attempts,
             boolean majorRoles,
             int maxAttempts) {
+        return assemble(challenge, attempts, majorRoles, maxAttempts, false);
+    }
+
+    public DailyGameFilmographyPlayStateDTO assemble(
+            DailyChallenge challenge,
+            List<DailyGameAttemptDTO> attempts,
+            boolean majorRoles,
+            int maxAttempts,
+            boolean terminal) {
         boolean series = challenge.getGameType() == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY;
         boolean effectiveMajorRoles = series && majorRoles;
         List<DailyGameAttemptDTO> safeAttempts = attempts == null ? List.of() : attempts;
@@ -72,7 +83,7 @@ public class DailyGameFilmographyPlayAssembler {
         }
 
         List<DailyGameFilmographyWorkViewDTO> workViews = snapshotEntries(challenge, series, effectiveMajorRoles,
-                revealedWorkKeys, sharedActorsByWorkKey);
+                revealedWorkKeys, sharedActorsByWorkKey, terminal);
         int normalizedMaxAttempts = Math.max(0, maxAttempts);
         int attemptsUsed = safeAttempts.size();
         return new DailyGameFilmographyPlayStateDTO(
@@ -85,22 +96,25 @@ public class DailyGameFilmographyPlayAssembler {
             boolean series,
             boolean majorRoles,
             Set<String> revealedWorkKeys,
-            Map<String, LinkedHashMap<String, DailyGameFilmographyActorReferenceDTO>> sharedActorsByWorkKey) {
+            Map<String, LinkedHashMap<String, DailyGameFilmographyActorReferenceDTO>> sharedActorsByWorkKey,
+            boolean terminal) {
         Map<String, Object> snapshot = challenge.getAnswerSnapshot();
         Object rawFilmography = snapshot == null ? null : snapshot.get("filmography");
-        if (!(rawFilmography instanceof List<?> entries)) {
-            return List.of();
+        if (!(rawFilmography instanceof List<?> entries) || entries.isEmpty()) {
+            throw new DailyGamesUnavailableException();
         }
 
         List<DailyGameFilmographyWorkViewDTO> works = new ArrayList<>();
-        for (Object entry : entries) {
+        for (int index = 0; index < entries.size(); index++) {
+            Object entry = entries.get(index);
             if (!(entry instanceof Map<?, ?> raw)) {
                 continue;
             }
             String workId = string(raw.get("workId"));
             String title = string(raw.get("title"));
             String mediaType = string(raw.get("mediaType"));
-            if (workId == null || title == null || (series && !"tv".equalsIgnoreCase(mediaType))
+            if (workId == null || workId.isBlank() || title == null || title.isBlank()
+                    || (series && !"tv".equalsIgnoreCase(mediaType))
                     || (!series && !"movie".equalsIgnoreCase(mediaType))) {
                 continue;
             }
@@ -112,25 +126,35 @@ public class DailyGameFilmographyPlayAssembler {
             }
 
             String workKey = (series ? "SERIES:" : "MOVIE:") + workId;
-            boolean revealed = revealedWorkKeys.contains(workKey);
+            boolean highlighted = revealedWorkKeys.contains(workKey);
+            boolean revealed = terminal || highlighted;
             LinkedHashMap<String, DailyGameFilmographyActorReferenceDTO> sharedActors =
                     sharedActorsByWorkKey.get(workKey);
             works.add(new DailyGameFilmographyWorkViewDTO(
-                    workId,
+                    revealed ? workId : null,
                     revealed ? title : null,
                     revealed,
-                    revealed,
+                    highlighted,
                     integer(raw.get("year")),
                     strings(raw.get("genres")),
                     revealed ? string(raw.get("posterUrl")) : null,
                     episodeCount,
                     string(raw.get("period")),
                     revealed ? string(raw.get("character")) : null,
-                    sharedActors == null ? List.of() : List.copyOf(sharedActors.values())));
+                    sharedActors == null ? List.of() : List.copyOf(sharedActors.values()),
+                    opaqueEntryKey(challenge, index)));
+        }
+        if (works.isEmpty()) {
+            throw new DailyGamesUnavailableException();
         }
         works.sort(Comparator.comparing(DailyGameFilmographyWorkViewDTO::year,
                 Comparator.nullsLast(Comparator.reverseOrder())));
         return List.copyOf(works);
+    }
+
+    private String opaqueEntryKey(DailyChallenge challenge, int index) {
+        String scopedRow = challenge.getId() + ":filmography-entry:" + index;
+        return java.util.UUID.nameUUIDFromBytes(scopedRow.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     private DailyGameCandidateDTO matchingActorCandidate(DailyGameCandidateDTO candidate, String actorId) {

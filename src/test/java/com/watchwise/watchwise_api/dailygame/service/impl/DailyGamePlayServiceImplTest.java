@@ -145,7 +145,11 @@ class DailyGamePlayServiceImplTest {
 
     @Test
     void terminalFilmographyIssuesProtectedOriginalAnswerMedia() {
-        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY);
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY).toBuilder()
+                .answerSnapshot(Map.of("title", "Actor", "filmography", List.of(Map.of(
+                        "workId", "77", "title", "Series", "mediaType", "tv", "episodeCount", 8,
+                        "totalEpisodes", 8))))
+                .build();
         UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
                 .attemptsUsed(1).score(0).status(DailyGameResultStatus.FAILED).build();
         when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
@@ -227,7 +231,10 @@ class DailyGamePlayServiceImplTest {
         assertThat(disabledMode.majorRoles()).isFalse();
         assertThat(disabledMode.entries()).isEqualTo(defaultMode.entries());
         assertThat(disabledMode.entries()).singleElement()
-                .extracting(entry -> entry.workId()).isEqualTo("100");
+                .satisfies(entry -> {
+                    assertThat(entry.workId()).isNull();
+                    assertThat(entry.entryKey()).isNotBlank();
+                });
         verifyNoInteractions(media, mutations);
     }
 
@@ -238,6 +245,7 @@ class DailyGamePlayServiceImplTest {
                 .attemptsUsed(1).score(9).status(DailyGameResultStatus.IN_PROGRESS).build();
         DailyGameInfoFeedbackDTO feedback = new DailyGameInfoFeedbackDTO(
                 null, null, null, null, null, null, null, null, 24);
+        stubPreflight(challenge);
         DailyGameAttemptDTO current = new DailyGameAttemptDTO(1,
                 new DailyGameCandidateDTO(DailyGameTargetKind.SERIES, "99", null, null,
                         null, null, "Other series", "/candidate.jpg", null), null, feedback, null);
@@ -253,7 +261,8 @@ class DailyGamePlayServiceImplTest {
                 .extracting(attempt -> attempt.infoFeedback().candidateEpisodeCount()).isEqualTo(24);
         assertThat(action.state().media()).isEmpty();
         assertThat(action.state().answer()).isNull();
-        verifyNoInteractions(challenges, results, media);
+        verify(results, never()).findByUserIdAndDailyChallengeIdIn(any(), any());
+        verifyNoInteractions(media);
     }
 
     @Test
@@ -264,6 +273,7 @@ class DailyGamePlayServiceImplTest {
                         "year", 2018, "genres", List.of("Drama"), "episodeCount", 8,
                         "totalEpisodes", 8, "period", "2018-01-01", "posterUrl", "/series.jpg"))))
                 .build();
+        stubPreflight(challenge);
         UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
                 .attemptsUsed(1).score(9).status(DailyGameResultStatus.IN_PROGRESS).build();
         DailyGameAttemptDTO current = new DailyGameAttemptDTO(1,
@@ -295,7 +305,8 @@ class DailyGamePlayServiceImplTest {
                 });
         assertThat(action.state().media()).isEmpty();
         assertThat(action.state().answer()).isNull();
-        verifyNoInteractions(challenges, results, media);
+        verify(results, never()).findByUserIdAndDailyChallengeIdIn(any(), any());
+        verifyNoInteractions(media);
     }
 
     @Test
@@ -309,6 +320,7 @@ class DailyGamePlayServiceImplTest {
                                 "year", 2019, "genres", List.of("Drama"), "episodeCount", 2,
                                 "totalEpisodes", 10))))
                 .build();
+        stubPreflight(challenge);
         UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
                 .attemptsUsed(1).score(0).status(DailyGameResultStatus.IN_PROGRESS).build();
         DailyGameAttemptDTO current = new DailyGameAttemptDTO(1,
@@ -327,7 +339,8 @@ class DailyGamePlayServiceImplTest {
                 .containsExactly("100:Major Series", "200:Guest Series");
         verify(mutations).mutateAttempt(USER, DATE, challenge.getGameType(),
                 new DailyGameAttemptRequest(null, "501", null, null, null), false, true);
-        verifyNoInteractions(challenges, results, media);
+        verify(results, never()).findByUserIdAndDailyChallengeIdIn(any(), any());
+        verifyNoInteractions(media);
     }
 
     @Test
@@ -425,8 +438,168 @@ class DailyGamePlayServiceImplTest {
     }
 
     @Test
+    @DisplayName("[readToday] Should Reject Filmography Without Usable Snapshot - When Reading Visual State")
+    void shouldRejectFilmographyWithoutUsableSnapshotWhenReadingVisualState() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY).toBuilder()
+                .answerSnapshot(Map.of("filmography", List.of(Map.of(
+                        "title", "No work identity", "mediaType", "movie"))))
+                .build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+
+        assertThatThrownBy(() -> service().readToday(USER, challenge.getGameType()))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+
+        verify(results, never()).save(any());
+        verify(results, never()).insertIfAbsent(any(), any(), any(), any());
+        verifyNoInteractions(media, mutations);
+    }
+
+    @Test
+    @DisplayName("[readToday] Should Reveal All Works And Preserve Intersections - When Filmography Is Terminal")
+    void shouldRevealAllWorksAndPreserveIntersectionsWhenFilmographyIsTerminal() {
+        for (DailyGameType type : List.of(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY,
+                DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY)) {
+            for (DailyGameResultStatus status : List.of(DailyGameResultStatus.COMPLETED,
+                    DailyGameResultStatus.FAILED)) {
+                reset(challenges, results, media, mutations);
+                String mediaType = type == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY ? "tv" : "movie";
+                String prefix = type == DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY ? "SERIES:" : "MOVIE:";
+                DailyChallenge challenge = challenge(type).toBuilder()
+                        .answerSnapshot(Map.of("title", "Secret Actor", "filmography", List.of(
+                                Map.of("workId", "100", "title", "Shared work", "mediaType", mediaType,
+                                        "year", 2020, "genres", List.of("Drama"), "episodeCount", 8,
+                                        "totalEpisodes", 8, "posterUrl", "/100.jpg", "character", "Shared Role"),
+                                Map.of("workId", "200", "title", "Unshared work", "mediaType", mediaType,
+                                        "year", 2010, "genres", List.of("Drama"), "episodeCount", 8,
+                                        "totalEpisodes", 8, "posterUrl", "/200.jpg", "character", "Unshared Role"))))
+                        .build();
+                DailyGameFilmographyFeedbackDTO feedback = new DailyGameFilmographyFeedbackDTO(
+                        new DailyGameActorGuessDTO("501", "Guessed Actor"),
+                        List.of(prefix + "100"), List.of(prefix + "100"), List.of());
+                DailyGameAttemptDTO attempt = new DailyGameAttemptDTO(1,
+                        new DailyGameCandidateDTO(DailyGameTargetKind.PERSON, null, "501", null,
+                                null, null, "Guessed Actor", "/actor.jpg", null), null, null, feedback);
+                UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
+                        .attemptsUsed(1).score(status == DailyGameResultStatus.COMPLETED ? 1 : 0)
+                        .status(status).attemptDetails(new DailyGameAttemptDetailsCodec().append(null, attempt)).build();
+                when(challenges.findByChallengeDateAndGameType(DATE, type)).thenReturn(Optional.of(challenge));
+                when(results.findByUserIdAndDailyChallengeIdIn(USER, List.of(challenge.getId())))
+                        .thenReturn(List.of(result));
+                when(media.issue(eq(USER), eq(challenge.getId()), any(), any(), anyString()))
+                        .thenAnswer(call -> new DailyGameMediaRefDTO(call.getArgument(2),
+                                "/games/play/media/terminal", call.getArgument(3), true));
+
+                var view = service().readToday(USER, type);
+
+                assertThat(view.status()).isEqualTo(DailyGameViewStatus.valueOf(status.name()));
+                assertThat(view.filmography().entries()).hasSize(2);
+                assertThat(view.filmography().entries()).filteredOn(entry -> "100".equals(entry.workId()))
+                        .singleElement().satisfies(entry -> {
+                            assertThat(entry.revealed()).isTrue();
+                            assertThat(entry.highlighted()).isTrue();
+                            assertThat(entry.sharedWith()).extracting(actor -> actor.personTmdbId())
+                                    .containsExactly("501");
+                        });
+                assertThat(view.filmography().entries()).filteredOn(entry -> "200".equals(entry.workId()))
+                        .singleElement().satisfies(entry -> {
+                            assertThat(entry.revealed()).isTrue();
+                            assertThat(entry.highlighted()).isFalse();
+                            assertThat(entry.sharedWith()).isEmpty();
+                            assertThat(entry.title()).isEqualTo("Unshared work");
+                            assertThat(entry.posterUrl()).isEqualTo("/200.jpg");
+                            assertThat(entry.character()).isEqualTo("Unshared Role");
+                        });
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("[submitToday] Should Reject Invalid Image Before Mutation - When Challenge Path Is Invalid")
+    void shouldRejectInvalidImageBeforeMutationWhenChallengePathIsInvalid() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER).toBuilder()
+                .imagePath("https://evil.example/secret.jpg").build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+
+        assertThatThrownBy(() -> service().submitToday(USER, challenge.getGameType(),
+                new DailyGameAttemptRequest("99", null, null, null, null)))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+
+        verifyNoInteractions(results, media);
+        verifyNoInteractions(mutations);
+    }
+
+    @Test
+    @DisplayName("[giveUpToday] Should Reject Invalid Image Before Mutation - When Challenge Path Is Invalid")
+    void shouldRejectInvalidImageBeforeMutationWhenGivingUpWithInvalidChallengePath() {
+        DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER).toBuilder()
+                .imagePath("https://evil.example/secret.jpg").build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+
+        assertThatThrownBy(() -> service().giveUpToday(USER, challenge.getGameType()))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+
+        verifyNoInteractions(results, media);
+        verifyNoInteractions(mutations);
+    }
+
+    @Test
+    @DisplayName("[submitToday] Should Reject Invalid Frames Before Mutation - When Frame Set Is Incomplete")
+    void shouldRejectInvalidFramesBeforeMutationWhenFrameSetIsIncomplete() {
+        DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME).toBuilder()
+                .displaySnapshot(Map.of("imagePaths", List.of("/frame0.jpg", "/frame1.jpg"))).build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+
+        assertThatThrownBy(() -> service().submitToday(USER, challenge.getGameType(),
+                new DailyGameAttemptRequest(null, null, "43", 1, 1)))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+
+        verifyNoInteractions(results, media);
+        verifyNoInteractions(mutations);
+    }
+
+    @Test
+    @DisplayName("[submitToday] Should Reject Invalid Filmography Before Mutation - When Snapshot Is Unusable")
+    void shouldRejectInvalidFilmographyBeforeMutationWhenSnapshotIsUnusable() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY).toBuilder()
+                .answerSnapshot(Map.of("filmography", List.of(Map.of(
+                        "workId", "", "title", "No identity", "mediaType", "tv"))))
+                .build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+
+        assertThatThrownBy(() -> service().submitToday(USER, challenge.getGameType(),
+                new DailyGameAttemptRequest(null, "501", null, null, null)))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+
+        verifyNoInteractions(results, media);
+        verifyNoInteractions(mutations);
+    }
+
+    @Test
+    @DisplayName("[giveUpToday] Should Reject Invalid Filmography Before Mutation - When Snapshot Is Unusable")
+    void shouldRejectInvalidFilmographyBeforeMutationWhenGivingUpWithUnusableSnapshot() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_SERIES_FILMOGRAPHY).toBuilder()
+                .answerSnapshot(Map.of("filmography", List.of(Map.of(
+                        "workId", "", "title", "No identity", "mediaType", "tv"))))
+                .build();
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
+
+        assertThatThrownBy(() -> service().giveUpToday(USER, challenge.getGameType()))
+                .isInstanceOf(DailyGamesUnavailableException.class);
+
+        verifyNoInteractions(results, media);
+        verifyNoInteractions(mutations);
+    }
+
+    @Test
     void actionUsesCommittedMutationWithoutAnotherStateRead() {
         DailyChallenge challenge = challenge(DailyGameType.MOVIE_BY_POSTER);
+        stubPreflight(challenge);
         UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
                 .attemptsUsed(1).score(0).status(DailyGameResultStatus.IN_PROGRESS).build();
         DailyGameAttemptDTO current = new DailyGameAttemptDTO(1,
@@ -444,12 +617,14 @@ class DailyGamePlayServiceImplTest {
 
         assertThat(action.state().attemptsUsed()).isEqualTo(1);
         assertThat(action.currentAttempt().candidate().tmdbId()).isEqualTo("99");
-        verifyNoInteractions(challenges, results);
+        verify(challenges).findByChallengeDateAndGameType(DATE, challenge.getGameType());
+        verifyNoInteractions(results);
     }
 
     @Test
     void giveUpUsesCommittedZeroScoreAndHasNoCurrentAttempt() {
         DailyChallenge challenge = challenge(DailyGameType.EPISODE_BY_FRAME);
+        stubPreflight(challenge);
         UserDailyGameResult result = UserDailyGameResult.builder().dailyChallenge(challenge)
                 .attemptsUsed(1).score(0).status(DailyGameResultStatus.FAILED).build();
         when(mutations.mutateGiveUp(USER, DATE, challenge.getGameType()))
@@ -463,12 +638,18 @@ class DailyGamePlayServiceImplTest {
         assertThat(action.state().score()).isZero();
         assertThat(action.state().media()).hasSize(6);
         assertThat(action.currentAttempt()).isNull();
-        verifyNoInteractions(challenges, results);
+        verify(challenges).findByChallengeDateAndGameType(DATE, challenge.getGameType());
+        verifyNoInteractions(results);
     }
 
     private DailyGamePlayServiceImpl service() {
         return new DailyGamePlayServiceImpl(challenges, results, mutations, media,
                 new DailyGameAttemptDetailsCodec(), new DailyGameFilmographyPlayAssembler(), CLOCK);
+    }
+
+    private void stubPreflight(DailyChallenge challenge) {
+        when(challenges.findByChallengeDateAndGameType(DATE, challenge.getGameType()))
+                .thenReturn(Optional.of(challenge));
     }
 
     private DailyChallenge challenge(DailyGameType type) {

@@ -7,15 +7,18 @@ import com.watchwise.watchwise_api.dailygame.dto.DailyGameFilmographyFeedbackDTO
 import com.watchwise.watchwise_api.dailygame.entity.DailyChallenge;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameTargetKind;
 import com.watchwise.watchwise_api.dailygame.entity.DailyGameType;
+import com.watchwise.watchwise_api.common.exception.DailyGamesUnavailableException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DailyGameFilmographyPlayAssemblerTest {
 
@@ -49,8 +52,8 @@ class DailyGameFilmographyPlayAssemblerTest {
             assertThat(actor.majorRoleSharedWorksCount()).isEqualTo(1);
         });
         assertThat(state.entries()).extracting(entry -> entry.workId() + ":" + entry.title())
-                .containsExactly("200:Second Movie", "100:First Movie", "300:null");
-        assertThat(state.entries()).filteredOn(entry -> entry.workId().equals("100")).singleElement().satisfies(entry -> {
+                .containsExactly("200:Second Movie", "100:First Movie", "null:null");
+        assertThat(state.entries()).filteredOn(entry -> "100".equals(entry.workId())).singleElement().satisfies(entry -> {
             assertThat(entry.revealed()).isTrue();
             assertThat(entry.highlighted()).isTrue();
             assertThat(entry.posterUrl()).isEqualTo("/100.jpg");
@@ -62,7 +65,9 @@ class DailyGameFilmographyPlayAssemblerTest {
                 assertThat(actor.profileUrl()).isEqualTo("/actor.jpg");
             });
         });
-        assertThat(state.entries()).filteredOn(entry -> entry.workId().equals("300")).singleElement().satisfies(entry -> {
+        assertThat(state.entries().get(2)).satisfies(entry -> {
+            assertThat(entry.workId()).isNull();
+            assertThat(entry.entryKey()).isNotBlank();
             assertThat(entry.posterUrl()).isNull();
             assertThat(entry.character()).isNull();
             assertThat(entry.sharedWith()).isEmpty();
@@ -74,6 +79,35 @@ class DailyGameFilmographyPlayAssemblerTest {
         assertThat(state.attemptsUsed()).isEqualTo(2);
         assertThat(state.attemptsRemaining()).isEqualTo(8);
         assertThat(state.maxAttempts()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("[assemble] Should Hide Work Identifier And Keep A Stable Opaque Key - When Work Is Unrevealed")
+    void shouldHideWorkIdentifierAndKeepStableOpaqueKeyWhenWorkIsUnrevealed() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY,
+                List.of(work("8675309", "Secret Movie", "movie", 2000, null, null,
+                        "2000-01-01", "Secret Role")));
+
+        var first = assembler.assemble(challenge, List.of(), true, 10);
+        var second = assembler.assemble(challenge, List.of(), true, 10);
+
+        assertThat(first.entries()).singleElement().satisfies(entry -> {
+            assertThat(entry.workId()).isNull();
+            String entryKey = recordValue(entry, "entryKey");
+            assertThat(entryKey).isNotBlank().isEqualTo(recordValue(second.entries().getFirst(), "entryKey"));
+            assertThat(entryKey).doesNotContain("8675309");
+            assertThat(entry.title()).isNull();
+        });
+    }
+
+    @Test
+    @DisplayName("[assemble] Should Reject Essential Filmography Snapshot - When No Work Is Usable")
+    void shouldRejectEssentialFilmographySnapshotWhenNoWorkIsUsable() {
+        DailyChallenge challenge = challenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY,
+                Arrays.asList(null, Map.of("workId", "", "title", "Missing identity", "mediaType", "movie")));
+
+        assertThatThrownBy(() -> assembler.assemble(challenge, List.of(), true, 10))
+                .isInstanceOf(DailyGamesUnavailableException.class);
     }
 
     @Test
@@ -150,7 +184,8 @@ class DailyGameFilmographyPlayAssemblerTest {
                 List.of(new DailyGameAttemptDTO(1, null, null, null, feedback)), true, 6);
 
         assertThat(state.entries()).singleElement().satisfies(entry -> {
-            assertThat(entry.workId()).isEqualTo("10");
+            assertThat(entry.workId()).isNull();
+            assertThat(entry.entryKey()).isNotBlank();
             assertThat(entry.title()).isNull();
         });
         assertThat(state.guessedActors()).singleElement().satisfies(actor -> {
@@ -204,5 +239,18 @@ class DailyGameFilmographyPlayAssemblerTest {
                 DailyGameTargetKind.PERSON, null, actorId, null, null, null,
                 actorName, imageUrl, birthDate == null ? null : LocalDate.parse(birthDate));
         return new DailyGameAttemptDTO(1, candidate, null, null, feedback);
+    }
+
+    private String recordValue(Object record, String fieldName) {
+        try {
+            for (var component : record.getClass().getRecordComponents()) {
+                if (component.getName().equals(fieldName)) {
+                    return (String) component.getAccessor().invoke(record);
+                }
+            }
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError(error);
+        }
+        throw new AssertionError("Missing record component: " + fieldName);
     }
 }
