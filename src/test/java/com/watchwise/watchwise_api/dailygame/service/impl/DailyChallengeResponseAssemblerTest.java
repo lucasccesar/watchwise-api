@@ -348,6 +348,88 @@ class DailyChallengeResponseAssemblerTest {
                 .containsExactlyElementsOf(rawEntries.stream().map(entry -> entry.get("entryKey").asText()).toList());
     }
 
+    @Test
+    @DisplayName("[attempts] Should Redact Legacy Hidden Work IDs And Backfill Entry Keys - When Raw State Is Open")
+    void shouldRedactLegacyHiddenWorkIdsAndBackfillEntryKeysWhenRawStateIsOpen() {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "Secret Movie", "movie", 2000),
+                filmographyWork("20", "Shared Movie", "movie", 2001)));
+        Map<String, Object> legacyAttemptDetails = legacyFilmographyAttemptDetails(List.of(
+                legacyFilmographyEntry("10", "Secret Movie"),
+                legacyFilmographyEntry("20", "Shared Movie")), List.of("MOVIE:20"));
+        UserDailyGameResult result = result(1, DailyGameResultStatus.IN_PROGRESS);
+        result.setAttemptDetails(legacyAttemptDetails);
+
+        DailyGameStateDTO state = assembler.toState(challenge, result, List.of(), true, true);
+
+        assertThat(state.attempts()).singleElement().satisfies(attempt -> {
+            assertThat(attempt.filmographyFeedback().entries()).hasSize(2);
+            assertThat(attempt.filmographyFeedback().entries().get(0).workId()).isNull();
+            assertThat(attempt.filmographyFeedback().entries().get(0).title()).isNull();
+            assertThat(attempt.filmographyFeedback().entries().get(0).revealed()).isFalse();
+            assertThat(attempt.filmographyFeedback().entries().get(0).highlighted()).isFalse();
+            assertThat(attempt.filmographyFeedback().entries().get(0).entryKey())
+                    .isEqualTo(com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey
+                            .forSnapshotEntry(challenge.getId(), 0));
+            assertThat(attempt.filmographyFeedback().entries().get(1).workId()).isEqualTo("20");
+            assertThat(attempt.filmographyFeedback().entries().get(1).title()).isEqualTo("Shared Movie");
+            assertThat(attempt.filmographyFeedback().entries().get(1).revealed()).isTrue();
+            assertThat(attempt.filmographyFeedback().entries().get(1).highlighted()).isTrue();
+        });
+        assertThat(new DailyGameAttemptDetailsCodec().read(result.getAttemptDetails()).getFirst()
+                .filmographyFeedback().entries().getFirst().workId()).isEqualTo("10");
+    }
+
+    @Test
+    @DisplayName("[currentAttempt] Should Redact Legacy Hidden Work IDs And Backfill Entry Keys - When Raw Attempt Is Open")
+    void shouldRedactLegacyHiddenWorkIdsAndBackfillEntryKeysWhenRawAttemptIsOpen() {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "Secret Movie", "movie", 2000),
+                filmographyWork("20", "Shared Movie", "movie", 2001)));
+        DailyGameAttemptDTO legacyAttempt = new DailyGameAttemptDetailsCodec().read(
+                legacyFilmographyAttemptDetails(List.of(
+                legacyFilmographyEntry("10", "Secret Movie"),
+                legacyFilmographyEntry("20", "Shared Movie")), List.of("MOVIE:20"))).getFirst();
+
+        DailyGameAttemptResponseDTO response = assembler.toAttemptResponse(
+                challenge, result(1, DailyGameResultStatus.IN_PROGRESS), List.of(), null, true, true, legacyAttempt);
+
+        assertThat(response.currentAttempt().filmographyFeedback().entries().getFirst().workId()).isNull();
+        assertThat(response.currentAttempt().filmographyFeedback().entries().getFirst().entryKey())
+                .isEqualTo(com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey
+                        .forSnapshotEntry(challenge.getId(), 0));
+        assertThat(response.currentAttempt().filmographyFeedback().entries().get(1).workId()).isEqualTo("20");
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DailyGameResultStatus.class, names = {"COMPLETED", "FAILED"})
+    @DisplayName("[attempts] Should Reveal Legacy Entries And Preserve Exact Highlights - When Raw State Is Terminal")
+    void shouldRevealLegacyEntriesAndPreserveExactHighlightsWhenRawStateIsTerminal(DailyGameResultStatus status) {
+        DailyChallenge challenge = filmographyChallenge(DailyGameType.ACTOR_BY_MOVIE_FILMOGRAPHY, List.of(
+                filmographyWork("10", "First Movie", "movie", 2000),
+                filmographyWork("20", "Shared Movie", "movie", 2001)));
+        UserDailyGameResult result = result(1, status);
+        result.setAttemptDetails(legacyFilmographyAttemptDetails(List.of(
+                legacyFilmographyEntry("10", "First Movie"),
+                legacyFilmographyEntry("20", "Shared Movie")), List.of("MOVIE:20")));
+
+        DailyGameStateDTO state = assembler.toState(challenge, result, List.of(), true, true);
+
+        assertThat(state.attempts().getFirst().filmographyFeedback().entries())
+                .extracting(DailyGameFilmographyEntryDTO::workId).containsExactly("10", "20");
+        assertThat(state.attempts().getFirst().filmographyFeedback().entries())
+                .extracting(DailyGameFilmographyEntryDTO::revealed).containsExactly(true, true);
+        assertThat(state.attempts().getFirst().filmographyFeedback().entries())
+                .extracting(DailyGameFilmographyEntryDTO::highlighted).containsExactly(false, true);
+        assertThat(state.attempts().getFirst().filmographyFeedback().entries())
+                .extracting(DailyGameFilmographyEntryDTO::entryKey)
+                .containsExactly(
+                        com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey
+                                .forSnapshotEntry(challenge.getId(), 0),
+                        com.watchwise.watchwise_api.dailygame.service.DailyGameFilmographyEntryKey
+                                .forSnapshotEntry(challenge.getId(), 1));
+    }
+
     @ParameterizedTest
     @EnumSource(value = DailyGameResultStatus.class, names = {"COMPLETED", "FAILED"})
     @DisplayName("[filmography] Should Reveal Terminal Raw Works And Keep Highlights Exact - When Result Is Terminal")
@@ -456,6 +538,32 @@ class DailyChallengeResponseAssemblerTest {
                 "posterUrl", "/" + workId + ".jpg",
                 "period", year + "-01-01",
                 "character", "Character");
+    }
+
+    private Map<String, Object> legacyFilmographyAttemptDetails(
+            List<DailyGameFilmographyEntryDTO> entries, List<String> sharedWorkKeys) {
+        List<Map<String, Object>> legacyEntries = entries.stream()
+                .map(entry -> Map.<String, Object>of(
+                        "workId", entry.workId(),
+                        "title", entry.title(),
+                        "revealed", entry.revealed(),
+                        "highlighted", entry.highlighted(),
+                        "year", entry.year(),
+                        "genres", entry.genres()))
+                .toList();
+        Map<String, Object> feedback = Map.of(
+                "guessedActor", Map.of("personTmdbId", "2", "name", "Guessed Actor"),
+                "sharedMajorRoleWorkKeys", sharedWorkKeys,
+                "sharedAllRoleWorkKeys", sharedWorkKeys,
+                "entries", legacyEntries);
+        return Map.of("attempts", List.of(Map.of(
+                "attemptNumber", 1,
+                "filmographyFeedback", feedback)));
+    }
+
+    private DailyGameFilmographyEntryDTO legacyFilmographyEntry(String workId, String title) {
+        return new DailyGameFilmographyEntryDTO(
+                workId, title, false, false, 2000, List.of("18"), null, null, null, null);
     }
 
     private Map<String, Object> seriesFilmographyWork(
