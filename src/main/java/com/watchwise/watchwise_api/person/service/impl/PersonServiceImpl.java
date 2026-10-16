@@ -1,15 +1,10 @@
 package com.watchwise.watchwise_api.person.service.impl;
 
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
-import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
-import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
-import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbImageUrlBuilder;
-import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregate;
-import com.watchwise.watchwise_api.common.tmdb.TmdbPersonAggregateCredit;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -31,15 +26,10 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.function.Function;
 
 @Service
@@ -49,19 +39,20 @@ public class PersonServiceImpl implements PersonService {
     private static final int LOCAL_QUERY_BATCH_SIZE = 500;
 
     private final UserRepository userRepository;
-    private final TmdbClient tmdbClient;
     private final DiaryEntryRepository diaryEntryRepository;
     private final UserListItemRepository userListItemRepository;
     private final FollowedPersonService followedPersonService;
     private final PageRequestFactory pageRequestFactory;
+    private final PersonAggregateReader aggregateReader;
+    private final PersonFilmographyNormalizer filmographyNormalizer;
 
     @Override
     public PersonResponseDTO getPerson(UUID viewerId, String personTmdbId, PersonParticipation participation,
                                        Integer pageNumber, Integer pageSize) {
-        validatePersonTmdbId(personTmdbId);
+        aggregateReader.validatePersonTmdbId(personTmdbId);
         User viewer = userRepository.findById(viewerId).orElseThrow(() -> new NotFoundException("User not found"));
-        TmdbPersonAggregate aggregate = requireAggregate(tmdbClient.getPersonAggregate(personTmdbId, viewer.getPreferredLanguage()));
-        List<NormalizedCredit> credits = normalizeCredits(aggregate);
+        TmdbPersonAggregate aggregate = aggregateReader.read(personTmdbId, viewer.getPreferredLanguage());
+        List<PersonFilmographyCredit> credits = filmographyNormalizer.normalize(aggregate);
         Set<CreditKey> watched = collectLocalMedia(credits, ids -> diaryEntryRepository
                 .findWatchedMediaForPersonCredits(viewerId, ids), DiaryEntryRepository.PersonCreditMedia::getType,
                 DiaryEntryRepository.PersonCreditMedia::getTmdbId, DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId);
@@ -70,14 +61,14 @@ public class PersonServiceImpl implements PersonService {
                 UserListItemRepository.PersonCreditMedia::getTmdbId, UserListItemRepository.PersonCreditMedia::getSeriesTmdbId);
 
         PersonProgressDTO progress = new PersonProgressDTO(credits.size(), (int) credits.stream()
-                .map(NormalizedCredit::key).filter(watched::contains).count(), percentage(credits, watched));
+                .map(PersonServiceImpl::key).filter(watched::contains).count(), percentage(credits, watched));
         List<PersonCreditDTO> filtered = credits.stream()
                 .filter(credit -> matchesParticipation(credit.participation(), participation))
-                .sorted(Comparator.comparing(NormalizedCredit::releaseDate, Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(NormalizedCredit::title, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
-                        .thenComparing(credit -> credit.key().type().name())
-                        .thenComparing(credit -> credit.key().tmdbId()))
-                .map(credit -> toDto(credit, watched.contains(credit.key()), inList.contains(credit.key())))
+                .sorted(Comparator.comparing(PersonFilmographyCredit::releaseDate, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(PersonFilmographyCredit::title, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
+                        .thenComparing(credit -> credit.type().name())
+                        .thenComparing(PersonFilmographyCredit::tmdbId))
+                .map(credit -> toDto(credit, watched.contains(key(credit)), inList.contains(key(credit))))
                 .toList();
         PageRequest request = pageRequestFactory.build(pageNumber, pageSize);
         PageResponseDTO<PersonCreditDTO> page = page(filtered, request);
@@ -87,51 +78,13 @@ public class PersonServiceImpl implements PersonService {
         return new PersonResponseDTO(person, progress, page);
     }
 
-    private TmdbPersonAggregate requireAggregate(TmdbLookupResult<TmdbPersonAggregate> lookup) {
-        if (lookup instanceof TmdbLookupResult.Found<TmdbPersonAggregate> found) {
-            if (found.value() != null) {
-                return found.value();
-            }
-            throw new TmdbUnavailableException("TMDB returned an unusable person response");
-        }
-        if (lookup.isNotFound()) {
-            throw new NotFoundException("No person found on TMDB for the given id");
-        }
-        throw new TmdbUnavailableException("TMDB is currently unavailable");
-    }
-
-    private List<NormalizedCredit> normalizeCredits(TmdbPersonAggregate aggregate) {
-        Map<CreditKey, MutableCredit> merged = new LinkedHashMap<>();
-        mergeCredits(aggregate.combinedCredits() == null ? List.of() : aggregate.combinedCredits().cast(), true, merged);
-        mergeCredits(aggregate.combinedCredits() == null ? List.of() : aggregate.combinedCredits().crew(), false, merged);
-        return merged.values().stream().map(MutableCredit::toNormalized).toList();
-    }
-
-    private void mergeCredits(List<TmdbPersonAggregateCredit> source, boolean cast, Map<CreditKey, MutableCredit> merged) {
-        for (TmdbPersonAggregateCredit credit : safeList(source)) {
-            MovieOrSeriesType type = supportedType(credit.mediaType());
-            if (type == null || !isNumericTmdbId(credit.id())) {
-                continue;
-            }
-            CreditKey key = new CreditKey(type, credit.id());
-            MutableCredit target = merged.computeIfAbsent(key, ignored -> new MutableCredit(key));
-            target.add(credit, cast);
-        }
-    }
-
-    private MovieOrSeriesType supportedType(String mediaType) {
-        if ("movie".equals(mediaType)) return MovieOrSeriesType.MOVIE;
-        if ("tv".equals(mediaType)) return MovieOrSeriesType.SERIES;
-        return null;
-    }
-
     private boolean matchesParticipation(PersonParticipation creditParticipation, PersonParticipation requested) {
         return requested == null || requested == PersonParticipation.ALL || creditParticipation == requested
                 || creditParticipation == PersonParticipation.ALL;
     }
 
-    private PersonCreditDTO toDto(NormalizedCredit credit, boolean watched, boolean inList) {
-        return new PersonCreditDTO(credit.key().tmdbId(), credit.key().type(), credit.title(), TmdbImageUrlBuilder.posterUrl(credit.posterPath()),
+    private PersonCreditDTO toDto(PersonFilmographyCredit credit, boolean watched, boolean inList) {
+        return new PersonCreditDTO(credit.tmdbId(), credit.type(), credit.title(), TmdbImageUrlBuilder.posterUrl(credit.posterPath()),
                 credit.releaseDate() == null ? null : credit.releaseDate().toString(), credit.characters(), credit.jobs(),
                 credit.participation(), watched, inList);
     }
@@ -146,15 +99,15 @@ public class PersonServiceImpl implements PersonService {
         return PageResponseDTO.of(new PageImpl<>(content.subList(fromIndex, toIndex), request, content.size()));
     }
 
-    private double percentage(List<NormalizedCredit> credits, Set<CreditKey> watched) {
-        return credits.isEmpty() ? 0.0d : watched.stream().filter(key -> credits.stream().map(NormalizedCredit::key).anyMatch(key::equals)).count()
+    private double percentage(List<PersonFilmographyCredit> credits, Set<CreditKey> watched) {
+        return credits.isEmpty() ? 0.0d : watched.stream().filter(key -> credits.stream().map(PersonServiceImpl::key).anyMatch(key::equals)).count()
                 * 100.0d / credits.size();
     }
 
-    private <T> Set<CreditKey> collectLocalMedia(List<NormalizedCredit> credits, Function<Collection<String>, List<T>> query,
+    private <T> Set<CreditKey> collectLocalMedia(List<PersonFilmographyCredit> credits, Function<Collection<String>, List<T>> query,
                                                    Function<T, ContentType> type, Function<T, String> tmdbId,
                                                    Function<T, String> seriesTmdbId) {
-        Set<String> ids = credits.stream().map(credit -> credit.key().tmdbId()).collect(java.util.stream.Collectors.toSet());
+        Set<String> ids = credits.stream().map(PersonFilmographyCredit::tmdbId).collect(java.util.stream.Collectors.toSet());
         Set<CreditKey> result = new LinkedHashSet<>();
         List<String> idList = new ArrayList<>(ids);
         for (int from = 0; from < idList.size(); from += LOCAL_QUERY_BATCH_SIZE) {
@@ -182,76 +135,10 @@ public class PersonServiceImpl implements PersonService {
         return tmdbId == null || tmdbId.isBlank() ? null : new CreditKey(type, tmdbId);
     }
 
-    private void validatePersonTmdbId(String personTmdbId) {
-        if (!isNumericTmdbId(personTmdbId) || personTmdbId.length() > 20) {
-            throw new BadRequestException("personTmdbId must be a numeric TMDB id up to 20 digits");
-        }
-    }
-
-    private static boolean isNumericTmdbId(String tmdbId) {
-        return tmdbId != null && tmdbId.matches("\\d+");
-    }
-
     private static <T> List<T> safeList(List<T> values) {
         return values == null ? List.of() : values;
     }
 
-    private record CreditKey(MovieOrSeriesType type, String tmdbId) {
-    }
-
-    private record NormalizedCredit(CreditKey key, String title, String posterPath, LocalDate releaseDate, List<String> characters,
-                                    List<String> jobs, PersonParticipation participation) {
-    }
-
-    private static final class MutableCredit {
-        private final CreditKey key;
-        private String title;
-        private String posterPath;
-        private LocalDate releaseDate;
-        private final Set<String> characters = new LinkedHashSet<>();
-        private final Set<String> jobs = new LinkedHashSet<>();
-        private boolean hasCast;
-        private boolean hasCrew;
-
-        private MutableCredit(CreditKey key) {
-            this.key = key;
-        }
-
-        private void add(TmdbPersonAggregateCredit credit, boolean cast) {
-            if (cast) {
-                hasCast = true;
-                if (credit.character() != null && !credit.character().isBlank()) characters.add(credit.character());
-            } else {
-                hasCrew = true;
-                if (credit.job() != null && !credit.job().isBlank()) jobs.add(credit.job());
-            }
-            String candidateTitle = key.type() == MovieOrSeriesType.MOVIE ? credit.title() : credit.name();
-            if (isBlank(title) && !isBlank(candidateTitle)) title = candidateTitle;
-            if (isBlank(posterPath) && !isBlank(credit.posterPath())) posterPath = credit.posterPath();
-            LocalDate candidateDate = parseDate(key.type() == MovieOrSeriesType.MOVIE
-                    ? credit.releaseDate() : credit.firstAirDate());
-            if (releaseDate == null && candidateDate != null) releaseDate = candidateDate;
-        }
-
-        private NormalizedCredit toNormalized() {
-            PersonParticipation participation = hasCast && hasCrew ? PersonParticipation.ALL
-                    : hasCast ? PersonParticipation.CAST : PersonParticipation.CREW;
-            return new NormalizedCredit(key, title, posterPath, releaseDate, List.copyOf(characters), List.copyOf(jobs), participation);
-        }
-
-        private static boolean isBlank(String value) {
-            return value == null || value.isBlank();
-        }
-    }
-
-    private static LocalDate parseDate(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return LocalDate.parse(value.trim(), DateTimeFormatter.ISO_LOCAL_DATE);
-        } catch (DateTimeParseException ignored) {
-            return null;
-        }
-    }
+    private record CreditKey(MovieOrSeriesType type, String tmdbId) { }
+    private static CreditKey key(PersonFilmographyCredit credit) { return new CreditKey(credit.type(), credit.tmdbId()); }
 }

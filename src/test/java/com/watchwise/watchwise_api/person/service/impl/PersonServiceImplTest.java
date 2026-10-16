@@ -54,8 +54,9 @@ class PersonServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new PersonServiceImpl(userRepository, tmdbClient, diaryEntryRepository, userListItemRepository,
-                followedPersonService, new PageRequestFactory());
+        service = new PersonServiceImpl(userRepository, diaryEntryRepository, userListItemRepository,
+                followedPersonService, new PageRequestFactory(), new PersonAggregateReader(tmdbClient),
+                new PersonFilmographyNormalizer());
         viewerId = UUID.randomUUID();
         lenient().when(userRepository.findById(viewerId)).thenReturn(Optional.of(User.builder()
                 .id(viewerId).preferredLanguage("pt-BR").build()));
@@ -278,6 +279,14 @@ class PersonServiceImplTest {
 
         assertThatThrownBy(() -> service.getPerson(viewerId, "503", null, 1, 20))
                 .isInstanceOf(TmdbUnavailableException.class);
+    }
+
+    @Test
+    void rawPersonResponseDoesNotExposeVisualReadModelMetadata() throws Exception {
+        stubAggregate(List.of(credit("1", "movie", "Film", null, "/poster.jpg", "2020-01-01", null, null)), List.of());
+        String json = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules()
+                .writeValueAsString(service.getPerson(viewerId, "287", PersonParticipation.ALL, 1, 20));
+        assertThat(json).doesNotContain("backdropPath", "popularity", "creditedEpisodeCount", "hero", "visualStats", "visualViewerState");
     }
 
     private void stubAggregate(List<TmdbPersonAggregateCredit> cast, List<TmdbPersonAggregateCredit> crew) {
