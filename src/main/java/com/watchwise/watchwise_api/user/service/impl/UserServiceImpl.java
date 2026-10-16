@@ -303,6 +303,9 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public UserResponseDTO removeBanner(UUID id) {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
+        if (user.getBanner() == null) {
+            return toUserResponseDto(user, computeProfileStats(id));
+        }
         user.setBanner(null);
         user.setUpdatedAt(LocalDateTime.now());
         User saved = userRepository.save(user);

@@ -190,16 +190,18 @@ class UserServiceImplTest {
     @Test
     void shouldRemoveBannerIdempotentlyWhenBannerIsAlreadyNull() {
         UUID userId = savedUser.getId();
+        LocalDateTime originalUpdatedAt = LocalDateTime.of(2026, 10, 15, 10, 30);
         savedUser.setBanner(null);
+        savedUser.setUpdatedAt(originalUpdatedAt);
         when(userRepository.findById(userId)).thenReturn(Optional.of(savedUser));
-        when(userRepository.save(savedUser)).thenReturn(savedUser);
         when(userMapper.userToUserResponseDto(eq(savedUser), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong()))
                 .thenReturn(userResponseDTO);
 
         UserResponseDTO result = userService.removeBanner(userId);
 
         assertThat(result.banner()).isNull();
-        verify(userRepository).save(savedUser);
+        assertThat(savedUser.getUpdatedAt()).isEqualTo(originalUpdatedAt);
+        verify(userRepository, never()).save(any());
     }
 
     @Test
