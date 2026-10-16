@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -58,6 +59,9 @@ class FollowerServiceImplTest {
 
     @Mock
     private UserBlockAccessService userBlockAccessService;
+
+    @Mock
+    private AdvisoryLock advisoryLock;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();

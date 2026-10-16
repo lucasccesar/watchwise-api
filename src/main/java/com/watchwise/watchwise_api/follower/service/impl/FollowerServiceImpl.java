@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserPairLockIdentity;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -36,6 +38,7 @@ public class FollowerServiceImpl implements FollowerService {
     private final PageRequestFactory pageRequestFactory;
     private final FollowNotificationService followNotificationService;
     private final UserBlockAccessService userBlockAccessService;
+    private final AdvisoryLock advisoryLock;
 
     @Override
     @Transactional
@@ -43,6 +46,7 @@ public class FollowerServiceImpl implements FollowerService {
         if (followerId.equals(followedId)) {
             throw new BadRequestException("Cannot follow yourself");
         }
+        advisoryLock.lock(UserPairLockIdentity.of(followerId, followedId));
         userBlockAccessService.assertInteractionAllowed(followerId, followedId);
 
         User followed = userRepository.findByIdForFollowStatus(followedId)
@@ -86,6 +90,7 @@ public class FollowerServiceImpl implements FollowerService {
     @Override
     @Transactional
     public void acceptFollowRequest(UUID targetUserId, UUID requesterId) {
+        advisoryLock.lock(UserPairLockIdentity.of(targetUserId, requesterId));
         Follower follow = followerRepository
                 .findPendingByFollowerIdAndFollowedIdForUpdate(requesterId, targetUserId)
                 .orElseThrow(() -> new NotFoundException("Follow request not found"));
