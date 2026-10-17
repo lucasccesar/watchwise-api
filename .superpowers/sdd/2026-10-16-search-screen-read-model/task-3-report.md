@@ -35,7 +35,7 @@ current focused suite was run against the existing implementation and passed.
 ## Commit
 
 - Existing implementation commit: `ac1e19a0` — `chore(search): checkpoint visual search implementation`.
-- Report commit: recorded after this report is committed.
+- Report introduction commit: `dbc925c7` — `docs(search): record task 3 verification`.
 - The implementation commit message contains no `Co-Authored-By` trailer or
   other self-attribution.
 
