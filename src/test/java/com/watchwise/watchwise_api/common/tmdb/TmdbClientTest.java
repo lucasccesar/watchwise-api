@@ -124,6 +124,26 @@ class TmdbClientTest {
     }
 
     @Test
+    @DisplayName("[searchMovies] Should Send Preferred Region - When Region Is Provided")
+    void shouldSendPreferredRegionWhenRegionIsProvided() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("query", "The%20Matrix"))
+                .andExpect(queryParam("language", "pt-BR"))
+                .andExpect(queryParam("region", "BR"))
+                .andExpect(queryParam("page", "1"))
+                .andExpect(queryParam("include_adult", "false"))
+                .andRespond(withSuccess("""
+                        {"page":1,"total_pages":1,"total_results":1,"results":[
+                          {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var result = tmdbClient.searchMovies(" The Matrix ", "pt-BR", "BR", 1).toOptional().orElseThrow();
+
+        assertThat(result.results()).extracting(TmdbMovieSearchResult::id).containsExactly("603");
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("[searchTv] Should Parse Series Page - When TMDB Responds")
     void shouldParseSeriesPageWhenTmdbResponds() {
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/tv?")))

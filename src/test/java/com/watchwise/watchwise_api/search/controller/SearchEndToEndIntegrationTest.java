@@ -132,7 +132,7 @@ class SearchEndToEndIntegrationTest {
     void shouldReturnVisualSearchContractThroughTheRealControllerAndService() throws Exception {
         RegisteredUser user = registerUser("searchviewcontract");
         long contentCountBefore = contentRepository.count();
-        when(tmdbClient.searchMovies("night", "en-US", 1))
+        when(tmdbClient.searchMovies("night", "en-US", "US", 1))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1, List.of(
                         new TmdbMovieSearchResult("movie-1", "Night Movie", "/movie.jpg", "2024-01-02", null, 8.2d),
                         new TmdbMovieSearchResult("movie-2", "Late Movie", "/movie-2.jpg", "2023-01-02", null, 7.1d)),

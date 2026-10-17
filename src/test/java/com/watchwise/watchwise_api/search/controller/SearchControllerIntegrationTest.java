@@ -164,7 +164,7 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.totalResults").value(1))
                 .andExpect(jsonPath("$.contents[0].tmdbId").value("movie-1"));
 
-        verify(tmdbClient).searchMovies("night", "en-US", 1);
+        verify(tmdbClient).searchMovies("night", "en-US", "US", 1);
     }
 
     @Test
@@ -194,6 +194,15 @@ class SearchControllerIntegrationTest {
                         .param("q", "night")
                         .param("scope", SearchViewScope.MOVIE.name())
                         .param("page", "0")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search/view"));
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .param("page", "501")
                         .cookie(user.accessToken()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400))
@@ -277,7 +286,7 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.contents[2].tmdbId").value("movie-4"));
 
         assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
-        verify(tmdbClient, org.mockito.Mockito.atLeastOnce()).searchMovies("night", "en-US", 1);
+        verify(tmdbClient, org.mockito.Mockito.atLeastOnce()).searchMovies("night", "en-US", "US", 1);
         verify(tmdbClient, org.mockito.Mockito.atLeastOnce()).searchTv("night", "en-US", 1);
     }
 
@@ -285,7 +294,7 @@ class SearchControllerIntegrationTest {
     @DisplayName("[search/view] Should Map Typed TMDB Failure To BadGateway")
     void shouldMapTypedTmdbFailureToBadGateway() throws Exception {
         RegisteredUser user = registerUser("searchviewtmdbdown");
-        when(tmdbClient.searchMovies(anyString(), anyString(), anyInt()))
+        when(tmdbClient.searchMovies(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
 
         mockMvc.perform(get("/search/view")
@@ -329,7 +338,7 @@ class SearchControllerIntegrationTest {
     }
 
     private void stubMovieSearch(long totalResults, List<TmdbMovieSearchResult> results) {
-        when(tmdbClient.searchMovies(anyString(), anyString(), anyInt()))
+        when(tmdbClient.searchMovies(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(found(new TmdbSearchPage<>(1, results, totalPages(totalResults), totalResults)));
     }
 

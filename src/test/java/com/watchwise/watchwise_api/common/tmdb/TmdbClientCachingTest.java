@@ -433,6 +433,24 @@ class TmdbClientCachingTest {
     }
 
     @Test
+    @DisplayName("[searchMovies] Should Fetch Separate Pages - When Region Changes")
+    void shouldFetchSeparatePagesWhenSearchRegionChanges() {
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("region", "US"))
+                .andRespond(movieSearchSuccess(1, "The Matrix"));
+        mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))
+                .andExpect(queryParam("region", "BR"))
+                .andRespond(movieSearchSuccess(1, "Matrix"));
+
+        var us = tmdbClient.searchMovies("Matrix", "en-US", "US", 1).toOptional().orElseThrow();
+        var brazil = tmdbClient.searchMovies("Matrix", "en-US", "BR", 1).toOptional().orElseThrow();
+
+        assertThat(us.results()).extracting(TmdbMovieSearchResult::title).containsExactly("The Matrix");
+        assertThat(brazil.results()).extracting(TmdbMovieSearchResult::title).containsExactly("Matrix");
+        mockServer.verify();
+    }
+
+    @Test
     @DisplayName("[searchMovies] Should Fetch Separate Pages - When Page Changes")
     void shouldFetchSeparatePagesWhenSearchPageChanges() {
         mockServer.expect(requestTo(startsWith("https://api.themoviedb.org/3/search/movie?")))

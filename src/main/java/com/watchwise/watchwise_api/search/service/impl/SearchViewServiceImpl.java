@@ -54,7 +54,8 @@ public class SearchViewServiceImpl implements SearchViewService {
 
     private SearchViewDTO searchMovies(User viewer, String query, SearchViewScope scope, int page, int size) {
         TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = windowReader.readPage(
-                page, size, sourcePage -> tmdbClient.searchMovies(query, viewer.getPreferredLanguage(), sourcePage));
+                page, size, sourcePage -> tmdbClient.searchMovies(
+                        query, viewer.getPreferredLanguage(), viewer.getPreferredRegion(), sourcePage));
         List<SearchContentCandidate> candidates = window.results().stream()
                 .map(this::movieCandidate)
                 .toList();
@@ -88,7 +89,8 @@ public class SearchViewServiceImpl implements SearchViewService {
 
     private SearchViewDTO searchContent(User viewer, String query, SearchViewScope scope, int page, int size) {
         TmdbSearchWindowReader.Range<TmdbMovieSearchResult> movieTotals = windowReader.readRange(
-                0, 1, sourcePage -> tmdbClient.searchMovies(query, viewer.getPreferredLanguage(), sourcePage));
+                0, 1, sourcePage -> tmdbClient.searchMovies(
+                        query, viewer.getPreferredLanguage(), viewer.getPreferredRegion(), sourcePage));
         TmdbSearchWindowReader.Range<TmdbTvSearchResult> seriesTotals = windowReader.readRange(
                 0, 1, sourcePage -> tmdbClient.searchTv(query, viewer.getPreferredLanguage(), sourcePage));
         ContentSearchPagePlanner.Plan plan = pagePlanner.plan(
@@ -124,7 +126,8 @@ public class SearchViewServiceImpl implements SearchViewService {
         int count = Math.toIntExact(slots.getLast().sourceIndex() - firstSourceIndex + 1);
         TmdbSearchWindowReader.Range<TmdbMovieSearchResult> range = windowReader.readRange(
                 firstSourceIndex, count,
-                sourcePage -> tmdbClient.searchMovies(query, viewer.getPreferredLanguage(), sourcePage));
+                sourcePage -> tmdbClient.searchMovies(
+                        query, viewer.getPreferredLanguage(), viewer.getPreferredRegion(), sourcePage));
         Map<Long, SearchContentCandidate> candidatesBySourceIndex = new java.util.HashMap<>();
         for (Map.Entry<Long, TmdbMovieSearchResult> result : range.resultsBySourceIndex().entrySet()) {
             candidatesBySourceIndex.put(result.getKey(), movieCandidate(result.getValue()));

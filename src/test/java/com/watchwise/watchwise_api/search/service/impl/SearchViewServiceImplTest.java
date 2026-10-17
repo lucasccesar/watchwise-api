@@ -62,9 +62,9 @@ class SearchViewServiceImplTest {
 
     @Test
     void shouldReadExactVisualMovieWindowAndPreservePageMetadata() {
-        when(tmdbClient.searchMovies("night", "pt-BR", 1))
+        when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 22, movies(1, 20))));
-        when(tmdbClient.searchMovies("night", "pt-BR", 2))
+        when(tmdbClient.searchMovies("night", "pt-BR", "BR", 2))
                 .thenReturn(found(moviePage(2, 22, movies(21, 2))));
         when(contentViewAssembler.assemble(any(User.class), anyList()))
                 .thenReturn(movieViews("19", "20", "21", "22"));
@@ -80,8 +80,8 @@ class SearchViewServiceImplTest {
         assertThat(candidates.getValue()).extracting(SearchContentCandidate::coordinate)
                 .extracting(coordinate -> coordinate.tmdbId())
                 .containsExactly("19", "20", "21", "22");
-        verify(tmdbClient).searchMovies("night", "pt-BR", 1);
-        verify(tmdbClient).searchMovies("night", "pt-BR", 2);
+        verify(tmdbClient).searchMovies("night", "pt-BR", "BR", 1);
+        verify(tmdbClient).searchMovies("night", "pt-BR", "BR", 2);
     }
 
     @Test
@@ -112,7 +112,7 @@ class SearchViewServiceImplTest {
 
     @Test
     void shouldInterleaveContentSourcesAndKeepSourceExhaustionOrder() {
-        when(tmdbClient.searchMovies("night", "pt-BR", 1))
+        when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 4, movies(1, 4))));
         when(tmdbClient.searchTv("night", "pt-BR", 1))
                 .thenReturn(found(tvPage(1, 3, tvShows(1, 3))));
@@ -124,15 +124,15 @@ class SearchViewServiceImplTest {
         assertThat(result.totalResults()).isEqualTo(7L);
         assertThat(result.contents()).extracting(SearchContentViewDTO::type)
                 .containsExactly(MovieOrSeriesType.MOVIE, MovieOrSeriesType.SERIES, MovieOrSeriesType.MOVIE);
-        verify(tmdbClient, atLeastOnce()).searchMovies("night", "pt-BR", 1);
+        verify(tmdbClient, atLeastOnce()).searchMovies("night", "pt-BR", "BR", 1);
         verify(tmdbClient, atLeastOnce()).searchTv("night", "pt-BR", 1);
     }
 
     @Test
     void shouldNotSubstituteLaterMovieRankForMissingRankWhenInterleavingContent() {
-        when(tmdbClient.searchMovies("night", "pt-BR", 1))
+        when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 22, movies(1, 19))));
-        when(tmdbClient.searchMovies("night", "pt-BR", 2))
+        when(tmdbClient.searchMovies("night", "pt-BR", "BR", 2))
                 .thenReturn(found(moviePage(2, 22, movies(21, 2))));
         when(tmdbClient.searchTv("night", "pt-BR", 1))
                 .thenReturn(found(tvPage(1, 22, tvShows(1, 20))));
@@ -149,7 +149,7 @@ class SearchViewServiceImplTest {
 
     @Test
     void shouldReturnEmptyVisualPageWithoutAssemblingCardsWhenNoSourceHasResults() {
-        when(tmdbClient.searchMovies("night", "pt-BR", 1))
+        when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 0, List.of())));
         when(tmdbClient.searchTv("night", "pt-BR", 1))
                 .thenReturn(found(tvPage(1, 0, List.of())));
@@ -164,7 +164,7 @@ class SearchViewServiceImplTest {
 
     @Test
     void shouldPropagateTypedTmdbUnavailableFailure() {
-        when(tmdbClient.searchMovies("night", "pt-BR", 1)).thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1)).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         assertThatThrownBy(() -> service.search(VIEWER_ID, "night", SearchViewScope.MOVIE, 1, 18))
                 .isInstanceOf(TmdbUnavailableException.class)
