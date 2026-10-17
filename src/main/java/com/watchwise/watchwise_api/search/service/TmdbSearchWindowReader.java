@@ -4,8 +4,9 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -47,7 +48,7 @@ public final class TmdbSearchWindowReader {
         long totalResults = Math.max(0, firstPage.totalResults());
 
         if (count == 0 || firstSourceIndex >= totalResults) {
-            return new Range<>(List.of(), totalResults);
+            return new Range<>(Map.of(), totalResults);
         }
 
         long requestedEnd = firstSourceIndex > Long.MAX_VALUE - count
@@ -62,17 +63,17 @@ public final class TmdbSearchWindowReader {
             pages.computeIfAbsent(sourcePageNumber, ignored -> loadPage(sourcePageNumber, loader));
         }
 
-        List<T> results = new ArrayList<>((int) Math.min(count, endExclusive - firstSourceIndex));
+        Map<Long, T> resultsBySourceIndex = new LinkedHashMap<>();
         for (long sourceIndex = firstSourceIndex; sourceIndex < endExclusive; sourceIndex++) {
             int sourcePageNumber = Math.toIntExact(sourcePageForIndex(sourceIndex));
             TmdbSearchPage<T> page = pages.get(sourcePageNumber);
             List<T> sourceResults = page.results() == null ? List.of() : page.results();
             int resultIndex = (int) (sourceIndex % SOURCE_PAGE_SIZE);
-            if (resultIndex < sourceResults.size()) {
-                results.add(sourceResults.get(resultIndex));
+            if (resultIndex < sourceResults.size() && sourceResults.get(resultIndex) != null) {
+                resultsBySourceIndex.put(sourceIndex, sourceResults.get(resultIndex));
             }
         }
-        return new Range<>(List.copyOf(results), totalResults);
+        return new Range<>(resultsBySourceIndex, totalResults);
     }
 
     private static <T> TmdbSearchPage<T> loadPage(
@@ -122,13 +123,17 @@ public final class TmdbSearchWindowReader {
         }
     }
 
-    public record Range<T>(List<T> results, long totalResults) {
+    public record Range<T>(Map<Long, T> resultsBySourceIndex, long totalResults) {
         public Range {
-            results = List.copyOf(results);
+            resultsBySourceIndex = Collections.unmodifiableMap(new LinkedHashMap<>(resultsBySourceIndex));
+        }
+
+        public List<T> results() {
+            return List.copyOf(resultsBySourceIndex.values());
         }
 
         public List<T> items() {
-            return results;
+            return results();
         }
     }
 }

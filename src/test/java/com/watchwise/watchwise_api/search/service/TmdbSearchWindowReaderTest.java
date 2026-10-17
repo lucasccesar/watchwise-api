@@ -58,6 +58,23 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
+    void shouldPreserveSourceIndexesWhenARequestRangeHasAMissingMiddleRank() {
+        TmdbSearchWindowReader.Range<TmdbMovieSearchResult> range = reader.readRange(
+                18,
+                4,
+                sourcePage -> found(tmdbPage(
+                        sourcePage,
+                        22,
+                        sourcePage == 1 ? movies(1, 19) : movies(21, 2))));
+
+        assertThat(range.resultsBySourceIndex()).containsOnlyKeys(18L, 20L, 21L);
+        assertThat(range.resultsBySourceIndex().get(18L).id()).isEqualTo("19");
+        assertThat(range.resultsBySourceIndex().get(20L).id()).isEqualTo("21");
+        assertThat(range.resultsBySourceIndex().get(21L).id()).isEqualTo("22");
+        assertThat(range.resultsBySourceIndex()).doesNotContainKey(19L);
+    }
+
+    @Test
     void shouldReturnEmptyVisualMetadataWhenFirstPageIsEmpty() {
         TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = reader.readPage(
                 1, 18, sourcePage -> found(tmdbPage(1, 0, List.of())));

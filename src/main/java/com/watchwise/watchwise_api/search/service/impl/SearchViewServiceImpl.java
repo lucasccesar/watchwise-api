@@ -102,7 +102,9 @@ public class SearchViewServiceImpl implements SearchViewService {
                 .map(slot -> candidatesByType.getOrDefault(slot.type(), Map.of()).get(slot.sourceIndex()))
                 .filter(candidate -> candidate != null)
                 .toList();
-        List<SearchContentViewDTO> contents = contentViewAssembler.assemble(viewer, candidates);
+        List<SearchContentViewDTO> contents = candidates.isEmpty()
+                ? List.of()
+                : contentViewAssembler.assemble(viewer, candidates);
 
         return new SearchViewDTO(
                 scope, query, page, size, plan.totalPages(), plan.totalResults(), plan.hasNext(),
@@ -124,8 +126,8 @@ public class SearchViewServiceImpl implements SearchViewService {
                 firstSourceIndex, count,
                 sourcePage -> tmdbClient.searchMovies(query, viewer.getPreferredLanguage(), sourcePage));
         Map<Long, SearchContentCandidate> candidatesBySourceIndex = new java.util.HashMap<>();
-        for (int offset = 0; offset < range.results().size(); offset++) {
-            candidatesBySourceIndex.put(firstSourceIndex + offset, movieCandidate(range.results().get(offset)));
+        for (Map.Entry<Long, TmdbMovieSearchResult> result : range.resultsBySourceIndex().entrySet()) {
+            candidatesBySourceIndex.put(result.getKey(), movieCandidate(result.getValue()));
         }
         candidatesByType.put(MovieOrSeriesType.MOVIE, candidatesBySourceIndex);
     }
@@ -145,8 +147,8 @@ public class SearchViewServiceImpl implements SearchViewService {
                 firstSourceIndex, count,
                 sourcePage -> tmdbClient.searchTv(query, viewer.getPreferredLanguage(), sourcePage));
         Map<Long, SearchContentCandidate> candidatesBySourceIndex = new java.util.HashMap<>();
-        for (int offset = 0; offset < range.results().size(); offset++) {
-            candidatesBySourceIndex.put(firstSourceIndex + offset, seriesCandidate(range.results().get(offset)));
+        for (Map.Entry<Long, TmdbTvSearchResult> result : range.resultsBySourceIndex().entrySet()) {
+            candidatesBySourceIndex.put(result.getKey(), seriesCandidate(result.getValue()));
         }
         candidatesByType.put(MovieOrSeriesType.SERIES, candidatesBySourceIndex);
     }

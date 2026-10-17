@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -123,8 +124,27 @@ class SearchViewServiceImplTest {
         assertThat(result.totalResults()).isEqualTo(7L);
         assertThat(result.contents()).extracting(SearchContentViewDTO::type)
                 .containsExactly(MovieOrSeriesType.MOVIE, MovieOrSeriesType.SERIES, MovieOrSeriesType.MOVIE);
-        verify(tmdbClient).searchMovies("night", "pt-BR", 1);
-        verify(tmdbClient).searchTv("night", "pt-BR", 1);
+        verify(tmdbClient, atLeastOnce()).searchMovies("night", "pt-BR", 1);
+        verify(tmdbClient, atLeastOnce()).searchTv("night", "pt-BR", 1);
+    }
+
+    @Test
+    void shouldNotSubstituteLaterMovieRankForMissingRankWhenInterleavingContent() {
+        when(tmdbClient.searchMovies("night", "pt-BR", 1))
+                .thenReturn(found(moviePage(1, 22, movies(1, 19))));
+        when(tmdbClient.searchMovies("night", "pt-BR", 2))
+                .thenReturn(found(moviePage(2, 22, movies(21, 2))));
+        when(tmdbClient.searchTv("night", "pt-BR", 1))
+                .thenReturn(found(tvPage(1, 22, tvShows(1, 20))));
+        when(tmdbClient.searchTv("night", "pt-BR", 2))
+                .thenReturn(found(tvPage(2, 22, tvShows(21, 2))));
+        when(contentViewAssembler.assemble(any(User.class), anyList()))
+                .thenAnswer(invocation -> viewsForCandidates(invocation.getArgument(1)));
+
+        SearchViewDTO result = service.search(VIEWER_ID, "night", SearchViewScope.CONTENT, 7, 6);
+
+        assertThat(result.contents()).extracting(SearchContentViewDTO::tmdbId)
+                .containsExactly("19", "19", "20", "21", "21");
     }
 
     @Test
