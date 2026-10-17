@@ -101,6 +101,19 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
+    void shouldCapReportedPagesAtTheMaximumAcceptedVisualPage() {
+        TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = reader.readPage(
+                500, 20, sourcePage -> found(tmdbPage(
+                        sourcePage,
+                        10_001,
+                        sourcePage == 1 ? movies(1, 20) : movies(9_981, 20))));
+
+        assertThat(window.totalResults()).isEqualTo(10_001L);
+        assertThat(window.totalPages()).isEqualTo(500);
+        assertThat(window.hasNext()).isFalse();
+    }
+
+    @Test
     void shouldThrowWhenTheFirstSourcePageIsUnavailable() {
         assertThatThrownBy(() -> reader.readPage(1, 18, page -> unavailable()))
                 .isInstanceOf(TmdbUnavailableException.class);

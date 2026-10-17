@@ -14,7 +14,9 @@ public final class ContentSearchPagePlanner {
         long totalResults = movieTotal + seriesTotal;
         int totalPages = totalResults == 0
                 ? 0
-                : Math.toIntExact((totalResults - 1) / size + 1);
+                : Math.toIntExact(Math.min(
+                        (totalResults - 1) / size + 1,
+                        SearchViewPagination.MAX_PAGE));
         long firstGlobalIndex = (long) (page - 1) * size;
         long endExclusive = Math.min(totalResults, firstGlobalIndex + size);
         List<Slot> slots = new ArrayList<>();

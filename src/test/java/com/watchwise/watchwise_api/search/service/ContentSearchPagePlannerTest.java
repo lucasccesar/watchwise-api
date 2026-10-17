@@ -45,4 +45,14 @@ class ContentSearchPagePlannerTest {
                         new ContentSearchPagePlanner.Slot(MovieOrSeriesType.SERIES, 3),
                         new ContentSearchPagePlanner.Slot(MovieOrSeriesType.SERIES, 4));
     }
+
+    @Test
+    void shouldCapReportedPagesAtTheMaximumAcceptedVisualPage() {
+        ContentSearchPagePlanner.Plan plan = planner.plan(10_001, 0, 500, 20);
+
+        assertThat(plan.totalResults()).isEqualTo(10_001L);
+        assertThat(plan.totalPages()).isEqualTo(500);
+        assertThat(plan.hasNext()).isFalse();
+        assertThat(plan.slots()).hasSize(20);
+    }
 }

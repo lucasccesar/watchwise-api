@@ -102,7 +102,7 @@ public final class TmdbSearchWindowReader {
             return 0;
         }
         long pages = (totalResults - 1) / visualSize + 1;
-        return Math.toIntExact(pages);
+        return Math.toIntExact(Math.min(pages, SearchViewPagination.MAX_PAGE));
     }
 
     private static void validateVisualPage(int visualPage) {
