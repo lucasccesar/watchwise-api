@@ -4,8 +4,11 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.search.dto.SearchRequestDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
+import com.watchwise.watchwise_api.search.dto.SearchViewDTO;
+import com.watchwise.watchwise_api.search.dto.SearchViewRequestDTO;
 import com.watchwise.watchwise_api.search.service.SearchService;
 import com.watchwise.watchwise_api.search.service.SearchType;
+import com.watchwise.watchwise_api.search.service.SearchViewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +28,7 @@ public class SearchController {
     private static final int MAX_EXTERNAL_PAGE = 500;
 
     private final SearchService searchService;
+    private final SearchViewService searchViewService;
     private final RequestThrottler requestThrottler;
 
     @Value("${app.rate-limit.search.max-requests}")
@@ -32,6 +36,10 @@ public class SearchController {
 
     @Value("${app.rate-limit.search.window-minutes}")
     private long searchWindowMinutes;
+
+    private static final int DEFAULT_VIEW_PAGE = 1;
+    private static final int DEFAULT_VIEW_SIZE = 18;
+    private static final int MAX_VIEW_QUERY_LENGTH = 100;
 
     @GetMapping("/search")
     public ResponseEntity<SearchResultDTO> search(
@@ -52,6 +60,35 @@ public class SearchController {
         SearchResultDTO result = searchService.search(
                 currentUserId, trimmedQuery, request.type(), request.page(), request.size());
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/search/view")
+    public ResponseEntity<SearchViewDTO> searchView(
+            @Valid @ModelAttribute SearchViewRequestDTO request
+    ) {
+        String trimmedQuery = request.q().trim();
+        validateViewQuery(trimmedQuery);
+
+        UUID currentUserId = getCurrentUserId();
+        requestThrottler.checkAllowed(
+                "search|" + currentUserId,
+                searchMaxRequests,
+                Duration.ofMinutes(searchWindowMinutes));
+
+        int page = request.page() == null ? DEFAULT_VIEW_PAGE : request.page();
+        int size = request.size() == null ? DEFAULT_VIEW_SIZE : request.size();
+        SearchViewDTO result = searchViewService.search(
+                currentUserId, trimmedQuery, request.scope(), page, size);
+        return ResponseEntity.ok(result);
+    }
+
+    private void validateViewQuery(String trimmedQuery) {
+        if (trimmedQuery.length() < 3) {
+            throw new BadRequestException("q must contain at least 3 characters after trimming");
+        }
+        if (trimmedQuery.length() > MAX_VIEW_QUERY_LENGTH) {
+            throw new BadRequestException("q must contain at most 100 characters after trimming");
+        }
     }
 
     private void validateExternalPage(SearchType type, Integer page) {
