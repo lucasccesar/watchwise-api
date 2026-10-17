@@ -121,6 +121,27 @@ class SearchEndToEndIntegrationTest {
         assertVisibleListNames(stranger.accessToken(), "Shared public");
     }
 
+    @Test
+    @DisplayName("[search/view] Should Return The Visual Search Contract Through The Real Controller And Service")
+    void shouldReturnVisualSearchContractThroughTheRealControllerAndService() throws Exception {
+        RegisteredUser user = registerUser("searchviewcontract");
+        when(tmdbClient.searchMovies("night", "en-US", 1))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1, List.of(), 0, 0)));
+        when(tmdbClient.searchTv("night", "en-US", 1))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1, List.of(), 0, 0)));
+
+        mockMvc.perform(get("/search/view")
+                        .cookie(user.accessToken())
+                        .param("q", "night")
+                        .param("scope", "CONTENT")
+                        .param("page", "1")
+                        .param("size", "18"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalResults").isNumber())
+                .andExpect(jsonPath("$.contents").isArray())
+                .andExpect(jsonPath("$.people").isEmpty());
+    }
+
     private void assertVisibleListNames(Cookie accessToken, String... expectedNames) throws Exception {
         MockHttpServletRequestBuilder request = get("/search")
                 .param("q", "Shared")
