@@ -9,9 +9,15 @@ public record TmdbMovieSearchResult(
         String title,
         @JsonProperty("poster_path") String posterPath,
         @JsonProperty("release_date") String releaseDate,
-        @JsonProperty("original_language") String originalLanguage) {
+        @JsonProperty("original_language") String originalLanguage,
+        @JsonProperty("vote_average") Double voteAverage) {
 
     public TmdbMovieSearchResult(String id, String title, String posterPath, String releaseDate) {
-        this(id, title, posterPath, releaseDate, null);
+        this(id, title, posterPath, releaseDate, null, null);
+    }
+
+    public TmdbMovieSearchResult(String id, String title, String posterPath, String releaseDate,
+                                 String originalLanguage) {
+        this(id, title, posterPath, releaseDate, originalLanguage, null);
     }
 }

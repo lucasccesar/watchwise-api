@@ -109,7 +109,7 @@ class TmdbClientTest {
                 .andExpect(queryParam("include_adult", "false"))
                 .andRespond(withSuccess("""
                         {"page":2,"total_pages":3,"total_results":42,"results":[
-                          {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+                          {"id":603,"title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31","vote_average":8.4}]}
                         """, MediaType.APPLICATION_JSON));
 
         var result = tmdbClient.searchMovies(" The Matrix ", "pt-BR", 2).toOptional().orElseThrow();
@@ -117,8 +117,9 @@ class TmdbClientTest {
         assertThat(result.page()).isEqualTo(2);
         assertThat(result.totalPages()).isEqualTo(3);
         assertThat(result.totalResults()).isEqualTo(42);
+        assertThat(result.results().getFirst().voteAverage()).isEqualTo(8.4d);
         assertThat(result.results()).containsExactly(
-                new TmdbMovieSearchResult("603", "The Matrix", "/matrix.jpg", "1999-03-31"));
+                new TmdbMovieSearchResult("603", "The Matrix", "/matrix.jpg", "1999-03-31", null, 8.4d));
         mockServer.verify();
     }
 
@@ -132,7 +133,7 @@ class TmdbClientTest {
                 .andExpect(queryParam("include_adult", "false"))
                 .andRespond(withSuccess("""
                         {"page":3,"total_pages":4,"total_results":61,"results":[
-                          {"id":70523,"name":"Dark","poster_path":"/dark.jpg","first_air_date":"2017-12-01"}]}
+                          {"id":70523,"name":"Dark","poster_path":"/dark.jpg","first_air_date":"2017-12-01","vote_average":7.9}]}
                         """, MediaType.APPLICATION_JSON));
 
         var result = tmdbClient.searchTv(" Dark ", "de-DE", 3).toOptional().orElseThrow();
@@ -140,8 +141,9 @@ class TmdbClientTest {
         assertThat(result.page()).isEqualTo(3);
         assertThat(result.totalPages()).isEqualTo(4);
         assertThat(result.totalResults()).isEqualTo(61);
+        assertThat(result.results().getFirst().voteAverage()).isEqualTo(7.9d);
         assertThat(result.results()).containsExactly(
-                new TmdbTvSearchResult("70523", "Dark", "/dark.jpg", "2017-12-01"));
+                new TmdbTvSearchResult("70523", "Dark", "/dark.jpg", "2017-12-01", null, 7.9d));
         mockServer.verify();
     }
 
@@ -346,7 +348,7 @@ class TmdbClientTest {
                 .andExpect(queryParam("include_adult", "false"))
                 .andRespond(withSuccess("""
                         {"page":1,"total_pages":1,"total_results":1,"results":[
-                          {"id":6384,"name":"Keanu Reeves","profile_path":"/keanu.jpg"}]}
+                          {"id":6384,"name":"Keanu Reeves","profile_path":"/keanu.jpg","known_for_department":"Acting"}]}
                         """, MediaType.APPLICATION_JSON));
 
         var result = tmdbClient.searchPeople(" Keanu ", "en-US", 1).toOptional().orElseThrow();
@@ -354,7 +356,9 @@ class TmdbClientTest {
         assertThat(result.page()).isEqualTo(1);
         assertThat(result.totalPages()).isEqualTo(1);
         assertThat(result.totalResults()).isEqualTo(1);
-        assertThat(result.results()).containsExactly(new TmdbPersonSearchResult("6384", "Keanu Reeves", "/keanu.jpg"));
+        assertThat(result.results().getFirst().knownForDepartment()).isEqualTo("Acting");
+        assertThat(result.results()).containsExactly(
+                new TmdbPersonSearchResult("6384", "Keanu Reeves", "/keanu.jpg", "Acting"));
         mockServer.verify();
     }
 

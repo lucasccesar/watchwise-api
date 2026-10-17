@@ -9,9 +9,15 @@ public record TmdbTvSearchResult(
         String name,
         @JsonProperty("poster_path") String posterPath,
         @JsonProperty("first_air_date") String firstAirDate,
-        @JsonProperty("original_language") String originalLanguage) {
+        @JsonProperty("original_language") String originalLanguage,
+        @JsonProperty("vote_average") Double voteAverage) {
 
     public TmdbTvSearchResult(String id, String name, String posterPath, String firstAirDate) {
-        this(id, name, posterPath, firstAirDate, null);
+        this(id, name, posterPath, firstAirDate, null, null);
+    }
+
+    public TmdbTvSearchResult(String id, String name, String posterPath, String firstAirDate,
+                              String originalLanguage) {
+        this(id, name, posterPath, firstAirDate, originalLanguage, null);
     }
 }

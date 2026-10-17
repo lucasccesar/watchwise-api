@@ -108,6 +108,22 @@ class SearchServiceImplTest {
     }
 
     @Test
+    @DisplayName("[search] Should Preserve Raw Movie Title - When TMDB Search Result Has Card Metadata")
+    void shouldPreserveRawMovieTitleWhenTmdbSearchResultHasCardMetadata() {
+        stubViewer();
+        TmdbSearchPage<TmdbMovieSearchResult> moviePage = new TmdbSearchPage<>(1,
+                List.of(new TmdbMovieSearchResult("999", "Night Shift", "/night-shift.jpg", "2024-01-01",
+                        null, 8.4d)), 1, 1);
+        when(tmdbClient.searchMovies("night", "pt-BR", 1)).thenReturn(new TmdbLookupResult.Found<>(moviePage));
+
+        SearchResultDTO result = service.search(viewerId, "night", SearchType.MOVIE, 1, 20);
+
+        assertThat(result.contents()).singleElement()
+                .extracting(SearchContentDTO::title)
+                .isEqualTo("Night Shift");
+    }
+
+    @Test
     @DisplayName("[search] Should Map Series Cards With Null Year - When Air Date Is Invalid")
     void shouldMapSeriesCardsWithNullYearWhenAirDateIsInvalid() {
         stubViewer();
