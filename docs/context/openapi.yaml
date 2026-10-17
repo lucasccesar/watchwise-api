@@ -3869,6 +3869,67 @@ paths:
               schema: { $ref: "#/components/schemas/ApiError" }
         "502": { description: TMDB indisponível durante uma busca externa }
 
+  /search/view:
+    get:
+      tags: [Search]
+      summary: Buscar o read model visual da tela Search
+      description: >
+        Exige autenticação por cookie JWT. É uma leitura sem escrita: não cria referências `Content`
+        nem persiste metadata de filme ou série. `scope=CONTENT` combina filmes e séries; `MOVIE`,
+        `SERIES` e `PERSON` limitam a fonte ao tipo correspondente. O termo é aparado antes da validação
+        e da consulta. A busca de filmes envia a regiao preferida do viewer ao TMDB; as buscas de series
+        e pessoas nao recebem regiao porque esses endpoints do TMDB nao oferecem esse parametro. O
+        enriquecimento dos cards usa idioma e regiao preferidos. A rota compartilha o mesmo rate limit de
+        busca de `GET /search`.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Texto aparado; depois de remover os espaços nas pontas, deve conter de 3 a 100 caracteres.
+          schema: { type: string, minLength: 3 }
+        - name: scope
+          in: query
+          required: true
+          description: Fonte visual da tela.
+          schema: { type: string, enum: [CONTENT, MOVIE, SERIES, PERSON] }
+        - name: page
+          in: query
+          required: false
+          description: Página visual 1-based; assume 1 se omitida e aceita de 1 a 500.
+          schema: { type: integer, minimum: 1, maximum: 500, default: 1 }
+        - name: size
+          in: query
+          required: false
+          description: Itens por página; assume 18 se omitido e aceita de 1 a 20.
+          schema: { type: integer, minimum: 1, maximum: 20, default: 18 }
+      responses:
+        "200":
+          description: Read model visual paginado da tela Search.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchView" }
+        "400":
+          description: q, scope, page ou size inválidos; o erro ocorre antes da consulta externa.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/ApiError" }
+                  - { $ref: "#/components/schemas/ValidationApiError" }
+        "401": { description: Não autenticado }
+        "429":
+          description: Muitas requisições de busca vindas desse usuário. Tente novamente após o período configurado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "502":
+          description: TMDB indisponível durante a busca; falhas posteriores de enriquecimento de card preservam o item e retornam 200 com previewStatus PARTIAL ou UNAVAILABLE.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+
   # ---------- TRENDING ----------
   /trending:
     get:
@@ -5216,6 +5277,27 @@ components:
         error: { type: string }
         message: { type: string }
         path: { type: string }
+
+    ValidationError:
+      type: object
+      required: [field, message]
+      properties:
+        field: { type: string, nullable: true }
+        message: { type: string }
+
+    ValidationApiError:
+      type: object
+      description: Corpo padronizado para falhas de validação de parâmetros ou campos.
+      required: [timestamp, status, error, message, path, errors]
+      properties:
+        timestamp: { type: string, format: date-time }
+        status: { type: integer }
+        error: { type: string }
+        message: { type: string }
+        path: { type: string }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/ValidationError" }
 
     PageMeta:
       type: object
@@ -8078,6 +8160,78 @@ components:
           type: array
           description: Templates de Picks buscados localmente por nome; preenchido somente quando type = PICKS_TEMPLATE e nunca contendo Picks preenchidos.
           items: { $ref: "#/components/schemas/PicksTemplatePreview" }
+
+    SearchView:
+      type: object
+      required: [scope, query, page, size, totalPages, totalResults, hasNext, contents, people]
+      description: >
+        Envelope paginado do read model visual de Search. `contents` e `people` são arrays separados:
+        somente o array correspondente ao escopo é preenchido, exceto `CONTENT`, que preenche `contents`
+        com filmes e séries misturados. `totalResults` pertence ao escopo solicitado. `totalPages` e
+        `hasNext` respeitam o limite máximo de 500 páginas da rota; quando o total externo ultrapassa
+        a capacidade paginável, `totalResults` continua exato, mas a última página acessível é a 500.
+      properties:
+        scope: { type: string, enum: [CONTENT, MOVIE, SERIES, PERSON] }
+        query: { type: string }
+        page: { type: integer, minimum: 1, maximum: 500 }
+        size: { type: integer, minimum: 1, maximum: 20 }
+        totalPages: { type: integer, minimum: 0 }
+        totalResults: { type: integer, format: int64, minimum: 0 }
+        hasNext: { type: boolean }
+        contents:
+          type: array
+          items: { $ref: "#/components/schemas/SearchContentView" }
+        people:
+          type: array
+          items: { $ref: "#/components/schemas/SearchPersonView" }
+
+    SearchContentView:
+      type: object
+      description: >
+        Card de filme ou série para a tela Search. `voteAverage` é a nota média fornecida pelo TMDB,
+        não uma estatística comunitária do Watchwise. O enriquecimento visual pode completar metadata
+        e estado do viewer, mas não altera a identidade TMDB do resultado.
+      properties:
+        tmdbId: { type: string }
+        type: { type: string, enum: [MOVIE, SERIES] }
+        title: { type: string, nullable: true }
+        posterUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: URL completa do poster no TMDB usando o tamanho w500; nula quando não há poster disponível.
+        releaseYear: { type: integer, nullable: true }
+        genres:
+          type: array
+          nullable: true
+          items: { type: string }
+        runtimeMinutes: { type: integer, nullable: true }
+        numberOfSeasons: { type: integer, nullable: true }
+        voteAverage:
+          type: number
+          format: double
+          nullable: true
+          description: Nota média do resultado de busca no TMDB; não é média de avaliações Watchwise.
+        viewerState:
+          allOf: [{ $ref: "#/components/schemas/ContentCardViewerState" }]
+          nullable: true
+        previewStatus:
+          type: string
+          enum: [AVAILABLE, PARTIAL, UNAVAILABLE]
+          description: Completude do metadata básico enriquecido para o card.
+
+    SearchPersonView:
+      type: object
+      description: Pessoa retornada pelo endpoint de busca de pessoas do TMDB.
+      properties:
+        tmdbId: { type: string }
+        name: { type: string, nullable: true }
+        photoUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: URL completa da foto no TMDB usando o tamanho w185; nula quando não há profile_path.
+        knownForDepartment: { type: string, nullable: true }
 
     SearchContentDTO:
       type: object

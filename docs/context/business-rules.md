@@ -2177,6 +2177,38 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
 - **A busca local de listas usa página fixa de 10 resultados** (`SearchServiceImpl.search`) — a regra vale
   para `type=LIST` e para o array `lists` da busca agregada sem tipo; o `size` recebido não altera esse
   tamanho, enquanto a página solicitada e as regras de visibilidade permanecem iguais.
+- **O read model visual tem quatro escopos e paginação própria** (`SearchController`/
+  `SearchViewServiceImpl`) — `GET /search/view` aceita somente `CONTENT`, `MOVIE`, `SERIES` e `PERSON`.
+  `q` é aparado antes da validação e precisa ter entre 3 e 100 caracteres; `page` é 1-based, assume 1
+  quando omitida e aceita de 1 a 500; `size` assume 18 quando omitido e aceita de 1 a 20. O envelope
+  sempre retorna `scope`, `query`, `page`, `size`, `totalPages`, `totalResults`, `hasNext`, `contents` e
+  `people`; o escopo `PERSON` preenche pessoas, os demais preenchem conteúdos. Quando o total externo
+  exigiria mais de 500 páginas, `totalResults` permanece exato, mas `totalPages` e `hasNext` são limitados
+  à última página acessível, a 500.
+- **`CONTENT` combina fontes sem perder a posição lógica** (`ContentSearchPagePlanner`/
+  `SearchViewServiceImpl`) — o total é a soma dos `total_results` de filmes e séries no TMDB, e os itens
+  alternam o mesmo rank de filme e série até uma fonte acabar; os ranks restantes da fonte mais longa vêm
+  depois. `totalPages` e `hasNext` são calculados sobre esse total combinado e o `size` pedido, com teto de
+  500 páginas. Um slot sem
+  resultado materializado não é substituído pelo rank posterior, embora o total externo permaneça o mesmo.
+- **As páginas visuais respeitam o tamanho pedido sobre a página fixa do TMDB** (`TmdbSearchWindowReader`)
+  — o serviço lê as páginas externas necessárias para montar o intervalo visual solicitado, calcula os
+  metadados a partir do total externo e preserva a ordem de origem. Isso vale para os escopos diretos e
+  para cada fonte do escopo misto.
+- **A regiao preferida e aplicada conforme o contrato de cada endpoint TMDB** (`SearchViewServiceImpl`/
+  `TmdbClient`) — buscas de filmes recebem `preferredRegion`, cuja regiao tambem participa da chave de
+  cache; os endpoints de series e pessoas nao oferecem esse parametro. O enriquecimento visual dos cards
+  continua usando idioma e regiao preferidos.
+- **Cards visuais reutilizam enriquecimento em lote e têm fallback** (`SearchContentViewAssembler`/
+  `ContentCardAssembler`) — o card pede metadata básica, estado do viewer e progresso de watchlist. Se a
+  metadata adicional do TMDB falhar ou vier incompleta, o item não desaparece: título, poster e ano vindos
+  da busca continuam sendo usados quando disponíveis, e `previewStatus` distingue `AVAILABLE`, `PARTIAL`
+  e `UNAVAILABLE`. O `voteAverage` permanece o valor da resposta de busca do TMDB; nunca é convertido em
+  média ou estatística comunitária do Watchwise.
+- **A leitura visual não cria referências de conteúdo** (`SearchViewServiceImpl`/
+  `SearchContentViewAssembler`) — a composição consulta coordenadas TMDB e estado existente do viewer,
+  mas não chama `ContentService.getOrCreateReference`, não persiste `Content` nem metadata de filme ou
+  série, e não transforma uma leitura em ação de escrita.
 
 ## Calendar
 

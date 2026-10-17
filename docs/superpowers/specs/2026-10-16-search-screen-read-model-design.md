@@ -19,9 +19,13 @@ Provide one paginated visual read model for the Search screen's Content, Movies,
 
 - `q` is trimmed and must contain 3 through 100 characters.
 - `scope` is required.
-- `page` defaults to `1`, is at least `1`, and cannot exceed `500`.
+- `page` defaults to `1`, is at least `1`, and cannot exceed `500`. `totalResults` remains the exact
+  external total, while `totalPages` and `hasNext` describe only the accessible visual pages and are
+  capped at `500`; this prevents the response from advertising a next page the route rejects.
 - `size` defaults to `18`, is at least `1`, and cannot exceed `20`.
-- The route requires the authenticated user, uses the existing search rate-limit bucket, and resolves data in the viewer's preferred TMDB language and region.
+- The route requires the authenticated user and uses the existing search rate-limit bucket. Movie search
+  passes the viewer's preferred TMDB language and region; TMDB's TV and person search endpoints accept
+  language but do not expose a region parameter. Card enrichment uses both viewer preferences.
 
 The response is a `SearchViewDTO`:
 
@@ -54,7 +58,7 @@ The canonical combined order is deterministic:
 
 This deliberately favors correct totals, stable numeric pagination, and a balanced mixed grid over the opaque mixed relevance order of TMDB's `/search/multi`. It is the only source contract available that can state an exact content-only total without storing a separate external search index.
 
-`TmdbSearchWindowReader` is the shared deep module for one TMDB source. TMDB pages are always 20 items, while the visual endpoint accepts a size from 1 through 20. The reader first loads source page 1 to learn the authoritative total, then converts the requested visual offset into the one or two valid overlapping TMDB pages and slices exact logical items from them. This prevents the page-two gap that would occur if visual `size = 18` were passed directly as TMDB's `page = 2`, and lets an out-of-range visual page return an empty page with the true total rather than becoming an external error.
+`TmdbSearchWindowReader` is the shared deep module for one TMDB source. TMDB pages are always 20 items, while the visual endpoint accepts a size from 1 through 20. The reader first loads source page 1 to learn the authoritative total, then converts the requested visual offset into the one or two valid overlapping TMDB pages and slices exact logical items from them. This prevents the page-two gap that would occur if visual `size = 18` were passed directly as TMDB's `page = 2`, and lets an out-of-range visual page return an empty page with the true result total rather than becoming an external error. Reported accessible page metadata remains capped at 500.
 
 `ContentSearchPagePlanner` is a pure component that maps a requested combined page to typed source positions. It uses the movie and TV totals returned by `TmdbSearchWindowReader`, then requests only source windows that contain those positions. After the cached total page, a source contributes at most two fixed-size TMDB pages for the requested visual window. It never walks every preceding result or makes a per-card search call.
 
