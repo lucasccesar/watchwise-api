@@ -1,0 +1,4562 @@
+{
+    "/3/discover/movie": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "certification",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "certification.gte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "certification.lte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "certification_country",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "include_video",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "primary_release_year",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "primary_release_date.gte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "primary_release_date.lte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "release_date.gte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "release_date.lte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "sort_by",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_average.gte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_average.lte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_count.gte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_count.lte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "watch_region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_cast",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_companies",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_crew",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_genres",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_keywords",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_origin_country",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_original_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_people",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_release_type",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_runtime.gte",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_runtime.lte",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_watch_monetization_types",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_watch_providers",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_companies",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_genres",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_keywords",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_watch_providers",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "year",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/discover/tv": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "air_date.gte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "air_date.lte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "first_air_date_year",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "first_air_date.gte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "first_air_date.lte",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "include_null_first_air_dates",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "screened_theatrically",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "sort_by",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "timezone",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_average.gte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_average.lte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_count.gte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "vote_count.lte",
+                    "schema": {
+                        "type": "number"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "watch_region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_companies",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_genres",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_keywords",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_networks",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_origin_country",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_original_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_runtime.gte",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_runtime.lte",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_status",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_watch_monetization_types",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_watch_providers",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_companies",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_genres",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_keywords",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "without_watch_providers",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "with_type",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["backdrop_path", "first_air_date", "genre_ids", "id", "name", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/genre/movie/list": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "genres": {
+                                        "items": {
+                                            "properties": ["id", "name"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/genre/tv/list": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "genres": {
+                                        "items": {
+                                            "properties": ["id", "name"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/keyword/{keyword_id}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "keyword_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "name": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/keyword/{keyword_id}/movies": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "keyword_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/now_playing": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "dates": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/popular": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/top_rated": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/upcoming": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "dates": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "append_to_response",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "adult": {},
+                                    "backdrop_path": {},
+                                    "belongs_to_collection": {},
+                                    "budget": {},
+                                    "genres": {
+                                        "items": {
+                                            "properties": ["id", "name"]
+                                        }
+                                    },
+                                    "homepage": {},
+                                    "id": {},
+                                    "imdb_id": {},
+                                    "origin_country": {},
+                                    "original_language": {},
+                                    "original_title": {},
+                                    "overview": {},
+                                    "popularity": {},
+                                    "poster_path": {},
+                                    "production_companies": {
+                                        "items": {
+                                            "properties": ["id", "logo_path", "name", "origin_country"]
+                                        }
+                                    },
+                                    "production_countries": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "name"]
+                                        }
+                                    },
+                                    "release_date": {},
+                                    "revenue": {},
+                                    "runtime": {},
+                                    "spoken_languages": {
+                                        "items": {
+                                            "properties": ["english_name", "iso_639_1", "name"]
+                                        }
+                                    },
+                                    "status": {},
+                                    "tagline": {},
+                                    "title": {},
+                                    "video": {},
+                                    "vote_average": {},
+                                    "vote_count": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/account_states": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "guest_session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "favorite": {},
+                                    "rated": {},
+                                    "watchlist": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/alternative_titles": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "country",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "titles": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "title", "type"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/changes": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "end_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "start_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "changes": {
+                                        "items": {
+                                            "properties": ["key", "items"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "cast_id", "character", "credit_id", "order"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "credit_id", "department", "job"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/external_ids": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "imdb_id": {},
+                                    "wikidata_id": {},
+                                    "facebook_id": {},
+                                    "instagram_id": {},
+                                    "twitter_id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/images": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_image_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "backdrops": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    },
+                                    "id": {},
+                                    "logos": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    },
+                                    "posters": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/keywords": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "keywords": {
+                                        "items": {
+                                            "properties": ["id", "name"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/latest": {
+        "get": {
+            "parameters": [],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "adult": {},
+                                    "backdrop_path": {},
+                                    "belongs_to_collection": {},
+                                    "budget": {},
+                                    "genres": {},
+                                    "homepage": {},
+                                    "id": {},
+                                    "imdb_id": {},
+                                    "original_language": {},
+                                    "original_title": {},
+                                    "overview": {},
+                                    "popularity": {},
+                                    "poster_path": {},
+                                    "production_companies": {},
+                                    "production_countries": {},
+                                    "release_date": {},
+                                    "revenue": {},
+                                    "runtime": {},
+                                    "spoken_languages": {},
+                                    "status": {},
+                                    "tagline": {},
+                                    "title": {},
+                                    "video": {},
+                                    "vote_average": {},
+                                    "vote_count": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/lists": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["description", "favorite_count", "id", "item_count", "iso_639_1", "list_type", "name", "poster_path"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/recommendations": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/release_dates": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "release_dates"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/reviews": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["author", "author_details", "content", "created_at", "id", "updated_at", "url"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/similar": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/translations": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "translations": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "iso_639_1", "name", "english_name", "data"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/videos": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["iso_639_1", "iso_3166_1", "name", "key", "site", "size", "type", "official", "published_at", "id"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/movie/{movie_id}/watch/providers": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "movie_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/popular": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for", "known_for_department", "name", "popularity", "profile_path"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "append_to_response",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "adult": {},
+                                    "also_known_as": {},
+                                    "biography": {},
+                                    "birthday": {},
+                                    "deathday": {},
+                                    "gender": {},
+                                    "homepage": {},
+                                    "id": {},
+                                    "imdb_id": {},
+                                    "known_for_department": {},
+                                    "name": {},
+                                    "place_of_birth": {},
+                                    "popularity": {},
+                                    "profile_path": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/changes": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "end_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "start_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "changes": {
+                                        "items": {
+                                            "properties": ["key", "items"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/combined_credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count", "character", "credit_id", "order", "media_type"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count", "credit_id", "department", "job", "media_type"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/external_ids": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "freebase_mid": {},
+                                    "freebase_id": {},
+                                    "imdb_id": {},
+                                    "tvrage_id": {},
+                                    "wikidata_id": {},
+                                    "facebook_id": {},
+                                    "instagram_id": {},
+                                    "tiktok_id": {},
+                                    "twitter_id": {},
+                                    "youtube_id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/images": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "profiles": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/latest": {
+        "get": {
+            "parameters": [],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "adult": {},
+                                    "also_known_as": {},
+                                    "biography": {},
+                                    "birthday": {},
+                                    "deathday": {},
+                                    "gender": {},
+                                    "homepage": {},
+                                    "id": {},
+                                    "imdb_id": {},
+                                    "known_for_department": {},
+                                    "name": {},
+                                    "place_of_birth": {},
+                                    "popularity": {},
+                                    "profile_path": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/movie_credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count", "character", "credit_id", "order"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count", "credit_id", "department", "job"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/tv_credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "first_air_date", "name", "vote_average", "vote_count", "character", "credit_id", "episode_count"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "first_air_date", "name", "vote_average", "vote_count", "credit_id", "department", "episode_count", "job"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/tagged_images": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "file_path", "height", "id", "iso_639_1", "vote_average", "vote_count", "width", "image_type", "media", "media_type"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/person/{person_id}/translations": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "person_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "translations": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "iso_639_1", "name", "english_name", "data"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/search/collection": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "query",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "id", "name", "original_language", "original_name", "overview", "poster_path"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/search/keyword": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "query",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["id", "name"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/search/movie": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "query",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "primary_release_year",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "region",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "year",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "original_language", "original_title", "overview", "popularity", "poster_path", "release_date", "title", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/search/multi": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "query",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "id", "title", "original_language", "original_title", "overview", "poster_path", "media_type", "genre_ids", "popularity", "release_date", "video", "vote_average", "vote_count", "name", "original_name"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/search/person": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "query",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "known_for"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/search/tv": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "query",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "first_air_date_year",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "include_adult",
+                    "schema": {
+                        "type": "boolean"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "year",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "first_air_date", "name", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/trending/all/{time_window}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "time_window",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "id", "title", "original_language", "original_title", "overview", "poster_path", "media_type", "genre_ids", "popularity", "release_date", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/trending/movie/{time_window}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "time_window",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "id", "title", "original_language", "original_title", "overview", "poster_path", "media_type", "genre_ids", "popularity", "release_date", "video", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/trending/person/{time_window}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "time_window",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "id", "name", "original_name", "media_type", "popularity", "gender", "known_for_department", "profile_path", "known_for"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/trending/tv/{time_window}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "time_window",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "id", "name", "original_language", "original_name", "overview", "poster_path", "media_type", "genre_ids", "popularity", "first_air_date", "vote_average", "vote_count", "origin_country"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/airing_today": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "timezone",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["backdrop_path", "first_air_date", "genre_ids", "id", "name", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/on_the_air": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "timezone",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["backdrop_path", "first_air_date", "genre_ids", "id", "name", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/popular": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["backdrop_path", "first_air_date", "genre_ids", "id", "name", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/top_rated": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["backdrop_path", "first_air_date", "genre_ids", "id", "name", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "append_to_response",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "adult": {},
+                                    "backdrop_path": {},
+                                    "created_by": {
+                                        "items": {
+                                            "properties": ["id", "credit_id", "name", "gender", "profile_path"]
+                                        }
+                                    },
+                                    "episode_run_time": {},
+                                    "first_air_date": {},
+                                    "genres": {
+                                        "items": {
+                                            "properties": ["id", "name"]
+                                        }
+                                    },
+                                    "homepage": {},
+                                    "id": {},
+                                    "in_production": {},
+                                    "languages": {},
+                                    "last_air_date": {},
+                                    "last_episode_to_air": {},
+                                    "name": {},
+                                    "next_episode_to_air": {},
+                                    "networks": {
+                                        "items": {
+                                            "properties": ["id", "logo_path", "name", "origin_country"]
+                                        }
+                                    },
+                                    "number_of_episodes": {},
+                                    "number_of_seasons": {},
+                                    "origin_country": {},
+                                    "original_language": {},
+                                    "original_name": {},
+                                    "overview": {},
+                                    "popularity": {},
+                                    "poster_path": {},
+                                    "production_companies": {
+                                        "items": {
+                                            "properties": ["id", "logo_path", "name", "origin_country"]
+                                        }
+                                    },
+                                    "production_countries": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "name"]
+                                        }
+                                    },
+                                    "seasons": {
+                                        "items": {
+                                            "properties": ["air_date", "episode_count", "id", "name", "overview", "poster_path", "season_number", "vote_average"]
+                                        }
+                                    },
+                                    "spoken_languages": {
+                                        "items": {
+                                            "properties": ["english_name", "iso_639_1", "name"]
+                                        }
+                                    },
+                                    "status": {},
+                                    "tagline": {},
+                                    "type": {},
+                                    "vote_average": {},
+                                    "vote_count": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/account_states": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "guest_session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "favorite": {},
+                                    "rated": {},
+                                    "watchlist": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/aggregate_credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "roles", "total_episode_count", "order"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "jobs", "department", "total_episode_count"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/alternative_titles": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "title", "type"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/changes": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "end_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "start_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "changes": {
+                                        "items": {
+                                            "properties": ["key", "items"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/content_ratings": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "results": {
+                                        "items": {
+                                            "properties": ["descriptors", "iso_3166_1", "rating"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "character", "credit_id", "order"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "credit_id", "department", "job"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/episode_groups": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "results": {
+                                        "items": {
+                                            "properties": ["description", "episode_count", "group_count", "id", "name", "network", "type"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/external_ids": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "imdb_id": {},
+                                    "freebase_mid": {},
+                                    "freebase_id": {},
+                                    "tvdb_id": {},
+                                    "tvrage_id": {},
+                                    "wikidata_id": {},
+                                    "facebook_id": {},
+                                    "instagram_id": {},
+                                    "twitter_id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/images": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_image_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "backdrops": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    },
+                                    "id": {},
+                                    "logos": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    },
+                                    "posters": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/keywords": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["name", "id"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/latest": {
+        "get": {
+            "parameters": [],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "adult": {},
+                                    "backdrop_path": {},
+                                    "created_by": {},
+                                    "episode_run_time": {},
+                                    "first_air_date": {},
+                                    "genres": {},
+                                    "homepage": {},
+                                    "id": {},
+                                    "in_production": {},
+                                    "languages": {},
+                                    "last_air_date": {},
+                                    "last_episode_to_air": {},
+                                    "name": {},
+                                    "next_episode_to_air": {},
+                                    "networks": {},
+                                    "number_of_episodes": {},
+                                    "number_of_seasons": {},
+                                    "origin_country": {},
+                                    "original_language": {},
+                                    "original_name": {},
+                                    "overview": {},
+                                    "popularity": {},
+                                    "poster_path": {},
+                                    "production_companies": {},
+                                    "production_countries": {},
+                                    "seasons": {
+                                        "items": {
+                                            "properties": ["air_date", "episode_count", "id", "name", "overview", "poster_path", "season_number"]
+                                        }
+                                    },
+                                    "spoken_languages": {},
+                                    "status": {},
+                                    "tagline": {},
+                                    "type": {},
+                                    "vote_average": {},
+                                    "vote_count": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/lists": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["description", "favorite_count", "id", "item_count", "iso_639_1", "iso_3166_1", "name", "poster_path"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/recommendations": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "id", "name", "original_language", "original_name", "overview", "poster_path", "media_type", "genre_ids", "popularity", "first_air_date", "vote_average", "vote_count", "origin_country"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/reviews": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["author", "author_details", "content", "created_at", "id", "updated_at", "url"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/screened_theatrically": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["id", "episode_number", "season_number"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/similar": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "page": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["adult", "backdrop_path", "genre_ids", "id", "origin_country", "original_language", "original_name", "overview", "popularity", "poster_path", "first_air_date", "name", "vote_average", "vote_count"]
+                                        }
+                                    },
+                                    "total_pages": {},
+                                    "total_results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/translations": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "translations": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "iso_639_1", "name", "english_name", "data"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/videos": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_video_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["iso_639_1", "iso_3166_1", "name", "key", "site", "size", "type", "official", "published_at", "id"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/watch/providers": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "append_to_response",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "_id": {},
+                                    "air_date": {},
+                                    "episodes": {
+                                        "items": {
+                                            "properties": ["air_date", "episode_number", "episode_type", "id", "name", "overview", "production_code", "runtime", "season_number", "show_id", "still_path", "vote_average", "vote_count", "crew", "guest_stars"]
+                                        }
+                                    },
+                                    "name": {},
+                                    "networks": {
+                                        "items": {
+                                            "properties": ["id", "logo_path", "name", "origin_country"]
+                                        }
+                                    },
+                                    "overview": {},
+                                    "id": {},
+                                    "poster_path": {},
+                                    "season_number": {},
+                                    "vote_average": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/account_states": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "guest_session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["id", "episode_number", "rated"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/aggregate_credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "roles", "total_episode_count", "order"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "jobs", "department", "total_episode_count"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/season/{season_id}/changes": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "end_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "page",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "start_date",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "changes": {
+                                        "items": {
+                                            "properties": ["key", "items"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "character", "credit_id", "order"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "credit_id", "department", "job"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/external_ids": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "freebase_mid": {},
+                                    "freebase_id": {},
+                                    "tvdb_id": {},
+                                    "tvrage_id": {},
+                                    "wikidata_id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/images": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_image_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "posters": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/translations": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "translations": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "iso_639_1", "name", "english_name", "data"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/videos": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_video_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["iso_639_1", "iso_3166_1", "name", "key", "site", "size", "type", "official", "published_at", "id"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/watch/providers": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/episode/{episode_number}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "episode_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "append_to_response",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "air_date": {},
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["department", "job", "credit_id", "adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path"]
+                                        }
+                                    },
+                                    "episode_number": {},
+                                    "guest_stars": {
+                                        "items": {
+                                            "properties": ["character", "credit_id", "order", "adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path"]
+                                        }
+                                    },
+                                    "name": {},
+                                    "overview": {},
+                                    "id": {},
+                                    "production_code": {},
+                                    "runtime": {},
+                                    "season_number": {},
+                                    "still_path": {},
+                                    "vote_average": {},
+                                    "vote_count": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/episode/{episode_number}/account_states": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "episode_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "guest_session_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "favorite": {},
+                                    "rated": {},
+                                    "watchlist": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/episode/{episode_id}/changes": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "episode_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "changes": {
+                                        "items": {
+                                            "properties": ["key", "items"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/episode/{episode_number}/credits": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "episode_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cast": {
+                                        "items": {
+                                            "properties": ["adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path", "character", "credit_id", "order"]
+                                        }
+                                    },
+                                    "crew": {
+                                        "items": {
+                                            "properties": ["department", "job", "credit_id", "adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path"]
+                                        }
+                                    },
+                                    "guest_stars": {
+                                        "items": {
+                                            "properties": ["character", "credit_id", "order", "adult", "gender", "id", "known_for_department", "name", "original_name", "popularity", "profile_path"]
+                                        }
+                                    },
+                                    "id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/episode/{episode_number}/external_ids": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "episode_number",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "imdb_id": {},
+                                    "freebase_mid": {},
+                                    "freebase_id": {},
+                                    "tvdb_id": {},
+                                    "tvrage_id": {},
+                                    "wikidata_id": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/episode/{episode_number}/images": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_image_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "episode_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "stills": {
+                                        "items": {
+                                            "properties": ["aspect_ratio", "height", "iso_639_1", "file_path", "vote_average", "vote_count", "width"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/episode/{episode_number}/translations": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "episode_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "translations": {
+                                        "items": {
+                                            "properties": ["iso_3166_1", "iso_639_1", "name", "english_name", "data"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/{series_id}/season/{season_number}/episode/{episode_number}/videos": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "series_id",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "include_video_language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "language",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": null
+                },
+                {
+                    "name": "season_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                },
+                {
+                    "name": "episode_number",
+                    "schema": {
+                        "type": "integer"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {},
+                                    "results": {
+                                        "items": {
+                                            "properties": ["iso_639_1", "iso_3166_1", "name", "key", "site", "size", "type", "official", "published_at", "id"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "/3/tv/episode_group/{tv_episode_group_id}": {
+        "get": {
+            "parameters": [
+                {
+                    "name": "tv_episode_group_id",
+                    "schema": {
+                        "type": "string"
+                    },
+                    "required": true
+                }
+            ],
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "description": {},
+                                    "episode_count": {},
+                                    "group_count": {},
+                                    "groups": {
+                                        "items": {
+                                            "properties": ["id", "name", "order", "episodes", "locked"]
+                                        }
+                                    },
+                                    "id": {},
+                                    "name": {},
+                                    "network": {},
+                                    "type": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -7,11 +7,8 @@ target/
 /.agents/
 /.claude/
 /.codex/
-/.superpowers/
 /.worktrees/
-/docs/
 /CLAUDE.md
-/AGENTS.md
 /.m2/
 /.obsidian/
 /.testcontainers.properties
