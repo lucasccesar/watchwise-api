@@ -7,5 +7,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record TmdbPersonSearchResult(
         String id,
         String name,
-        @JsonProperty("profile_path") String profilePath) {
+        @JsonProperty("profile_path") String profilePath,
+        @JsonProperty("known_for_department") String knownForDepartment) {
+
+    public TmdbPersonSearchResult(String id, String name, String profilePath) {
+        this(id, name, profilePath, null);
+    }
 }
