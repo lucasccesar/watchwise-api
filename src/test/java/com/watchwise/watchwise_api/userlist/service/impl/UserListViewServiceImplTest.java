@@ -108,6 +108,7 @@ class UserListViewServiceImplTest {
         verify(repository).findPage(captor.capture());
         UserListViewQuery query = captor.getValue();
         assertThat(query.query()).isEqualTo("100\\%\\_\\\\");
+        assertThat(query.rawQuery()).isEqualTo("100%_\\");
         assertThat(query.sortBy()).isEqualTo(UserListViewSort.LIKES_COUNT);
         assertThat(query.direction()).isEqualTo(Sort.Direction.DESC);
         assertThat(query.pageable().getPageNumber()).isEqualTo(1);
@@ -115,6 +116,24 @@ class UserListViewServiceImplTest {
         assertThat(result.getTotalElements()).isEqualTo(31);
         assertThat(result.getNumber()).isEqualTo(1);
         verifyNoInteractions(itemService, comments, likes, contentCards);
+    }
+
+    @Test
+    @DisplayName("[getView] Should Preserve Visual Search Page Size Up To Twenty - When Search Uses The Default Size")
+    void shouldPreserveVisualSearchPageSizeUpToTwentyWhenSearchUsesTheDefaultSize() {
+        when(repository.findPage(any())).thenAnswer(inv -> {
+            UserListViewQuery query = inv.getArgument(0);
+            return new PageImpl<UserList>(List.of(), query.pageable(), 0);
+        });
+
+        var result = service.getView(new UserListViewRequest(
+                viewer, null, UserListViewQueryMode.SEARCH, null, "night", null, null,
+                null, null, 1, 18));
+
+        ArgumentCaptor<UserListViewQuery> captor = ArgumentCaptor.forClass(UserListViewQuery.class);
+        verify(repository).findPage(captor.capture());
+        assertThat(captor.getValue().pageable().getPageSize()).isEqualTo(18);
+        assertThat(result.getSize()).isEqualTo(18);
     }
 
     @Test

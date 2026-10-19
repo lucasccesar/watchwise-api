@@ -92,6 +92,7 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
         if (request.query() != null && !request.query().isBlank()) {
             where.append(" AND LOWER(ul.name) LIKE '%' || LOWER(:nameQuery) || '%' ESCAPE '\\'");
             params.put("nameQuery", request.query());
+            params.put("rawNameQuery", request.rawQuery());
         }
         boolean hasGenre = request.genre() != null && !request.genre().isBlank();
         if (request.itemType() != null) {
@@ -133,7 +134,7 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
             return switch (request.mode()) {
                 case DISCOVER -> " ORDER BY ul.likes_count DESC, ul.created_at DESC, ul.id DESC";
                 case USER -> " ORDER BY ul.created_at DESC, ul.id DESC";
-                case SEARCH -> " ORDER BY CASE WHEN LOWER(ul.name) = LOWER(:nameQuery) THEN 0 WHEN LOWER(ul.name) LIKE LOWER(:nameQuery) || '%' ESCAPE '\\' THEN 1 ELSE 2 END, ul.likes_count DESC, ul.updated_at DESC, ul.id DESC";
+                case SEARCH -> " ORDER BY CASE WHEN LOWER(ul.name) = LOWER(:rawNameQuery) THEN 0 WHEN LOWER(ul.name) LIKE LOWER(:nameQuery) || '%' ESCAPE '\\' THEN 1 ELSE 2 END, ul.likes_count DESC, ul.updated_at DESC, ul.id DESC";
                 case MY -> switch (request.source()) {
                     case OWNED -> " ORDER BY ul.rank ASC NULLS LAST, ul.created_at DESC, ul.id DESC";
                     case LIKED -> " ORDER BY (SELECT vl.created_at FROM likes vl WHERE vl.user_id = :viewerId AND vl.list_id = ul.id) DESC, (SELECT vl.id FROM likes vl WHERE vl.user_id = :viewerId AND vl.list_id = ul.id) DESC";

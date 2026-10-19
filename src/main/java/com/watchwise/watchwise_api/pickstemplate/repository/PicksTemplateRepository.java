@@ -53,6 +53,7 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
 
     @Query(value = """
             select template from PicksTemplate template
+            left join fetch template.creator
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
             order by case

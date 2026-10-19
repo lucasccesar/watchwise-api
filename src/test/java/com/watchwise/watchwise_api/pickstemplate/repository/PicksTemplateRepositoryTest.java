@@ -139,6 +139,30 @@ class PicksTemplateRepositoryTest {
     }
 
     @Test
+    @DisplayName("[searchRelevance] Should Fetch Nullable Creators In The Search Page - When Templates Match")
+    void shouldFetchNullableCreatorsInTheSearchPageWhenTemplatesMatch() {
+        LocalDateTime now = LocalDateTime.now();
+        User creator = saveUser("search-template-creator", now);
+        PicksTemplate community = repository.saveAndFlush(PicksTemplate.builder()
+                .creator(creator).origin(PickOrigin.COMMUNITY).name("Night community")
+                .createdAt(now).updatedAt(now).build());
+        PicksTemplate official = repository.saveAndFlush(PicksTemplate.builder()
+                .origin(PickOrigin.OFFICIAL).name("Night official")
+                .createdAt(now).updatedAt(now).build());
+        entityManager.clear();
+
+        Page<PicksTemplate> result = repository.searchRelevance(
+                null, "night", "night", PageRequest.of(0, 10));
+
+        PicksTemplate fetchedCommunity = result.getContent().stream()
+                .filter(template -> template.getId().equals(community.getId())).findFirst().orElseThrow();
+        PicksTemplate fetchedOfficial = result.getContent().stream()
+                .filter(template -> template.getId().equals(official.getId())).findFirst().orElseThrow();
+        assertThat(Hibernate.isInitialized(fetchedCommunity.getCreator())).isTrue();
+        assertThat(fetchedOfficial.getCreator()).isNull();
+    }
+
+    @Test
     void searchesRecentTemplatesInCreationOrderWithOriginAndEscapedNameFilters() {
         LocalDateTime now = LocalDateTime.of(2026, 9, 18, 12, 0);
         saveTemplate("Rank% older", PickOrigin.OFFICIAL, now.minusDays(1));

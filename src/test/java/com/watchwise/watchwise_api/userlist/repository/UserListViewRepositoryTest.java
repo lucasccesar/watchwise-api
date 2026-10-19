@@ -181,6 +181,21 @@ class UserListViewRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findPage] Should Rank A Literal Wildcard Name As Exact - When Search Query Contains A Wildcard")
+    void shouldRankLiteralWildcardNameAsExactWhenSearchQueryContainsAWildcard() {
+        UserList exact = list(viewer, "100%", UserListVisibility.PRIVATE, 1, 1, null);
+        UserList prefix = list(viewer, "100% list extras", UserListVisibility.PRIVATE, 1, 2, null);
+        em.flush();
+        em.clear();
+
+        UserListViewQuery query = new UserListViewQuery(viewer.getId(), null, UserListViewQueryMode.SEARCH,
+                null, "100\\%", "100%", null, null, null, Sort.Direction.ASC, PageRequest.of(0, 10));
+
+        assertThat(views.findPage(query).getContent()).extracting(UserList::getId)
+                .containsExactly(exact.getId(), prefix.getId());
+    }
+
+    @Test
     @DisplayName("[countListsVisibleToViewerByOwnerIdIn] Should Exclude Private Lists From Other Owners - When Counting User Cards")
     void shouldExcludePrivateListsFromOtherOwnersWhenCountingUserCards() {
         list(viewer, "own-private", UserListVisibility.PRIVATE, 0, 1, null);

@@ -39,6 +39,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class UserListViewServiceImpl implements UserListViewService {
+    private static final int DEFAULT_LIST_PAGE_SIZE_CAP = 10;
+    private static final int SEARCH_LIST_PAGE_SIZE_CAP = 20;
+
     private final UserListViewRepository repository;
     private final UserListItemRepository itemRepository;
     private final UserListItemService itemService;
@@ -116,11 +119,17 @@ public class UserListViewServiceImpl implements UserListViewService {
             throw new BadRequestException("Sort is unavailable for this list view");
         if (request.size() != null && request.size() < 10 && request.mode() != UserListViewQueryMode.SEARCH)
             throw new BadRequestException("Page size must be at least 10");
-        PageRequest pageable = pages.build(request.page(), request.size(), 10);
+        int pageSizeCap = request.mode() == UserListViewQueryMode.SEARCH
+                ? SEARCH_LIST_PAGE_SIZE_CAP
+                : DEFAULT_LIST_PAGE_SIZE_CAP;
+        PageRequest pageable = pages.build(request.page(), request.size(), pageSizeCap);
         String normalizedQuery = SearchTextNormalizer.normalizeOptionalQuery(request.query());
+        String rawQuery = request.query() == null || request.query().isBlank()
+                ? null
+                : request.query().trim();
         String genre = request.genre() == null || request.genre().isBlank() ? null : request.genre().trim();
         return new UserListViewQuery(request.viewerId(), request.ownerId(), request.mode(), source,
-                normalizedQuery, request.itemType(), genre, sort,
+                normalizedQuery, rawQuery, request.itemType(), genre, sort,
                 "desc".equals(request.sortDirection()) ? Sort.Direction.DESC : Sort.Direction.ASC, pageable);
     }
 
