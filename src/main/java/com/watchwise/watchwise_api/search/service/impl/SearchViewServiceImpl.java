@@ -49,6 +49,7 @@ public class SearchViewServiceImpl implements SearchViewService {
             case MOVIE -> searchMovies(viewer, trimmedQuery, scope, page, size);
             case SERIES -> searchSeries(viewer, trimmedQuery, scope, page, size);
             case PERSON -> searchPeople(viewer, trimmedQuery, scope, page, size);
+            default -> throw new UnsupportedOperationException("Local search scopes are not wired yet");
         };
     }
 

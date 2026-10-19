@@ -1,6 +1,8 @@
 package com.watchwise.watchwise_api.search.dto;
 
 import com.watchwise.watchwise_api.search.service.SearchViewScope;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewItemType;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -42,5 +44,13 @@ class SearchViewRequestDTOTest {
                 " " + "a".repeat(100) + " ", SearchViewScope.CONTENT, 1, 18);
 
         assertThat(validator.validate(request)).isEmpty();
+    }
+
+    @Test
+    void shouldAcceptPicksTemplateOriginAndListItemTypeAsBindableFilters() {
+        assertThat(validator.validate(new SearchViewRequestDTO(
+                "night", SearchViewScope.PICKS_TEMPLATE, 1, 10, PickOrigin.COMMUNITY, null))).isEmpty();
+        assertThat(validator.validate(new SearchViewRequestDTO(
+                "night", SearchViewScope.LIST, 1, 10, null, UserListViewItemType.MOVIE))).isEmpty();
     }
 }

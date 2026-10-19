@@ -4,5 +4,8 @@ public enum SearchViewScope {
     CONTENT,
     MOVIE,
     SERIES,
-    PERSON
+    PERSON,
+    LIST,
+    PICKS_TEMPLATE,
+    USER
 }
