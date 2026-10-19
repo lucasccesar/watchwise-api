@@ -55,6 +55,28 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
             select template from PicksTemplate template
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+            order by case
+                when lower(template.name) = lower(coalesce(:query, '')) then 0
+                when lower(template.name) like concat(lower(coalesce(:escapedName, '')), '%') escape '\\' then 1
+                else 2
+            end,
+            template.likesCount desc, template.createdAt desc, template.id desc
+            """,
+            countQuery = """
+                    select count(template) from PicksTemplate template
+                    where (:origin is null or template.origin = :origin)
+                      and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+                    """)
+    Page<PicksTemplate> searchRelevance(
+            @Param("origin") PickOrigin origin,
+            @Param("query") String query,
+            @Param("escapedName") String escapedName,
+            Pageable pageable);
+
+    @Query(value = """
+            select template from PicksTemplate template
+            where (:origin is null or template.origin = :origin)
+              and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
             order by template.createdAt desc, template.id desc
             """,
             countQuery = """

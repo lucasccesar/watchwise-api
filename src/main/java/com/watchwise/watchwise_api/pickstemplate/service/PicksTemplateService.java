@@ -14,6 +14,8 @@ public interface PicksTemplateService {
     PicksTemplateResponseDTO createTemplate(UUID actorId, PicksTemplateCreationDTO dto);
     Page<PicksTemplatePreviewDTO> listTemplates(UUID viewerId, PickOrigin origin, String name,
                                                 Integer page, Integer size, PicksTemplateSort sort);
+    Page<PicksTemplatePreviewDTO> searchForView(UUID viewerId, PickOrigin origin, String name,
+                                                Integer page, Integer size);
     Page<PicksTemplatePreviewDTO> getMyTemplatesView(UUID viewerId, Integer page, Integer size, PicksTemplateSort sort);
     PicksTemplateResponseDTO getTemplate(UUID viewerId, UUID templateId);
     PicksTemplateResponseDTO updateTemplate(UUID actorId, UUID templateId, PicksTemplatePatchDTO dto);

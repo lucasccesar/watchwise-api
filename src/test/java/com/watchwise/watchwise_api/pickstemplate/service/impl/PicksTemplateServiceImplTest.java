@@ -95,6 +95,25 @@ class PicksTemplateServiceImplTest {
     }
 
     @Test
+    void shouldSearchForViewWithRelevanceAndAssembleReturnedPage() {
+        UUID viewerId = UUID.randomUUID();
+        PageRequest pageRequest = PageRequest.of(0, 10);
+        Page<PicksTemplate> repositoryPage = Page.empty(pageRequest);
+        Page<PicksTemplatePreviewDTO> assembledPage = Page.empty(pageRequest);
+        when(pageRequestFactory.build(1, 10)).thenReturn(pageRequest);
+        when(templateRepository.searchRelevance(PickOrigin.COMMUNITY, "night", "night", pageRequest))
+                .thenReturn(repositoryPage);
+        when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
+
+        Page<PicksTemplatePreviewDTO> result = service.searchForView(
+                viewerId, PickOrigin.COMMUNITY, "night", 1, 10);
+
+        assertThat(result).isSameAs(assembledPage);
+        verify(templateRepository).searchRelevance(PickOrigin.COMMUNITY, "night", "night", pageRequest);
+        verify(previewAssembler).assemblePage(repositoryPage, viewerId);
+    }
+
+    @Test
     void shouldDispatchRecentSortToRecentSearch() {
         UUID viewerId = UUID.randomUUID();
         PageRequest pageRequest = PageRequest.of(0, 20);

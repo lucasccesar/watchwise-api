@@ -92,6 +92,16 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
 
     @Override
     @Transactional(readOnly = true)
+    public Page<PicksTemplatePreviewDTO> searchForView(UUID viewerId, PickOrigin origin, String name,
+                                                       Integer page, Integer size) {
+        PageRequest pageRequest = pageRequestFactory.build(page, size);
+        Page<PicksTemplate> templates = templateRepository.searchRelevance(
+                origin, name, escapeLike(name), pageRequest);
+        return previewAssembler.assemblePage(templates, viewerId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Page<PicksTemplatePreviewDTO> getMyTemplatesView(UUID viewerId, Integer page, Integer size,
                                                              PicksTemplateSort sort) {
         if (sort != null && sort != PicksTemplateSort.RECENT) {

@@ -122,6 +122,23 @@ class PicksTemplateRepositoryTest {
     }
 
     @Test
+    @DisplayName("[searchRelevance] Should Order Exact Prefix And Contains Matches - When Searching Template Names")
+    void shouldOrderExactPrefixAndContainsMatchesWhenSearchingTemplateNames() {
+        LocalDateTime now = LocalDateTime.now();
+        saveTemplate("Night", PickOrigin.COMMUNITY, now);
+        saveTemplate("Night Owls", PickOrigin.COMMUNITY, now.minusMinutes(1));
+        saveTemplate("Late Night Movies", PickOrigin.COMMUNITY, now.minusMinutes(2));
+        saveTemplate("Night Official", PickOrigin.OFFICIAL, now.plusMinutes(1));
+
+        Page<PicksTemplate> result = repository.searchRelevance(
+                PickOrigin.COMMUNITY, "night", "night", PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(PicksTemplate::getName)
+                .containsExactly("Night", "Night Owls", "Late Night Movies");
+        assertThat(result.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
     void searchesRecentTemplatesInCreationOrderWithOriginAndEscapedNameFilters() {
         LocalDateTime now = LocalDateTime.of(2026, 9, 18, 12, 0);
         saveTemplate("Rank% older", PickOrigin.OFFICIAL, now.minusDays(1));
