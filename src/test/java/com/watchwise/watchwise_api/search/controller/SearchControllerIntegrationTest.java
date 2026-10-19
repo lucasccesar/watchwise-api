@@ -37,6 +37,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -141,14 +142,73 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Load The Concrete Service In The Application Context")
-    void shouldLoadConcreteSearchViewServiceInApplicationContext() {
+    @DisplayName("[searchView] Should Load The Concrete Service - When The Application Context Starts")
+    void shouldLoadConcreteSearchViewServiceWhenApplicationContextStarts() {
         assertThat(searchViewService).isInstanceOf(SearchViewServiceImpl.class);
     }
 
     @Test
-    @DisplayName("[search/view] Should Trim Query And Apply Default Page And Size")
-    void shouldTrimQueryAndApplyDefaultPageAndSize() throws Exception {
+    @DisplayName("[searchView] Should Return Unauthorized - When Access Token Is Missing")
+    void shouldReturnUnauthorizedWhenSearchViewAccessTokenIsMissing() throws Exception {
+        assertSearchViewApiError(
+                mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())),
+                401)
+                .andExpect(jsonPath("$.error").value("Unauthorized"));
+    }
+
+    @Test
+    @DisplayName("[searchView] Should Return BadRequest ApiError - When Scope Is Invalid")
+    void shouldReturnBadRequestApiErrorWhenSearchViewScopeIsInvalid() throws Exception {
+        RegisteredUser user = registerUser("searchviewinvalidscope");
+
+        assertSearchViewApiError(
+                mockMvc.perform(searchViewRequest(user.accessToken()).param("scope", "INVALID")),
+                400)
+                .andExpect(jsonPath("$.error").value("Bad Request"));
+    }
+
+    @Test
+    @DisplayName("[searchView] Should Return BadRequest ApiError - When Scope Is Missing")
+    void shouldReturnBadRequestApiErrorWhenSearchViewScopeIsMissing() throws Exception {
+        RegisteredUser user = registerUser("searchviewmissingscope");
+
+        assertSearchViewApiError(
+                mockMvc.perform(searchViewRequest(user.accessToken())),
+                400)
+                .andExpect(jsonPath("$.error").value("Bad Request"));
+    }
+
+    @Test
+    @DisplayName("[searchView] Should Return BadRequest ApiError - When Page Is Zero")
+    void shouldReturnBadRequestApiErrorWhenSearchViewPageIsZero() throws Exception {
+        RegisteredUser user = registerUser("searchviewpagezero");
+
+        assertSearchViewApiError(
+                mockMvc.perform(searchViewRequest(user.accessToken())
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .param("page", "0")),
+                400)
+                .andExpect(jsonPath("$.error").value("Bad Request"));
+    }
+
+    @Test
+    @DisplayName("[searchView] Should Return BadRequest ApiError - When Size Exceeds Twenty")
+    void shouldReturnBadRequestApiErrorWhenSearchViewSizeExceedsTwenty() throws Exception {
+        RegisteredUser user = registerUser("searchviewsizeabovemaximum");
+
+        assertSearchViewApiError(
+                mockMvc.perform(searchViewRequest(user.accessToken())
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .param("size", "21")),
+                400)
+                .andExpect(jsonPath("$.error").value("Bad Request"));
+    }
+
+    @Test
+    @DisplayName("[searchView] Should Trim Query And Apply Default Page And Size - When Pagination Is Omitted")
+    void shouldTrimQueryAndApplyDefaultPageAndSizeWhenPaginationIsOmitted() throws Exception {
         RegisteredUser user = registerUser("searchviewdefaults");
         stubMovieSearch(1, List.of(movie("movie-1")));
 
@@ -168,8 +228,8 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Reject A Query That Exceeds The Trimmed Maximum")
-    void shouldRejectQueryThatExceedsTrimmedMaximum() throws Exception {
+    @DisplayName("[searchView] Should Reject A Query - When The Trimmed Maximum Is Exceeded")
+    void shouldRejectQueryWhenTheTrimmedMaximumIsExceeded() throws Exception {
         RegisteredUser user = registerUser("searchviewlongquery");
 
         mockMvc.perform(get("/search/view")
@@ -186,8 +246,8 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Reject Invalid Page And Size Before Calling TMDB")
-    void shouldRejectInvalidPageAndSizeBeforeCallingTmdb() throws Exception {
+    @DisplayName("[searchView] Should Reject Invalid Page And Size - When Validation Fails Before Calling TMDB")
+    void shouldRejectInvalidPageAndSizeWhenValidationFailsBeforeCallingTmdb() throws Exception {
         RegisteredUser user = registerUser("searchviewpagingvalidation");
 
         mockMvc.perform(get("/search/view")
@@ -221,8 +281,8 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Serve Every Scope Through The Running Application")
-    void shouldServeEveryScopeThroughTheRunningApplication() throws Exception {
+    @DisplayName("[searchView] Should Serve Every Scope - When The Running Application Handles Each Scope")
+    void shouldServeEveryScopeWhenTheRunningApplicationHandlesEachScope() throws Exception {
         RegisteredUser user = registerUser("searchviewscopes");
         stubMovieSearch(1, List.of(movie("movie-1")));
         stubSeriesSearch(1, List.of(series("series-1")));
@@ -262,8 +322,8 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Return Mixed Content In Planned Page Order Without Persisting Content")
-    void shouldReturnMixedContentInPlannedPageOrderWithoutPersistingContent() throws Exception {
+    @DisplayName("[searchView] Should Return Mixed Content In Planned Page Order Without Persisting Content - When Content Scope Is Requested")
+    void shouldReturnMixedContentInPlannedPageOrderWithoutPersistingContentWhenContentScopeIsRequested() throws Exception {
         RegisteredUser user = registerUser("searchviewmixedcontent");
         stubMovieSearch(4, List.of(movie("movie-1"), movie("movie-2"), movie("movie-3"), movie("movie-4")));
         stubSeriesSearch(3, List.of(series("series-1"), series("series-2"), series("series-3")));
@@ -291,8 +351,8 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Map Typed TMDB Failure To BadGateway")
-    void shouldMapTypedTmdbFailureToBadGateway() throws Exception {
+    @DisplayName("[searchView] Should Map Typed Tmdb Failure To BadGateway - When TMDB Is Unavailable")
+    void shouldMapTypedTmdbFailureToBadGatewayWhenTmdbIsUnavailable() throws Exception {
         RegisteredUser user = registerUser("searchviewtmdbdown");
         when(tmdbClient.searchMovies(anyString(), anyString(), anyString(), anyInt()))
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
@@ -310,8 +370,8 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Share The Legacy Search Rate Limit")
-    void shouldShareTheLegacySearchRateLimit() throws Exception {
+    @DisplayName("[searchView] Should Share The Legacy Search Rate Limit - When Search View Uses The Same Bucket")
+    void shouldShareTheLegacySearchRateLimitWhenSearchViewUsesTheSameBucket() throws Exception {
         RegisteredUser user = registerUser("searchviewratelimit");
         SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
         when(searchService.search(user.id(), "night", null, null, null)).thenReturn(expected);
@@ -335,6 +395,24 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value(429));
 
         verify(searchService, times(29)).search(user.id(), "night", null, null, null);
+    }
+
+    private MockHttpServletRequestBuilder searchViewRequest(Cookie accessToken) {
+        return get("/search/view")
+                .param("q", "night")
+                .cookie(accessToken);
+    }
+
+    private ResultActions assertSearchViewApiError(ResultActions resultActions, int expectedStatus)
+            throws Exception {
+        return resultActions
+                .andExpect(status().is(expectedStatus))
+                .andExpect(jsonPath("$.status").value(expectedStatus))
+                .andExpect(jsonPath("$.path").value("/search/view"))
+                .andExpect(jsonPath("$.type").doesNotExist())
+                .andExpect(jsonPath("$.title").doesNotExist())
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
     }
 
     private void stubMovieSearch(long totalResults, List<TmdbMovieSearchResult> results) {
@@ -419,8 +497,8 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search] Should Share Rate Limit Across Search Types")
-    void shouldShareRateLimitAcrossSearchTypes() throws Exception {
+    @DisplayName("[search] Should Share Rate Limit Across Search Types - When Both Routes Are Used")
+    void shouldShareRateLimitAcrossSearchTypesWhenBothRoutesAreUsed() throws Exception {
         RegisteredUser user = registerUser("searchratelimit");
         SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
         when(searchService.search(user.id(), "Alien", SearchType.USER, null, null)).thenReturn(expected);
