@@ -50,6 +50,24 @@ class SearchIndexesRepositoryTest {
                         .containsIgnoringCase("lower(")
                         .containsIgnoringCase("username")
                         .containsIgnoringCase("text_pattern_ops"));
+        assertThat(indexDefinitions("idx_users_username_trgm"))
+                .singleElement()
+                .satisfies(definition -> assertThat(definition)
+                        .containsIgnoringCase("lower(")
+                        .containsIgnoringCase("username")
+                        .containsIgnoringCase("gin_trgm_ops"));
+        assertThat(indexDefinitions("idx_users_name_trgm"))
+                .singleElement()
+                .satisfies(definition -> assertThat(definition)
+                        .containsIgnoringCase("lower(")
+                        .containsIgnoringCase("name")
+                        .containsIgnoringCase("gin_trgm_ops"));
+        assertThat(indexDefinitions("idx_picks_templates_name_trgm"))
+                .singleElement()
+                .satisfies(definition -> assertThat(definition)
+                        .containsIgnoringCase("lower(")
+                        .containsIgnoringCase("name")
+                        .containsIgnoringCase("gin_trgm_ops"));
     }
 
     @Test
