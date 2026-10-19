@@ -40,6 +40,36 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
 
     long countByFollowerIdAndStatus(UUID followerId, FollowStatus status);
 
+    @Query("""
+            SELECT f.followed.id AS userId, COUNT(f.id) AS count
+            FROM Follower f
+            WHERE f.followed.id IN :userIds AND f.status = :status
+            GROUP BY f.followed.id
+            """)
+    List<UserCount> countAcceptedFollowersByFollowedIdIn(
+            @Param("userIds") java.util.Collection<UUID> userIds,
+            @Param("status") FollowStatus status);
+
+    @Query("""
+            SELECT f.follower.id AS followerId, f.followed.id AS followedId, f.status AS status
+            FROM Follower f
+            WHERE (f.follower.id = :viewerId AND f.followed.id IN :targetIds)
+               OR (f.followed.id = :viewerId AND f.follower.id IN :targetIds)
+            """)
+    List<ViewerRelationRow> findViewerRelations(
+            @Param("viewerId") UUID viewerId, @Param("targetIds") java.util.Collection<UUID> targetIds);
+
+    interface UserCount {
+        UUID getUserId();
+        Long getCount();
+    }
+
+    interface ViewerRelationRow {
+        UUID getFollowerId();
+        UUID getFollowedId();
+        FollowStatus getStatus();
+    }
+
     @Modifying
     @Transactional
     void deleteByFollowerIdAndFollowedId(UUID followerId, UUID followedId);

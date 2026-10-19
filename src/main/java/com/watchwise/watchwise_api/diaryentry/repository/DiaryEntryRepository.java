@@ -21,6 +21,19 @@ import java.util.UUID;
 
 public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, DiaryEntryRepositoryCustom {
 
+    @Query("""
+            SELECT d.user.id AS userId, COUNT(d.id) AS count
+            FROM DiaryEntry d
+            WHERE d.user.id IN :userIds AND d.ignore = false
+            GROUP BY d.user.id
+            """)
+    List<UserDiaryCount> countVisibleDiaryEntriesByUserIdIn(@Param("userIds") Collection<UUID> userIds);
+
+    interface UserDiaryCount {
+        UUID getUserId();
+        Long getCount();
+    }
+
     // --- Feed (GET /feed) ---
 
     @Query("""

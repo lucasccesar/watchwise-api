@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.tuple;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -177,6 +178,24 @@ class UserListViewRepositoryTest {
         assertThat(page.getTotalElements()).isEqualTo(3);
         assertThat(page.getContent()).extracting(UserList::getId)
                 .containsExactly(exact.getId(), prefix.getId(), contains.getId());
+    }
+
+    @Test
+    @DisplayName("[countListsVisibleToViewerByOwnerIdIn] Should Exclude Private Lists From Other Owners - When Counting User Cards")
+    void shouldExcludePrivateListsFromOtherOwnersWhenCountingUserCards() {
+        list(viewer, "own-private", UserListVisibility.PRIVATE, 0, 1, null);
+        list(owner, "public", UserListVisibility.PUBLIC, 0, 2, null);
+        list(owner, "private", UserListVisibility.PRIVATE, 0, 3, null);
+        followers.save(Follower.builder().follower(viewer).followed(owner).status(FollowStatus.ACCEPTED)
+                .createdAt(LocalDateTime.now()).build());
+        list(owner, "followers", UserListVisibility.FOLLOWERS, 0, 4, null);
+        em.flush();
+        em.clear();
+
+        assertThat(lists.countListsVisibleToViewerByOwnerIdIn(viewer.getId(), List.of(viewer.getId(), owner.getId())))
+                .extracting(UserListRepository.OwnerListCount::getUserId, UserListRepository.OwnerListCount::getCount)
+                .containsExactlyInAnyOrder(
+                        tuple(viewer.getId(), 1L), tuple(owner.getId(), 2L));
     }
 
     @Test

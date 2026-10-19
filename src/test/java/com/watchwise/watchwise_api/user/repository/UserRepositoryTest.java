@@ -144,6 +144,23 @@ class UserRepositoryTest {
     }
 
     @Test
+    @DisplayName("[searchByNameOrUsernameForView] Should Match Name And Username In Relevance Order - When Searching Users")
+    void shouldMatchNameAndUsernameInRelevanceOrderWhenSearchingUsers() {
+        userRepository.save(buildUser("night", "night@email.com", true));
+        userRepository.save(buildUser("nightly", "nightly@email.com", true));
+        User namedMatch = buildUser("cinema", "cinema@email.com", true);
+        namedMatch.setName("Night Cinema");
+        userRepository.save(namedMatch);
+
+        Page<User> result = userRepository.searchByNameOrUsernameForView(
+                "night", "night", PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(User::getUsername)
+                .containsExactly("night", "nightly", "cinema");
+        assertThat(result.getTotalElements()).isEqualTo(3);
+    }
+
+    @Test
     @DisplayName("[findByUsernameStartingWithIgnoreCase] Should Match Regardless Of Case - When Username Prefix Has A Different Case")
     void shouldBeCaseInsensitive() {
         Page<User> result = userRepository.findByUsernameStartingWithIgnoreCase(

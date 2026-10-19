@@ -69,4 +69,28 @@ public interface UserRepository extends JpaRepository<User, UUID> {
             @Param("escapedUsername") String escapedUsername,
             Pageable pageable
     );
+
+    @Query(value = """
+        SELECT u FROM User u
+        WHERE LOWER(u.username) LIKE CONCAT('%', LOWER(:escapedQuery), '%') ESCAPE '\\'
+           OR LOWER(u.name) LIKE CONCAT('%', LOWER(:escapedQuery), '%') ESCAPE '\\'
+        ORDER BY
+            CASE
+                WHEN LOWER(u.username) = LOWER(:query) THEN 0
+                WHEN LOWER(u.name) = LOWER(:query) THEN 1
+                WHEN LOWER(u.username) LIKE CONCAT(LOWER(:escapedQuery), '%') ESCAPE '\\' THEN 2
+                WHEN LOWER(u.name) LIKE CONCAT(LOWER(:escapedQuery), '%') ESCAPE '\\' THEN 3
+                ELSE 4
+            END,
+            LOWER(u.name), LOWER(u.username), u.id
+        """,
+            countQuery = """
+        SELECT COUNT(u) FROM User u
+        WHERE LOWER(u.username) LIKE CONCAT('%', LOWER(:escapedQuery), '%') ESCAPE '\\'
+           OR LOWER(u.name) LIKE CONCAT('%', LOWER(:escapedQuery), '%') ESCAPE '\\'
+        """)
+    Page<User> searchByNameOrUsernameForView(
+            @Param("query") String query,
+            @Param("escapedQuery") String escapedQuery,
+            Pageable pageable);
 }

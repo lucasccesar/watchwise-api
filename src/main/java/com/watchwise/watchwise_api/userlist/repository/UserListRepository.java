@@ -35,6 +35,29 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
     Page<UserList> findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
             UserListVisibility visibility, Pageable pageable);
 
+    @Query("""
+            SELECT ul.user.id AS userId, COUNT(ul.id) AS count
+            FROM UserList ul
+            WHERE ul.user.id IN :userIds
+              AND (ul.user.id = :viewerId
+                   OR ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
+                   OR (ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
+                       AND EXISTS (
+                           SELECT f.id FROM Follower f
+                           WHERE f.follower.id = :viewerId
+                             AND f.followed.id = ul.user.id
+                             AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+                       )))
+            GROUP BY ul.user.id
+            """)
+    List<OwnerListCount> countListsVisibleToViewerByOwnerIdIn(
+            @Param("viewerId") UUID viewerId, @Param("userIds") Collection<UUID> userIds);
+
+    interface OwnerListCount {
+        UUID getUserId();
+        Long getCount();
+    }
+
     @Query(
             value = """
             SELECT ul FROM UserList ul JOIN FETCH ul.user
