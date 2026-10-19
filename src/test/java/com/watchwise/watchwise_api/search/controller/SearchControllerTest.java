@@ -5,8 +5,12 @@ import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
 import com.watchwise.watchwise_api.search.dto.SearchRequestDTO;
+import com.watchwise.watchwise_api.search.dto.SearchViewDTO;
+import com.watchwise.watchwise_api.search.dto.SearchViewRequestDTO;
 import com.watchwise.watchwise_api.search.service.SearchService;
 import com.watchwise.watchwise_api.search.service.SearchType;
+import com.watchwise.watchwise_api.search.service.SearchViewScope;
+import com.watchwise.watchwise_api.search.service.SearchViewService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,6 +45,9 @@ class SearchControllerTest {
 
     @Mock
     private SearchService searchService;
+
+    @Mock
+    private SearchViewService searchViewService;
 
     @Mock
     private RequestThrottler requestThrottler;
@@ -170,5 +177,37 @@ class SearchControllerTest {
         verify(requestThrottler, never()).checkAllowed(anyString(), anyInt(), any(Duration.class));
         verify(searchService, never()).search(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Apply Trim And Defaults - When Visual Search Request Is Valid")
+    void shouldApplyTrimAndDefaultsWhenVisualSearchRequestIsValid() {
+        SearchViewDTO expected = new SearchViewDTO(
+                SearchViewScope.MOVIE, "night", 1, 18, 1, 1L, false, List.of(), List.of());
+        when(searchViewService.search(viewerId, "night", SearchViewScope.MOVIE, 1, 18))
+                .thenReturn(expected);
+
+        ResponseEntity<SearchViewDTO> result = searchController.searchView(
+                new SearchViewRequestDTO(" night ", SearchViewScope.MOVIE, null, null));
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(expected);
+        verify(requestThrottler).checkAllowed("search|" + viewerId, 30, Duration.ofMinutes(5));
+        verify(searchViewService).search(viewerId, "night", SearchViewScope.MOVIE, 1, 18);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Reject Trimmed Query Above One Hundred Characters - When Visual Search Request Is Invalid")
+    void shouldRejectTrimmedQueryAboveOneHundredCharactersWhenVisualSearchRequestIsInvalid() {
+        assertThatThrownBy(() -> searchController.searchView(
+                new SearchViewRequestDTO(" " + "x".repeat(101) + " ", SearchViewScope.MOVIE, null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("q must contain at most 100 characters after trimming");
+
+        verify(requestThrottler, never()).checkAllowed(anyString(), anyInt(), any(Duration.class));
+        verify(searchViewService, never()).search(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt());
     }
 }

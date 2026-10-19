@@ -7,10 +7,13 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
 import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
+import com.watchwise.watchwise_api.search.dto.SearchViewDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.search.service.SearchService;
 import com.watchwise.watchwise_api.search.service.SearchType;
+import com.watchwise.watchwise_api.search.service.SearchViewScope;
+import com.watchwise.watchwise_api.search.service.SearchViewService;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -80,11 +83,15 @@ class SearchControllerIntegrationTest {
     @MockitoBean
     private SearchService searchService;
 
+    @MockitoBean
+    private SearchViewService searchViewService;
+
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         reset(searchService);
+        reset(searchViewService);
         RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
@@ -142,6 +149,63 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.templates").isArray());
 
         verify(searchService).search(user.id(), "Alien", SearchType.MOVIE, 2, 10);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Return Visual Search And Apply Defaults - When Request Is Valid")
+    void shouldReturnVisualSearchAndApplyDefaultsWhenRequestIsValid() throws Exception {
+        RegisteredUser user = registerUser("searchviewvalid");
+        SearchViewDTO expected = new SearchViewDTO(
+                SearchViewScope.MOVIE, "night", 1, 18, 1, 1L, false, List.of(), List.of());
+        when(searchViewService.search(user.id(), "night", SearchViewScope.MOVIE, 1, 18))
+                .thenReturn(expected);
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", " night ")
+                        .param("scope", "MOVIE")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.query").value("night"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(18));
+
+        verify(searchViewService).search(user.id(), "night", SearchViewScope.MOVIE, 1, 18);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Return BadRequest ApiError - When Trimmed Query Exceeds One Hundred Characters")
+    void shouldReturnBadRequestApiErrorWhenTrimmedQueryExceedsOneHundredCharacters() throws Exception {
+        RegisteredUser user = registerUser("searchviewlongquery");
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "x".repeat(101))
+                        .param("scope", "MOVIE")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search/view"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(searchViewService);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Return BadRequest ApiError - When Scope Binding Is Invalid")
+    void shouldReturnBadRequestApiErrorWhenScopeBindingIsInvalid() throws Exception {
+        RegisteredUser user = registerUser("searchviewinvalidscope");
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", "UNKNOWN")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search/view"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+
+        verifyNoInteractions(searchViewService);
     }
 
     @Test
