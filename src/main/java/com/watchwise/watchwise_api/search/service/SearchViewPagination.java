@@ -11,7 +11,7 @@ public final class SearchViewPagination {
         if (totalResults <= 0) {
             return 0;
         }
-        long pages = (totalResults + size - 1L) / size;
+        long pages = ((totalResults - 1L) / size) + 1L;
         return (int) Math.min(pages, MAX_PAGE);
     }
 

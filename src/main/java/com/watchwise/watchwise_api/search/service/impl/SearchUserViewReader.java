@@ -49,12 +49,18 @@ public class SearchUserViewReader {
                 .map(User::getId)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 
-        Map<UUID, Long> followersByUser = countsByUserId(
-                followers.countAcceptedFollowersByFollowedIdIn(visibleDetails, FollowStatus.ACCEPTED));
-        Map<UUID, Long> listsByUser = lists.countListsVisibleToViewerByOwnerIdIn(viewerId, visibleDetails).stream()
+        Map<UUID, Long> followersByUser = visibleDetails.isEmpty()
+                ? Map.of()
+                : countsByUserId(followers.countAcceptedFollowersByFollowedIdIn(
+                        visibleDetails, FollowStatus.ACCEPTED));
+        Map<UUID, Long> listsByUser = visibleDetails.isEmpty()
+                ? Map.of()
+                : lists.countListsVisibleToViewerByOwnerIdIn(viewerId, visibleDetails).stream()
                 .collect(java.util.stream.Collectors.toMap(UserListRepository.OwnerListCount::getUserId,
                         UserListRepository.OwnerListCount::getCount));
-        Map<UUID, Long> watchedByUser = diary.countVisibleDiaryEntriesByUserIdIn(visibleDetails).stream()
+        Map<UUID, Long> watchedByUser = visibleDetails.isEmpty()
+                ? Map.of()
+                : diary.countVisibleDiaryEntriesByUserIdIn(visibleDetails).stream()
                 .collect(java.util.stream.Collectors.toMap(DiaryEntryRepository.UserDiaryCount::getUserId,
                         DiaryEntryRepository.UserDiaryCount::getCount));
 
