@@ -25,10 +25,21 @@ public record UserListCardDTO(
         long commentsCount,
         Integer rank,
         UserListItemScope itemScope,
+        UserListDisplayScope displayScope,
         boolean ownedByMe
 ) {
     public UserListCardDTO {
         previewCards = previewCards == null ? List.of() : List.copyOf(previewCards);
         nestedListPreviews = nestedListPreviews == null ? List.of() : List.copyOf(nestedListPreviews);
+    }
+
+    public UserListCardDTO(UUID id, UserPreviewDTO user, String name, String description,
+            UserListVisibility visibility, LocalDateTime createdAt, LocalDateTime updatedAt,
+            List<ContentCardDTO> previewCards, List<UserListPreviewDTO> nestedListPreviews,
+            long nestedListsCount, long likesCount, boolean likedByMe, long itemsCount,
+            long commentsCount, Integer rank, UserListItemScope itemScope, boolean ownedByMe) {
+        this(id, user, name, description, visibility, createdAt, updatedAt, previewCards,
+                nestedListPreviews, nestedListsCount, likesCount, likedByMe, itemsCount,
+                commentsCount, rank, itemScope, null, ownedByMe);
     }
 }

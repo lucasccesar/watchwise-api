@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCardDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
+import com.watchwise.watchwise_api.userlist.dto.UserListDisplayScope;
 import com.watchwise.watchwise_api.userlist.dto.UserListPreviewDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListViewItemType;
 import com.watchwise.watchwise_api.userlist.dto.UserListViewQueryMode;
@@ -33,7 +34,7 @@ class UserListViewAssemblerTest {
     void visualEnumsMapApiSortValuesAndRejectUnknownValues() {
         assertArrayEquals(new UserListViewSource[]{UserListViewSource.OWNED, UserListViewSource.LIKED, UserListViewSource.ALL}, UserListViewSource.values());
         assertArrayEquals(new UserListViewItemType[]{UserListViewItemType.MOVIE, UserListViewItemType.SERIES, UserListViewItemType.SEASON, UserListViewItemType.EPISODE, UserListViewItemType.LIST}, UserListViewItemType.values());
-        assertArrayEquals(new UserListViewQueryMode[]{UserListViewQueryMode.MY, UserListViewQueryMode.USER, UserListViewQueryMode.DISCOVER}, UserListViewQueryMode.values());
+        assertArrayEquals(new UserListViewQueryMode[]{UserListViewQueryMode.MY, UserListViewQueryMode.USER, UserListViewQueryMode.DISCOVER, UserListViewQueryMode.SEARCH}, UserListViewQueryMode.values());
         assertEquals(UserListViewSort.NAME, UserListViewSort.fromApiValue("name"));
         assertEquals(UserListViewSort.LIKES_COUNT, UserListViewSort.fromApiValue("likesCount"));
         assertEquals(UserListViewSort.ITEMS_COUNT, UserListViewSort.fromApiValue("itemsCount"));
@@ -58,7 +59,7 @@ class UserListViewAssemblerTest {
         names.forEachRemaining(actual::add);
         assertEquals(List.of("id", "user", "name", "description", "visibility", "createdAt", "updatedAt",
                 "previewCards", "nestedListPreviews", "nestedListsCount", "likesCount", "likedByMe",
-                "itemsCount", "commentsCount", "rank", "itemScope", "ownedByMe"), actual);
+                "itemsCount", "commentsCount", "rank", "itemScope", "displayScope", "ownedByMe"), actual);
     }
 
     @Test
@@ -76,7 +77,7 @@ class UserListViewAssemblerTest {
         List<UserListPreviewDTO> sourceNested = new ArrayList<>();
         for (int i = 0; i < 7; i++) sourceNested.add(new UserListPreviewDTO(UUID.randomUUID(), ownerPreviewA, "nested-" + i, UserListVisibility.PUBLIC));
 
-        List<UserListCardDTO> cards = UserListViewAssembler.assemble(List.of(first, second),
+        List<UserListCardDTO> cards = UserListViewAssembler.assembleWithItemScopes(List.of(first, second),
                 Map.of(ownerA.getId(), ownerPreviewA, ownerB.getId(), ownerPreviewB),
                 Map.of(first.getId(), sourceCards), Map.of(first.getId(), sourceNested),
                 Map.of(first.getId(), 12L), Map.of(first.getId(), 8L), Map.of(first.getId(), 3L),
@@ -111,7 +112,7 @@ class UserListViewAssemblerTest {
         ContentCardDTO firstOnly = contentCard(22);
         ContentCardDTO secondOnly = contentCard(23);
 
-        List<UserListCardDTO> cards = UserListViewAssembler.assemble(List.of(first, second),
+        List<UserListCardDTO> cards = UserListViewAssembler.assembleWithItemScopes(List.of(first, second),
                 Map.of(owner.getId(), preview(owner)),
                 Map.of(first.getId(), List.of(repeatedCoordinate, firstOnly),
                         second.getId(), List.of(secondOnly, repeatedCoordinate)),
@@ -131,7 +132,7 @@ class UserListViewAssemblerTest {
         User owner = user(UUID.randomUUID(), "owner");
         UserList list = list(UUID.randomUUID(), owner, "list");
         ContentCardDTO supplied = contentCard(9);
-        var card = UserListViewAssembler.assemble(List.of(list), Map.of(owner.getId(), preview(owner)),
+        var card = UserListViewAssembler.assembleWithItemScopes(List.of(list), Map.of(owner.getId(), preview(owner)),
                 Map.of(list.getId(), List.of(supplied)), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
                 Set.of(), Map.of(), UUID.randomUUID()).get(0);
         assertSame(supplied, card.previewCards().get(0));

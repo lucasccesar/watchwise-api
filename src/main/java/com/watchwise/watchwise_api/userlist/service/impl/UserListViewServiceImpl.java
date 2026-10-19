@@ -62,7 +62,7 @@ public class UserListViewServiceImpl implements UserListViewService {
         Map<UUID, List<ContentRefDTO>> rawPreviews = itemService.getPreviewItemsByListIds(ids);
         Map<UUID, Long> nestedCounts = itemService.countNestedListsByListIds(ids);
         Map<UUID, Long> itemsCounts = itemService.getItemsCountByListIds(ids);
-        Map<UUID, UserListItemScope> scopes = itemService.getItemScopeByListIds(ids, nestedCounts);
+        Map<UUID, UserListScopeSummary> scopeSummaries = itemService.getScopeSummariesByListIds(ids, nestedCounts);
         Set<UUID> likedIds = likes.getLikedListIds(query.viewerId(), ids);
         Map<UUID, Long> commentCounts = comments.countVisibleListComments(query.viewerId(), ids).stream()
                 .collect(Collectors.toMap(CommentRepository.ListCommentCount::getListId,
@@ -81,7 +81,7 @@ public class UserListViewServiceImpl implements UserListViewService {
         Map<UUID, List<ContentCardDTO>> previewCards = previewCards(rawPreviews, loadedUsers.get(query.viewerId()));
         List<UserListCardDTO> cards = UserListViewAssembler.assemble(lists, ownerPreviews, previewCards,
                 nestedPreviews, nestedCounts, likeCounts, itemsCounts, commentCounts,
-                likedIds == null ? Set.of() : likedIds, scopes, query.viewerId());
+                likedIds == null ? Set.of() : likedIds, scopeSummaries, query.viewerId());
         return new org.springframework.data.domain.PageImpl<>(cards, page.getPageable(), page.getTotalElements());
     }
 
@@ -103,6 +103,10 @@ public class UserListViewServiceImpl implements UserListViewService {
                 if (request.ownerId() != null || request.source() != null)
                     throw new BadRequestException("DISCOVER rejects ownerId and source");
             }
+            case SEARCH -> {
+                if (request.ownerId() != null || request.source() != null)
+                    throw new BadRequestException("SEARCH rejects ownerId and source");
+            }
         }
         if (request.sortDirection() != null && !Set.of("asc", "desc").contains(request.sortDirection()))
             throw new BadRequestException("sortDirection must be one of: asc, desc");
@@ -110,7 +114,7 @@ public class UserListViewServiceImpl implements UserListViewService {
         if (sort != null && (sort == UserListViewSort.UPDATED_AT || sort == UserListViewSort.RANK)
                 && !(request.mode() == UserListViewQueryMode.MY && source == UserListViewSource.OWNED))
             throw new BadRequestException("Sort is unavailable for this list view");
-        if (request.size() != null && request.size() < 10)
+        if (request.size() != null && request.size() < 10 && request.mode() != UserListViewQueryMode.SEARCH)
             throw new BadRequestException("Page size must be at least 10");
         PageRequest pageable = pages.build(request.page(), request.size(), 10);
         String normalizedQuery = SearchTextNormalizer.normalizeOptionalQuery(request.query());

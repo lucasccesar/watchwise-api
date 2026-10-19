@@ -63,6 +63,10 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
                 if (request.ownerId() != null || request.source() != null)
                     throw new IllegalArgumentException("DISCOVER rejects ownerId and source");
             }
+            case SEARCH -> {
+                if (request.ownerId() != null || request.source() != null)
+                    throw new IllegalArgumentException("SEARCH rejects ownerId and source");
+            }
         }
     }
 
@@ -83,6 +87,7 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
                         .append(" AND (ul.user_id = :viewerId OR ul.visibility = 'PUBLIC' OR (ul.visibility = 'FOLLOWERS' AND EXISTS (SELECT 1 FROM followers f WHERE f.follower_id = :viewerId AND f.followed_id = :ownerId AND f.status = 'ACCEPTED')))");
             }
             case DISCOVER -> where.append(" AND ul.visibility = 'PUBLIC'");
+            case SEARCH -> where.append(" AND (ul.user_id = :viewerId OR ul.visibility = 'PUBLIC' OR (ul.visibility = 'FOLLOWERS' AND EXISTS (SELECT 1 FROM followers f WHERE f.follower_id = :viewerId AND f.followed_id = ul.user_id AND f.status = 'ACCEPTED')))");
         }
         if (request.query() != null && !request.query().isBlank()) {
             where.append(" AND LOWER(ul.name) LIKE '%' || LOWER(:nameQuery) || '%' ESCAPE '\\'");
@@ -128,6 +133,7 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
             return switch (request.mode()) {
                 case DISCOVER -> " ORDER BY ul.likes_count DESC, ul.created_at DESC, ul.id DESC";
                 case USER -> " ORDER BY ul.created_at DESC, ul.id DESC";
+                case SEARCH -> " ORDER BY CASE WHEN LOWER(ul.name) = LOWER(:nameQuery) THEN 0 WHEN LOWER(ul.name) LIKE LOWER(:nameQuery) || '%' ESCAPE '\\' THEN 1 ELSE 2 END, ul.likes_count DESC, ul.updated_at DESC, ul.id DESC";
                 case MY -> switch (request.source()) {
                     case OWNED -> " ORDER BY ul.rank ASC NULLS LAST, ul.created_at DESC, ul.id DESC";
                     case LIKED -> " ORDER BY (SELECT vl.created_at FROM likes vl WHERE vl.user_id = :viewerId AND vl.list_id = ul.id) DESC, (SELECT vl.id FROM likes vl WHERE vl.user_id = :viewerId AND vl.list_id = ul.id) DESC";

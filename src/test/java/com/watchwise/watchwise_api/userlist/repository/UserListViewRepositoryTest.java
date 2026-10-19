@@ -158,6 +158,28 @@ class UserListViewRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findPage] Should Search Own Public And Followed Lists By Relevance - When Search Mode Is Used")
+    void shouldSearchVisibleListsByRelevanceWhenSearchModeIsUsed() {
+        UserList exact = list(viewer, "night", UserListVisibility.PRIVATE, 1, 1, null);
+        UserList prefix = list(owner, "night owls", UserListVisibility.FOLLOWERS, 1, 2, null);
+        UserList contains = list(owner, "late night movies", UserListVisibility.PUBLIC, 10, 3, null);
+        list(owner, "night secret", UserListVisibility.PRIVATE, 100, 4, null);
+        followers.save(Follower.builder().follower(viewer).followed(owner).status(FollowStatus.ACCEPTED)
+                .createdAt(LocalDateTime.now()).build());
+        em.flush();
+        em.clear();
+
+        UserListViewQuery query = new UserListViewQuery(viewer.getId(), null, UserListViewQueryMode.SEARCH,
+                null, "night", null, null, null, Sort.Direction.ASC, PageRequest.of(0, 10));
+
+        Page<UserList> page = views.findPage(query);
+
+        assertThat(page.getTotalElements()).isEqualTo(3);
+        assertThat(page.getContent()).extracting(UserList::getId)
+                .containsExactly(exact.getId(), prefix.getId(), contains.getId());
+    }
+
+    @Test
     @DisplayName("[findPage] Should Match Direct Genres And Keep Nested Lists Separate - When Filtering Content And List Items")
     void shouldKeepContentAndNestedListTypesSeparateWhenFiltering() {
         UserList parent = list(viewer, "parent", UserListVisibility.PUBLIC, 1, 1, null);

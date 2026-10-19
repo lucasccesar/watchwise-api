@@ -156,7 +156,7 @@ class UserListViewServiceImplTest {
         when(itemService.getPreviewItemsByListIds(any())).thenReturn(Map.of());
         when(itemService.countNestedListsByListIds(any())).thenReturn(Map.of());
         when(itemService.getItemsCountByListIds(any())).thenReturn(Map.of());
-        when(itemService.getItemScopeByListIds(any(), any())).thenReturn(Map.of());
+        when(itemService.getScopeSummariesByListIds(any(), any())).thenReturn(Map.of());
         when(likes.getLikedListIds(eq(viewer), any())).thenReturn(Set.of());
         when(users.findAllById(any())).thenReturn(List.of(list.getUser()));
         when(itemRepository.findNestedPreviewsByParentIdIn(any(), eq(viewer))).thenReturn(List.of());
@@ -186,7 +186,7 @@ class UserListViewServiceImplTest {
         when(itemService.getPreviewItemsByListIds(any())).thenReturn(Map.of(first.getId(), List.of(ref), second.getId(), List.of(ref)));
         when(itemService.countNestedListsByListIds(any())).thenReturn(Map.of());
         when(itemService.getItemsCountByListIds(any())).thenReturn(Map.of());
-        when(itemService.getItemScopeByListIds(any(), any())).thenReturn(Map.of());
+        when(itemService.getScopeSummariesByListIds(any(), any())).thenReturn(Map.of());
         when(likes.getLikedListIds(eq(viewer), any())).thenReturn(Set.of());
         when(users.findAllById(any())).thenReturn(List.of(owner));
         when(itemRepository.findNestedPreviewsByParentIdIn(any(), eq(viewer))).thenReturn(List.of());
@@ -219,7 +219,7 @@ class UserListViewServiceImplTest {
         when(itemService.getPreviewItemsByListIds(any())).thenReturn(Map.of());
         when(itemService.countNestedListsByListIds(any())).thenReturn(Map.of());
         when(itemService.getItemsCountByListIds(any())).thenReturn(Map.of());
-        when(itemService.getItemScopeByListIds(any(), any())).thenReturn(Map.of());
+        when(itemService.getScopeSummariesByListIds(any(), any())).thenReturn(Map.of());
         when(likes.getLikedListIds(eq(viewer), any())).thenReturn(Set.of());
         when(users.findAllById(any())).thenReturn(List.of(owner));
         when(itemRepository.findNestedPreviewsByParentIdIn(any(), eq(viewer))).thenReturn(List.of(hidden, visible));

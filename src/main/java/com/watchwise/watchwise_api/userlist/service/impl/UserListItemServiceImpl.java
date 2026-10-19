@@ -18,6 +18,8 @@ import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemResponseDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemScope;
+import com.watchwise.watchwise_api.userlist.dto.UserListDisplayScope;
+import com.watchwise.watchwise_api.userlist.dto.UserListScopeSummary;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
@@ -217,6 +219,15 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     @Override
     public Map<UUID, UserListItemScope> getItemScopeByListIds(Collection<UUID> listIds, Map<UUID, Long> nestedListsCountByListId) {
+        return getScopeSummariesByListIds(listIds, nestedListsCountByListId).entrySet().stream()
+                .filter(entry -> entry.getValue().itemScope() != null)
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().itemScope(),
+                        (left, right) -> left, LinkedHashMap::new));
+    }
+
+    @Override
+    public Map<UUID, UserListScopeSummary> getScopeSummariesByListIds(
+            Collection<UUID> listIds, Map<UUID, Long> nestedListsCountByListId) {
         if (listIds.isEmpty()) {
             return Map.of();
         }
@@ -226,14 +237,13 @@ public class UserListItemServiceImpl implements UserListItemService {
             contentTypesByListId.computeIfAbsent(row.getUserListId(), id -> new HashSet<>()).add(row.getType());
         }
 
-        Map<UUID, UserListItemScope> scopeByListId = new LinkedHashMap<>();
+        Map<UUID, UserListScopeSummary> scopeByListId = new LinkedHashMap<>();
         for (UUID listId : listIds) {
             boolean hasNestedLists = nestedListsCountByListId.getOrDefault(listId, 0L) > 0;
             Set<ContentType> types = contentTypesByListId.getOrDefault(listId, Set.of());
             UserListItemScope scope = UserListItemScope.resolve(types, hasNestedLists);
-            if (scope != null) {
-                scopeByListId.put(listId, scope);
-            }
+            scopeByListId.put(listId, new UserListScopeSummary(
+                    scope, UserListDisplayScope.resolve(types, hasNestedLists)));
         }
         return scopeByListId;
     }
