@@ -6,4 +6,16 @@ public final class SearchViewPagination {
 
     private SearchViewPagination() {
     }
+
+    public static int cappedTotalPages(long totalResults, int size) {
+        if (totalResults <= 0) {
+            return 0;
+        }
+        long pages = (totalResults + size - 1L) / size;
+        return (int) Math.min(pages, MAX_PAGE);
+    }
+
+    public static boolean hasNext(int page, long totalResults, int size) {
+        return page < cappedTotalPages(totalResults, size);
+    }
 }

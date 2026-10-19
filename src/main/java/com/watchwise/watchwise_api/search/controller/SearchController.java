@@ -9,6 +9,7 @@ import com.watchwise.watchwise_api.search.dto.SearchViewRequestDTO;
 import com.watchwise.watchwise_api.search.service.SearchService;
 import com.watchwise.watchwise_api.search.service.SearchType;
 import com.watchwise.watchwise_api.search.service.SearchViewService;
+import com.watchwise.watchwise_api.search.service.SearchViewQuery;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -77,8 +78,14 @@ public class SearchController {
 
         int page = request.page() == null ? DEFAULT_VIEW_PAGE : request.page();
         int size = request.size() == null ? DEFAULT_VIEW_SIZE : request.size();
-        SearchViewDTO result = searchViewService.search(
-                currentUserId, trimmedQuery, request.scope(), page, size);
+        SearchViewDTO result;
+        if (request.origin() == null && request.itemType() == null) {
+            result = searchViewService.search(currentUserId, trimmedQuery, request.scope(), page, size);
+        } else {
+            result = searchViewService.search(new SearchViewQuery(
+                    currentUserId, trimmedQuery, request.scope(), page, size,
+                    request.origin(), request.itemType()));
+        }
         return ResponseEntity.ok(result);
     }
 

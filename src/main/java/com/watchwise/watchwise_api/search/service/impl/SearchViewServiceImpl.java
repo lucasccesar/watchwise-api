@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.search.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
@@ -15,10 +16,21 @@ import com.watchwise.watchwise_api.search.dto.SearchViewDTO;
 import com.watchwise.watchwise_api.search.service.ContentSearchPagePlanner;
 import com.watchwise.watchwise_api.search.service.SearchViewScope;
 import com.watchwise.watchwise_api.search.service.SearchViewService;
+import com.watchwise.watchwise_api.search.service.SearchViewPagination;
 import com.watchwise.watchwise_api.search.service.TmdbSearchWindowReader;
+import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
+import com.watchwise.watchwise_api.pickstemplate.service.PicksTemplateService;
+import com.watchwise.watchwise_api.userlist.dto.UserListCardDTO;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewItemType;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewQueryMode;
+import com.watchwise.watchwise_api.userlist.dto.UserListViewRequest;
+import com.watchwise.watchwise_api.userlist.service.UserListViewService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -29,28 +41,109 @@ import java.util.Map;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class SearchViewServiceImpl implements SearchViewService {
 
     private final UserRepository userRepository;
     private final TmdbClient tmdbClient;
     private final SearchContentViewAssembler contentViewAssembler;
+    private final UserListViewService userListViewService;
+    private final SearchListViewAssembler searchListViewAssembler;
+    private final PicksTemplateService picksTemplateService;
+    private final SearchUserViewReader searchUserViewReader;
+    private final PageRequestFactory pageRequestFactory;
     private final TmdbSearchWindowReader windowReader = new TmdbSearchWindowReader();
     private final ContentSearchPagePlanner pagePlanner = new ContentSearchPagePlanner();
 
+    @Autowired
+    public SearchViewServiceImpl(
+            UserRepository userRepository,
+            TmdbClient tmdbClient,
+            SearchContentViewAssembler contentViewAssembler,
+            UserListViewService userListViewService,
+            SearchListViewAssembler searchListViewAssembler,
+            PicksTemplateService picksTemplateService,
+            SearchUserViewReader searchUserViewReader,
+            PageRequestFactory pageRequestFactory) {
+        this.userRepository = userRepository;
+        this.tmdbClient = tmdbClient;
+        this.contentViewAssembler = contentViewAssembler;
+        this.userListViewService = userListViewService;
+        this.searchListViewAssembler = searchListViewAssembler;
+        this.picksTemplateService = picksTemplateService;
+        this.searchUserViewReader = searchUserViewReader;
+        this.pageRequestFactory = pageRequestFactory;
+    }
+
+    public SearchViewServiceImpl(
+            UserRepository userRepository,
+            TmdbClient tmdbClient,
+            SearchContentViewAssembler contentViewAssembler) {
+        this(userRepository, tmdbClient, contentViewAssembler, null, null, null, null, null);
+    }
+
     @Override
-    public SearchViewDTO search(UUID viewerId, String query, SearchViewScope scope, int page, int size) {
-        User viewer = userRepository.findById(viewerId)
+    public SearchViewDTO search(com.watchwise.watchwise_api.search.service.SearchViewQuery searchQuery) {
+        User viewer = userRepository.findById(searchQuery.viewerId())
                 .orElseThrow(() -> new NotFoundException("User not found"));
-        String trimmedQuery = query.trim();
+        String trimmedQuery = searchQuery.query().trim();
+        SearchViewScope scope = searchQuery.scope();
+        int page = searchQuery.page();
+        int size = searchQuery.size();
 
         return switch (scope) {
             case CONTENT -> searchContent(viewer, trimmedQuery, scope, page, size);
             case MOVIE -> searchMovies(viewer, trimmedQuery, scope, page, size);
             case SERIES -> searchSeries(viewer, trimmedQuery, scope, page, size);
             case PERSON -> searchPeople(viewer, trimmedQuery, scope, page, size);
-            default -> throw new UnsupportedOperationException("Local search scopes are not wired yet");
+            case LIST -> searchLists(searchQuery);
+            case PICKS_TEMPLATE -> searchTemplates(searchQuery);
+            case USER -> searchUsers(searchQuery);
         };
+    }
+
+    private SearchViewDTO searchLists(com.watchwise.watchwise_api.search.service.SearchViewQuery query) {
+        requireLocalDependencies();
+        Page<UserListCardDTO> page = userListViewService.getView(new UserListViewRequest(
+                query.viewerId(), null, UserListViewQueryMode.SEARCH, null, query.query(),
+                query.itemType(), null, null, null, query.page(), query.size()));
+        return localResponse(query, searchListViewAssembler.assemble(page.getContent()), List.of(), List.of(), List.of(),
+                page.getTotalElements());
+    }
+
+    private SearchViewDTO searchTemplates(com.watchwise.watchwise_api.search.service.SearchViewQuery query) {
+        requireLocalDependencies();
+        Page<PicksTemplatePreviewDTO> page = picksTemplateService.searchForView(
+                query.viewerId(), query.origin(), query.query(), query.page(), query.size());
+        return localResponse(query, List.of(), page.getContent(), List.of(), List.of(), page.getTotalElements());
+    }
+
+    private SearchViewDTO searchUsers(com.watchwise.watchwise_api.search.service.SearchViewQuery query) {
+        requireLocalDependencies();
+        PageRequest pageable = pageRequestFactory.build(query.page(), query.size(), 20);
+        Page<com.watchwise.watchwise_api.search.dto.SearchUserViewDTO> page = searchUserViewReader.read(
+                query.viewerId(), query.query(), pageable);
+        return localResponse(query, List.of(), List.of(), page.getContent(), List.of(), page.getTotalElements());
+    }
+
+    private SearchViewDTO localResponse(
+            com.watchwise.watchwise_api.search.service.SearchViewQuery query,
+            List<com.watchwise.watchwise_api.search.dto.SearchListViewDTO> lists,
+            List<PicksTemplatePreviewDTO> templates,
+            List<com.watchwise.watchwise_api.search.dto.SearchUserViewDTO> users,
+            List<SearchPersonViewDTO> people,
+            long totalResults) {
+        return new SearchViewDTO(
+                query.scope(), query.query(), query.page(), query.size(),
+                SearchViewPagination.cappedTotalPages(totalResults, query.size()), totalResults,
+                SearchViewPagination.hasNext(query.page(), totalResults, query.size()),
+                List.of(), people, lists, templates, users);
+    }
+
+    private void requireLocalDependencies() {
+        if (userListViewService == null || searchListViewAssembler == null || picksTemplateService == null
+                || searchUserViewReader == null || pageRequestFactory == null) {
+            throw new IllegalStateException("Local visual search dependencies are not configured");
+        }
     }
 
     private SearchViewDTO searchMovies(User viewer, String query, SearchViewScope scope, int page, int size) {

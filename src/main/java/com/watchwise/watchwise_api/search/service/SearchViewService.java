@@ -6,5 +6,9 @@ import java.util.UUID;
 
 public interface SearchViewService {
 
-    SearchViewDTO search(UUID viewerId, String query, SearchViewScope scope, int page, int size);
+    SearchViewDTO search(SearchViewQuery query);
+
+    default SearchViewDTO search(UUID viewerId, String query, SearchViewScope scope, int page, int size) {
+        return search(new SearchViewQuery(viewerId, query, scope, page, size, null, null));
+    }
 }

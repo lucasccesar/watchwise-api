@@ -11,6 +11,8 @@ import com.watchwise.watchwise_api.search.service.SearchService;
 import com.watchwise.watchwise_api.search.service.SearchType;
 import com.watchwise.watchwise_api.search.service.SearchViewScope;
 import com.watchwise.watchwise_api.search.service.SearchViewService;
+import com.watchwise.watchwise_api.search.service.SearchViewQuery;
+import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -194,6 +196,24 @@ class SearchControllerTest {
         assertThat(result.getBody()).isEqualTo(expected);
         verify(requestThrottler).checkAllowed("search|" + viewerId, 30, Duration.ofMinutes(5));
         verify(searchViewService).search(viewerId, "night", SearchViewScope.MOVIE, 1, 18);
+    }
+
+    @Test
+    void shouldPassLocalVisualFiltersThroughValidatedQuery() {
+        SearchViewDTO expected = new SearchViewDTO(
+                SearchViewScope.PICKS_TEMPLATE, "night", 1, 10, 1, 1L, false, List.of(), List.of());
+        when(searchViewService.search(any(SearchViewQuery.class))).thenReturn(expected);
+
+        ResponseEntity<SearchViewDTO> result = searchController.searchView(
+                new SearchViewRequestDTO("night", SearchViewScope.PICKS_TEMPLATE, 1, 10, PickOrigin.COMMUNITY, null));
+
+        assertThat(result.getBody()).isEqualTo(expected);
+        verify(searchViewService).search(org.mockito.ArgumentMatchers.argThat(query ->
+                query.viewerId().equals(viewerId)
+                        && query.scope() == SearchViewScope.PICKS_TEMPLATE
+                        && query.origin() == PickOrigin.COMMUNITY
+                        && query.page() == 1
+                        && query.size() == 10));
     }
 
     @Test
