@@ -1,19 +1,26 @@
 package com.watchwise.watchwise_api.search.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
-import com.watchwise.watchwise_api.common.security.RequestThrottler;
-import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.common.security.RequestThrottler;
+import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
+import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbPersonSearchResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.search.dto.SearchContentDTO;
 import com.watchwise.watchwise_api.search.dto.SearchResultDTO;
-import com.watchwise.watchwise_api.search.dto.SearchViewDTO;
 import com.watchwise.watchwise_api.pickstemplate.dto.PicksTemplatePreviewDTO;
 import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.search.service.SearchService;
 import com.watchwise.watchwise_api.search.service.SearchType;
 import com.watchwise.watchwise_api.search.service.SearchViewScope;
 import com.watchwise.watchwise_api.search.service.SearchViewService;
+import com.watchwise.watchwise_api.search.service.impl.SearchViewServiceImpl;
 import com.watchwise.watchwise_api.content.entity.MovieOrSeriesType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -40,6 +47,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isNull;
 import static org.mockito.Mockito.nullable;
@@ -75,23 +84,29 @@ class SearchControllerIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private ContentRepository contentRepository;
+
+    @Autowired
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
     private RequestThrottler requestThrottler;
 
+    @Autowired
+    private SearchViewService searchViewService;
+
     @MockitoBean
     private SearchService searchService;
 
     @MockitoBean
-    private SearchViewService searchViewService;
+    private TmdbClient tmdbClient;
 
     @BeforeEach
     void setUp() {
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
         reset(searchService);
-        reset(searchViewService);
+        reset(tmdbClient);
         RequestThrottlerTestSupport.reset(requestThrottler);
     }
 
@@ -126,6 +141,238 @@ class SearchControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[search/view] Should Load The Concrete Service In The Application Context")
+    void shouldLoadConcreteSearchViewServiceInApplicationContext() {
+        assertThat(searchViewService).isInstanceOf(SearchViewServiceImpl.class);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Trim Query And Apply Default Page And Size")
+    void shouldTrimQueryAndApplyDefaultPageAndSize() throws Exception {
+        RegisteredUser user = registerUser("searchviewdefaults");
+        stubMovieSearch(1, List.of(movie("movie-1")));
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", " night ")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.scope").value("MOVIE"))
+                .andExpect(jsonPath("$.query").value("night"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(18))
+                .andExpect(jsonPath("$.totalResults").value(1))
+                .andExpect(jsonPath("$.contents[0].tmdbId").value("movie-1"));
+
+        verify(tmdbClient).searchMovies("night", "en-US", "US", 1);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Reject A Query That Exceeds The Trimmed Maximum")
+    void shouldRejectQueryThatExceedsTrimmedMaximum() throws Exception {
+        RegisteredUser user = registerUser("searchviewlongquery");
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "   " + "n".repeat(101) + "   ")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("q must contain at most 100 characters after trimming"))
+                .andExpect(jsonPath("$.path").value("/search/view"));
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Reject Invalid Page And Size Before Calling TMDB")
+    void shouldRejectInvalidPageAndSizeBeforeCallingTmdb() throws Exception {
+        RegisteredUser user = registerUser("searchviewpagingvalidation");
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .param("page", "0")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search/view"));
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .param("page", "501")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search/view"));
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .param("size", "21")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.path").value("/search/view"));
+
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Serve Every Scope Through The Running Application")
+    void shouldServeEveryScopeThroughTheRunningApplication() throws Exception {
+        RegisteredUser user = registerUser("searchviewscopes");
+        stubMovieSearch(1, List.of(movie("movie-1")));
+        stubSeriesSearch(1, List.of(series("series-1")));
+        stubPeopleSearch(1, List.of(person("person-1")));
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.CONTENT.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contents[*].tmdbId")
+                        .value(org.hamcrest.Matchers.containsInAnyOrder("movie-1", "series-1")))
+                .andExpect(jsonPath("$.people").isArray())
+                .andExpect(jsonPath("$.people").isEmpty());
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contents[0].type").value("MOVIE"));
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.SERIES.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contents[0].type").value("SERIES"));
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.PERSON.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.people[0].tmdbId").value("person-1"))
+                .andExpect(jsonPath("$.people[0].knownForDepartment").value("Acting"));
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Return Mixed Content In Planned Page Order Without Persisting Content")
+    void shouldReturnMixedContentInPlannedPageOrderWithoutPersistingContent() throws Exception {
+        RegisteredUser user = registerUser("searchviewmixedcontent");
+        stubMovieSearch(4, List.of(movie("movie-1"), movie("movie-2"), movie("movie-3"), movie("movie-4")));
+        stubSeriesSearch(3, List.of(series("series-1"), series("series-2"), series("series-3")));
+        long contentCountBefore = contentRepository.count();
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.CONTENT.name())
+                        .param("page", "2")
+                        .param("size", "4")
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(4))
+                .andExpect(jsonPath("$.totalResults").value(7))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.contents[0].tmdbId").value("movie-3"))
+                .andExpect(jsonPath("$.contents[1].tmdbId").value("series-3"))
+                .andExpect(jsonPath("$.contents[2].tmdbId").value("movie-4"));
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
+        verify(tmdbClient, org.mockito.Mockito.atLeastOnce()).searchMovies("night", "en-US", "US", 1);
+        verify(tmdbClient, org.mockito.Mockito.atLeastOnce()).searchTv("night", "en-US", 1);
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Map Typed TMDB Failure To BadGateway")
+    void shouldMapTypedTmdbFailureToBadGateway() throws Exception {
+        RegisteredUser user = registerUser("searchviewtmdbdown");
+        when(tmdbClient.searchMovies(anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(new TmdbLookupResult.Unavailable<>());
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.status").value(502))
+                .andExpect(jsonPath("$.error").value("Bad Gateway"))
+                .andExpect(jsonPath("$.path").value("/search/view"))
+                .andExpect(jsonPath("$.detail").doesNotExist())
+                .andExpect(jsonPath("$.instance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("[search/view] Should Share The Legacy Search Rate Limit")
+    void shouldShareTheLegacySearchRateLimit() throws Exception {
+        RegisteredUser user = registerUser("searchviewratelimit");
+        SearchResultDTO expected = new SearchResultDTO(List.of(), List.of(), List.of(), List.of());
+        when(searchService.search(user.id(), "night", null, null, null)).thenReturn(expected);
+        stubMovieSearch(1, List.of(movie("movie-1")));
+
+        for (int i = 0; i < 29; i++) {
+            mockMvc.perform(get("/search")
+                            .param("q", "night")
+                            .cookie(user.accessToken()))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(get("/search/view")
+                        .param("q", "night")
+                        .param("scope", SearchViewScope.MOVIE.name())
+                        .cookie(user.accessToken()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/search").param("q", "night").cookie(user.accessToken()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429));
+
+        verify(searchService, times(29)).search(user.id(), "night", null, null, null);
+    }
+
+    private void stubMovieSearch(long totalResults, List<TmdbMovieSearchResult> results) {
+        when(tmdbClient.searchMovies(anyString(), anyString(), anyString(), anyInt()))
+                .thenReturn(found(new TmdbSearchPage<>(1, results, totalPages(totalResults), totalResults)));
+    }
+
+    private void stubSeriesSearch(long totalResults, List<TmdbTvSearchResult> results) {
+        when(tmdbClient.searchTv(anyString(), anyString(), anyInt()))
+                .thenReturn(found(new TmdbSearchPage<>(1, results, totalPages(totalResults), totalResults)));
+    }
+
+    private void stubPeopleSearch(long totalResults, List<TmdbPersonSearchResult> results) {
+        when(tmdbClient.searchPeople(anyString(), anyString(), anyInt()))
+                .thenReturn(found(new TmdbSearchPage<>(1, results, totalPages(totalResults), totalResults)));
+    }
+
+    private TmdbMovieSearchResult movie(String id) {
+        return new TmdbMovieSearchResult(id, "Movie " + id, "/" + id + ".jpg", "2024-01-02");
+    }
+
+    private TmdbTvSearchResult series(String id) {
+        return new TmdbTvSearchResult(id, "Series " + id, "/" + id + ".jpg", "2024-01-02");
+    }
+
+    private TmdbPersonSearchResult person(String id) {
+        return new TmdbPersonSearchResult(id, "Person " + id, "/" + id + ".jpg", "Acting");
+    }
+
+    private int totalPages(long totalResults) {
+        return totalResults == 0 ? 0 : (int) ((totalResults + 19) / 20);
+    }
+
+    private <T> TmdbLookupResult<T> found(T value) {
+        return new TmdbLookupResult.Found<>(value);
+    }
+
+    @Test
     @DisplayName("[search] Should Return Search Result And Trim Query - When Request Is Valid")
     void shouldReturnSearchResultAndTrimQueryWhenRequestIsValid() throws Exception {
         RegisteredUser user = registerUser("searchvalid");
@@ -149,63 +396,6 @@ class SearchControllerIntegrationTest {
                 .andExpect(jsonPath("$.templates").isArray());
 
         verify(searchService).search(user.id(), "Alien", SearchType.MOVIE, 2, 10);
-    }
-
-    @Test
-    @DisplayName("[search/view] Should Return Visual Search And Apply Defaults - When Request Is Valid")
-    void shouldReturnVisualSearchAndApplyDefaultsWhenRequestIsValid() throws Exception {
-        RegisteredUser user = registerUser("searchviewvalid");
-        SearchViewDTO expected = new SearchViewDTO(
-                SearchViewScope.MOVIE, "night", 1, 18, 1, 1L, false, List.of(), List.of());
-        when(searchViewService.search(user.id(), "night", SearchViewScope.MOVIE, 1, 18))
-                .thenReturn(expected);
-
-        mockMvc.perform(get("/search/view")
-                        .param("q", " night ")
-                        .param("scope", "MOVIE")
-                        .cookie(user.accessToken()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.query").value("night"))
-                .andExpect(jsonPath("$.page").value(1))
-                .andExpect(jsonPath("$.size").value(18));
-
-        verify(searchViewService).search(user.id(), "night", SearchViewScope.MOVIE, 1, 18);
-    }
-
-    @Test
-    @DisplayName("[search/view] Should Return BadRequest ApiError - When Trimmed Query Exceeds One Hundred Characters")
-    void shouldReturnBadRequestApiErrorWhenTrimmedQueryExceedsOneHundredCharacters() throws Exception {
-        RegisteredUser user = registerUser("searchviewlongquery");
-
-        mockMvc.perform(get("/search/view")
-                        .param("q", "x".repeat(101))
-                        .param("scope", "MOVIE")
-                        .cookie(user.accessToken()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400))
-                .andExpect(jsonPath("$.path").value("/search/view"))
-                .andExpect(jsonPath("$.detail").doesNotExist())
-                .andExpect(jsonPath("$.instance").doesNotExist());
-
-        verifyNoInteractions(searchViewService);
-    }
-
-    @Test
-    @DisplayName("[search/view] Should Return BadRequest ApiError - When Scope Binding Is Invalid")
-    void shouldReturnBadRequestApiErrorWhenScopeBindingIsInvalid() throws Exception {
-        RegisteredUser user = registerUser("searchviewinvalidscope");
-
-        mockMvc.perform(get("/search/view")
-                        .param("q", "night")
-                        .param("scope", "UNKNOWN")
-                        .cookie(user.accessToken()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400))
-                .andExpect(jsonPath("$.path").value("/search/view"))
-                .andExpect(jsonPath("$.detail").doesNotExist())
-                .andExpect(jsonPath("$.instance").doesNotExist());
-
-        verifyNoInteractions(searchViewService);
     }
 
     @Test

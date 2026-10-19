@@ -6,7 +6,10 @@ import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.RequestThrottlerTestSupport;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
+import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
+import com.watchwise.watchwise_api.common.tmdb.TmdbTvSearchResult;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -70,6 +73,9 @@ class SearchEndToEndIntegrationTest {
     private UserRepository userRepository;
 
     @Autowired
+    private ContentRepository contentRepository;
+
+    @Autowired
     private UserListRepository userListRepository;
 
     @Autowired
@@ -119,6 +125,55 @@ class SearchEndToEndIntegrationTest {
         assertVisibleListNames(owner.accessToken(), "Shared public", "Shared followers", "Shared private");
         assertVisibleListNames(acceptedFollower.accessToken(), "Shared public", "Shared followers");
         assertVisibleListNames(stranger.accessToken(), "Shared public");
+    }
+
+    @Test
+    @DisplayName("[searchView] Should Return The Visual Search Contract - When Content Scope Is Requested")
+    void shouldReturnVisualSearchContractWhenContentScopeIsRequested() throws Exception {
+        RegisteredUser user = registerUser("searchviewcontract");
+        long contentCountBefore = contentRepository.count();
+        when(tmdbClient.searchMovies("night", "en-US", "US", 1))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1, List.of(
+                        new TmdbMovieSearchResult("movie-1", "Night Movie", "/movie.jpg", "2024-01-02", null, 8.2d),
+                        new TmdbMovieSearchResult("movie-2", "Late Movie", "/movie-2.jpg", "2023-01-02", null, 7.1d)),
+                        1, 2)));
+        when(tmdbClient.searchTv("night", "en-US", 1))
+                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1, List.of(
+                        new TmdbTvSearchResult("series-1", "Night Series", "/series.jpg", "2024-03-04", null, 7.6d)),
+                        1, 1)));
+
+        mockMvc.perform(get("/search/view")
+                        .cookie(user.accessToken())
+                        .param("q", "night")
+                        .param("scope", "CONTENT")
+                        .param("page", "1")
+                        .param("size", "18"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.query").value("night"))
+                .andExpect(jsonPath("$.scope").value("CONTENT"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(18))
+                .andExpect(jsonPath("$.totalResults").value(3))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.contents.length()").value(3))
+                .andExpect(jsonPath("$.contents[0].tmdbId").value("movie-1"))
+                .andExpect(jsonPath("$.contents[0].type").value("MOVIE"))
+                .andExpect(jsonPath("$.contents[0].title").value("Night Movie"))
+                .andExpect(jsonPath("$.contents[0].posterUrl").value(
+                        "https://image.tmdb.org/t/p/w500/movie.jpg"))
+                .andExpect(jsonPath("$.contents[0].releaseYear").value(2024))
+                .andExpect(jsonPath("$.contents[0].voteAverage").value(8.2))
+                .andExpect(jsonPath("$.contents[0].previewStatus").value("PARTIAL"))
+                .andExpect(jsonPath("$.contents[1].tmdbId").value("series-1"))
+                .andExpect(jsonPath("$.contents[1].type").value("SERIES"))
+                .andExpect(jsonPath("$.contents[1].title").value("Night Series"))
+                .andExpect(jsonPath("$.contents[1].voteAverage").value(7.6))
+                .andExpect(jsonPath("$.contents[2].tmdbId").value("movie-2"))
+                .andExpect(jsonPath("$.contents[2].type").value("MOVIE"))
+                .andExpect(jsonPath("$.people").isEmpty());
+
+        assertThat(contentRepository.count()).isEqualTo(contentCountBefore);
     }
 
     private void assertVisibleListNames(Cookie accessToken, String... expectedNames) throws Exception {

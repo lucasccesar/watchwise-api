@@ -1,6 +1,6 @@
 # Progresso do projeto
 
-Última atualização: 2026-10-10.
+Última atualização: 2026-10-19.
 
 Este documento resume o que já foi construído no Watchwise API, em ordem cronológica por dia de
 desenvolvimento: o quê, por quê e como. Serve como retrato do estado atual do projeto — para a visão
@@ -5123,3 +5123,43 @@ A verificação focada da Task 5 passou com 359 testes, zero falhas, erros ou ig
 A suíte Maven completa passou com 4.092 testes, zero falhas, erros ou ignorados, exit status 0,
 confirmados também em 266 relatórios XML do Surefire. A execução registrou o aviso de encerramento
 tardio da JVM de testes após `System.exit(0)`, mas terminou com `BUILD SUCCESS`.
+
+## 2026-10-17 — Read model visual de Search
+
+Foi validada e documentada a rota autenticada `GET /search/view`, adicionada de forma aditiva ao
+`GET /search` existente. O contrato aceita os escopos `CONTENT`, `MOVIE`, `SERIES` e `PERSON`; `q` é
+aparado e validado entre 3–100 caracteres, `page` assume 1 e aceita 1–500, e `size` assume 18 e aceita
+1–20. A resposta entrega `scope`, `query`, paginação, totais, `hasNext`, `contents` e `people`, com
+apenas o array correspondente preenchido nos escopos diretos. `totalResults` permanece exato mesmo
+quando exigiria mais de 500 páginas, enquanto `totalPages`/`hasNext` respeitam o teto acessível da rota.
+
+No escopo `CONTENT`, filmes e séries são alternados pelo mesmo rank até uma fonte acabar, os ranks
+restantes da fonte mais longa vêm depois e `totalResults` é a soma dos totais do TMDB. As páginas visuais
+leem as páginas externas necessárias para respeitar o `size` solicitado. Os cards reaproveitam o
+enriquecimento visual existente, preservam title/poster/ano da busca quando o metadata adicional falha e
+expõem `previewStatus`, estado do viewer e `voteAverage` do TMDB, sem tratar essa nota como estatística
+Watchwise.
+
+A leitura não cria referências `Content`, não persiste metadata e mantém o resultado quando o enriquecimento
+do card está parcial ou indisponível. `SearchEndToEndIntegrationTest` passou pelo controller e serviço reais,
+repositórios JPA e PostgreSQL 16 via Testcontainers, com o TMDB isolado por stub.
+As verificações focada e completa passaram, respectivamente, com 55 e 4.139 testes, sem falhas, erros
+ou testes ignorados; a suíte completa terminou com `BUILD SUCCESS`.
+Após a revisão final, as buscas visuais de filmes passaram a enviar `preferredRegion` ao TMDB e a incluir
+a região na chave de cache; a busca raw permaneceu inalterada. As buscas visuais de séries e pessoas continuam
+enviando apenas `preferredLanguage`, pois os endpoints correspondentes do TMDB não expõem região; o enriquecimento
+dos cards continua usando idioma e região. A suíte focada final passou com 144 testes e a suíte completa com 4.141,
+sem falhas, erros ou testes ignorados.
+
+## 2026-10-19 — Verificação do contrato visual de Search
+
+Foi concluída a sincronização local do contrato já implementado de `GET /search/view` no OpenAPI, nas regras
+de negócio e nos requisitos da tela Search. A documentação agora explicita os quatro escopos, defaults e
+limites de `q`, `page` e `size`, os campos mínimos dos cards, a escala da nota `voteAverage`, o fallback
+de enriquecimento e o comportamento somente leitura.
+
+Também foi ajustado `SearchEndToEndIntegrationTest` para verificar, pelo controller e serviço reais, o
+envelope misto de `CONTENT` com `page=1` e `size=18`, a alternância filme/série, o estado `PARTIAL` do
+card, a lista `people` vazia e a ausência de referências persistidas em `Content`. A regra de paginação
+mista permanece global: ranks de filme e série alternam até uma fonte acabar, sem promover um rank posterior
+quando um slot não é materializado. A verificação focada passou com 104 testes, sem falhas, erros ou ignorados.

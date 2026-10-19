@@ -1,4 +1,4 @@
-# Requisitos definitivos — Home, User Progress, Episode Ratings Map, User Profile, Diary History, Diary Reviews, Review, Month in Review, Year in Review, All Time Stats, Watchlist, My Lists, Community Lists, Create List, List, Episodes List, List of Lists, List Progress, Picks Explore, My Picks, Create Picks Template, Calendar, TMDB Trending, Social/Feed, Notifications, Person, Games, Games Ranking, Movie by Poster, Series by Poster, Person by Face, Episode by Frame, Movie by Info, Series by Info, Actor by Movie Filmography, Actor by Series Filmography, Settings e Content Detail
+# Requisitos definitivos — Home, User Progress, Episode Ratings Map, User Profile, Diary History, Diary Reviews, Review, Month in Review, Year in Review, All Time Stats, Watchlist, My Lists, Community Lists, Search, Create List, List, Episodes List, List of Lists, List Progress, Picks Explore, My Picks, Create Picks Template, Calendar, TMDB Trending, Social/Feed, Notifications, Person, Games, Games Ranking, Movie by Poster, Series by Poster, Person by Face, Episode by Frame, Movie by Info, Series by Info, Actor by Movie Filmography, Actor by Series Filmography, Settings e Content Detail
 
 Este documento descreve as requisições necessárias para montar as telas
 **Home**, **User Progress**, **Episode Ratings Map**, **Episode Ratings Map (Show)**,
@@ -119,6 +119,9 @@ batch continua disponível para compatibilidade; não é requisito dos novos flu
 - **Community Lists:** `GET /lists/discover/view` retorna somente listas públicas; quando a tela
   estiver no contexto de um usuário, `GET /users/{userId}/lists/view` aplica a visibilidade do perfil
   e da lista. Ambos retornam o mesmo modelo visual de cards.
+- **Search:** a tela usa `GET /search/view` e mapeia as abas `All`, `Movies`, `Series` e `People` para
+  `scope=CONTENT`, `MOVIE`, `SERIES` e `PERSON`. A busca é somente leitura e o envelope já entrega os
+  cards visuais, a paginação e o estado do viewer.
 - **Create List:** o formulário usa `POST /users/me/lists` para uma lista vazia ou
   `POST /users/me/lists/bulk` para criar a lista já com conteúdos. A busca de filmes e séries usa
   `/search`; temporadas e episódios usam as rotas de seleção contextual do Content. O tipo escolhido
@@ -2223,6 +2226,72 @@ mantêm o contrato atual.
 - `401`: viewer não autenticado;
 - `403`: perfil privado sem relação de acesso aceita;
 - `404`: usuário não encontrado na rota contextual.
+
+---
+
+# Search
+
+## Tela
+
+A tela Search permite procurar filmes, séries e pessoas autenticados pelo TMDB, com cards prontos para
+exibição e estado do viewer. O resultado é um read model (modelo de leitura) separado da busca raw
+`GET /search`, que continua disponível para os fluxos que dependem de seus arrays legados.
+
+## Requisição principal
+
+```http
+GET /search/view?q=night&scope=CONTENT&page=1&size=18
+```
+
+`q` é obrigatório, tem os espaços externos removidos antes da validação e deve ter entre 3 e 100
+caracteres após o trim. `scope` é obrigatório e aceita:
+
+| Controle da tela | `scope` | Array preenchido | Uso |
+| --- | --- | --- | --- |
+| All | `CONTENT` | `contents` | Filmes e séries em uma página mista. |
+| Movies | `MOVIE` | `contents` | Somente filmes. |
+| Series | `SERIES` | `contents` | Somente séries. |
+| People | `PERSON` | `people` | Somente pessoas; `contents` fica vazio. |
+
+`page` é 1-based, assume `1` quando omitida e aceita de `1` a `500`. `size` assume `18` quando omitido
+e aceita de `1` a `20`. Quando o total externo ultrapassa a capacidade de 500 páginas, `totalResults`
+continua exato, mas `totalPages` e `hasNext` param na última página acessível. A resposta sempre contém `scope`, `query`, `page`, `size`, `totalPages`,
+`totalResults`, `hasNext`, `contents` e `people`; nos escopos `MOVIE` e `SERIES`, `people` fica vazio.
+
+Na busca visual, filmes recebem `preferredLanguage` e `preferredRegion` do usuário no pedido ao TMDB.
+As buscas de séries e pessoas recebem apenas `preferredLanguage`, pois esses endpoints não expõem parâmetro
+de região; o enriquecimento dos cards usa idioma e região quando consulta os detalhes.
+
+## Ordem, totais e cards
+
+No escopo `CONTENT`, o backend soma os totais de filmes e séries informados pelo TMDB e pagina uma única
+sequência global: rank 0 de filme, rank 0 de série, rank 1 de filme, rank 1 de série e assim por diante.
+Quando uma fonte acaba, os ranks restantes da outra continuam na ordem original. `totalPages` e `hasNext`
+são calculados sobre o total combinado e o `size` solicitado, com teto de 500 páginas. Se um slot não for
+materializado, ele não é substituído pelo rank posterior, então a quantidade retornada pode ser menor que
+`size` sem alterar `totalResults`.
+
+Cada item de `contents` informa `tmdbId`, `type`, `title`, `posterUrl`, `releaseYear`, `genres`,
+`runtimeMinutes`, `numberOfSeasons`, `voteAverage`, `viewerState` e `previewStatus`. `voteAverage` é a
+nota média do resultado na escala do TMDB (0–10); não é a média das avaliações do Watchwise. Pessoas
+informam `tmdbId`, `name`, `photoUrl` e `knownForDepartment`.
+
+O backend reaproveita o montador de cards em lote. Se o enriquecimento adicional do TMDB falhar ou vier
+incompleto, a linha continua na resposta e usa title, poster e ano vindos da busca quando disponíveis;
+`previewStatus` indica `AVAILABLE`, `PARTIAL` ou `UNAVAILABLE`. O estado do viewer é resolvido fora de
+caches compartilhados de metadata.
+
+## Leitura e erros
+
+`GET /search/view` não chama `POST /contents/reference`, não cria referências `Content` e não persiste
+metadata. A tela não deve criar conteúdo local apenas para exibir um resultado; use os IDs TMDB retornados
+quando uma ação posterior exigir uma referência persistida.
+
+- `400`: `q`, `scope`, `page` ou `size` inválidos;
+- `401`: viewer não autenticado;
+- `429`: limite compartilhado com `GET /search` excedido;
+- `502`: TMDB indisponível durante a busca visual; falhas de enriquecimento do card preservam a linha com
+  `previewStatus=PARTIAL` ou `UNAVAILABLE`.
 
 ---
 

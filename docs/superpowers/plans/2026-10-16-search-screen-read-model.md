@@ -12,14 +12,16 @@
 
 - Preserve `GET /search` and `SearchResultDTO`; existing callers must observe no behavior or schema regression.
 - Add `GET /search/view`; it accepts only `CONTENT`, `MOVIE`, `SERIES`, and `PERSON` scopes.
-- `q` is trimmed and must contain 3 through 100 characters; `page` is 1 through 500; `size` defaults to 18 and is 1 through 20.
+- `q` is trimmed and must contain 3 through 100 characters; `page` is 1 through 500; `size` defaults to 18 and is 1 through 20. `totalResults` remains exact, while `totalPages` and `hasNext` are capped at the 500 accessible pages.
 - Do not create `Content` rows while reading external search results.
 - Use `ContentCardAssembler` with `BASIC_METADATA`, `VIEWER_STATE`, and `WATCHLIST_PROGRESS`; do not make client-side content-details calls.
 - Keep TMDB `voteAverage` distinct from Watchwise statistics.
 - Content scope order is movie 1, series 1, movie 2, series 2 until one source ends, then the remaining source; total is the sum of both TMDB totals.
 - Map visual page/size to the TMDB fixed page size of 20; never pass visual page numbers directly to TMDB when `size < 20`.
 - Keep external calls bounded: a direct scope reads source page 1 for its total plus at most two overlapping TMDB pages; Content reads the two source totals and only source pages containing the requested card positions.
-- Follow the project `ApiError` error contract, existing search throttle, JWT security model, and preferred TMDB language/region.
+- Follow the project `ApiError` error contract, existing search throttle, JWT security model, and preferred
+  TMDB language/region where the endpoint supports it. Movie search accepts the preferred region; TMDB TV
+  and person search accept language only. Card enrichment uses both preferences.
 - Use TDD. Every code commit uses Conventional Commits with no `Co-Authored-By` or other self-attribution. Do not push.
 - Update `docs/context/openapi.yaml`, `docs/context/business-rules.md`, `docs/context/progress.md`, and `docs/telas-reqs-definitivo.md`, but do not stage those documentation files under the repository's documentation policy.
 
@@ -36,6 +38,7 @@
 | `search/dto/SearchPersonViewDTO.java` | Person grid card with resolved profile URL and department. |
 | `search/service/ContentSearchPagePlanner.java` | Pure mapping from combined page indexes to TMDB source indexes. |
 | `search/service/TmdbSearchWindowReader.java` | Deep module that reads an exact visual window from one fixed-size TMDB result stream. |
+| `search/service/SearchViewPagination.java` | Shared maximum for accessible visual pages. |
 | `search/service/SearchViewService.java` | Public visual-read boundary. |
 | `search/service/impl/SearchViewServiceImpl.java` | TMDB paging, card assembly, and visual DTO mapping. |
 | `search/service/impl/SearchContentViewAssembler.java` | One batched content-card assembly per response. |
@@ -225,7 +228,7 @@ Expected: compilation failure because `TmdbSearchWindowReader` does not exist.
 
 - [ ] **Step 3: Implement the generic, side-effect-free reader**
 
-Create nested `Window<T>` and `Range<T>` results and accept a loader function rather than injecting `TmdbClient`. Both methods load source page 1 first, derive the total from it, and avoid a requested source page whose first index is already beyond that total. The reader calculates source indexes from `(visualPage - 1) * visualSize`, groups valid indexes by `(index / 20) + 1`, invokes each needed source page at most once, and orders retained results by logical source index. `readPage` derives `totalPages` from `ceil(totalResults / visualSize)`, never from TMDB's own 20-item page count. `readRange` returns the indexed items and total for the Content planner. An unavailable lookup throws `TmdbUnavailableException`; an empty first page returns an empty result.
+Create nested `Window<T>` and `Range<T>` results and accept a loader function rather than injecting `TmdbClient`. Both methods load source page 1 first, derive the total from it, and avoid a requested source page whose first index is already beyond that total. The reader calculates source indexes from `(visualPage - 1) * visualSize`, groups valid indexes by `(index / 20) + 1`, invokes each needed source page at most once, and orders retained results by logical source index. `readPage` derives `totalPages` from `ceil(totalResults / visualSize)`, never from TMDB's own 20-item page count, then caps it at the route's maximum of 500. `readRange` returns the indexed items and total for the Content planner. An unavailable lookup throws `TmdbUnavailableException`; an empty first page returns an empty result.
 
 - [ ] **Step 4: Add edge tests and run the reader suite**
 
@@ -307,7 +310,7 @@ if (movieTotal > seriesTotal) {
 return new Slot(SERIES, globalIndex - movieTotal);
 ~~~
 
-The controller already bounds page and size to 500 and 20, so the planner can use a long calculation without an unnecessary overflow-specific request path. A page beyond the end is valid and has an empty slot list while retaining exact total metadata.
+The controller already bounds page and size to 500 and 20, so the planner can use a long calculation without an unnecessary overflow-specific request path. The planner retains the exact combined result total but caps accessible `totalPages` and `hasNext` at 500, preventing a `hasNext` response from pointing to a page the controller rejects. A page beyond the end is valid and has an empty slot list while retaining the exact result total.
 
 - [ ] **Step 4: Add boundary tests and run the planner suite**
 

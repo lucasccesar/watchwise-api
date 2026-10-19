@@ -150,15 +150,25 @@ public class TmdbClient {
 
     public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> searchMovies(
             String query, String language, int page) {
+        return searchMovies(query, language, null, page);
+    }
+
+    public TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>> searchMovies(
+            String query, String language, String region, int page) {
         String trimmedQuery = query.trim();
-        TmdbSearchCacheKey key = TmdbSearchCacheKey.of(trimmedQuery, TmdbSearchType.MOVIE, language, page);
+        TmdbSearchCacheKey key = TmdbSearchCacheKey.of(trimmedQuery, TmdbSearchType.MOVIE, language, region, page);
         return cachedLookup(tmdbMovieSearchCache, key, () -> callWithRetry(() -> tmdbRestClient.get()
-                        .uri(uriBuilder -> uriBuilder.path("/search/movie")
-                                .queryParam("query", "{query}")
-                                .queryParam("language", language)
-                                .queryParam("page", page)
-                                .queryParam("include_adult", false)
-                                .build(trimmedQuery))
+                        .uri(uriBuilder -> {
+                            var builder = uriBuilder.path("/search/movie")
+                                    .queryParam("query", "{query}")
+                                    .queryParam("language", language)
+                                    .queryParam("page", page)
+                                    .queryParam("include_adult", false);
+                            if (region != null && !region.isBlank()) {
+                                builder.queryParam("region", region);
+                            }
+                            return builder.build(trimmedQuery);
+                        })
                         .retrieve()
                         .body(new ParameterizedTypeReference<TmdbSearchPage<TmdbMovieSearchResult>>() {}),
                 "movie search"));

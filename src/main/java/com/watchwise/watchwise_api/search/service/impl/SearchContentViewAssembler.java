@@ -42,35 +42,28 @@ public class SearchContentViewAssembler {
 
         List<SearchContentCandidate> orderedCandidates = candidates.stream()
                 .filter(Objects::nonNull)
-                .filter(candidate -> candidate.coordinate() != null)
                 .toList();
-        if (orderedCandidates.isEmpty()) {
-            return List.of();
-        }
-
         List<ContentCardSpec> specs = distinctSpecs(orderedCandidates);
         Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate = specs.isEmpty()
                 ? Map.of()
-                : safeCards(contentCardAssembler.assemble(
+                : contentCardAssembler.assemble(
                         specs,
                         new ContentCardContext(
                                 viewer.getPreferredLanguage(), viewer.getPreferredRegion(), null, viewer.getId()),
-                        CARD_FIELDS));
+                        CARD_FIELDS);
 
         return orderedCandidates.stream()
                 .map(candidate -> toView(candidate, cardsByCoordinate.get(candidate.coordinate())))
                 .toList();
     }
 
-    private Map<ContentCoordinate, ContentCardDTO> safeCards(
-            Map<ContentCoordinate, ContentCardDTO> cardsByCoordinate) {
-        return cardsByCoordinate == null ? Map.of() : cardsByCoordinate;
-    }
-
     private List<ContentCardSpec> distinctSpecs(List<SearchContentCandidate> candidates) {
         Map<ContentCoordinate, ContentCardSpec> specsByCoordinate = new LinkedHashMap<>();
         for (SearchContentCandidate candidate : candidates) {
             ContentCoordinate coordinate = candidate.coordinate();
+            if (coordinate == null) {
+                continue;
+            }
             specsByCoordinate.putIfAbsent(coordinate, new ContentCardSpec(
                     coordinate,
                     candidate.title(),
@@ -83,16 +76,14 @@ public class SearchContentViewAssembler {
     }
 
     private SearchContentViewDTO toView(SearchContentCandidate candidate, ContentCardDTO card) {
-        String posterPath = firstNonBlank(card == null ? null : card.posterPath(), candidate.posterPath());
-        String title = firstNonBlank(card == null ? null : card.title(), candidate.title());
+        String posterPath = firstNonNull(card == null ? null : card.posterPath(), candidate.posterPath());
+        String title = firstNonNull(card == null ? null : card.title(), candidate.title());
         Integer releaseYear = firstNonNull(
                 card == null ? null : card.releaseYear(),
                 releaseYear(candidate.releaseDate()));
         Integer runtimeMinutes = firstNonNull(
                 card == null ? null : card.runtimeMinutes(), candidate.runtimeMinutes());
         List<String> genres = firstNonNull(card == null ? null : card.genres(), candidate.genres());
-        Integer numberOfSeasons = firstNonNull(
-                card == null ? null : card.numberOfSeasons(), candidate.numberOfSeasons());
         ContentPreviewStatus previewStatus = card == null || card.previewStatus() == null
                 ? ContentPreviewStatus.PARTIAL
                 : card.previewStatus();
@@ -106,7 +97,7 @@ public class SearchContentViewAssembler {
                 releaseYear,
                 genres,
                 runtimeMinutes,
-                numberOfSeasons,
+                card == null ? null : card.numberOfSeasons(),
                 candidate.voteAverage(),
                 card == null ? null : card.viewerState(),
                 previewStatus);
@@ -119,10 +110,6 @@ public class SearchContentViewAssembler {
     private <T> T firstNonNull(T primary, T fallback) {
         return primary == null ? fallback : primary;
     }
-
-    private String firstNonBlank(String primary, String fallback) {
-        return primary == null || primary.isBlank() ? fallback : primary;
-    }
 }
 
 record SearchContentCandidate(
@@ -132,19 +119,7 @@ record SearchContentCandidate(
         LocalDate releaseDate,
         Integer runtimeMinutes,
         Double voteAverage,
-        List<String> genres,
-        Integer numberOfSeasons) {
-
-    SearchContentCandidate(
-            ContentCoordinate coordinate,
-            String title,
-            String posterPath,
-            LocalDate releaseDate,
-            Integer runtimeMinutes,
-            Double voteAverage,
-            List<String> genres) {
-        this(coordinate, title, posterPath, releaseDate, runtimeMinutes, voteAverage, genres, null);
-    }
+        List<String> genres) {
 
     SearchContentCandidate {
         genres = genres == null ? null : List.copyOf(genres);

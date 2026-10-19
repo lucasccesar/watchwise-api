@@ -58,6 +58,23 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
+    void shouldPreserveSourceIndexesWhenARequestRangeHasAMissingMiddleRank() {
+        TmdbSearchWindowReader.Range<TmdbMovieSearchResult> range = reader.readRange(
+                18,
+                4,
+                sourcePage -> found(tmdbPage(
+                        sourcePage,
+                        22,
+                        sourcePage == 1 ? movies(1, 19) : movies(21, 2))));
+
+        assertThat(range.resultsBySourceIndex()).containsOnlyKeys(18L, 20L, 21L);
+        assertThat(range.resultsBySourceIndex().get(18L).id()).isEqualTo("19");
+        assertThat(range.resultsBySourceIndex().get(20L).id()).isEqualTo("21");
+        assertThat(range.resultsBySourceIndex().get(21L).id()).isEqualTo("22");
+        assertThat(range.resultsBySourceIndex()).doesNotContainKey(19L);
+    }
+
+    @Test
     void shouldReturnEmptyVisualMetadataWhenFirstPageIsEmpty() {
         TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = reader.readPage(
                 1, 18, sourcePage -> found(tmdbPage(1, 0, List.of())));
@@ -81,6 +98,19 @@ class TmdbSearchWindowReaderTest {
         assertThat(window.results()).isEmpty();
         assertThat(window.totalResults()).isEqualTo(1L);
         assertThat(requestedSourcePages).containsExactly(1);
+    }
+
+    @Test
+    void shouldCapReportedPagesAtTheMaximumAcceptedVisualPage() {
+        TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = reader.readPage(
+                500, 20, sourcePage -> found(tmdbPage(
+                        sourcePage,
+                        10_001,
+                        sourcePage == 1 ? movies(1, 20) : movies(9_981, 20))));
+
+        assertThat(window.totalResults()).isEqualTo(10_001L);
+        assertThat(window.totalPages()).isEqualTo(500);
+        assertThat(window.hasNext()).isFalse();
     }
 
     @Test

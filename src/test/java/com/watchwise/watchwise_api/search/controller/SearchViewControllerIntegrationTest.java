@@ -94,7 +94,7 @@ class SearchViewControllerIntegrationTest {
     @DisplayName("[searchView] Should Serialize Visual DTO Through Concrete Service - When Movie Results Exist")
     void shouldSerializeVisualDtoThroughConcreteServiceWhenMovieResultsExist() throws Exception {
         RegisteredUser user = registerUser("visualconcretemovie");
-        when(tmdbClient.searchMovies("night", "en-US", 1))
+        when(tmdbClient.searchMovies("night", "en-US", "US", 1))
                 .thenReturn(new TmdbLookupResult.Found<>(new TmdbSearchPage<>(1,
                         List.of(new TmdbMovieSearchResult("603", "Night", "/night.jpg", "2024-01-01")),
                         1, 1)));
@@ -126,7 +126,7 @@ class SearchViewControllerIntegrationTest {
     @DisplayName("[searchView] Should Serialize Empty Visual Metadata - When Movie Search Is Not Found")
     void shouldSerializeEmptyVisualMetadataWhenMovieSearchIsNotFound() throws Exception {
         RegisteredUser user = registerUser("visualconcreteempty");
-        when(tmdbClient.searchMovies("empty", "en-US", 1))
+        when(tmdbClient.searchMovies("empty", "en-US", "US", 1))
                 .thenReturn(new TmdbLookupResult.NotFound<>());
         when(contentViewAssembler.assemble(any(User.class), anyList())).thenReturn(List.of());
 
@@ -149,7 +149,7 @@ class SearchViewControllerIntegrationTest {
     @DisplayName("[searchView] Should Return BadGateway ApiError Through Concrete Service - When TMDB Is Unavailable")
     void shouldReturnBadGatewayApiErrorThroughConcreteServiceWhenTmdbIsUnavailable() throws Exception {
         RegisteredUser user = registerUser("visualconcretedown");
-        when(tmdbClient.searchMovies("down", "en-US", 1))
+        when(tmdbClient.searchMovies("down", "en-US", "US", 1))
                 .thenReturn(new TmdbLookupResult.Unavailable<>());
 
         mockMvc.perform(get("/search/view")

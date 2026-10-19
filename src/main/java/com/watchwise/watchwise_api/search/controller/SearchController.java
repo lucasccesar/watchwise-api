@@ -37,6 +37,10 @@ public class SearchController {
     @Value("${app.rate-limit.search.window-minutes}")
     private long searchWindowMinutes;
 
+    private static final int DEFAULT_VIEW_PAGE = 1;
+    private static final int DEFAULT_VIEW_SIZE = 18;
+    private static final int MAX_VIEW_QUERY_LENGTH = 100;
+
     @GetMapping("/search")
     public ResponseEntity<SearchResultDTO> search(
             @Valid @ModelAttribute SearchRequestDTO request
@@ -63,12 +67,7 @@ public class SearchController {
             @Valid @ModelAttribute SearchViewRequestDTO request
     ) {
         String trimmedQuery = request.q().trim();
-        if (trimmedQuery.length() < 3) {
-            throw new BadRequestException("q must contain at least 3 characters after trimming");
-        }
-        if (trimmedQuery.length() > 100) {
-            throw new BadRequestException("q must contain at most 100 characters after trimming");
-        }
+        validateViewQuery(trimmedQuery);
 
         UUID currentUserId = getCurrentUserId();
         requestThrottler.checkAllowed(
@@ -76,11 +75,20 @@ public class SearchController {
                 searchMaxRequests,
                 Duration.ofMinutes(searchWindowMinutes));
 
-        int page = request.page() == null ? 1 : request.page();
-        int size = request.size() == null ? 18 : request.size();
+        int page = request.page() == null ? DEFAULT_VIEW_PAGE : request.page();
+        int size = request.size() == null ? DEFAULT_VIEW_SIZE : request.size();
         SearchViewDTO result = searchViewService.search(
                 currentUserId, trimmedQuery, request.scope(), page, size);
         return ResponseEntity.ok(result);
+    }
+
+    private void validateViewQuery(String trimmedQuery) {
+        if (trimmedQuery.length() < 3) {
+            throw new BadRequestException("q must contain at least 3 characters after trimming");
+        }
+        if (trimmedQuery.length() > MAX_VIEW_QUERY_LENGTH) {
+            throw new BadRequestException("q must contain at most 100 characters after trimming");
+        }
     }
 
     private void validateExternalPage(SearchType type, Integer page) {
