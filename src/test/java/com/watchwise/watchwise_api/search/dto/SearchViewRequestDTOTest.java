@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.search.service.SearchViewScope;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
@@ -15,7 +16,8 @@ class SearchViewRequestDTOTest {
     private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 
     @Test
-    void shouldRejectSizeAboveTwenty() {
+    @DisplayName("[validate] Should Reject Size Above Twenty - When Size Exceeds Maximum")
+    void shouldRejectSizeAboveTwentyWhenSizeExceedsMaximum() {
         Set<ConstraintViolation<SearchViewRequestDTO>> violations = validator.validate(
                 new SearchViewRequestDTO("night", SearchViewScope.CONTENT, 1, 21));
 
@@ -24,7 +26,8 @@ class SearchViewRequestDTOTest {
     }
 
     @Test
-    void shouldRequireVisualScope() {
+    @DisplayName("[validate] Should Require Visual Scope - When Scope Is Missing")
+    void shouldRequireVisualScopeWhenScopeIsMissing() {
         Set<ConstraintViolation<SearchViewRequestDTO>> violations = validator.validate(
                 new SearchViewRequestDTO("night", null, 1, 18));
 
@@ -33,7 +36,8 @@ class SearchViewRequestDTOTest {
     }
 
     @Test
-    void shouldAcceptOneHundredTrimmedQueryCharactersWithSurroundingWhitespaceAndMinimumPage() {
+    @DisplayName("[validate] Should Accept One Hundred Trimmed Query Characters - When Surrounding Whitespace Is Present And Page Is Minimum")
+    void shouldAcceptOneHundredTrimmedQueryCharactersWhenSurroundingWhitespaceIsPresentAndPageIsMinimum() {
         SearchViewRequestDTO request = new SearchViewRequestDTO(
                 " " + "a".repeat(100) + " ", SearchViewScope.CONTENT, 1, 18);
 

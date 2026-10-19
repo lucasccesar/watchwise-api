@@ -111,8 +111,8 @@ class SearchEndToEndIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search] Should Apply List Visibility Through Real Controller And Service")
-    void shouldApplyListVisibilityThroughRealControllerAndService() throws Exception {
+    @DisplayName("[search] Should Apply List Visibility - When It Is Queried Through The Real Controller And Service")
+    void shouldApplyListVisibilityWhenItIsQueriedThroughTheRealControllerAndService() throws Exception {
         RegisteredUser owner = registerUser("visibilityowner");
         RegisteredUser acceptedFollower = registerUser("visibilityfollower");
         RegisteredUser stranger = registerUser("visibilitystranger");

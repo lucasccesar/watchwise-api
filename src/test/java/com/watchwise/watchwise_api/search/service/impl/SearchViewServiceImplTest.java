@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.search.service.SearchViewScope;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -61,7 +62,8 @@ class SearchViewServiceImplTest {
     }
 
     @Test
-    void shouldReadExactVisualMovieWindowAndPreservePageMetadata() {
+    @DisplayName("[search] Should Read The Exact Visual Movie Window And Preserve Page Metadata - When Page Two Is Requested")
+    void shouldReadExactVisualMovieWindowAndPreservePageMetadataWhenPageTwoIsRequested() {
         when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 22, movies(1, 20))));
         when(tmdbClient.searchMovies("night", "pt-BR", "BR", 2))
@@ -85,7 +87,8 @@ class SearchViewServiceImplTest {
     }
 
     @Test
-    void shouldReadSeriesAndPeopleWithTheirOwnVisualWindows() {
+    @DisplayName("[search] Should Read Series And People With Their Own Visual Windows - When Their Scopes Are Requested")
+    void shouldReadSeriesAndPeopleWithTheirOwnVisualWindowsWhenTheirScopesAreRequested() {
         when(tmdbClient.searchTv("night", "pt-BR", 1))
                 .thenReturn(found(tvPage(1, 1, List.of(new TmdbTvSearchResult(
                         "series-1", "Night Watch", "/series.jpg", "2024-01-02", null, 7.4d)))));
@@ -111,7 +114,8 @@ class SearchViewServiceImplTest {
     }
 
     @Test
-    void shouldInterleaveContentSourcesAndKeepSourceExhaustionOrder() {
+    @DisplayName("[search] Should Interleave Content Sources And Keep Source Exhaustion Order - When Content Scope Starts On A Later Page")
+    void shouldInterleaveContentSourcesAndKeepSourceExhaustionOrderWhenContentScopeStartsOnALaterPage() {
         when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 4, movies(1, 4))));
         when(tmdbClient.searchTv("night", "pt-BR", 1))
@@ -129,7 +133,8 @@ class SearchViewServiceImplTest {
     }
 
     @Test
-    void shouldNotSubstituteLaterMovieRankForMissingRankWhenInterleavingContent() {
+    @DisplayName("[search] Should Not Substitute A Later Movie Rank - When An Earlier Rank Is Missing During Interleaving")
+    void shouldNotSubstituteLaterMovieRankWhenAnEarlierRankIsMissingDuringInterleaving() {
         when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 22, movies(1, 19))));
         when(tmdbClient.searchMovies("night", "pt-BR", "BR", 2))
@@ -148,6 +153,7 @@ class SearchViewServiceImplTest {
     }
 
     @Test
+    @DisplayName("[search] Should Return An Empty Visual Page Without Assembling Cards - When No Source Has Results")
     void shouldReturnEmptyVisualPageWithoutAssemblingCardsWhenNoSourceHasResults() {
         when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1))
                 .thenReturn(found(moviePage(1, 0, List.of())));
@@ -163,7 +169,8 @@ class SearchViewServiceImplTest {
     }
 
     @Test
-    void shouldPropagateTypedTmdbUnavailableFailure() {
+    @DisplayName("[search] Should Propagate TmdbUnavailableException - When Movie Search Is Unavailable")
+    void shouldPropagateTypedTmdbUnavailableFailureWhenMovieSearchIsUnavailable() {
         when(tmdbClient.searchMovies("night", "pt-BR", "BR", 1)).thenReturn(new TmdbLookupResult.Unavailable<>());
 
         assertThatThrownBy(() -> service.search(VIEWER_ID, "night", SearchViewScope.MOVIE, 1, 18))

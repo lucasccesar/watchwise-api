@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.search.dto.SearchContentViewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -41,7 +42,8 @@ class SearchContentViewAssemblerTest {
     private ContentCardAssembler contentCardAssembler;
 
     @Test
-    void shouldAssembleOrderedCardsFromOneBatchedCardRequest() {
+    @DisplayName("[assemble] Should Assemble Ordered Cards - When One Batched Card Request Is Used")
+    void shouldAssembleOrderedCardsWhenOneBatchedCardRequestIsUsed() {
         User viewer = viewer();
         SearchContentCandidate movieCandidate = movieCandidate("1", "Night Shift", "/movie.jpg", 8.1d);
         SearchContentCandidate seriesCandidate = seriesCandidate("2", "Night Watch", "/series.jpg", 7.4d);
@@ -78,6 +80,7 @@ class SearchContentViewAssemblerTest {
     }
 
     @Test
+    @DisplayName("[assemble] Should Retain Fallback Metadata - When Card Enrichment Is Unavailable")
     void shouldRetainFallbackMetadataWhenCardEnrichmentIsUnavailable() {
         User viewer = viewer();
         SearchContentCandidate candidate = movieCandidate("3", "Night Shift", "/movie.jpg", 8.1d);
@@ -97,7 +100,8 @@ class SearchContentViewAssemblerTest {
     }
 
     @Test
-    void shouldRequestEachDistinctCoordinateOnceWhilePreservingCandidateOrder() {
+    @DisplayName("[assemble] Should Request Each Distinct Coordinate Once - When Candidate Order Must Be Preserved")
+    void shouldRequestEachDistinctCoordinateOnceWhenCandidateOrderMustBePreserved() {
         User viewer = viewer();
         SearchContentCandidate first = movieCandidate("1", "First", "/first.jpg", 8.1d);
         SearchContentCandidate duplicate = movieCandidate("1", "Duplicate fallback", "/duplicate.jpg", 7.1d);

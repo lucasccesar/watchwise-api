@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbMovieSearchResult;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSearchPage;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -18,7 +19,8 @@ class TmdbSearchWindowReaderTest {
     private final TmdbSearchWindowReader reader = new TmdbSearchWindowReader();
 
     @Test
-    void shouldReadExactVisualPageFromFixedSizeSourcePages() {
+    @DisplayName("[readPage] Should Read The Exact Visual Page - When The Source Uses Fixed-Size Pages")
+    void shouldReadExactVisualPageWhenSourceUsesFixedSizePages() {
         List<Integer> requestedSourcePages = new ArrayList<>();
         IntFunction<TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> loader =
                 sourcePage -> {
@@ -39,7 +41,8 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
-    void shouldReadRangeByZeroBasedSourceIndexAndReturnTotal() {
+    @DisplayName("[readRange] Should Read A Zero-Based Source Range And Return Total - When The Range Spans Source Pages")
+    void shouldReadRangeByZeroBasedSourceIndexAndReturnTotalWhenRangeSpansSourcePages() {
         List<Integer> requestedSourcePages = new ArrayList<>();
         IntFunction<TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> loader =
                 sourcePage -> {
@@ -58,6 +61,7 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
+    @DisplayName("[readRange] Should Preserve Source Indexes - When A Request Range Has A Missing Middle Rank")
     void shouldPreserveSourceIndexesWhenARequestRangeHasAMissingMiddleRank() {
         TmdbSearchWindowReader.Range<TmdbMovieSearchResult> range = reader.readRange(
                 18,
@@ -75,6 +79,7 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
+    @DisplayName("[readPage] Should Return Empty Visual Metadata - When The First Source Page Is Empty")
     void shouldReturnEmptyVisualMetadataWhenFirstPageIsEmpty() {
         TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = reader.readPage(
                 1, 18, sourcePage -> found(tmdbPage(1, 0, List.of())));
@@ -86,7 +91,8 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
-    void shouldNotRequestSourcePagesPastTheKnownTotal() {
+    @DisplayName("[readPage] Should Not Request Pages Past The Known Total - When The Requested Page Is Out Of Range")
+    void shouldNotRequestSourcePagesPastTheKnownTotalWhenRequestedPageIsOutOfRange() {
         List<Integer> requestedSourcePages = new ArrayList<>();
 
         TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = reader.readPage(
@@ -101,7 +107,8 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
-    void shouldCapReportedPagesAtTheMaximumAcceptedVisualPage() {
+    @DisplayName("[readPage] Should Cap Reported Pages - When The Visual Page Reaches Maximum")
+    void shouldCapReportedPagesWhenVisualPageReachesMaximum() {
         TmdbSearchWindowReader.Window<TmdbMovieSearchResult> window = reader.readPage(
                 500, 20, sourcePage -> found(tmdbPage(
                         sourcePage,
@@ -114,12 +121,14 @@ class TmdbSearchWindowReaderTest {
     }
 
     @Test
+    @DisplayName("[readPage] Should Throw TmdbUnavailableException - When The First Source Page Is Unavailable")
     void shouldThrowWhenTheFirstSourcePageIsUnavailable() {
         assertThatThrownBy(() -> reader.readPage(1, 18, page -> unavailable()))
                 .isInstanceOf(TmdbUnavailableException.class);
     }
 
     @Test
+    @DisplayName("[readPage] Should Throw TmdbUnavailableException - When A Needed Source Page Is Unavailable")
     void shouldThrowWhenANeededSourcePageIsUnavailable() {
         IntFunction<TmdbLookupResult<TmdbSearchPage<TmdbMovieSearchResult>>> loader = sourcePage ->
                 sourcePage == 1
