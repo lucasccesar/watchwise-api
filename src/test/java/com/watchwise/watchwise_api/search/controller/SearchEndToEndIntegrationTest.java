@@ -128,8 +128,8 @@ class SearchEndToEndIntegrationTest {
     }
 
     @Test
-    @DisplayName("[search/view] Should Return The Visual Search Contract Through The Real Controller And Service")
-    void shouldReturnVisualSearchContractThroughTheRealControllerAndService() throws Exception {
+    @DisplayName("[searchView] Should Return The Visual Search Contract - When Content Scope Is Requested")
+    void shouldReturnVisualSearchContractWhenContentScopeIsRequested() throws Exception {
         RegisteredUser user = registerUser("searchviewcontract");
         long contentCountBefore = contentRepository.count();
         when(tmdbClient.searchMovies("night", "en-US", "US", 1))
@@ -147,13 +147,16 @@ class SearchEndToEndIntegrationTest {
                         .param("q", "night")
                         .param("scope", "CONTENT")
                         .param("page", "1")
-                        .param("size", "2"))
+                        .param("size", "18"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.query").value("night"))
+                .andExpect(jsonPath("$.scope").value("CONTENT"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(18))
                 .andExpect(jsonPath("$.totalResults").value(3))
-                .andExpect(jsonPath("$.totalPages").value(2))
-                .andExpect(jsonPath("$.hasNext").value(true))
-                .andExpect(jsonPath("$.contents.length()").value(2))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.hasNext").value(false))
+                .andExpect(jsonPath("$.contents.length()").value(3))
                 .andExpect(jsonPath("$.contents[0].tmdbId").value("movie-1"))
                 .andExpect(jsonPath("$.contents[0].type").value("MOVIE"))
                 .andExpect(jsonPath("$.contents[0].title").value("Night Movie"))
@@ -166,6 +169,8 @@ class SearchEndToEndIntegrationTest {
                 .andExpect(jsonPath("$.contents[1].type").value("SERIES"))
                 .andExpect(jsonPath("$.contents[1].title").value("Night Series"))
                 .andExpect(jsonPath("$.contents[1].voteAverage").value(7.6))
+                .andExpect(jsonPath("$.contents[2].tmdbId").value("movie-2"))
+                .andExpect(jsonPath("$.contents[2].type").value("MOVIE"))
                 .andExpect(jsonPath("$.people").isEmpty());
 
         assertThat(contentRepository.count()).isEqualTo(contentCountBefore);

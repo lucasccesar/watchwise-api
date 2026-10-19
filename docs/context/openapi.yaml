@@ -3879,8 +3879,10 @@ paths:
         `SERIES` e `PERSON` limitam a fonte ao tipo correspondente. O termo é aparado antes da validação
         e da consulta. A busca de filmes envia a regiao preferida do viewer ao TMDB; as buscas de series
         e pessoas nao recebem regiao porque esses endpoints do TMDB nao oferecem esse parametro. O
-        enriquecimento dos cards usa idioma e regiao preferidos. A rota compartilha o mesmo rate limit de
-        busca de `GET /search`.
+        enriquecimento dos cards usa idioma e regiao preferidos. No escopo `CONTENT`, `page` e `size`
+        indexam uma unica sequencia visual: rank 0 de filme, rank 0 de serie, rank 1 de filme, rank 1 de
+        serie e assim por diante; quando uma fonte acaba, os ranks restantes da outra continuam. A rota
+        compartilha o mesmo rate limit de busca de `GET /search`.
       security:
         - cookieAuth: []
       parameters:
@@ -3888,7 +3890,7 @@ paths:
           in: query
           required: true
           description: Texto aparado; depois de remover os espaços nas pontas, deve conter de 3 a 100 caracteres.
-          schema: { type: string, minLength: 3 }
+          schema: { type: string, minLength: 3, maxLength: 100 }
         - name: scope
           in: query
           required: true
@@ -8167,9 +8169,11 @@ components:
       description: >
         Envelope paginado do read model visual de Search. `contents` e `people` são arrays separados:
         somente o array correspondente ao escopo é preenchido, exceto `CONTENT`, que preenche `contents`
-        com filmes e séries misturados. `totalResults` pertence ao escopo solicitado. `totalPages` e
-        `hasNext` respeitam o limite máximo de 500 páginas da rota; quando o total externo ultrapassa
-        a capacidade paginável, `totalResults` continua exato, mas a última página acessível é a 500.
+        com filmes e séries misturados na ordem da sequência global de ranks. `totalResults` pertence ao
+        escopo solicitado. `totalPages` e `hasNext` respeitam o limite máximo de 500 páginas da rota;
+        quando o total externo ultrapassa a capacidade paginável, `totalResults` continua exato, mas a
+        última página acessível é a 500. Se um item de um slot global não puder ser materializado, ele é
+        omitido de `contents` e os slots posteriores não são promovidos para preencher sua posição.
       properties:
         scope: { type: string, enum: [CONTENT, MOVIE, SERIES, PERSON] }
         query: { type: string }
@@ -8187,6 +8191,7 @@ components:
 
     SearchContentView:
       type: object
+      required: [tmdbId, type, previewStatus]
       description: >
         Card de filme ou série para a tela Search. `voteAverage` é a nota média fornecida pelo TMDB,
         não uma estatística comunitária do Watchwise. O enriquecimento visual pode completar metadata
@@ -8211,7 +8216,7 @@ components:
           type: number
           format: double
           nullable: true
-          description: Nota média do resultado de busca no TMDB; não é média de avaliações Watchwise.
+          description: Nota média do resultado de busca no TMDB, na escala de 0 a 10; não é média de avaliações Watchwise.
         viewerState:
           allOf: [{ $ref: "#/components/schemas/ContentCardViewerState" }]
           nullable: true
@@ -8222,6 +8227,7 @@ components:
 
     SearchPersonView:
       type: object
+      required: [tmdbId]
       description: Pessoa retornada pelo endpoint de busca de pessoas do TMDB.
       properties:
         tmdbId: { type: string }

@@ -1,6 +1,6 @@
 # Progresso do projeto
 
-Última atualização: 2026-10-17.
+Última atualização: 2026-10-19.
 
 Este documento resume o que já foi construído no Watchwise API, em ordem cronológica por dia de
 desenvolvimento: o quê, por quê e como. Serve como retrato do estado atual do projeto — para a visão
@@ -5150,3 +5150,16 @@ a região na chave de cache; a busca raw permaneceu inalterada. As buscas visuai
 enviando apenas `preferredLanguage`, pois os endpoints correspondentes do TMDB não expõem região; o enriquecimento
 dos cards continua usando idioma e região. A suíte focada final passou com 144 testes e a suíte completa com 4.141,
 sem falhas, erros ou testes ignorados.
+
+## 2026-10-19 — Verificação do contrato visual de Search
+
+Foi concluída a sincronização local do contrato já implementado de `GET /search/view` no OpenAPI, nas regras
+de negócio e nos requisitos da tela Search. A documentação agora explicita os quatro escopos, defaults e
+limites de `q`, `page` e `size`, os campos mínimos dos cards, a escala da nota `voteAverage`, o fallback
+de enriquecimento e o comportamento somente leitura.
+
+Também foi ajustado `SearchEndToEndIntegrationTest` para verificar, pelo controller e serviço reais, o
+envelope misto de `CONTENT` com `page=1` e `size=18`, a alternância filme/série, o estado `PARTIAL` do
+card, a lista `people` vazia e a ausência de referências persistidas em `Content`. A regra de paginação
+mista permanece global: ranks de filme e série alternam até uma fonte acabar, sem promover um rank posterior
+quando um slot não é materializado. A verificação focada passou com 104 testes, sem falhas, erros ou ignorados.

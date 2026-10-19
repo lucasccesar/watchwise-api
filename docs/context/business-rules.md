@@ -2186,15 +2186,16 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   exigiria mais de 500 páginas, `totalResults` permanece exato, mas `totalPages` e `hasNext` são limitados
   à última página acessível, a 500.
 - **`CONTENT` combina fontes sem perder a posição lógica** (`ContentSearchPagePlanner`/
-  `SearchViewServiceImpl`) — o total é a soma dos `total_results` de filmes e séries no TMDB, e os itens
-  alternam o mesmo rank de filme e série até uma fonte acabar; os ranks restantes da fonte mais longa vêm
-  depois. `totalPages` e `hasNext` são calculados sobre esse total combinado e o `size` pedido, com teto de
-  500 páginas. Um slot sem
-  resultado materializado não é substituído pelo rank posterior, embora o total externo permaneça o mesmo.
+  `SearchViewServiceImpl`) — o total é a soma dos `total_results` de filmes e séries no TMDB, e `page`/
+  `size` indexam uma única sequência global: rank 0 de filme, rank 0 de série, rank 1 de filme, rank 1 de
+  série e assim por diante até uma fonte acabar; os ranks restantes da fonte mais longa vêm depois.
+  `totalPages` e `hasNext` são calculados sobre esse total combinado e o `size` pedido, com teto de 500
+  páginas. A janela de cada fonte é planejada a partir desses slots. Um slot sem resultado materializado
+  é omitido da resposta sem promover o rank posterior, embora o total externo permaneça o mesmo.
 - **As páginas visuais respeitam o tamanho pedido sobre a página fixa do TMDB** (`TmdbSearchWindowReader`)
   — o serviço lê as páginas externas necessárias para montar o intervalo visual solicitado, calcula os
   metadados a partir do total externo e preserva a ordem de origem. Isso vale para os escopos diretos e
-  para cada fonte do escopo misto.
+  para cada fonte do escopo misto, sem tratar filme e série como duas paginações independentes.
 - **A regiao preferida e aplicada conforme o contrato de cada endpoint TMDB** (`SearchViewServiceImpl`/
   `TmdbClient`) — buscas de filmes recebem `preferredRegion`, cuja regiao tambem participa da chave de
   cache; os endpoints de series e pessoas nao oferecem esse parametro. O enriquecimento visual dos cards

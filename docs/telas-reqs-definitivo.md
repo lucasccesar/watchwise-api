@@ -2264,14 +2264,16 @@ de região; o enriquecimento dos cards usa idioma e região quando consulta os d
 
 ## Ordem, totais e cards
 
-No escopo `CONTENT`, o backend soma os totais de filmes e séries informados pelo TMDB. Os resultados
-alternam o mesmo rank de cada fonte até uma delas acabar; depois, os ranks restantes da fonte mais longa
-continuam na ordem original. `totalPages` e `hasNext` são calculados sobre o total combinado e o `size`
-solicitado, com teto de 500 páginas. Um slot sem resultado materializado não é preenchido pelo rank posterior.
+No escopo `CONTENT`, o backend soma os totais de filmes e séries informados pelo TMDB e pagina uma única
+sequência global: rank 0 de filme, rank 0 de série, rank 1 de filme, rank 1 de série e assim por diante.
+Quando uma fonte acaba, os ranks restantes da outra continuam na ordem original. `totalPages` e `hasNext`
+são calculados sobre o total combinado e o `size` solicitado, com teto de 500 páginas. Se um slot não for
+materializado, ele não é substituído pelo rank posterior, então a quantidade retornada pode ser menor que
+`size` sem alterar `totalResults`.
 
 Cada item de `contents` informa `tmdbId`, `type`, `title`, `posterUrl`, `releaseYear`, `genres`,
 `runtimeMinutes`, `numberOfSeasons`, `voteAverage`, `viewerState` e `previewStatus`. `voteAverage` é a
-nota média fornecida pelo TMDB para o resultado; não é a média das avaliações do Watchwise. Pessoas
+nota média do resultado na escala do TMDB (0–10); não é a média das avaliações do Watchwise. Pessoas
 informam `tmdbId`, `name`, `photoUrl` e `knownForDepartment`.
 
 O backend reaproveita o montador de cards em lote. Se o enriquecimento adicional do TMDB falhar ou vier
