@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PickOrigin;
 import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.hibernate.Hibernate;
@@ -114,11 +115,36 @@ class PicksTemplateRepositoryTest {
         repository.save(PicksTemplate.builder().origin(PickOrigin.COMMUNITY).name("1000 Awards").createdAt(now).updatedAt(now).build());
         repository.saveAndFlush(PicksTemplate.builder().origin(PickOrigin.OFFICIAL).name("Other Awards").createdAt(now).updatedAt(now).build());
 
-        Page<PicksTemplate> result = repository.search(PickOrigin.OFFICIAL, "100\\%", PageRequest.of(0, 1));
+        Page<PicksTemplate> result = repository.search(UUID.randomUUID(), PickOrigin.OFFICIAL,
+                "100\\%", PageRequest.of(0, 1));
 
         assertThat(result.getTotalElements()).isEqualTo(1);
         assertThat(result.getTotalPages()).isEqualTo(1);
         assertThat(result.getContent()).extracting(PicksTemplate::getName).containsExactly("100% Awards");
+    }
+
+    @Test
+    void excludesBlockedTemplateCreatorsBeforeSearchPaginationAndCount() {
+        LocalDateTime now = LocalDateTime.now();
+        User viewer = saveUser("blocked-template-viewer", now);
+        User blockedCreator = saveUser("blocked-template-creator", now);
+        User visibleCreator = saveUser("visible-template-creator", now);
+        PicksTemplate blocked = repository.saveAndFlush(PicksTemplate.builder()
+                .creator(blockedCreator).origin(PickOrigin.COMMUNITY).name("Blocked template")
+                .likesCount(100).createdAt(now).updatedAt(now).build());
+        PicksTemplate visible = repository.saveAndFlush(PicksTemplate.builder()
+                .creator(visibleCreator).origin(PickOrigin.COMMUNITY).name("Visible template")
+                .likesCount(10).createdAt(now.minusMinutes(1)).updatedAt(now).build());
+        entityManager.persist(UserBlock.builder().blocker(viewer).blocked(blockedCreator).createdAt(now).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<PicksTemplate> result = repository.searchRelevance(
+                viewer.getId(), null, "", "", PageRequest.of(0, 1));
+
+        assertThat(result.getContent()).extracting(PicksTemplate::getId).containsExactly(visible.getId());
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getContent()).doesNotContain(blocked);
     }
 
     @Test
@@ -131,7 +157,7 @@ class PicksTemplateRepositoryTest {
         saveTemplate("Night Official", PickOrigin.OFFICIAL, now.plusMinutes(1));
 
         Page<PicksTemplate> result = repository.searchRelevance(
-                PickOrigin.COMMUNITY, "night", "night", PageRequest.of(0, 10));
+                UUID.randomUUID(), PickOrigin.COMMUNITY, "night", "night", PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(PicksTemplate::getName)
                 .containsExactly("Night", "Night Owls", "Late Night Movies");
@@ -152,7 +178,7 @@ class PicksTemplateRepositoryTest {
         entityManager.clear();
 
         Page<PicksTemplate> result = repository.searchRelevance(
-                null, "night", "night", PageRequest.of(0, 10));
+                UUID.randomUUID(), null, "night", "night", PageRequest.of(0, 10));
 
         PicksTemplate fetchedCommunity = result.getContent().stream()
                 .filter(template -> template.getId().equals(community.getId())).findFirst().orElseThrow();
@@ -170,7 +196,7 @@ class PicksTemplateRepositoryTest {
         saveTemplate("Rank% community", PickOrigin.COMMUNITY, now.plusDays(1));
 
         Page<PicksTemplate> result = repository.searchRecent(
-                PickOrigin.OFFICIAL, "rank\\%", PageRequest.of(0, 10));
+                UUID.randomUUID(), PickOrigin.OFFICIAL, "rank\\%", PageRequest.of(0, 10));
 
         assertThat(result.getContent()).extracting(PicksTemplate::getName)
                 .containsExactly("Rank% newer", "Rank% older");

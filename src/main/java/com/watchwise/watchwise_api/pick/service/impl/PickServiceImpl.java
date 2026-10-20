@@ -36,6 +36,7 @@ import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateCategor
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,15 +69,16 @@ public class PickServiceImpl implements PickService {
     private final CommentRepository commentRepository;
     private final LikeService likeService;
     private final PickPreviewAssembler pickPreviewAssembler;
+    private final UserBlockAccessService userBlockAccessService;
 
     public PickServiceImpl(PickRepository pickRepository, PickSelectionRepository selectionRepository,
             PicksTemplateRepository templateRepository, PicksTemplateCategoryRepository categoryRepository,
             UserRepository userRepository, FollowerRepository followerRepository, PickTargetService targetService,
             PickMapper pickMapper, PicksTemplateMapper templateMapper, PageRequestFactory pageRequestFactory,
-            PickPreviewAssembler pickPreviewAssembler) {
+            PickPreviewAssembler pickPreviewAssembler, UserBlockAccessService userBlockAccessService) {
         this(pickRepository, selectionRepository, templateRepository, categoryRepository, userRepository,
                 followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
-                null, null, null, pickPreviewAssembler);
+                null, null, null, pickPreviewAssembler, userBlockAccessService);
     }
 
     @Override
@@ -116,9 +118,7 @@ public class PickServiceImpl implements PickService {
     @Override
     @Transactional(readOnly = true)
     public Page<PickPreviewDTO> getMyPicks(UUID userId, UUID templateId, Integer page, Integer size) {
-        if (!templateRepository.existsById(templateId)) {
-            throw new NotFoundException("Picks template not found");
-        }
+        assertTemplateVisible(userId, templateId);
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         Page<Pick> picks = pickRepository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(userId, templateId, pageRequest);
         return mapPreviewPage(picks, userId);
@@ -128,7 +128,7 @@ public class PickServiceImpl implements PickService {
     @Transactional(readOnly = true)
     public Page<PickViewCardDTO> getMyPicksView(UUID viewerId, Integer page, Integer size) {
         PageRequest pageRequest = pageRequestFactory.build(page, size, MAX_VISUAL_PICK_PAGE_SIZE);
-        Page<Pick> picks = pickRepository.findByUserIdOrderByCreatedAtDescIdDesc(viewerId, pageRequest);
+        Page<Pick> picks = pickRepository.findVisibleByUserId(viewerId, viewerId, pageRequest);
         return pickPreviewAssembler.assembleViewPage(picks, viewerId);
     }
 
@@ -136,7 +136,7 @@ public class PickServiceImpl implements PickService {
     @Transactional(readOnly = true)
     public Page<PickTemplatePickViewDTO> getTemplatePicksView(
             UUID viewerId, UUID templateId, PickSort sort, Integer page, Integer size) {
-        assertTemplateExists(templateId);
+        assertTemplateVisible(viewerId, templateId);
         PageRequest pageRequest = pageRequestFactory.build(page, size, MAX_VISUAL_PICK_PAGE_SIZE);
         Page<Pick> picks = sort == PickSort.POPULAR
                 ? pickRepository.findVisibleByTemplatePopular(viewerId, templateId, pageRequest)
@@ -148,7 +148,7 @@ public class PickServiceImpl implements PickService {
     @Transactional(readOnly = true)
     public Page<PickTemplatePickViewDTO> getMyPicksView(
             UUID viewerId, UUID templateId, Integer page, Integer size) {
-        assertTemplateExists(templateId);
+        assertTemplateVisible(viewerId, templateId);
         PageRequest pageRequest = pageRequestFactory.build(page, size, MAX_VISUAL_PICK_PAGE_SIZE);
         Page<Pick> picks = pickRepository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(
                 viewerId, templateId, pageRequest);
@@ -167,7 +167,7 @@ public class PickServiceImpl implements PickService {
     @Override
     @Transactional(readOnly = true)
     public Page<PickPreviewDTO> getTemplatePicks(UUID viewerId, UUID templateId, PickSort sort, Integer page, Integer size) {
-        assertTemplateExists(templateId);
+        assertTemplateVisible(viewerId, templateId);
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         Page<Pick> picks = sort == PickSort.POPULAR
                 ? pickRepository.findVisibleByTemplatePopular(viewerId, templateId, pageRequest)
@@ -210,6 +210,7 @@ public class PickServiceImpl implements PickService {
         if (!userRepository.existsById(ownerId)) {
             throw new NotFoundException("User not found");
         }
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         return mapPreviewPage(pickRepository.findVisibleByOwner(viewerId, ownerId, templateId, pageRequest), viewerId);
     }
@@ -226,9 +227,11 @@ public class PickServiceImpl implements PickService {
         return pickPreviewAssembler.assemblePage(picks, viewerId);
     }
 
-    private void assertTemplateExists(UUID templateId) {
-        if (!templateRepository.existsById(templateId)) {
-            throw new NotFoundException("Picks template not found");
+    private void assertTemplateVisible(UUID viewerId, UUID templateId) {
+        PicksTemplate template = templateRepository.findById(templateId)
+                .orElseThrow(() -> new NotFoundException("Picks template not found"));
+        if (template.getCreator() != null) {
+            userBlockAccessService.assertContentVisible(viewerId, template.getCreator().getId());
         }
     }
 
@@ -342,6 +345,10 @@ public class PickServiceImpl implements PickService {
 
     private void assertVisible(UUID viewerId, Pick pick) {
         UUID ownerId = pick.getUser().getId();
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
+        if (pick.getPicksTemplate().getCreator() != null) {
+            userBlockAccessService.assertContentVisible(viewerId, pick.getPicksTemplate().getCreator().getId());
+        }
         if (viewerId.equals(ownerId) || pick.getVisibility() == PickVisibility.PUBLIC) {
             return;
         }

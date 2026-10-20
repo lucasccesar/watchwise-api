@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userlist.dto.*;
 import com.watchwise.watchwise_api.userlist.entity.*;
 import jakarta.persistence.EntityManager;
@@ -156,6 +157,22 @@ class UserListViewRepositoryTest {
         assertThat(views.findPage(new UserListViewQuery(viewer.getId(), null, UserListViewQueryMode.DISCOVER, null,
                 null, UserListViewItemType.MOVIE, "drama", null, Sort.Direction.ASC, PageRequest.of(1, 1)))
                 .getContent()).extracting(UserList::getId).containsExactly(second.getId());
+    }
+
+    @Test
+    void shouldExcludeBlockedOwnersBeforeVisualDiscoveryPaginationAndCount() {
+        UserList blocked = list(owner, "A blocked owner list", UserListVisibility.PUBLIC, 100, 1, null);
+        UserList visible = list(viewer, "B visible list", UserListVisibility.PUBLIC, 10, 2, null);
+        em.persist(UserBlock.builder().blocker(viewer).blocked(owner).createdAt(LocalDateTime.now()).build());
+        em.flush(); em.clear();
+        UserListViewQuery query = new UserListViewQuery(viewer.getId(), null, UserListViewQueryMode.DISCOVER, null,
+                null, null, null, null, Sort.Direction.DESC, PageRequest.of(0, 1));
+
+        Page<UserList> result = views.findPage(query);
+
+        assertThat(result.getContent()).extracting(UserList::getId).containsExactly(visible.getId());
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getContent()).doesNotContain(blocked);
     }
 
     @Test

@@ -40,6 +40,7 @@ import com.watchwise.watchwise_api.pick.dto.PickTargetPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -70,6 +71,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     private final TmdbClient tmdbClient;
     private final RequestThrottler requestThrottler;
     private final PickTargetPreviewAssembler pickTargetPreviewAssembler;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Value("${app.rate-limit.search.max-requests}")
     private int searchMaxRequests;
@@ -97,6 +99,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     public Page<PickOptionSearchDTO> searchOptions(UUID viewerId, UUID templateId, UUID categoryId, String query,
                                                     String seriesTmdbId, Integer seasonNumber, Integer page, Integer size) {
         PicksTemplateCategory category = findCategory(templateId, categoryId);
+        assertTemplateVisible(viewerId, category);
         return searchOptions(viewerId, category, query, seriesTmdbId, seasonNumber,
                 pageRequestFactory.build(page, size));
     }
@@ -122,6 +125,7 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
     public Page<PickOptionViewDTO> getOptionViews(UUID viewerId, UUID templateId, UUID categoryId, String query,
                                                   String seriesTmdbId, Integer seasonNumber, Integer page, Integer size) {
         PicksTemplateCategory category = findCategory(templateId, categoryId);
+        assertTemplateVisible(viewerId, category);
         Page<PickOptionSearchDTO> options = searchOptions(viewerId, category, query, seriesTmdbId, seasonNumber,
                 pageRequestFactory.build(page, size, MAX_OPTION_VIEW_PAGE_SIZE));
         List<PickTargetPreviewDTO> previews = pickTargetPreviewAssembler.assemble(
@@ -164,6 +168,13 @@ public class PicksTemplateOptionServiceImpl implements PicksTemplateOptionServic
                 return options.isLast();
             }
         };
+    }
+
+    private void assertTemplateVisible(UUID viewerId, PicksTemplateCategory category) {
+        PicksTemplate template = category.getPicksTemplate();
+        if (template != null && template.getCreator() != null) {
+            userBlockAccessService.assertContentVisible(viewerId, template.getCreator().getId());
+        }
     }
 
     private PicksTemplateCategory findCategory(UUID templateId, UUID categoryId) {

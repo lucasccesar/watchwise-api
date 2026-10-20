@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListItem;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
@@ -116,6 +117,28 @@ class UserListRepositoryTest {
         List<UserList> result = userListRepository.findByUserId(lucas.getId());
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void shouldExcludeBlockedOwnersBeforeDiscoverPaginationAndCount() {
+        LocalDateTime now = LocalDateTime.now();
+        User thirdParty = userRepository.saveAndFlush(buildUser("thirdparty", "thirdparty@email.com"));
+        UserList blockedList = userListRepository.saveAndFlush(UserList.builder()
+                .user(marina).name("Blocked popular list").visibility(UserListVisibility.PUBLIC)
+                .likesCount(100).createdAt(now).updatedAt(now).build());
+        UserList visibleList = userListRepository.saveAndFlush(UserList.builder()
+                .user(thirdParty).name("Visible list").visibility(UserListVisibility.PUBLIC)
+                .likesCount(10).createdAt(now.minusMinutes(1)).updatedAt(now).build());
+        entityManager.persist(UserBlock.builder().blocker(lucas).blocked(marina).createdAt(now).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<UserList> result = userListRepository.findVisibleByVisibility(
+                lucas.getId(), UserListVisibility.PUBLIC, PageRequest.of(0, 1));
+
+        assertThat(result.getContent()).extracting(UserList::getId).containsExactly(visibleList.getId());
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getContent()).doesNotContain(blockedList);
     }
 
     @Test

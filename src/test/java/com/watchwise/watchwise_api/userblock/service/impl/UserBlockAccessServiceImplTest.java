@@ -2,6 +2,8 @@ package com.watchwise.watchwise_api.userblock.service.impl;
 
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserPairLockIdentity;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UserBlockAccessServiceImplTest {
     @Mock UserBlockRepository userBlockRepository;
+    @Mock AdvisoryLock advisoryLock;
     @InjectMocks UserBlockAccessServiceImpl service;
 
     @Test void shouldUseEitherDirectionPredicate() {
@@ -66,6 +69,17 @@ class UserBlockAccessServiceImplTest {
         assertThatThrownBy(() -> service.assertContentVisible(ownerId, viewerId))
                 .isInstanceOf(NotFoundException.class);
         service.assertContentVisible(viewerId, viewerId);
+    }
+
+    @Test void shouldLockThePairBeforeAllowingAnInteraction() {
+        UUID actorId = UUID.randomUUID();
+        UUID targetId = UUID.randomUUID();
+        when(userBlockRepository.existsEitherDirection(actorId, targetId)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.lockAndAssertInteractionAllowed(actorId, targetId))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(advisoryLock).lock(UserPairLockIdentity.of(actorId, targetId));
     }
 
     private static UserBlockRepository.PairDirection direction(UUID blockerId, UUID blockedId) {

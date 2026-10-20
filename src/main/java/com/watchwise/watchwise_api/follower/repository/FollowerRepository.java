@@ -21,6 +21,16 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
     @Query("SELECT f.followed.id FROM Follower f WHERE f.follower.id = :followerId AND f.status = :status")
     List<UUID> findFollowedIdsByFollowerIdAndStatus(@Param("followerId") UUID followerId, @Param("status") FollowStatus status);
 
+    @Query("""
+            SELECT f.followed.id FROM Follower f
+            WHERE f.follower.id = :viewerId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
+              AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                    (b.blocker.id = :viewerId AND b.blocked.id = f.followed.id)
+                    OR (b.blocker.id = f.followed.id AND b.blocked.id = :viewerId))
+            """)
+    List<UUID> findVisibleFollowedIdsByFollowerId(@Param("viewerId") UUID viewerId);
+
     Optional<Follower> findByFollowerIdAndFollowedId(UUID followerId, UUID followedId);
 
     Optional<Follower> findByFollowerIdAndFollowedIdAndStatus(UUID followerId, UUID followedId, FollowStatus status);
@@ -97,5 +107,13 @@ public interface FollowerRepository extends JpaRepository<Follower, UUID> {
               AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.PENDING
             """)
     List<Follower> findPendingByFollowedIdForUpdate(@Param("followedId") UUID followedId);
+
+    @Query("""
+            SELECT f.follower.id FROM Follower f
+            WHERE f.followed.id = :followedId
+              AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.PENDING
+            ORDER BY f.follower.id ASC
+            """)
+    List<UUID> findPendingFollowerIdsByFollowedId(@Param("followedId") UUID followedId);
 
 }

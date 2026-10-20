@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -49,20 +52,22 @@ public class LikeServiceImpl implements LikeService {
     private final PicksTemplateRepository picksTemplateRepository;
     private final NewTransactionExecutor newTransactionExecutor;
     private final SocialNotificationService socialNotificationService;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public void likeComment(UUID userId, UUID commentId) {
-        if (likeRepository.existsByUserIdAndCommentId(userId, commentId)) {
-            return;
-        }
-
         Comment comment = commentRepository.findByIdWithTargets(commentId)
                 .orElseThrow(() -> new NotFoundException("Comment not found"));
 
-        assertCommentIsVisibleTo(userId, comment);
-
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                userBlockAccessService.lockAndAssertInteractionAllowed(userId, commentCounterparts(comment));
+                Comment currentComment = commentRepository.findByIdWithTargets(commentId)
+                        .orElseThrow(() -> new NotFoundException("Comment not found"));
+                assertCommentIsVisibleTo(userId, currentComment);
+                if (likeRepository.existsByUserIdAndCommentId(userId, commentId)) {
+                    return null;
+                }
                 Like like = Like.builder()
                         .user(userRepository.getReferenceById(userId))
                         .comment(commentRepository.getReferenceById(commentId))
@@ -71,7 +76,7 @@ public class LikeServiceImpl implements LikeService {
                 Like saved = likeRepository.saveAndFlush(like);
                 commentRepository.incrementLikesCount(commentId);
                 socialNotificationService.notifyLikeReceived(
-                        userId, comment.getUser().getId(), NotificationTargetType.COMMENT, commentId);
+                        userId, currentComment.getUser().getId(), NotificationTargetType.COMMENT, commentId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -91,17 +96,18 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public void likeDiaryEntry(UUID userId, UUID diaryEntryId) {
-        if (likeRepository.existsByUserIdAndDiaryEntryId(userId, diaryEntryId)) {
-            return;
-        }
-
         DiaryEntry diaryEntry = diaryEntryRepository.findByIdWithUser(diaryEntryId)
                 .orElseThrow(() -> new NotFoundException("Diary entry not found"));
 
-        assertDiaryEntryIsVisibleTo(userId, diaryEntry);
-
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                userBlockAccessService.lockAndAssertInteractionAllowed(userId, diaryEntry.getUser().getId());
+                DiaryEntry currentEntry = diaryEntryRepository.findByIdWithUser(diaryEntryId)
+                        .orElseThrow(() -> new NotFoundException("Diary entry not found"));
+                assertDiaryEntryIsVisibleTo(userId, currentEntry);
+                if (likeRepository.existsByUserIdAndDiaryEntryId(userId, diaryEntryId)) {
+                    return null;
+                }
                 Like like = Like.builder()
                         .user(userRepository.getReferenceById(userId))
                         .diaryEntry(diaryEntryRepository.getReferenceById(diaryEntryId))
@@ -110,7 +116,7 @@ public class LikeServiceImpl implements LikeService {
                 Like saved = likeRepository.saveAndFlush(like);
                 diaryEntryRepository.incrementLikesCount(diaryEntryId);
                 socialNotificationService.notifyLikeReceived(
-                        userId, diaryEntry.getUser().getId(), NotificationTargetType.DIARY_ENTRY, diaryEntryId);
+                        userId, currentEntry.getUser().getId(), NotificationTargetType.DIARY_ENTRY, diaryEntryId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -130,17 +136,18 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public void likeDroppedEntry(UUID userId, UUID droppedEntryId) {
-        if (likeRepository.existsByUserIdAndDroppedEntryId(userId, droppedEntryId)) {
-            return;
-        }
-
         DroppedEntry droppedEntry = droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)
                 .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
 
-        assertDroppedEntryIsVisibleTo(userId, droppedEntry);
-
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                userBlockAccessService.lockAndAssertInteractionAllowed(userId, droppedEntry.getUser().getId());
+                DroppedEntry currentEntry = droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)
+                        .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
+                assertDroppedEntryIsVisibleTo(userId, currentEntry);
+                if (likeRepository.existsByUserIdAndDroppedEntryId(userId, droppedEntryId)) {
+                    return null;
+                }
                 Like like = Like.builder()
                         .user(userRepository.getReferenceById(userId))
                         .droppedEntry(droppedEntryRepository.getReferenceById(droppedEntryId))
@@ -149,7 +156,7 @@ public class LikeServiceImpl implements LikeService {
                 Like saved = likeRepository.saveAndFlush(like);
                 droppedEntryRepository.incrementLikesCount(droppedEntryId);
                 socialNotificationService.notifyLikeReceived(
-                        userId, droppedEntry.getUser().getId(), NotificationTargetType.DROPPED_ENTRY, droppedEntryId);
+                        userId, currentEntry.getUser().getId(), NotificationTargetType.DROPPED_ENTRY, droppedEntryId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -169,17 +176,18 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public void likeList(UUID userId, UUID listId) {
-        if (likeRepository.existsByUserIdAndListId(userId, listId)) {
-            return;
-        }
-
         UserList list = userListRepository.findById(listId)
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
-        assertListIsVisibleTo(userId, list);
-
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                userBlockAccessService.lockAndAssertInteractionAllowed(userId, list.getUser().getId());
+                UserList currentList = userListRepository.findById(listId)
+                        .orElseThrow(() -> new NotFoundException("List not found"));
+                assertListIsVisibleTo(userId, currentList);
+                if (likeRepository.existsByUserIdAndListId(userId, listId)) {
+                    return null;
+                }
                 Like like = Like.builder()
                         .user(userRepository.getReferenceById(userId))
                         .list(userListRepository.getReferenceById(listId))
@@ -188,7 +196,7 @@ public class LikeServiceImpl implements LikeService {
                 Like saved = likeRepository.saveAndFlush(like);
                 userListRepository.incrementLikesCount(listId);
                 socialNotificationService.notifyLikeReceived(
-                        userId, list.getUser().getId(), NotificationTargetType.USER_LIST, listId);
+                        userId, currentList.getUser().getId(), NotificationTargetType.USER_LIST, listId);
                 return saved;
             });
         } catch (DataIntegrityViolationException e) {
@@ -208,18 +216,23 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public void likePick(UUID userId, UUID pickId) {
-        if (likeRepository.existsByUserIdAndPickId(userId, pickId)) {
-            return;
-        }
-
         Pick pick = pickRepository.findById(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
-        assertPickIsVisibleTo(userId, pick);
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                List<UUID> counterpartIds = new ArrayList<>();
+                counterpartIds.add(pick.getUser().getId());
+                if (pick.getPicksTemplate().getCreator() != null) {
+                    counterpartIds.add(pick.getPicksTemplate().getCreator().getId());
+                }
+                userBlockAccessService.lockAndAssertInteractionAllowed(userId, counterpartIds);
                 Pick lockedPick = pickRepository.findByIdForUpdate(pickId)
                         .orElseThrow(() -> new NotFoundException("Pick not found"));
+                assertPickIsVisibleTo(userId, lockedPick);
+                if (likeRepository.existsByUserIdAndPickId(userId, pickId)) {
+                    return null;
+                }
                 Like like = Like.builder()
                         .user(userRepository.getReferenceById(userId))
                         .pick(lockedPick)
@@ -250,17 +263,22 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public void likePicksTemplate(UUID userId, UUID templateId) {
-        if (likeRepository.existsByUserIdAndPicksTemplateId(userId, templateId)) {
-            return;
-        }
-
-        picksTemplateRepository.findById(templateId)
+        PicksTemplate template = picksTemplateRepository.findById(templateId)
                 .orElseThrow(() -> new NotFoundException("Picks template not found"));
 
         try {
             newTransactionExecutor.runInNewTransaction(() -> {
+                if (template.getCreator() != null) {
+                    userBlockAccessService.lockAndAssertInteractionAllowed(userId, template.getCreator().getId());
+                }
                 PicksTemplate lockedTemplate = picksTemplateRepository.findByIdForUpdate(templateId)
                         .orElseThrow(() -> new NotFoundException("Picks template not found"));
+                if (lockedTemplate.getCreator() != null) {
+                    userBlockAccessService.assertInteractionAllowed(userId, lockedTemplate.getCreator().getId());
+                }
+                if (likeRepository.existsByUserIdAndPicksTemplateId(userId, templateId)) {
+                    return null;
+                }
                 Like like = Like.builder()
                         .user(userRepository.getReferenceById(userId))
                         .picksTemplate(lockedTemplate)
@@ -367,6 +385,23 @@ public class LikeServiceImpl implements LikeService {
         }
 
         assertDiaryEntryIsVisibleTo(viewerId, comment.getDiaryEntry());
+    }
+
+    private List<UUID> commentCounterparts(Comment comment) {
+        List<UUID> counterpartIds = new ArrayList<>();
+        counterpartIds.add(comment.getUser().getId());
+        if (comment.getList() != null) {
+            counterpartIds.add(comment.getList().getUser().getId());
+        } else if (comment.getDiaryEntry() != null) {
+            counterpartIds.add(comment.getDiaryEntry().getUser().getId());
+        } else if (comment.getDroppedEntry() != null) {
+            counterpartIds.add(comment.getDroppedEntry().getUser().getId());
+        } else if (comment.getPick() != null) {
+            counterpartIds.add(comment.getPick().getUser().getId());
+        } else if (comment.getPicksTemplate() != null && comment.getPicksTemplate().getCreator() != null) {
+            counterpartIds.add(comment.getPicksTemplate().getCreator().getId());
+        }
+        return counterpartIds;
     }
 
     private void assertPickIsVisibleTo(UUID viewerId, Pick pick) {

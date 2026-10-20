@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.userlist.service.impl;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
@@ -14,6 +15,7 @@ import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.dto.*;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
@@ -52,13 +54,14 @@ class UserListViewServiceImplTest {
     @Mock LikeService likes;
     @Mock UserRepository users;
     @Mock FollowerRepository followers;
+    @Mock UserBlockAccessService userBlockAccessService;
     @Mock ContentCardAssembler contentCards;
     UserListViewServiceImpl service;
     UUID viewer = UUID.randomUUID();
 
     @BeforeEach void setup() {
         service = new UserListViewServiceImpl(repository, itemRepository, itemService, comments,
-                likes, users, followers, contentCards, new PageRequestFactory());
+                likes, users, followers, contentCards, new PageRequestFactory(), userBlockAccessService);
     }
 
     @Test
@@ -161,6 +164,19 @@ class UserListViewServiceImplTest {
                 .id(ownerId).isProfilePublic(false).build()));
         assertThatThrownBy(() -> service.getView(request(UserListViewQueryMode.USER, null, ownerId,
                 null, null, null, 1, 10))).isInstanceOf(ForbiddenException.class);
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    void shouldHideTheOwnerListViewWhenViewerAndOwnerAreBlocked() {
+        UUID ownerId = UUID.randomUUID();
+        when(users.findById(ownerId)).thenReturn(Optional.of(com.watchwise.watchwise_api.user.entity.User.builder()
+                .id(ownerId).isProfilePublic(true).build()));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(viewer, ownerId);
+
+        assertThatThrownBy(() -> service.getView(request(UserListViewQueryMode.USER, null, ownerId,
+                null, null, null, 1, 10))).isInstanceOf(NotFoundException.class);
         verifyNoInteractions(repository);
     }
 

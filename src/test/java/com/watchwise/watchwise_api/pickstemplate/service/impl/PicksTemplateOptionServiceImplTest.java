@@ -28,6 +28,7 @@ import com.watchwise.watchwise_api.pickstemplate.mapper.PicksTemplateOptionMappe
 import com.watchwise.watchwise_api.pickstemplate.repository.*;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -60,13 +61,14 @@ class PicksTemplateOptionServiceImplTest {
     @Mock TmdbClient tmdbClient;
     @Mock RequestThrottler requestThrottler;
     @Mock PickTargetPreviewAssembler previewAssembler;
+    @Mock UserBlockAccessService userBlockAccessService;
     PicksTemplateOptionServiceImpl service;
 
     @BeforeEach
     void initializeService() {
         service = new PicksTemplateOptionServiceImpl(templateRepository, categoryRepository, optionRepository,
                 selectionRepository, userRepository, pickTargetService, optionMapper, new PageRequestFactory(),
-                tmdbClient, requestThrottler, previewAssembler);
+                tmdbClient, requestThrottler, previewAssembler, userBlockAccessService);
     }
 
     @Test
@@ -99,6 +101,27 @@ class PicksTemplateOptionServiceImplTest {
         verify(previewAssembler).assemble(eq(List.of(target)), any(ContentCardContext.class));
         verify(requestThrottler).checkAllowed(eq("search|" + viewerId), anyInt(), any());
         verifyNoInteractions(optionRepository);
+    }
+
+    @Test
+    void shouldHideTemplateOptionSearchWhenCreatorAndViewerAreBlocked() {
+        UUID viewerId = UUID.randomUUID();
+        UUID creatorId = UUID.randomUUID();
+        User creator = User.builder().id(creatorId).build();
+        PicksTemplate template = PicksTemplate.builder().id(UUID.randomUUID()).creator(creator)
+                .origin(PickOrigin.COMMUNITY).name("Awards").build();
+        PicksTemplateCategory category = PicksTemplateCategory.builder().id(UUID.randomUUID())
+                .picksTemplate(template).name("Best").group(PickCategoryGroup.PRIMARY).displayOrder(1)
+                .allowedType(PickAllowedType.MOVIE).optionMode(PickCategoryOptionMode.OPEN).build();
+        when(categoryRepository.findByIdAndPicksTemplateId(category.getId(), template.getId()))
+                .thenReturn(Optional.of(category));
+        org.mockito.Mockito.doThrow(new com.watchwise.watchwise_api.common.exception.NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(viewerId, creatorId);
+
+        assertThatThrownBy(() -> service.searchOptions(viewerId, template.getId(), category.getId(),
+                "movie", null, null, 1, 10))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.NotFoundException.class);
+        verifyNoInteractions(optionRepository, tmdbClient, requestThrottler);
     }
 
     @Test

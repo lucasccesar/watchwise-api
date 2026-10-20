@@ -3,7 +3,6 @@ package com.watchwise.watchwise_api.notification.repository;
 import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
-import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -31,17 +30,49 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 
     boolean existsByUserIdAndIsReadFalse(UUID userId);
 
-    @EntityGraph(attributePaths = {"content", "latestActor"})
-    Page<Notification> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
+    @Query(value = """
+            SELECT n FROM Notification n LEFT JOIN FETCH n.content LEFT JOIN FETCH n.latestActor
+            WHERE n.user.id = :userId
+              AND (n.latestActor IS NULL OR NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                    (b.blocker.id = :userId AND b.blocked.id = n.latestActor.id)
+                    OR (b.blocker.id = n.latestActor.id AND b.blocked.id = :userId)))
+            ORDER BY n.createdAt DESC, n.id DESC
+            """,
+            countQuery = """
+                    SELECT COUNT(n) FROM Notification n
+                    WHERE n.user.id = :userId
+                      AND (n.latestActor IS NULL OR NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                            (b.blocker.id = :userId AND b.blocked.id = n.latestActor.id)
+                            OR (b.blocker.id = n.latestActor.id AND b.blocked.id = :userId)))
+                    """)
+    Page<Notification> findByUserIdOrderByCreatedAtDesc(@Param("userId") UUID userId, Pageable pageable);
 
-    @EntityGraph(attributePaths = {"content", "latestActor"})
-    Page<Notification> findByUserIdAndIsReadOrderByCreatedAtDesc(UUID userId, boolean isRead, Pageable pageable);
+    @Query(value = """
+            SELECT n FROM Notification n LEFT JOIN FETCH n.content LEFT JOIN FETCH n.latestActor
+            WHERE n.user.id = :userId AND n.isRead = :isRead
+              AND (n.latestActor IS NULL OR NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                    (b.blocker.id = :userId AND b.blocked.id = n.latestActor.id)
+                    OR (b.blocker.id = n.latestActor.id AND b.blocked.id = :userId)))
+            ORDER BY n.createdAt DESC, n.id DESC
+            """,
+            countQuery = """
+                    SELECT COUNT(n) FROM Notification n
+                    WHERE n.user.id = :userId AND n.isRead = :isRead
+                      AND (n.latestActor IS NULL OR NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                            (b.blocker.id = :userId AND b.blocked.id = n.latestActor.id)
+                            OR (b.blocker.id = n.latestActor.id AND b.blocked.id = :userId)))
+                    """)
+    Page<Notification> findByUserIdAndIsReadOrderByCreatedAtDesc(
+            @Param("userId") UUID userId, @Param("isRead") boolean isRead, Pageable pageable);
 
     @Query("""
             SELECT COUNT(n) AS totalNotifications,
                    COALESCE(SUM(CASE WHEN n.isRead = false THEN 1 ELSE 0 END), 0) AS unreadNotifications
             FROM Notification n
             WHERE n.user.id = :userId
+              AND (n.latestActor IS NULL OR NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                    (b.blocker.id = :userId AND b.blocked.id = n.latestActor.id)
+                    OR (b.blocker.id = n.latestActor.id AND b.blocked.id = :userId)))
             """)
     NotificationCountsProjection findCountsByUserId(@Param("userId") UUID userId);
 

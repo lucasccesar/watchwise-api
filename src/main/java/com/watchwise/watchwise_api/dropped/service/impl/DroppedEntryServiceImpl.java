@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -48,6 +49,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
     private final NewTransactionExecutor newTransactionExecutor;
     private final WatchlistEntryService watchlistEntryService;
     private final PageRequestFactory pageRequestFactory;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public Page<DroppedEntryResponseDTO> getDropped(UUID viewerId, UUID userId, ContentType type, Integer pageNumber, Integer pageSize) {
@@ -68,6 +70,7 @@ public class DroppedEntryServiceImpl implements DroppedEntryService {
     }
 
     private void assertCanViewDropped(UUID viewerId, UUID targetUserId, User target) {
+        userBlockAccessService.assertContentVisible(viewerId, targetUserId);
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;
         }

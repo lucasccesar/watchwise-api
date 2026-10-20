@@ -26,6 +26,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListItemRepository;
 import com.watchwise.watchwise_api.userlist.repository.UserListViewRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListViewService;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -51,6 +52,7 @@ public class UserListViewServiceImpl implements UserListViewService {
     private final FollowerRepository followers;
     private final ContentCardAssembler contentCards;
     private final PageRequestFactory pages;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     @Transactional(readOnly = true)
@@ -135,6 +137,7 @@ public class UserListViewServiceImpl implements UserListViewService {
 
     private void assertProfileVisible(UserListViewQuery query) {
         User owner = users.findById(query.ownerId()).orElseThrow(() -> new NotFoundException("User not found"));
+        userBlockAccessService.assertContentVisible(query.viewerId(), query.ownerId());
         if (!query.viewerId().equals(query.ownerId()) && !Boolean.TRUE.equals(owner.getIsProfilePublic())
                 && !followers.existsByFollowerIdAndFollowedIdAndStatus(
                         query.viewerId(), query.ownerId(), FollowStatus.ACCEPTED))

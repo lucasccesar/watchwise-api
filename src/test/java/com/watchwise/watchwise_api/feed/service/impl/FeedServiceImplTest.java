@@ -215,7 +215,7 @@ class FeedServiceImplTest {
         stubFollowedIds();
         UUID discardedUserId = UUID.randomUUID();
         User discardedUser = User.builder().id(discardedUserId).username("discarded").name("Discarded").build();
-        when(followerRepository.findFollowedIdsByFollowerIdAndStatus(viewerId, FollowStatus.ACCEPTED))
+        when(followerRepository.findVisibleFollowedIdsByFollowerId(viewerId))
                 .thenReturn(List.of(followedId, discardedUserId));
 
         LocalDateTime now = LocalDateTime.now();
@@ -817,7 +817,7 @@ class FeedServiceImplTest {
     @Test
     @DisplayName("[getFeed] Should Return Empty Content And HasNext False - When Viewer Follows Nobody")
     void shouldReturnEmptyContentAndHasNextFalseWhenViewerFollowsNobody() {
-        when(followerRepository.findFollowedIdsByFollowerIdAndStatus(viewerId, FollowStatus.ACCEPTED)).thenReturn(List.of());
+        when(followerRepository.findVisibleFollowedIdsByFollowerId(viewerId)).thenReturn(List.of());
 
         CursorPageResponseDTO<FeedItemDTO> result = feedService.getFeed(viewerId, null, null);
 
@@ -1235,7 +1235,7 @@ class FeedServiceImplTest {
     }
 
     private void stubFollowedIds() {
-        when(followerRepository.findFollowedIdsByFollowerIdAndStatus(viewerId, FollowStatus.ACCEPTED))
+        when(followerRepository.findVisibleFollowedIdsByFollowerId(viewerId))
                 .thenReturn(List.of(followedId));
     }
 

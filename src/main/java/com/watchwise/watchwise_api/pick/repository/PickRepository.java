@@ -25,10 +25,19 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
             join fetch pick.picksTemplate template
             left join fetch template.creator
             where pick.user.id = :userId
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
             order by pick.createdAt desc, pick.id desc
             """,
-            countQuery = "select count(pick) from Pick pick where pick.user.id = :userId")
-    Page<Pick> findByUserIdOrderByCreatedAtDescIdDesc(@Param("userId") UUID userId, Pageable pageable);
+            countQuery = """
+                    select count(pick) from Pick pick
+                    where pick.user.id = :userId
+                      and (pick.picksTemplate.creator is null or not exists (select b.id from UserBlock b where
+                            (b.blocker.id = :viewerId and b.blocked.id = pick.picksTemplate.creator.id) or
+                            (b.blocker.id = pick.picksTemplate.creator.id and b.blocked.id = :viewerId)))
+                    """)
+    Page<Pick> findVisibleByUserId(@Param("viewerId") UUID viewerId, @Param("userId") UUID userId, Pageable pageable);
 
     @Query("select pick.picksTemplate.id from Pick pick where pick.id = :id and pick.user.id = :userId")
     Optional<UUID> findOwnedTemplateId(@Param("id") UUID id, @Param("userId") UUID userId);
@@ -40,8 +49,14 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
     @Query("""
             select pick from Pick pick
             join fetch pick.user
-            join fetch pick.picksTemplate
+            join fetch pick.picksTemplate template
             where pick.user.id in :followedUserIds
+              and not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                    (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
               and (
                   pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
                   or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists (
@@ -112,6 +127,9 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
             + "or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists "
             + "(select 1 from Follower follower where follower.follower.id = :viewerId "
             + "and follower.followed.id = pick.user.id and follower.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED))) "
+            + "and not exists (select b.id from UserBlock b where "
+            + "(b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or "
+            + "(b.blocker.id = pick.user.id and b.blocked.id = :viewerId)) "
             + "group by pick.picksTemplate.id")
     List<VisiblePickCount> countVisibleByTemplateIds(@Param("viewerId") UUID viewerId,
             @Param("templateIds") Collection<UUID> templateIds);
@@ -133,6 +151,12 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
     @Query("""
             select pick from Pick pick where pick.user.id = :ownerId
               and (:templateId is null or pick.picksTemplate.id = :templateId)
+              and not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                    (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
+              and (pick.picksTemplate.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = pick.picksTemplate.creator.id) or
+                    (b.blocker.id = pick.picksTemplate.creator.id and b.blocked.id = :viewerId)))
               and (pick.user.id = :viewerId
                 or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
                 or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists
@@ -147,6 +171,9 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
             join fetch pick.picksTemplate template
             left join fetch template.creator
             where pick.picksTemplate.id = :templateId
+              and not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                    (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
               and (pick.user.id = :viewerId
                 or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
                 or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists
@@ -157,6 +184,9 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
             countQuery = """
                     select count(pick) from Pick pick
                     where pick.picksTemplate.id = :templateId
+                      and not exists (select b.id from UserBlock b where
+                            (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                            (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
                       and (pick.user.id = :viewerId
                         or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
                         or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists
@@ -173,6 +203,9 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
             join fetch pick.picksTemplate template
             left join fetch template.creator
             where pick.picksTemplate.id = :templateId
+              and not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                    (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
               and (pick.user.id = :viewerId
                 or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
                 or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists
@@ -183,6 +216,9 @@ public interface PickRepository extends JpaRepository<Pick, UUID> {
             countQuery = """
                     select count(pick) from Pick pick
                     where pick.picksTemplate.id = :templateId
+                      and not exists (select b.id from UserBlock b where
+                            (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                            (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
                       and (pick.user.id = :viewerId
                         or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
                         or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS and exists

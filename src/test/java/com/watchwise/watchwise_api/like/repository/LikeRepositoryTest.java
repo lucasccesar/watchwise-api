@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.like.entity.Like;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
@@ -489,6 +490,24 @@ class LikeRepositoryTest {
         Page<UserList> result = likeRepository.findLikedListsByUserId(lucas.getId(), PageRequest.of(0, 10));
 
         assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    void excludesListsOwnedByBlockedUsersFromLikedListsBeforePaginationAndCount() {
+        UserList visibleList = userListRepository.saveAndFlush(UserList.builder().user(lucas)
+                .name("Visible list").visibility(UserListVisibility.PUBLIC)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        likeRepository.saveAndFlush(buildListLike(lucas, scifi));
+        likeRepository.saveAndFlush(buildListLike(lucas, visibleList));
+        entityManager.persist(UserBlock.builder().blocker(lucas).blocked(marina)
+                .createdAt(LocalDateTime.now()).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<UserList> result = likeRepository.findLikedListsByUserId(lucas.getId(), PageRequest.of(0, 1));
+
+        assertThat(result.getContent()).extracting(UserList::getId).containsExactly(visibleList.getId());
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
     private Like buildCommentLike(User user, Comment comment) {

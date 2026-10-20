@@ -22,6 +22,8 @@ import com.watchwise.watchwise_api.user.dto.PublicUserProfileDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
+import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -82,6 +84,9 @@ class UserServiceImplTest {
 
     @Mock
     private UserVisibilityService userVisibilityService;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -163,6 +168,7 @@ class UserServiceImplTest {
 
         lenient().when(followerRepository.countByFollowedIdAndStatus(any(), any())).thenReturn(0L);
         lenient().when(followerRepository.countByFollowerIdAndStatus(any(), any())).thenReturn(0L);
+        lenient().when(userBlockAccessService.relationship(any(), any())).thenReturn(UserBlockRelationship.NONE);
     }
 
     @Test
@@ -449,6 +455,31 @@ class UserServiceImplTest {
         PublicUserProfileDTO result = userService.getUserById(viewerId, targetId);
 
         assertThat(result.viewerRelation()).isEqualTo(ViewerProfileRelation.FOLLOWING);
+    }
+
+    @Test
+    void shouldReturnOnlySafeIdentityWhenEitherUserBlockedTheOther() {
+        UUID viewerId = UUID.randomUUID();
+        UUID targetId = savedUser.getId();
+        savedUser.setName("Target Name");
+        when(userRepository.findById(targetId)).thenReturn(Optional.of(savedUser));
+        when(userBlockAccessService.relationship(viewerId, targetId)).thenReturn(UserBlockRelationship.BLOCKED_ME);
+
+        PublicUserProfileDTO result = userService.getUserById(viewerId, targetId);
+
+        assertThat(result.id()).isEqualTo(targetId);
+        assertThat(result.username()).isEqualTo(savedUser.getUsername());
+        assertThat(result.name()).isEqualTo("Target Name");
+        assertThat(result.description()).isNull();
+        assertThat(result.profilePicture()).isNull();
+        assertThat(result.banner()).isNull();
+        assertThat(result.followersCount()).isNull();
+        assertThat(result.totalMinutesWatchedMovies()).isNull();
+        assertThat(result.genreCountsMovies()).isNull();
+        assertThat(result.blockRelationship()).isEqualTo(UserBlockRelationship.BLOCKED_ME);
+        assertThat(result.isContentRestrictedByBlock()).isTrue();
+        verify(userVisibilityService, never()).assertCanView(any(), any());
+        verify(userMapper, never()).userToPublicUserProfileDto(any(), anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), any(), any(), anyLong(), anyLong());
     }
 
     @Test

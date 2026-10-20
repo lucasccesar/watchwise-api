@@ -67,6 +67,7 @@ import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -171,6 +172,9 @@ class SummaryServiceImplTest {
     @Mock
     private AllTimeStatsReader allTimeStatsReader;
 
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
+
     @InjectMocks
     private SummaryServiceImpl summaryService;
 
@@ -179,6 +183,16 @@ class SummaryServiceImplTest {
     private User lucas;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void shouldHideSummaryBeforeDelegatingWhenTargetAndViewerAreBlocked() {
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+
+        assertThatThrownBy(() -> summaryService.getSummary(marinaId, lucasId, ContentType.MOVIE))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(profileSummaryReader);
+    }
 
 
     @Test

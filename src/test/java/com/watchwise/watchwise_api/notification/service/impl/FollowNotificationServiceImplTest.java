@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.notification.entity.Notification;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +21,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class FollowNotificationServiceImplTest {
@@ -30,6 +33,9 @@ class FollowNotificationServiceImplTest {
     @Mock
     private NotificationRepository notificationRepository;
 
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
+
     private FollowNotificationServiceImpl followNotificationService;
     private User requester;
     private User owner;
@@ -37,7 +43,7 @@ class FollowNotificationServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        followNotificationService = new FollowNotificationServiceImpl(notificationRepository, CLOCK);
+        followNotificationService = new FollowNotificationServiceImpl(notificationRepository, CLOCK, userBlockAccessService);
         requester = user("lucas");
         owner = user("marina");
         secondRequester = user("joao");
@@ -61,6 +67,15 @@ class FollowNotificationServiceImplTest {
         assertThat(notification.getContent()).isNull();
         assertThat(notification.getTargetType()).isNull();
         assertThat(notification.getTargetId()).isNull();
+    }
+
+    @Test
+    void shouldSuppressFollowNotificationWhenRequesterAndOwnerAreBlocked() {
+        when(userBlockAccessService.isBlockedEitherDirection(requester.getId(), owner.getId())).thenReturn(true);
+
+        followNotificationService.notifyFollowRequested(requester, owner);
+
+        verifyNoInteractions(notificationRepository);
     }
 
     @Test

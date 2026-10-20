@@ -35,6 +35,8 @@ public interface UserMapper {
     PublicUserDTO userToPublicUserDto(User user);
 
     @Mapping(target = "viewerRelation", ignore = true)
+    @Mapping(target = "blockRelationship", ignore = true)
+    @Mapping(target = "isContentRestrictedByBlock", ignore = true)
     PublicUserProfileDTO userToPublicUserProfileDto(User user, long totalMinutesWatchedMovies,
             long totalMinutesWatchedEpisodes, long minutesWatchedMoviesLast30Days,
             long minutesWatchedEpisodesLast30Days, long totalTheaterVisits, List<GenreCountDTO> genreCountsMovies,

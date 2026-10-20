@@ -23,6 +23,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
@@ -77,6 +78,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private final ContentReleaseDateSnapshotService releaseDateSnapshotService;
     private final ContentCardAssembler contentCardAssembler;
     private final SeriesProgressReadRepository seriesProgressReadRepository;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Value("${app.watchlist.view.max-materialized-sort-candidates:1000}")
     private int maxMaterializedSortCandidates = 1000;
@@ -459,6 +461,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     }
 
     private void assertCanViewWatchlist(UUID viewerId, UUID targetUserId, User target) {
+        userBlockAccessService.assertContentVisible(viewerId, targetUserId);
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;
         }

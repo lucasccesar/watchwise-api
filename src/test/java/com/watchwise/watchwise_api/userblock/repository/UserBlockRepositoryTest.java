@@ -19,6 +19,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,6 +57,17 @@ class UserBlockRepositoryTest {
         assertThat(repository.findByBlockerIdOrderByCreatedAtDescIdDesc(userA.getId(), PageRequest.of(0, 20))
                 .getContent()).extracting(block -> block.getBlocked().getId()).containsExactly(userB.getId());
         assertThat(saved.getId()).isNotNull();
+    }
+
+    @Test void shouldReturnOnlyTheExistingBlockDirectionForAUserPair() {
+        repository.saveAndFlush(block(userA, userB));
+
+        List<UserBlockRepository.PairDirection> directions = repository.findPairDirections(userB.getId(), userA.getId());
+
+        assertThat(directions).singleElement().satisfies(direction -> {
+            assertThat(direction.getBlockerId()).isEqualTo(userA.getId());
+            assertThat(direction.getBlockedId()).isEqualTo(userB.getId());
+        });
     }
 
     @Test void shouldRejectDuplicateBlockPair() {

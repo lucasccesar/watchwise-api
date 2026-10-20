@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
@@ -89,6 +90,7 @@ class WatchlistEntryServiceImplTest {
     @Mock private ContentReleaseDateSnapshotService releaseDateSnapshotService;
     @Mock private ContentCardAssembler contentCardAssembler;
     @Mock private SeriesProgressReadRepository seriesProgressReadRepository;
+    @Mock private UserBlockAccessService userBlockAccessService;
     @Spy private PageRequestFactory pageRequestFactory = new PageRequestFactory();
     @InjectMocks private WatchlistEntryServiceImpl watchlistEntryService;
 
@@ -234,6 +236,18 @@ class WatchlistEntryServiceImplTest {
         assertThatThrownBy(() -> watchlistEntryService.getWatchlist(viewerId, userId, null, 1, 10))
                 .isInstanceOf(ForbiddenException.class);
         verify(watchlistEntryRepository, never()).findByUserIdOrderByPositionAsc(userId);
+    }
+
+    @Test
+    void shouldHideWatchlistWhenTargetAndViewerAreBlocked() {
+        UUID viewerId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(viewerId, userId);
+
+        assertThatThrownBy(() -> watchlistEntryService.getWatchlist(viewerId, userId, null, 1, 10))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(watchlistEntryRepository);
     }
 
     @Test

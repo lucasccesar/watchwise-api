@@ -69,6 +69,7 @@ import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.persistence.EntityManager;
@@ -169,6 +170,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private LikeService likeService;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @Mock
     private CommentPreviewAssembler commentPreviewAssembler;
@@ -390,6 +394,18 @@ class DiaryEntryServiceImplTest {
                 .hasMessage("scoreFrom and scoreTo must be between 1 and 10");
 
         verifyNoInteractions(diaryEntryReadRepository);
+    }
+
+    @Test
+    void shouldHideDiaryWhenTargetAndViewerAreBlocked() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntries(
+                marinaId, lucasId, null, 1, 10, null, null, null, null))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(diaryEntryRepository);
     }
 
     @Test

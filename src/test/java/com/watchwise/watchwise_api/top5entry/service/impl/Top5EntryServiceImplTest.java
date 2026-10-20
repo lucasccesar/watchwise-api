@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.top5entry.mapper.Top5EntryMapper;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -71,6 +72,9 @@ class Top5EntryServiceImplTest {
 
     @Mock
     private Top5EntryMapper top5EntryMapper;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @InjectMocks
     private Top5EntryServiceImpl top5EntryService;
@@ -296,6 +300,18 @@ class Top5EntryServiceImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
+        verifyNoInteractions(top5EntryRepository);
+    }
+
+    @Test
+    void shouldHideTop5WhenTargetAndViewerAreBlocked() {
+        UUID viewerId = UUID.randomUUID();
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(viewerId, lucasId);
+
+        assertThatThrownBy(() -> top5EntryService.getTop5(viewerId, lucasId, ContentType.MOVIE))
+                .isInstanceOf(NotFoundException.class);
         verifyNoInteractions(top5EntryRepository);
     }
 

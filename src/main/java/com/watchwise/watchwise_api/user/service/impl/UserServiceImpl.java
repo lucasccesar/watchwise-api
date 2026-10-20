@@ -26,6 +26,8 @@ import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.user.service.UserService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
+import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -58,6 +60,7 @@ public class UserServiceImpl implements UserService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final FollowerRepository followerRepository;
     private final UserVisibilityService userVisibilityService;
+    private final UserBlockAccessService userBlockAccessService;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -260,6 +263,14 @@ public class UserServiceImpl implements UserService {
         User foundUser = userRepository.findById(targetUserId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
+        UserBlockRelationship blockRelationship = userBlockAccessService.relationship(viewerId, targetUserId);
+        if (blockRelationship != UserBlockRelationship.NONE) {
+            return new PublicUserProfileDTO(
+                    foundUser.getId(), foundUser.getUsername(), foundUser.getName(),
+                    null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, blockRelationship, true);
+        }
+
         userVisibilityService.assertCanView(viewerId, targetUserId);
 
         ProfileStats stats = computeProfileStats(targetUserId);
@@ -273,7 +284,7 @@ public class UserServiceImpl implements UserService {
                 profile.minutesWatchedMoviesLast30Days(), profile.minutesWatchedEpisodesLast30Days(),
                 profile.totalTheaterVisits(), profile.genreCountsMovies(), profile.genreCountsSeries(),
                 profile.banner(), profile.followersCount(), profile.followingCount(),
-                resolveViewerProfileRelation(viewerId, targetUserId));
+                resolveViewerProfileRelation(viewerId, targetUserId), UserBlockRelationship.NONE, false);
     }
 
     private ViewerProfileRelation resolveViewerProfileRelation(UUID viewerId, UUID targetUserId) {

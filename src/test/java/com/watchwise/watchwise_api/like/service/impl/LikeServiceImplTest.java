@@ -25,6 +25,7 @@ import com.watchwise.watchwise_api.pickstemplate.entity.PicksTemplate;
 import com.watchwise.watchwise_api.pickstemplate.repository.PicksTemplateRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
@@ -93,6 +94,9 @@ class LikeServiceImplTest {
 
     @Mock
     private SocialNotificationService socialNotificationService;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @InjectMocks
     private LikeServiceImpl likeService;
@@ -194,6 +198,20 @@ class LikeServiceImplTest {
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
     }
 
+    @Test
+    void shouldRejectCommentLikeAfterBlockCheckInsideWriteTransaction() {
+        Comment comment = buildContentComment();
+        when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(comment));
+        org.mockito.Mockito.doThrow(new ForbiddenException("This interaction is not allowed"))
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
+
+        assertThatThrownBy(() -> likeService.likeComment(lucasId, commentId))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(likeRepository, never()).saveAndFlush(any());
+        verify(commentRepository, never()).incrementLikesCount(commentId);
+    }
+
     private Comment buildContentComment() {
         return Comment.builder()
                 .id(commentId)
@@ -291,13 +309,14 @@ class LikeServiceImplTest {
     @Test
     @DisplayName("[likeComment] Should Do Nothing - When Already Liked That Comment")
     void shouldDoNothingWhenAlreadyLikedThatComment() {
+        when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(buildContentComment()));
         when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId)).thenReturn(true);
 
         likeService.likeComment(lucasId, commentId);
 
         verify(likeRepository, never()).saveAndFlush(any());
         verifyNoInteractions(socialNotificationService);
-        verifyNoInteractions(commentRepository);
+        verify(commentRepository, never()).incrementLikesCount(commentId);
     }
 
     @Test
@@ -320,7 +339,6 @@ class LikeServiceImplTest {
     @Test
     @DisplayName("[likeComment] Should Throw NotFoundException - When Comment Does Not Exist")
     void shouldThrowNotFoundExceptionWhenCommentDoesNotExist() {
-        when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId)).thenReturn(false);
         when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> likeService.likeComment(lucasId, commentId))
@@ -364,7 +382,6 @@ class LikeServiceImplTest {
     void shouldThrowForbiddenExceptionWhenCommentTargetsAPrivateListAndLikerIsNotTheOwner() {
         scifi.setVisibility(UserListVisibility.PRIVATE);
         Comment comment = buildListComment(scifi);
-        when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId)).thenReturn(false);
         when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(comment));
 
         assertThatThrownBy(() -> likeService.likeComment(lucasId, commentId))
@@ -396,7 +413,6 @@ class LikeServiceImplTest {
     void shouldThrowForbiddenExceptionWhenCommentTargetsAFollowersOnlyListAndLikerDoesNotFollowTheOwner() {
         scifi.setVisibility(UserListVisibility.FOLLOWERS);
         Comment comment = buildListComment(scifi);
-        when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId)).thenReturn(false);
         when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(comment));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
@@ -445,7 +461,6 @@ class LikeServiceImplTest {
     void shouldThrowForbiddenExceptionWhenCommentTargetsADiaryEntryAndOwnerProfileIsPrivateAndLikerDoesNotFollowTheOwner() {
         marina.setIsProfilePublic(false);
         Comment comment = buildDiaryEntryComment(diaryEntry);
-        when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId)).thenReturn(false);
         when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(comment));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
@@ -546,12 +561,13 @@ class LikeServiceImplTest {
     @Test
     @DisplayName("[likeDiaryEntry] Should Do Nothing - When Already Liked That Diary Entry")
     void shouldDoNothingWhenAlreadyLikedThatDiaryEntry() {
+        when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
         when(likeRepository.existsByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(true);
 
         likeService.likeDiaryEntry(lucasId, diaryEntryId);
 
         verify(likeRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(diaryEntryRepository);
+        verify(diaryEntryRepository, never()).incrementLikesCount(diaryEntryId);
         verifyNoInteractions(socialNotificationService);
     }
 
@@ -575,7 +591,6 @@ class LikeServiceImplTest {
     @Test
     @DisplayName("[likeDiaryEntry] Should Throw NotFoundException - When Diary Entry Does Not Exist")
     void shouldThrowNotFoundExceptionWhenDiaryEntryDoesNotExist() {
-        when(likeRepository.existsByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(false);
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> likeService.likeDiaryEntry(lucasId, diaryEntryId))
@@ -620,7 +635,6 @@ class LikeServiceImplTest {
     @DisplayName("[likeDiaryEntry] Should Throw ForbiddenException - When Owner Profile Is Private And Liker Does Not Follow The Owner")
     void shouldThrowForbiddenExceptionWhenOwnerProfileIsPrivateAndLikerDoesNotFollowTheOwner() {
         marina.setIsProfilePublic(false);
-        when(likeRepository.existsByUserIdAndDiaryEntryId(lucasId, diaryEntryId)).thenReturn(false);
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
@@ -712,7 +726,6 @@ class LikeServiceImplTest {
     @DisplayName("[likeDroppedEntry] Should Throw NotFoundException - When Entry Does Not Exist")
     void shouldThrowNotFoundExceptionWhenDroppedEntryDoesNotExist() {
         UUID droppedEntryId = UUID.randomUUID();
-        when(likeRepository.existsByUserIdAndDroppedEntryId(lucasId, droppedEntryId)).thenReturn(false);
         when(droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> likeService.likeDroppedEntry(lucasId, droppedEntryId))
@@ -770,19 +783,19 @@ class LikeServiceImplTest {
     @Test
     @DisplayName("[likeList] Should Do Nothing - When Already Liked That List")
     void shouldDoNothingWhenAlreadyLikedThatList() {
+        when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(true);
 
         likeService.likeList(lucasId, listId);
 
         verify(likeRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(userListRepository);
+        verify(userListRepository, never()).incrementLikesCount(listId);
         verifyNoInteractions(socialNotificationService);
     }
 
     @Test
     @DisplayName("[likeList] Should Throw NotFoundException - When List Does Not Exist")
     void shouldThrowNotFoundExceptionWhenListDoesNotExistOnLike() {
-        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> likeService.likeList(lucasId, listId))
@@ -826,7 +839,6 @@ class LikeServiceImplTest {
     @DisplayName("[likeList] Should Throw ForbiddenException - When List Is Private And Liker Is Not The Owner")
     void shouldThrowForbiddenExceptionWhenListIsPrivateAndLikerIsNotTheOwner() {
         scifi.setVisibility(UserListVisibility.PRIVATE);
-        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
 
         assertThatThrownBy(() -> likeService.likeList(lucasId, listId))
@@ -840,7 +852,6 @@ class LikeServiceImplTest {
     @DisplayName("[likeList] Should Throw ForbiddenException - When List Is Followers-Only And Liker Does Not Follow The Owner")
     void shouldThrowForbiddenExceptionWhenListIsFollowersOnlyAndLikerDoesNotFollowTheOwner() {
         scifi.setVisibility(UserListVisibility.FOLLOWERS);
-        when(likeRepository.existsByUserIdAndListId(lucasId, listId)).thenReturn(false);
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(false);
@@ -1013,8 +1024,8 @@ class LikeServiceImplTest {
     @DisplayName("[likePick] Should Reject Stranger - When Pick Is Private")
     void shouldRejectStrangerWhenPickIsPrivate() {
         pick.setVisibility(PickVisibility.PRIVATE);
-        when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
         when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
 
         assertThatThrownBy(() -> likeService.likePick(lucasId, pickId))
                 .isInstanceOf(ForbiddenException.class)

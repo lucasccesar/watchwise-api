@@ -68,6 +68,7 @@ import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -110,6 +111,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final DiaryEntryRepository diaryEntryRepository;
     private final DiaryEntryReadRepository diaryEntryReadRepository;
     private final UserRepository userRepository;
+    private final UserBlockAccessService userBlockAccessService;
     private final ContentRepository contentRepository;
     private final ContentService contentService;
     private final ContentMapper contentMapper;
@@ -780,6 +782,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private void assertCanViewDiary(UUID viewerId, UUID targetUserId, User target) {
+        userBlockAccessService.assertContentVisible(viewerId, targetUserId);
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;
         }

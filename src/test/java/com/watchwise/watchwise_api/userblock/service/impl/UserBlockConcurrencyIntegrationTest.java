@@ -10,6 +10,9 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.follower.service.FollowerService;
 import com.watchwise.watchwise_api.follower.service.impl.FollowerServiceImpl;
 import com.watchwise.watchwise_api.notification.service.FollowNotificationService;
+import com.watchwise.watchwise_api.notification.entity.Notification;
+import com.watchwise.watchwise_api.notification.entity.NotificationType;
+import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -82,6 +85,7 @@ class UserBlockConcurrencyIntegrationTest {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoSpyBean FollowerRepository followerRepository;
+    @MockitoSpyBean NotificationRepository notificationRepository;
     @MockitoBean UserMapper userMapper;
     @MockitoBean FollowNotificationService followNotificationService;
 
@@ -159,6 +163,39 @@ class UserBlockConcurrencyIntegrationTest {
     }
 
     @Test
+    @DisplayName("[acceptAllPendingFollowRequestsFor] Should Not Accept A Pending Request - When Block Wins The Pair Lock")
+    void shouldNotAcceptAllPendingRequestWhenBlockWinsThePairLock() throws Exception {
+        saveFollow(first, second, FollowStatus.PENDING);
+        CountDownLatch cleanupStarted = new CountDownLatch(1);
+        CountDownLatch releaseCleanup = new CountDownLatch(1);
+        pauseCleanup(first.getId(), second.getId(), cleanupStarted, releaseCleanup);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        AtomicLong acceptancePid = new AtomicLong();
+        CountDownLatch acceptanceStarted = new CountDownLatch(1);
+        try {
+            Future<?> block = executor.submit(() -> block(false));
+            assertThat(cleanupStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<?> acceptance = executor.submit(() -> inTransaction(() -> {
+                acceptancePid.set(currentBackendPid());
+                acceptanceStarted.countDown();
+                followerService.acceptAllPendingFollowRequestsFor(second);
+            }));
+            assertThat(acceptanceStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            boolean serialized = awaitAdvisoryWaitOrCompletion(acceptancePid.get(), acceptance);
+            releaseCleanup.countDown();
+            block.get(10, TimeUnit.SECONDS);
+            acceptance.get(10, TimeUnit.SECONDS);
+
+            assertThat(followerRepository.findByFollowerIdAndFollowedId(first.getId(), second.getId())).isEmpty();
+            assertThat(blockRepository.count()).isEqualTo(1);
+            assertThat(serialized).as("bulk acceptance waits for the block transaction").isTrue();
+        } finally {
+            releaseCleanup.countDown();
+            shutdown(executor);
+        }
+    }
+
+    @Test
     @DisplayName("[block] Should Roll Back The Block And Both Deletions - When The Second Cleanup Fails")
     void shouldRollBackBlockAndBothDeletionsWhenSecondCleanupFails() {
         saveFollow(first, second, FollowStatus.ACCEPTED);
@@ -177,6 +214,30 @@ class UserBlockConcurrencyIntegrationTest {
                 .get().extracting(Follower::getStatus).isEqualTo(FollowStatus.ACCEPTED);
         assertThat(followerRepository.findByFollowerIdAndFollowedId(second.getId(), first.getId()))
                 .get().extracting(Follower::getStatus).isEqualTo(FollowStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("[block] Should Roll Back The Block And Follow Cleanup - When Notification Cleanup Fails")
+    void shouldRollBackBlockAndFollowCleanupWhenNotificationCleanupFails() {
+        saveFollow(first, second, FollowStatus.ACCEPTED);
+        LocalDateTime now = LocalDateTime.now();
+        Notification pairNotification = notificationRepository.saveAndFlush(Notification.builder()
+                .user(first).latestActor(second).type(NotificationType.NEW_FOLLOWER)
+                .message("followed you").isRead(false).createdAt(now).updatedAt(now).build());
+        doAnswer(invocation -> {
+            jdbcTemplate.update("DELETE FROM notifications WHERE "
+                            + "(user_id = ? AND actor_user_id = ?) OR (user_id = ? AND actor_user_id = ?)",
+                    first.getId(), second.getId(), second.getId(), first.getId());
+            throw new IllegalStateException("notification cleanup failed");
+        }).when(notificationRepository).deleteBetweenUsers(first.getId(), second.getId());
+
+        assertThatThrownBy(() -> blockService.block(first.getId(), second.getId()))
+                .isInstanceOf(IllegalStateException.class).hasMessage("notification cleanup failed");
+
+        assertThat(blockRepository.count()).isZero();
+        assertThat(followerRepository.findByFollowerIdAndFollowedId(first.getId(), second.getId()))
+                .get().extracting(Follower::getStatus).isEqualTo(FollowStatus.ACCEPTED);
+        assertThat(notificationRepository.findById(pairNotification.getId())).isPresent();
     }
 
     @Test

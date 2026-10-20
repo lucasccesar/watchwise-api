@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,9 @@ class SocialNotificationServiceImplTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
+
     private SocialNotificationServiceImpl socialNotificationService;
     private UUID recipientId;
     private UUID targetId;
@@ -56,7 +60,8 @@ class SocialNotificationServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        socialNotificationService = new SocialNotificationServiceImpl(notificationRepository, userRepository, CLOCK);
+        socialNotificationService = new SocialNotificationServiceImpl(
+                notificationRepository, userRepository, CLOCK, userBlockAccessService);
         recipientId = UUID.randomUUID();
         targetId = UUID.randomUUID();
         recipient = user(recipientId, "Lucas");
@@ -86,6 +91,16 @@ class SocialNotificationServiceImplTest {
         assertThat(nowCaptor.getValue()).isEqualTo(now());
         verify(notificationRepository, never()).save(any());
         verify(notificationRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void shouldSuppressSocialNotificationForBlockedActorAndRecipient() {
+        when(userBlockAccessService.isBlockedEitherDirection(joao.getId(), recipientId)).thenReturn(true);
+
+        socialNotificationService.notifyLikeReceived(
+                joao.getId(), recipientId, NotificationTargetType.DIARY_ENTRY, targetId);
+
+        verifyNoInteractions(notificationRepository);
     }
 
     @Test

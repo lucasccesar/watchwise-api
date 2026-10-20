@@ -18,6 +18,9 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     @Query("""
             SELECT DISTINCT child FROM UserList child JOIN FETCH child.user
             WHERE child.id IN :childListIds
+            AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                (b.blocker.id = :viewerId AND b.blocked.id = child.user.id)
+                OR (b.blocker.id = child.user.id AND b.blocked.id = :viewerId))
             AND (child.user.id = :viewerId
                 OR child.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
                 OR (child.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
@@ -44,6 +47,9 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
                 JOIN user_lists child ON child.id = item.child_list_id
                 JOIN users owner ON owner.id = child.user_id
                 WHERE item.user_list_id IN :parentIds
+                AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                                WHERE (b.blocker_id = :viewerId AND b.blocked_id = child.user_id)
+                                   OR (b.blocker_id = child.user_id AND b.blocked_id = :viewerId))
                 AND (child.user_id = :viewerId OR child.visibility = 'PUBLIC'
                     OR (child.visibility = 'FOLLOWERS' AND EXISTS (
                         SELECT 1 FROM followers f WHERE f.follower_id = :viewerId

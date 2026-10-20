@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -79,6 +80,9 @@ class DroppedEntryServiceImplTest {
 
     @Mock
     private WatchlistEntryService watchlistEntryService;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -219,6 +223,17 @@ class DroppedEntryServiceImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
+        verifyNoInteractions(droppedEntryRepository);
+    }
+
+    @Test
+    void shouldHideDroppedEntriesWhenTargetAndViewerAreBlocked() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+
+        assertThatThrownBy(() -> droppedEntryService.getDropped(marinaId, lucasId, ContentType.MOVIE, 1, 10))
+                .isInstanceOf(NotFoundException.class);
         verifyNoInteractions(droppedEntryRepository);
     }
 

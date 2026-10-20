@@ -2,6 +2,9 @@ package com.watchwise.watchwise_api.userblock.controller;
 
 import com.watchwise.watchwise_api.auth.repository.RefreshTokenRepository;
 import com.watchwise.watchwise_api.common.security.CookieUtil;
+import com.watchwise.watchwise_api.notification.entity.Notification;
+import com.watchwise.watchwise_api.notification.entity.NotificationType;
+import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
@@ -44,9 +47,11 @@ class UserBlockControllerIntegrationTest {
     @Autowired UserRepository userRepository;
     @Autowired UserBlockRepository userBlockRepository;
     @Autowired RefreshTokenRepository refreshTokenRepository;
+    @Autowired NotificationRepository notificationRepository;
 
     @BeforeEach void clean() {
         userBlockRepository.deleteAll();
+        notificationRepository.deleteAll();
         refreshTokenRepository.deleteAll();
         userRepository.deleteAll();
     }
@@ -106,5 +111,27 @@ class UserBlockControllerIntegrationTest {
                         .cookie(actor.access()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.content[0].user.id").value(target.id().toString()));
+    }
+
+    @Test void shouldDeleteNotificationsBetweenUsersWhenBlockIsCreated() throws Exception {
+        Registered actor = register("block-notification-a");
+        Registered target = register("block-notification-b");
+        Registered thirdParty = register("block-notification-c");
+        LocalDateTime now = LocalDateTime.now();
+        Notification pairNotification = notificationRepository.saveAndFlush(Notification.builder()
+                .user(userRepository.findById(actor.id()).orElseThrow())
+                .latestActor(userRepository.findById(target.id()).orElseThrow())
+                .type(NotificationType.NEW_FOLLOWER).message("pair activity").isRead(false)
+                .createdAt(now).updatedAt(now).build());
+        Notification unrelatedNotification = notificationRepository.saveAndFlush(Notification.builder()
+                .user(userRepository.findById(actor.id()).orElseThrow())
+                .latestActor(userRepository.findById(thirdParty.id()).orElseThrow())
+                .type(NotificationType.NEW_FOLLOWER).message("third-party activity").isRead(false)
+                .createdAt(now).updatedAt(now).build());
+
+        mockMvc.perform(action("POST", actor, target.id())).andExpect(status().isNoContent());
+
+        assertThat(notificationRepository.findById(pairNotification.getId())).isEmpty();
+        assertThat(notificationRepository.findById(unrelatedNotification.getId())).isPresent();
     }
 }

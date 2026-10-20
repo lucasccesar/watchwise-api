@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
 import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -130,6 +131,30 @@ class NotificationRepositoryTest {
         NotificationCountsProjection counts = notificationRepository.findCountsByUserId(lucas.getId());
 
         assertThat(counts.getTotalNotifications()).isEqualTo(2L);
+        assertThat(counts.getUnreadNotifications()).isEqualTo(1L);
+    }
+
+    @Test
+    void filtersNotificationsFromBlockedActorsBeforePaginationAndCounts() {
+        LocalDateTime now = LocalDateTime.now();
+        Notification fromBlocked = notificationRepository.saveAndFlush(Notification.builder()
+                .user(lucas).latestActor(marina).type(NotificationType.NEW_FOLLOWER)
+                .message("blocked actor").isRead(false).createdAt(now.plusMinutes(1)).updatedAt(now).build());
+        Notification visible = notificationRepository.saveAndFlush(Notification.builder()
+                .user(lucas).latestActor(lucas).type(NotificationType.NEW_FOLLOWER)
+                .message("visible actor").isRead(false).createdAt(now).updatedAt(now).build());
+        entityManager.persist(UserBlock.builder().blocker(lucas).blocked(marina).createdAt(now).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<Notification> page = notificationRepository.findByUserIdOrderByCreatedAtDesc(
+                lucas.getId(), PageRequest.of(0, 1));
+        NotificationCountsProjection counts = notificationRepository.findCountsByUserId(lucas.getId());
+
+        assertThat(page.getContent()).extracting(Notification::getId).containsExactly(visible.getId());
+        assertThat(page.getTotalElements()).isEqualTo(1);
+        assertThat(page.getContent()).doesNotContain(fromBlocked);
+        assertThat(counts.getTotalNotifications()).isEqualTo(1L);
         assertThat(counts.getUnreadNotifications()).isEqualTo(1L);
     }
 

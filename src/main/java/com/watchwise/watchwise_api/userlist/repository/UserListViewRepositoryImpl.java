@@ -72,6 +72,9 @@ public class UserListViewRepositoryImpl implements UserListViewRepository {
 
     private String predicates(UserListViewQuery request, Map<String, Object> params) {
         StringBuilder where = new StringBuilder("1=1");
+        where.append(" AND NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE "
+                + "(ub.blocker_id = :viewerId AND ub.blocked_id = ul.user_id) OR "
+                + "(ub.blocker_id = ul.user_id AND ub.blocked_id = :viewerId))");
         switch (request.mode()) {
             case MY -> {
                 switch (request.source()) {

@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -48,6 +49,7 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
     private final UserMapper userMapper;
     private final PageRequestFactory pageRequestFactory;
     private final PicksTemplatePreviewAssembler previewAssembler;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     @Transactional
@@ -78,10 +80,10 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
         String escapedName = escapeLike(name);
         Page<PicksTemplate> templates;
         if (sort == null) {
-            templates = templateRepository.search(origin, escapedName, pageRequest);
+            templates = templateRepository.search(viewerId, origin, escapedName, pageRequest);
         } else {
             templates = switch (sort) {
-                case RECENT -> templateRepository.searchRecent(origin, escapedName, pageRequest);
+                case RECENT -> templateRepository.searchRecent(viewerId, origin, escapedName, pageRequest);
                 case MOST_PICKED -> templateRepository.searchMostPicked(viewerId, origin, escapedName, pageRequest);
                 case POPULAR_WEEK -> templateRepository.searchPopularWeek(viewerId, LocalDateTime.now().minusDays(7),
                         origin, escapedName, pageRequest);
@@ -96,7 +98,7 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
                                                        Integer page, Integer size) {
         PageRequest pageRequest = pageRequestFactory.build(page, size);
         Page<PicksTemplate> templates = templateRepository.searchRelevance(
-                origin, name, escapeLike(name), pageRequest);
+                viewerId, origin, name, escapeLike(name), pageRequest);
         return previewAssembler.assemblePage(templates, viewerId);
     }
 
@@ -115,7 +117,11 @@ public class PicksTemplateServiceImpl implements PicksTemplateService {
     @Override
     @Transactional(readOnly = true)
     public PicksTemplateResponseDTO getTemplate(UUID viewerId, UUID templateId) {
-        return toResponse(findTemplate(templateId), viewerId);
+        PicksTemplate template = findTemplate(templateId);
+        if (template.getCreator() != null) {
+            userBlockAccessService.assertContentVisible(viewerId, template.getCreator().getId());
+        }
+        return toResponse(template, viewerId);
     }
 
     @Override

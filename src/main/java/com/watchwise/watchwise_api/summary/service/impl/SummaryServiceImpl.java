@@ -67,6 +67,7 @@ import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -133,9 +134,11 @@ public class SummaryServiceImpl implements SummaryService {
     private final ContentCardAssembler contentCardAssembler;
     private final ProfileSummaryReader profileSummaryReader;
     private final AllTimeStatsReader allTimeStatsReader;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public SummaryResponseDTO getSummary(UUID viewerId, UUID userId, ContentType type) {
+        userBlockAccessService.assertContentVisible(viewerId, userId);
         return profileSummaryReader.read(viewerId, userId, type);
     }
 
@@ -889,6 +892,7 @@ public class SummaryServiceImpl implements SummaryService {
     }
 
     private void assertCanViewSummary(UUID viewerId, UUID targetUserId, User target) {
+        userBlockAccessService.assertContentVisible(viewerId, targetUserId);
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;
         }

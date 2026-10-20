@@ -23,6 +23,7 @@ import com.watchwise.watchwise_api.top5entry.service.Top5EntryService;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -46,6 +47,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     private final FollowerRepository followerRepository;
     private final Top5EntryMapper top5EntryMapper;
     private final ProfileSummaryQueryRepository profileSummaryQueryRepository;
+    private final UserBlockAccessService userBlockAccessService;
 
     static final int MAX_ENTRIES = 5;
 
@@ -69,6 +71,7 @@ public class Top5EntryServiceImpl implements Top5EntryService {
     }
 
     private void assertCanViewTop5(UUID viewerId, UUID targetUserId, User target) {
+        userBlockAccessService.assertContentVisible(viewerId, targetUserId);
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;
         }

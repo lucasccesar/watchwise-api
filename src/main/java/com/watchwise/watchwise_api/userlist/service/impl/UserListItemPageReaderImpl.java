@@ -26,6 +26,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemPageReader;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -58,6 +59,7 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
     private final DiaryEntryRepository diaryEntryRepository;
     private final ContentRepository contentRepository;
     private final PageRequestFactory pageRequestFactory;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public UserListItemPage read(UserListItemPageRequest request) {
@@ -339,6 +341,7 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {
         UUID ownerId = userList.getUser().getId();
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
         if (viewerId.equals(ownerId) || userList.getVisibility() == UserListVisibility.PUBLIC) {
             return;
         }

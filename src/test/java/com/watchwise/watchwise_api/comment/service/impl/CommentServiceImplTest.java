@@ -745,7 +745,7 @@ class CommentServiceImplTest {
     void shouldRejectCommentOnBlockedListOwner() {
         when(userListRepository.findById(listId)).thenReturn(Optional.of(scifi));
         doThrow(new ForbiddenException("Blocked interaction"))
-                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
 
         assertThatThrownBy(() -> commentService.createCommentOnList(
                 lucasId, listId, new CommentCreationDTO("Nice picks", null, null)))
@@ -761,7 +761,7 @@ class CommentServiceImplTest {
         when(contentRepository.findById(contentId)).thenReturn(Optional.of(fightClub));
         when(commentRepository.findById(parent.getId())).thenReturn(Optional.of(parent));
         doThrow(new ForbiddenException("Blocked interaction"))
-                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
 
         assertThatThrownBy(() -> commentService.createCommentOnContent(
                 lucasId, contentId, new CommentCreationDTO("Reply", parent.getId(), null)))
@@ -774,7 +774,7 @@ class CommentServiceImplTest {
     void shouldRejectCommentOnBlockedDiaryEntryOwner() {
         when(diaryEntryRepository.findByIdWithUser(diaryEntryId)).thenReturn(Optional.of(diaryEntry));
         doThrow(new ForbiddenException("Blocked interaction"))
-                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
 
         assertThatThrownBy(() -> commentService.createCommentOnDiaryEntry(
                 lucasId, diaryEntryId, new CommentCreationDTO("Comment", null, null)))
@@ -790,7 +790,7 @@ class CommentServiceImplTest {
         DroppedEntry dropped = DroppedEntry.builder().id(droppedId).user(marina).content(fightClub).build();
         when(droppedEntryRepository.findByIdWithUserAndContent(droppedId)).thenReturn(Optional.of(dropped));
         doThrow(new ForbiddenException("Blocked interaction"))
-                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
 
         assertThatThrownBy(() -> commentService.createCommentOnDroppedEntry(
                 lucasId, droppedId, new CommentCreationDTO("Comment", null, null)))
@@ -804,7 +804,7 @@ class CommentServiceImplTest {
     void shouldRejectCommentOnBlockedPickOwner() {
         when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
         doThrow(new ForbiddenException("Blocked interaction"))
-                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
 
         assertThatThrownBy(() -> commentService.createCommentOnPick(
                 lucasId, pickId, new CommentCreationDTO("Comment", null, null)))
@@ -818,7 +818,7 @@ class CommentServiceImplTest {
     void shouldRejectCommentOnBlockedTemplateCreator() {
         when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(template));
         doThrow(new ForbiddenException("Blocked interaction"))
-                .when(userBlockAccessService).assertInteractionAllowed(lucasId, marinaId);
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
 
         assertThatThrownBy(() -> commentService.createCommentOnPicksTemplate(
                 lucasId, templateId, new CommentCreationDTO("Comment", null, null)))

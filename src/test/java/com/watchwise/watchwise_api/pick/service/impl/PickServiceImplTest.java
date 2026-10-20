@@ -30,6 +30,7 @@ import com.watchwise.watchwise_api.pickstemplate.service.impl.PicksTemplatePrevi
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -68,6 +69,7 @@ class PickServiceImplTest {
     @Mock UserMapper userMapper;
     @Mock PicksTemplateOptionRepository optionRepository;
     @Mock PicksTemplatePreviewAssembler templatePreviewAssembler;
+    @Mock UserBlockAccessService userBlockAccessService;
 
     PickService service;
     PageRequestFactory pageRequestFactory;
@@ -81,7 +83,7 @@ class PickServiceImplTest {
                 targetService, userMapper, templatePreviewAssembler);
         service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
                 userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
-                pickPreviewAssembler);
+                pickPreviewAssembler, userBlockAccessService);
         savedSelections = new ArrayList<>();
     }
 
@@ -93,7 +95,7 @@ class PickServiceImplTest {
         Pick newer = pick(ownerId, template, PickVisibility.PUBLIC);
         PageRequest request = PageRequest.of(1, 5);
         Page<Pick> repositoryPage = new PageImpl<>(List.of(newer), request, 6);
-        when(pickRepository.findByUserIdOrderByCreatedAtDescIdDesc(ownerId, request)).thenReturn(repositoryPage);
+        when(pickRepository.findVisibleByUserId(ownerId, ownerId, request)).thenReturn(repositoryPage);
         when(selectionRepository.findByPickIdIn(List.of(newer.getId()))).thenReturn(List.of());
         when(categoryRepository.findByPicksTemplateIdInOrderByDisplayOrder(List.of(template.getId()))).thenReturn(List.of());
         when(templatePreviewAssembler.assemble(anyCollection(), eq(ownerId)))
@@ -105,7 +107,7 @@ class PickServiceImplTest {
 
         assertThat(result.getContent()).extracting(PickViewCardDTO::id).containsExactly(newer.getId());
         assertThat(result.getTotalElements()).isEqualTo(6);
-        verify(pickRepository).findByUserIdOrderByCreatedAtDescIdDesc(ownerId, request);
+        verify(pickRepository).findVisibleByUserId(ownerId, ownerId, request);
         verify(pickRepository, never()).findVisibleByOwner(any(), any(), any(), any());
     }
 
@@ -115,7 +117,7 @@ class PickServiceImplTest {
         UUID ownerId = UUID.randomUUID();
         PageRequest request = PageRequest.of(0, 5);
         Page<Pick> emptyPage = Page.empty(request);
-        when(pickRepository.findByUserIdOrderByCreatedAtDescIdDesc(ownerId, request)).thenReturn(emptyPage);
+        when(pickRepository.findVisibleByUserId(ownerId, ownerId, request)).thenReturn(emptyPage);
 
         Page<PickViewCardDTO> result = service.getMyPicksView(ownerId, null, 5);
 
@@ -241,7 +243,7 @@ class PickServiceImplTest {
         PickSelection firstSelection = persistedSelection(first, category, content("550"));
         PickSelection secondSelection = persistedSelection(second, category, content("551"));
         PageRequest pageRequest = PageRequest.of(0, 10);
-        when(templateRepository.existsById(template.getId())).thenReturn(true);
+        when(templateRepository.findById(template.getId())).thenReturn(Optional.of(template));
         when(pickRepository.findByUserIdAndPicksTemplateIdOrderByCreatedAtDescIdDesc(userId, template.getId(), pageRequest))
                 .thenReturn(new PageImpl<>(List.of(first, second), pageRequest, 2));
         when(selectionRepository.findByPickIdIn(List.of(first.getId(), second.getId())))
@@ -266,7 +268,7 @@ class PickServiceImplTest {
         Pick pick = pick(UUID.randomUUID(), template, PickVisibility.PUBLIC);
         PickSelection selection = persistedSelection(pick, category, content("550"));
         PageRequest pageRequest = PageRequest.of(0, 10);
-        when(templateRepository.existsById(template.getId())).thenReturn(true);
+        when(templateRepository.findById(template.getId())).thenReturn(Optional.of(template));
         when(pickRepository.findVisibleByTemplateRecent(viewerId, template.getId(), pageRequest))
                 .thenReturn(new PageImpl<>(List.of(pick), pageRequest, 1));
         when(selectionRepository.findByPickIdIn(List.of(pick.getId()))).thenReturn(List.of(selection));
@@ -290,7 +292,7 @@ class PickServiceImplTest {
         UUID viewerId = UUID.randomUUID();
         UUID templateId = UUID.randomUUID();
         PageRequest pageRequest = PageRequest.of(0, 10);
-        when(templateRepository.existsById(templateId)).thenReturn(true);
+        when(templateRepository.findById(templateId)).thenReturn(Optional.of(template()));
         when(pickRepository.findVisibleByTemplatePopular(viewerId, templateId, pageRequest))
                 .thenReturn(new PageImpl<>(List.of(), pageRequest, 0));
 
@@ -303,7 +305,7 @@ class PickServiceImplTest {
     @Test
     void shouldRejectTemplatePicksWhenTemplateDoesNotExist() {
         UUID templateId = UUID.randomUUID();
-        when(templateRepository.existsById(templateId)).thenReturn(false);
+        when(templateRepository.findById(templateId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getTemplatePicks(UUID.randomUUID(), templateId, null, 1, 10))
                 .isInstanceOf(NotFoundException.class);
@@ -352,13 +354,27 @@ class PickServiceImplTest {
     }
 
     @Test
+    void shouldHidePublicPickWhenOwnerAndViewerAreBlocked() {
+        UUID viewerId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        Pick pick = pick(ownerId, template(), PickVisibility.PUBLIC);
+        when(pickRepository.findById(pick.getId())).thenReturn(Optional.of(pick));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(viewerId, ownerId);
+
+        assertThatThrownBy(() -> service.getPick(viewerId, pick.getId()))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(selectionRepository);
+    }
+
+    @Test
     void shouldExcludeBlockedAuthorsFromPickResponseCommentCount() {
         UUID viewerId = UUID.randomUUID();
         PicksTemplate template = template();
         Pick pick = pick(UUID.randomUUID(), template, PickVisibility.PUBLIC);
         service = new PickServiceImpl(pickRepository, selectionRepository, templateRepository, categoryRepository,
                 userRepository, followerRepository, targetService, pickMapper, templateMapper, pageRequestFactory,
-                templatePreviewAssembler, commentRepository, likeService, null);
+                templatePreviewAssembler, commentRepository, likeService, null, userBlockAccessService);
         when(pickRepository.findById(pick.getId())).thenReturn(Optional.of(pick));
         lenient().when(commentRepository.countVisiblePickComments(viewerId, List.of(pick.getId())))
                 .thenReturn(List.of(new CommentRepository.PickCommentCount() {

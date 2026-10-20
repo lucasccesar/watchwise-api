@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
+import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.hibernate.Hibernate;
@@ -55,6 +57,9 @@ class FollowerRepositoryTest {
     private FollowerRepository followerRepository;
 
     @Autowired
+    private UserBlockRepository userBlockRepository;
+
+    @Autowired
     private UserRepository userRepository;
 
     @Autowired
@@ -96,6 +101,18 @@ class FollowerRepositoryTest {
         Optional<Follower> result = followerRepository.findByFollowerIdAndFollowedId(lucas.getId(), marina.getId());
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void shouldExcludeBlockedUsersFromVisibleFollowedIds() {
+        followerRepository.saveAndFlush(buildFollower(lucas, marina, FollowStatus.ACCEPTED));
+        followerRepository.saveAndFlush(buildFollower(lucas, joao, FollowStatus.ACCEPTED));
+        userBlockRepository.saveAndFlush(UserBlock.builder()
+                .blocker(lucas).blocked(marina).createdAt(LocalDateTime.now()).build());
+        entityManager.clear();
+
+        assertThat(followerRepository.findVisibleFollowedIdsByFollowerId(lucas.getId()))
+                .containsExactly(joao.getId());
     }
 
     @Test

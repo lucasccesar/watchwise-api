@@ -35,10 +35,31 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
     Page<UserList> findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
             UserListVisibility visibility, Pageable pageable);
 
+    @Query(value = """
+            SELECT ul FROM UserList ul JOIN FETCH ul.user
+            WHERE ul.visibility = :visibility
+              AND NOT EXISTS (SELECT b.id FROM UserBlock b
+                              WHERE (b.blocker.id = :viewerId AND b.blocked.id = ul.user.id)
+                                 OR (b.blocker.id = ul.user.id AND b.blocked.id = :viewerId))
+            ORDER BY ul.likesCount DESC, ul.createdAt DESC, ul.id DESC
+            """,
+            countQuery = """
+            SELECT COUNT(ul) FROM UserList ul
+            WHERE ul.visibility = :visibility
+              AND NOT EXISTS (SELECT b.id FROM UserBlock b
+                              WHERE (b.blocker.id = :viewerId AND b.blocked.id = ul.user.id)
+                                 OR (b.blocker.id = ul.user.id AND b.blocked.id = :viewerId))
+            """)
+    Page<UserList> findVisibleByVisibility(@Param("viewerId") UUID viewerId,
+            @Param("visibility") UserListVisibility visibility, Pageable pageable);
+
     @Query("""
             SELECT ul.user.id AS userId, COUNT(ul.id) AS count
             FROM UserList ul
             WHERE ul.user.id IN :userIds
+              AND NOT EXISTS (SELECT b.id FROM UserBlock b
+                              WHERE (b.blocker.id = :viewerId AND b.blocked.id = ul.user.id)
+                                 OR (b.blocker.id = ul.user.id AND b.blocked.id = :viewerId))
               AND (ul.user.id = :viewerId
                    OR ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.PUBLIC
                    OR (ul.visibility = com.watchwise.watchwise_api.userlist.entity.UserListVisibility.FOLLOWERS
@@ -75,6 +96,9 @@ public interface UserListRepository extends JpaRepository<UserList, UUID> {
                     )
                 )
             )
+            AND NOT EXISTS (SELECT b.id FROM UserBlock b
+                            WHERE (b.blocker.id = :viewerId AND b.blocked.id = ul.user.id)
+                               OR (b.blocker.id = ul.user.id AND b.blocked.id = :viewerId))
             ORDER BY LOWER(ul.name) ASC, ul.id ASC
             """
     )

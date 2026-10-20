@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.hibernate.Hibernate;
@@ -64,7 +65,7 @@ class PickRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdOrderByCreatedAtDescIdDesc] Should Isolate And Order Owned Picks Across Pages - When Another User Has Newer Picks")
+    @DisplayName("[findVisibleByUserId] Should Isolate And Order Owned Picks Across Pages - When Another User Has Newer Picks")
     void shouldIsolateAndOrderOwnedPicksAcrossPagesWhenAnotherUserHasNewerPicks() {
         LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);
         User owner = user("owned-page-owner", now);
@@ -75,8 +76,8 @@ class PickRepositoryTest {
         Pick newer = save(owner, template, PickVisibility.PUBLIC, now);
         save(other, template, PickVisibility.PUBLIC, now.plusDays(1));
 
-        Page<Pick> firstPage = repository.findByUserIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(0, 1));
-        Page<Pick> secondPage = repository.findByUserIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(1, 1));
+        Page<Pick> firstPage = repository.findVisibleByUserId(owner.getId(), owner.getId(), PageRequest.of(0, 1));
+        Page<Pick> secondPage = repository.findVisibleByUserId(owner.getId(), owner.getId(), PageRequest.of(1, 1));
 
         assertThat(firstPage.getContent()).extracting(Pick::getId).containsExactly(newer.getId());
         assertThat(firstPage.getTotalElements()).isEqualTo(2);
@@ -84,7 +85,7 @@ class PickRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findByUserIdOrderByCreatedAtDescIdDesc] Should Fetch Card To-One Associations With The Page - When Picks Span Templates")
+    @DisplayName("[findVisibleByUserId] Should Fetch Card To-One Associations With The Page - When Picks Span Templates")
     void shouldFetchCardToOneAssociationsWithPageWhenPicksSpanTemplates() {
         LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);
         User owner = user("owned-card-page-owner", now);
@@ -99,7 +100,7 @@ class PickRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        Page<Pick> page = repository.findByUserIdOrderByCreatedAtDescIdDesc(owner.getId(), PageRequest.of(0, 5));
+        Page<Pick> page = repository.findVisibleByUserId(owner.getId(), owner.getId(), PageRequest.of(0, 5));
 
         assertThat(page.getContent()).hasSize(2);
         assertThat(page.getContent()).allSatisfy(pick -> {
@@ -141,6 +142,27 @@ class PickRepositoryTest {
 
         assertThat(candidates).extracting(Pick::getId)
                 .containsExactly(newerPublic.getId(), followersPick.getId(), olderPublic.getId());
+    }
+
+    @Test
+    void excludesBlockedPickAuthorsBeforeTemplatePaginationAndCount() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 20, 12, 0);
+        User viewer = user("blocked-pick-viewer", now);
+        User blockedAuthor = user("blocked-pick-author", now);
+        User visibleAuthor = user("visible-pick-author", now);
+        PicksTemplate template = templateRepository.saveAndFlush(PicksTemplate.builder()
+                .origin(PickOrigin.OFFICIAL).name("Picks").createdAt(now).updatedAt(now).build());
+        save(blockedAuthor, template, PickVisibility.PUBLIC, now.plusMinutes(2));
+        Pick visiblePick = save(visibleAuthor, template, PickVisibility.PUBLIC, now.plusMinutes(1));
+        entityManager.persist(UserBlock.builder().blocker(viewer).blocked(blockedAuthor).createdAt(now).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<Pick> result = repository.findVisibleByTemplateRecent(
+                viewer.getId(), template.getId(), PageRequest.of(0, 1));
+
+        assertThat(result.getContent()).extracting(Pick::getId).containsExactly(visiblePick.getId());
+        assertThat(result.getTotalElements()).isEqualTo(1);
     }
     private User user(String value, LocalDateTime now) { return userRepository.save(User.builder().username(value).name(value).email(value + "@example.com").password("hash").profilePicture("https://example.com/a.png").createdAt(now).updatedAt(now).build()); }
     private Pick save(User user, PicksTemplate template, PickVisibility visibility, LocalDateTime now) {

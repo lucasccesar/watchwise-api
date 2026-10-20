@@ -47,15 +47,22 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
             select template from PicksTemplate template
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
             order by lower(template.name), template.id
             """)
-    Page<PicksTemplate> search(@Param("origin") PickOrigin origin, @Param("escapedName") String escapedName, Pageable pageable);
+    Page<PicksTemplate> search(@Param("viewerId") UUID viewerId, @Param("origin") PickOrigin origin,
+            @Param("escapedName") String escapedName, Pageable pageable);
 
     @Query(value = """
             select template from PicksTemplate template
             left join fetch template.creator
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
             order by case
                 when lower(template.name) = lower(coalesce(:query, '')) then 0
                 when lower(template.name) like concat(lower(coalesce(:escapedName, '')), '%') escape '\\' then 1
@@ -67,8 +74,12 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
                     select count(template) from PicksTemplate template
                     where (:origin is null or template.origin = :origin)
                       and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+                      and (template.creator is null or not exists (select b.id from UserBlock b where
+                            (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                            (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
                     """)
     Page<PicksTemplate> searchRelevance(
+            @Param("viewerId") UUID viewerId,
             @Param("origin") PickOrigin origin,
             @Param("query") String query,
             @Param("escapedName") String escapedName,
@@ -78,14 +89,21 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
             select template from PicksTemplate template
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
             order by template.createdAt desc, template.id desc
             """,
             countQuery = """
                     select count(template) from PicksTemplate template
                     where (:origin is null or template.origin = :origin)
                       and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+                      and (template.creator is null or not exists (select b.id from UserBlock b where
+                            (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                            (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
                     """)
-    Page<PicksTemplate> searchRecent(@Param("origin") PickOrigin origin,
+    Page<PicksTemplate> searchRecent(@Param("viewerId") UUID viewerId,
+                                     @Param("origin") PickOrigin origin,
                                      @Param("escapedName") String escapedName,
                                      Pageable pageable);
 
@@ -93,9 +111,15 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
             select template from PicksTemplate template
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
             order by (
                 select count(pick) from Pick pick
                 where pick.picksTemplate = template
+                  and not exists (select b.id from UserBlock b where
+                        (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                        (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
                   and (pick.user.id = :viewerId
                     or pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC
                     or (pick.visibility = com.watchwise.watchwise_api.pick.entity.PickVisibility.FOLLOWERS
@@ -111,6 +135,9 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
                     select count(template) from PicksTemplate template
                     where (:origin is null or template.origin = :origin)
                       and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+                      and (template.creator is null or not exists (select b.id from UserBlock b where
+                            (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                            (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
                     """)
     Page<PicksTemplate> searchMostPicked(@Param("viewerId") UUID viewerId,
                                          @Param("origin") PickOrigin origin,
@@ -121,19 +148,31 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
             select template from PicksTemplate template
             where (:origin is null or template.origin = :origin)
               and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+              and (template.creator is null or not exists (select b.id from UserBlock b where
+                    (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                    (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
               and (
                   (select count(weeklyLike) from Like weeklyLike
                    where weeklyLike.picksTemplate = template
+                     and not exists (select b.id from UserBlock b where
+                           (b.blocker.id = :viewerId and b.blocked.id = weeklyLike.user.id) or
+                           (b.blocker.id = weeklyLike.user.id and b.blocked.id = :viewerId))
                      and weeklyLike.createdAt >= :since
                      and weeklyLike.createdAt <= current_timestamp)
                   +
                   (select count(weeklyComment) from Comment weeklyComment
                    where weeklyComment.picksTemplate = template
+                     and not exists (select b.id from UserBlock b where
+                           (b.blocker.id = :viewerId and b.blocked.id = weeklyComment.user.id) or
+                           (b.blocker.id = weeklyComment.user.id and b.blocked.id = :viewerId))
                      and weeklyComment.createdAt >= :since
                      and weeklyComment.createdAt <= current_timestamp)
                   +
                   (select count(weeklyPick) from Pick weeklyPick
                    where weeklyPick.picksTemplate = template
+                     and not exists (select b.id from UserBlock b where
+                           (b.blocker.id = :viewerId and b.blocked.id = weeklyPick.user.id) or
+                           (b.blocker.id = weeklyPick.user.id and b.blocked.id = :viewerId))
                      and weeklyPick.createdAt >= :since
                      and weeklyPick.createdAt <= current_timestamp
                      and (weeklyPick.user.id = :viewerId
@@ -150,16 +189,25 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
             order by (
                 (select count(templateLike) from Like templateLike
                  where templateLike.picksTemplate = template
+                   and not exists (select b.id from UserBlock b where
+                         (b.blocker.id = :viewerId and b.blocked.id = templateLike.user.id) or
+                         (b.blocker.id = templateLike.user.id and b.blocked.id = :viewerId))
                    and templateLike.createdAt >= :since
                    and templateLike.createdAt <= current_timestamp)
                 +
                 (select count(templateComment) from Comment templateComment
                  where templateComment.picksTemplate = template
+                   and not exists (select b.id from UserBlock b where
+                         (b.blocker.id = :viewerId and b.blocked.id = templateComment.user.id) or
+                         (b.blocker.id = templateComment.user.id and b.blocked.id = :viewerId))
                    and templateComment.createdAt >= :since
                    and templateComment.createdAt <= current_timestamp)
                 +
                 (select count(pick) from Pick pick
                  where pick.picksTemplate = template
+                   and not exists (select b.id from UserBlock b where
+                         (b.blocker.id = :viewerId and b.blocked.id = pick.user.id) or
+                         (b.blocker.id = pick.user.id and b.blocked.id = :viewerId))
                    and pick.createdAt >= :since
                    and pick.createdAt <= current_timestamp
                    and (pick.user.id = :viewerId
@@ -178,19 +226,31 @@ public interface PicksTemplateRepository extends JpaRepository<PicksTemplate, UU
                     select count(template) from PicksTemplate template
                     where (:origin is null or template.origin = :origin)
                       and lower(template.name) like concat('%', lower(coalesce(:escapedName, '')), '%') escape '\\'
+                      and (template.creator is null or not exists (select b.id from UserBlock b where
+                            (b.blocker.id = :viewerId and b.blocked.id = template.creator.id) or
+                            (b.blocker.id = template.creator.id and b.blocked.id = :viewerId)))
                       and (
                           (select count(weeklyLike) from Like weeklyLike
                            where weeklyLike.picksTemplate = template
+                             and not exists (select b.id from UserBlock b where
+                                   (b.blocker.id = :viewerId and b.blocked.id = weeklyLike.user.id) or
+                                   (b.blocker.id = weeklyLike.user.id and b.blocked.id = :viewerId))
                              and weeklyLike.createdAt >= :since
                              and weeklyLike.createdAt <= current_timestamp)
                           +
                           (select count(weeklyComment) from Comment weeklyComment
                            where weeklyComment.picksTemplate = template
+                             and not exists (select b.id from UserBlock b where
+                                   (b.blocker.id = :viewerId and b.blocked.id = weeklyComment.user.id) or
+                                   (b.blocker.id = weeklyComment.user.id and b.blocked.id = :viewerId))
                              and weeklyComment.createdAt >= :since
                              and weeklyComment.createdAt <= current_timestamp)
                           +
                           (select count(weeklyPick) from Pick weeklyPick
                            where weeklyPick.picksTemplate = template
+                             and not exists (select b.id from UserBlock b where
+                                   (b.blocker.id = :viewerId and b.blocked.id = weeklyPick.user.id) or
+                                   (b.blocker.id = weeklyPick.user.id and b.blocked.id = :viewerId))
                              and weeklyPick.createdAt >= :since
                              and weeklyPick.createdAt <= current_timestamp
                              and (weeklyPick.user.id = :viewerId

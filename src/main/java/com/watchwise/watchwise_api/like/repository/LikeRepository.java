@@ -69,7 +69,21 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
     @Query("SELECT l.picksTemplate.id FROM Like l WHERE l.user.id = :userId AND l.picksTemplate.id IN :templateIds")
     Set<UUID> findLikedPicksTemplateIds(@Param("userId") UUID userId, @Param("templateIds") Collection<UUID> templateIds);
 
-    @Query("SELECT l.list FROM Like l WHERE l.user.id = :userId AND l.list IS NOT NULL ORDER BY l.createdAt DESC, l.id DESC")
+    @Query(value = """
+            SELECT l.list FROM Like l
+            WHERE l.user.id = :userId AND l.list IS NOT NULL
+              AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                    (b.blocker.id = :userId AND b.blocked.id = l.list.user.id)
+                    OR (b.blocker.id = l.list.user.id AND b.blocked.id = :userId))
+            ORDER BY l.createdAt DESC, l.id DESC
+            """,
+            countQuery = """
+            SELECT COUNT(l) FROM Like l
+            WHERE l.user.id = :userId AND l.list IS NOT NULL
+              AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                    (b.blocker.id = :userId AND b.blocked.id = l.list.user.id)
+                    OR (b.blocker.id = l.list.user.id AND b.blocked.id = :userId))
+            """)
     Page<UserList> findLikedListsByUserId(@Param("userId") UUID userId, Pageable pageable);
 
 }

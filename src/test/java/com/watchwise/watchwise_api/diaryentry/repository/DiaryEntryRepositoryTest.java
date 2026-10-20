@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.hibernate.SessionFactory;
@@ -88,6 +89,7 @@ class DiaryEntryRepositoryTest {
     @BeforeEach
     void setUp() {
         diaryEntryRepository.deleteAll();
+        droppedEntryRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
 
@@ -95,6 +97,36 @@ class DiaryEntryRepositoryTest {
         marina = userRepository.save(buildUser("marina", "marina@email.com"));
         fightClub = contentRepository.save(buildContent("550", ContentType.MOVIE));
         pulpFiction = contentRepository.save(buildContent("680", ContentType.MOVIE));
+    }
+
+    @Test
+    void excludesBlockedDiaryAndDroppedReviewsBeforePaginationAndCount() {
+        User visibleAuthor = userRepository.save(buildUser("visible-review-author", "visible-review@email.com"));
+        DiaryEntry blockedDiaryReview = DiaryEntry.builder().user(marina).content(fightClub).watchNumber(1)
+                .comment("blocked diary review").createdAt(LocalDateTime.now().plusMinutes(2))
+                .updatedAt(LocalDateTime.now()).build();
+        diaryEntryRepository.saveAndFlush(blockedDiaryReview);
+        DiaryEntry visibleReview = DiaryEntry.builder().user(visibleAuthor).content(fightClub).watchNumber(1)
+                .comment("visible review").createdAt(LocalDateTime.now().plusMinutes(1))
+                .updatedAt(LocalDateTime.now()).build();
+        diaryEntryRepository.saveAndFlush(visibleReview);
+        droppedEntryRepository.saveAndFlush(DroppedEntry.builder().user(marina).content(fightClub)
+                .type(ContentType.MOVIE).comment("blocked dropped review")
+                .createdAt(LocalDateTime.now().plusMinutes(3)).updatedAt(LocalDateTime.now()).build());
+        entityManager.persist(UserBlock.builder().blocker(lucas).blocked(marina).createdAt(LocalDateTime.now()).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<DiaryEntryRepository.ContentReviewKey> result = diaryEntryRepository.findContentReviewKeys(
+                fightClub.getId(), lucas.getId(), "RECENT", PageRequest.of(0, 1));
+
+        assertThat(result.getContent()).singleElement().satisfies(review -> {
+            assertThat(review.getSource()).isEqualTo("DIARY");
+            assertThat(review.getReviewId()).isEqualTo(visibleReview.getId());
+        });
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getContent()).noneSatisfy(review ->
+                assertThat(review.getReviewId()).isEqualTo(blockedDiaryReview.getId()));
     }
 
     @Test

@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
@@ -127,6 +128,9 @@ class UserListServiceImplTest {
     private UserContentPosterService userContentPosterService;
 
     @Mock
+    private UserBlockAccessService userBlockAccessService;
+
+    @Mock
     private ContentRepository contentRepository;
 
     @Spy
@@ -176,7 +180,7 @@ class UserListServiceImplTest {
                         .toList());
         ReflectionTestUtils.setField(userListService, "userListItemPageReader", new UserListItemPageReaderImpl(
                 userListRepository, followerRepository, userListItemService, likeService, commentRepository,
-                diaryEntryRepository, contentRepository, pageRequestFactory));
+                diaryEntryRepository, contentRepository, pageRequestFactory, userBlockAccessService));
         lenient().when(contentMapper.contentToContentRefDto(any(Content.class)))
                 .thenAnswer(invocation -> {
                     Content content = invocation.getArgument(0);
@@ -449,6 +453,17 @@ class UserListServiceImplTest {
     }
 
     @Test
+    void shouldHideListsWhenTargetAndViewerAreBlocked() {
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(marinaId, lucasId);
+
+        assertThatThrownBy(() -> userListService.getUserLists(marinaId, lucasId, 1, 10, null, null, null))
+                .isInstanceOf(NotFoundException.class);
+        verifyNoInteractions(userListRepository);
+    }
+
+    @Test
     @DisplayName("[getUserLists] Should Allow Access - When Target Profile Is Private But Viewer Follows Target")
     void shouldAllowAccessWhenTargetProfileIsPrivateButViewerFollowsTarget() {
         User privateLucas = buildUser(lucasId, "lucas", false);
@@ -656,8 +671,8 @@ class UserListServiceImplTest {
         UserList list = buildList(marina, "Marina's public list", null, UserListVisibility.PUBLIC);
         UserListResponseDTO dto = buildResponseDto(list);
         stubResponseMapping(list, lucasId);
-        when(userListRepository.findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
-                eq(UserListVisibility.PUBLIC), any(PageRequest.class)))
+        when(userListRepository.findVisibleByVisibility(
+                eq(lucasId), eq(UserListVisibility.PUBLIC), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(list)));
         when(userListMapper.userListToResponseDto(list, List.of(), 0L, 0.0, false, 0L, 0L, 0L, null, null))
                 .thenReturn(dto);
@@ -665,8 +680,8 @@ class UserListServiceImplTest {
         Page<UserListResponseDTO> result = userListService.getDiscoverLists(lucasId, 1, 10);
 
         assertThat(result.getContent()).containsExactly(dto);
-        verify(userListRepository).findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
-                eq(UserListVisibility.PUBLIC), pageRequestCaptor.capture());
+        verify(userListRepository).findVisibleByVisibility(
+                eq(lucasId), eq(UserListVisibility.PUBLIC), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getValue().getPageNumber()).isZero();
         assertThat(pageRequestCaptor.getValue().getPageSize()).isEqualTo(10);
     }
@@ -676,8 +691,8 @@ class UserListServiceImplTest {
     void shouldUsePageSizeTenWhenPageSizeIsMissingOrLargerThanTen() {
         UserList list = buildList(marina, "Marina's public list", null, UserListVisibility.PUBLIC);
         stubResponseMapping(list, lucasId);
-        when(userListRepository.findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
-                eq(UserListVisibility.PUBLIC), any(PageRequest.class)))
+        when(userListRepository.findVisibleByVisibility(
+                eq(lucasId), eq(UserListVisibility.PUBLIC), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(list)));
         when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(),
                 anyLong(), anyLong(), anyLong(), any(), any()))
@@ -686,8 +701,8 @@ class UserListServiceImplTest {
         userListService.getDiscoverLists(lucasId, 1, null);
         userListService.getDiscoverLists(lucasId, 1, 11);
 
-        verify(userListRepository, times(2)).findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(
-                eq(UserListVisibility.PUBLIC), pageRequestCaptor.capture());
+        verify(userListRepository, times(2)).findVisibleByVisibility(
+                eq(lucasId), eq(UserListVisibility.PUBLIC), pageRequestCaptor.capture());
         assertThat(pageRequestCaptor.getAllValues()).extracting(PageRequest::getPageSize)
                 .containsExactly(10, 10);
     }

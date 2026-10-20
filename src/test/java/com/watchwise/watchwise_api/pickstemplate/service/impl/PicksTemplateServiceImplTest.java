@@ -17,6 +17,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.entity.UserRole;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,6 +54,7 @@ class PicksTemplateServiceImplTest {
     @Mock UserMapper userMapper;
     @Mock PageRequestFactory pageRequestFactory;
     @Mock PicksTemplatePreviewAssembler previewAssembler;
+    @Mock UserBlockAccessService userBlockAccessService;
     @InjectMocks PicksTemplateServiceImpl service;
 
     @Test
@@ -73,7 +75,7 @@ class PicksTemplateServiceImplTest {
         assertThat(result).isSameAs(assembledPage);
         verify(templateRepository).findByCreatorIdOrderByCreatedAtDescIdDesc(viewerId, request);
         verify(previewAssembler).assemblePage(repositoryPage, viewerId);
-        verify(templateRepository, never()).search(any(), any(), any());
+        verify(templateRepository, never()).search(any(), any(), any(), any());
     }
 
     @Test
@@ -83,13 +85,13 @@ class PicksTemplateServiceImplTest {
         Page<PicksTemplate> repositoryPage = new PageImpl<>(List.of(template(null, PickOrigin.COMMUNITY)), pageRequest, 1);
         Page<PicksTemplatePreviewDTO> assembledPage = new PageImpl<>(List.of(), pageRequest, 1);
         when(pageRequestFactory.build(1, 20)).thenReturn(pageRequest);
-        when(templateRepository.search(PickOrigin.COMMUNITY, "A\\%", pageRequest)).thenReturn(repositoryPage);
+        when(templateRepository.search(viewerId, PickOrigin.COMMUNITY, "A\\%", pageRequest)).thenReturn(repositoryPage);
         when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
 
         Page<PicksTemplatePreviewDTO> result = service.listTemplates(viewerId, PickOrigin.COMMUNITY, "A%", 1, 20, null);
 
         assertThat(result).isSameAs(assembledPage);
-        verify(templateRepository).search(PickOrigin.COMMUNITY, "A\\%", pageRequest);
+        verify(templateRepository).search(viewerId, PickOrigin.COMMUNITY, "A\\%", pageRequest);
         verify(previewAssembler).assemblePage(repositoryPage, viewerId);
         verifyNoMoreInteractions(templateRepository, previewAssembler);
     }
@@ -101,7 +103,7 @@ class PicksTemplateServiceImplTest {
         Page<PicksTemplate> repositoryPage = Page.empty(pageRequest);
         Page<PicksTemplatePreviewDTO> assembledPage = Page.empty(pageRequest);
         when(pageRequestFactory.build(1, 10)).thenReturn(pageRequest);
-        when(templateRepository.searchRelevance(PickOrigin.COMMUNITY, "night", "night", pageRequest))
+        when(templateRepository.searchRelevance(viewerId, PickOrigin.COMMUNITY, "night", "night", pageRequest))
                 .thenReturn(repositoryPage);
         when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
 
@@ -109,8 +111,22 @@ class PicksTemplateServiceImplTest {
                 viewerId, PickOrigin.COMMUNITY, "night", 1, 10);
 
         assertThat(result).isSameAs(assembledPage);
-        verify(templateRepository).searchRelevance(PickOrigin.COMMUNITY, "night", "night", pageRequest);
+        verify(templateRepository).searchRelevance(viewerId, PickOrigin.COMMUNITY, "night", "night", pageRequest);
         verify(previewAssembler).assemblePage(repositoryPage, viewerId);
+    }
+
+    @Test
+    void shouldHideTemplateWhenCreatorAndViewerAreBlocked() {
+        UUID viewerId = UUID.randomUUID();
+        UUID creatorId = UUID.randomUUID();
+        PicksTemplate template = template(user(creatorId, UserRole.USER), PickOrigin.COMMUNITY);
+        when(templateRepository.findById(template.getId())).thenReturn(Optional.of(template));
+        org.mockito.Mockito.doThrow(new com.watchwise.watchwise_api.common.exception.NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(viewerId, creatorId);
+
+        assertThatThrownBy(() -> service.getTemplate(viewerId, template.getId()))
+                .isInstanceOf(com.watchwise.watchwise_api.common.exception.NotFoundException.class);
+        verifyNoInteractions(categoryRepository, previewAssembler);
     }
 
     @Test
@@ -120,13 +136,13 @@ class PicksTemplateServiceImplTest {
         Page<PicksTemplate> repositoryPage = Page.empty(pageRequest);
         Page<PicksTemplatePreviewDTO> assembledPage = Page.empty(pageRequest);
         when(pageRequestFactory.build(1, 20)).thenReturn(pageRequest);
-        when(templateRepository.searchRecent(null, null, pageRequest)).thenReturn(repositoryPage);
+        when(templateRepository.searchRecent(viewerId, null, null, pageRequest)).thenReturn(repositoryPage);
         when(previewAssembler.assemblePage(repositoryPage, viewerId)).thenReturn(assembledPage);
 
         Page<PicksTemplatePreviewDTO> result = service.listTemplates(viewerId, null, null, 1, 20, PicksTemplateSort.RECENT);
 
         assertThat(result).isSameAs(assembledPage);
-        verify(templateRepository).searchRecent(null, null, pageRequest);
+        verify(templateRepository).searchRecent(viewerId, null, null, pageRequest);
         verify(previewAssembler).assemblePage(repositoryPage, viewerId);
     }
 

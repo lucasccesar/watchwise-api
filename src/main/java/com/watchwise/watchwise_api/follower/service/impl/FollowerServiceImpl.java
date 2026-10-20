@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -146,14 +147,32 @@ public class FollowerServiceImpl implements FollowerService {
     @Override
     @Transactional
     public void acceptAllPendingFollowRequestsFor(User followed) {
-        List<Follower> pending = followerRepository.findPendingByFollowedIdForUpdate(followed.getId());
-        pending.forEach(follow -> follow.setStatus(FollowStatus.ACCEPTED));
-        followerRepository.saveAll(pending);
+        List<UUID> requesterIds = followerRepository.findPendingFollowerIdsByFollowedId(followed.getId());
+        List<Follower> accepted = new ArrayList<>();
+        for (UUID requesterId : requesterIds) {
+            try {
+                userBlockAccessService.lockAndAssertInteractionAllowed(followed.getId(), requesterId);
+            } catch (ForbiddenException blockedPair) {
+                followerRepository.deleteByFollowerIdAndFollowedId(requesterId, followed.getId());
+                continue;
+            }
+
+            followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(requesterId, followed.getId())
+                    .ifPresent(follow -> {
+                        follow.setStatus(FollowStatus.ACCEPTED);
+                        accepted.add(follow);
+                    });
+        }
+        if (accepted.isEmpty()) {
+            return;
+        }
+        followerRepository.saveAll(accepted);
         followNotificationService.notifyFollowRequestsAccepted(
-                followed, pending.stream().map(Follower::getFollower).toList());
+                followed, accepted.stream().map(Follower::getFollower).toList());
     }
 
     private void assertCanViewFollowGraph(UUID viewerId, UUID targetUserId, User target) {
+        userBlockAccessService.assertContentVisible(viewerId, targetUserId);
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;
         }

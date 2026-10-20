@@ -79,6 +79,7 @@ public class CommentServiceImpl implements CommentService {
         UserList list = userListRepository.findById(listId)
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
+        userBlockAccessService.assertContentVisible(viewerId, list.getUser().getId());
         assertListIsVisibleTo(viewerId, list);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
@@ -92,6 +93,7 @@ public class CommentServiceImpl implements CommentService {
         DiaryEntry diaryEntry = diaryEntryRepository.findByIdWithUser(diaryEntryId)
                 .orElseThrow(() -> new NotFoundException("Diary entry not found"));
 
+        userBlockAccessService.assertContentVisible(viewerId, diaryEntry.getUser().getId());
         assertDiaryEntryIsVisibleTo(viewerId, diaryEntry);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
@@ -106,6 +108,7 @@ public class CommentServiceImpl implements CommentService {
         DroppedEntry droppedEntry = droppedEntryRepository.findByIdWithUserAndContent(droppedEntryId)
                 .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
 
+        userBlockAccessService.assertContentVisible(viewerId, droppedEntry.getUser().getId());
         assertDroppedEntryIsVisibleTo(viewerId, droppedEntry);
 
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
@@ -117,6 +120,10 @@ public class CommentServiceImpl implements CommentService {
     public Page<CommentResponseDTO> getCommentsForPick(UUID viewerId, UUID pickId, Integer pageNumber, Integer pageSize) {
         Pick pick = pickRepository.findById(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
+        userBlockAccessService.assertContentVisible(viewerId, pick.getUser().getId());
+        if (pick.getPicksTemplate().getCreator() != null) {
+            userBlockAccessService.assertContentVisible(viewerId, pick.getPicksTemplate().getCreator().getId());
+        }
         assertPickIsVisibleTo(viewerId, pick);
         Page<Comment> comments = commentRepository.findVisibleByPickId(viewerId, pickId,
                 pageRequestFactory.build(pageNumber, pageSize));
@@ -125,8 +132,10 @@ public class CommentServiceImpl implements CommentService {
 
     @Override
     public Page<CommentResponseDTO> getCommentsForPicksTemplate(UUID viewerId, UUID templateId, Integer pageNumber, Integer pageSize) {
-        if (!picksTemplateRepository.existsById(templateId)) {
-            throw new NotFoundException("Picks template not found");
+        PicksTemplate template = picksTemplateRepository.findById(templateId)
+                .orElseThrow(() -> new NotFoundException("Picks template not found"));
+        if (template.getCreator() != null) {
+            userBlockAccessService.assertContentVisible(viewerId, template.getCreator().getId());
         }
         Page<Comment> comments = commentRepository.findVisibleByPicksTemplateId(viewerId, templateId,
                 pageRequestFactory.build(pageNumber, pageSize));
@@ -147,6 +156,7 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("Content not found"));
 
         Comment parentComment = resolveParentCommentOnContent(userId, commentCreationDTO.parentCommentId(), contentId);
+        assertInteractionsAllowed(userId, null, parentComment);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .content(content)
@@ -162,9 +172,8 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("List not found"));
 
         assertListIsVisibleTo(userId, list);
-        userBlockAccessService.assertInteractionAllowed(userId, list.getUser().getId());
-
         Comment parentComment = resolveParentCommentOnList(userId, commentCreationDTO.parentCommentId(), listId);
+        assertInteractionsAllowed(userId, list.getUser().getId(), parentComment);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .list(list)
@@ -182,9 +191,8 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("Diary entry not found"));
 
         assertDiaryEntryIsVisibleTo(userId, diaryEntry);
-        userBlockAccessService.assertInteractionAllowed(userId, diaryEntry.getUser().getId());
-
         Comment parentComment = resolveParentCommentOnDiaryEntry(userId, commentCreationDTO.parentCommentId(), diaryEntryId);
+        assertInteractionsAllowed(userId, diaryEntry.getUser().getId(), parentComment);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .diaryEntry(diaryEntry)
@@ -203,9 +211,8 @@ public class CommentServiceImpl implements CommentService {
                 .orElseThrow(() -> new NotFoundException("Dropped entry not found"));
 
         assertDroppedEntryIsVisibleTo(userId, droppedEntry);
-        userBlockAccessService.assertInteractionAllowed(userId, droppedEntry.getUser().getId());
-
         Comment parentComment = resolveParentCommentOnDroppedEntry(userId, commentCreationDTO.parentCommentId(), droppedEntryId);
+        assertInteractionsAllowed(userId, droppedEntry.getUser().getId(), parentComment);
 
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .droppedEntry(droppedEntry)
@@ -222,8 +229,8 @@ public class CommentServiceImpl implements CommentService {
         Pick pick = pickRepository.findById(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
         assertPickIsVisibleTo(userId, pick);
-        userBlockAccessService.assertInteractionAllowed(userId, pick.getUser().getId());
         Comment parentComment = resolveParentCommentOnPick(userId, commentCreationDTO.parentCommentId(), pickId);
+        assertInteractionsAllowed(userId, pick.getUser().getId(), parentComment);
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .pick(pick)
                 .build();
@@ -237,10 +244,9 @@ public class CommentServiceImpl implements CommentService {
     public CommentResponseDTO createCommentOnPicksTemplate(UUID userId, UUID templateId, CommentCreationDTO commentCreationDTO) {
         PicksTemplate template = picksTemplateRepository.findById(templateId)
                 .orElseThrow(() -> new NotFoundException("Picks template not found"));
-        if (template.getCreator() != null) {
-            userBlockAccessService.assertInteractionAllowed(userId, template.getCreator().getId());
-        }
         Comment parentComment = resolveParentCommentOnPicksTemplate(userId, commentCreationDTO.parentCommentId(), templateId);
+        assertInteractionsAllowed(userId,
+                template.getCreator() == null ? null : template.getCreator().getId(), parentComment);
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .picksTemplate(template)
                 .build();
@@ -377,8 +383,18 @@ public class CommentServiceImpl implements CommentService {
     private Comment findParentComment(UUID userId, UUID parentCommentId) {
         Comment parent = commentRepository.findById(parentCommentId)
                 .orElseThrow(() -> new NotFoundException("Parent comment not found"));
-        userBlockAccessService.assertInteractionAllowed(userId, parent.getUser().getId());
         return parent;
+    }
+
+    private void assertInteractionsAllowed(UUID actorId, UUID resourceOwnerId, Comment parentComment) {
+        List<UUID> counterpartIds = new java.util.ArrayList<>(2);
+        if (resourceOwnerId != null) {
+            counterpartIds.add(resourceOwnerId);
+        }
+        if (parentComment != null) {
+            counterpartIds.add(parentComment.getUser().getId());
+        }
+        userBlockAccessService.lockAndAssertInteractionAllowed(actorId, counterpartIds);
     }
 
     private void notifyCommentReceived(

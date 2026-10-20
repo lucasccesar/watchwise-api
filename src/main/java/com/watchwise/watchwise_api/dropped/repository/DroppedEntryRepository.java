@@ -80,6 +80,9 @@ public interface DroppedEntryRepository extends JpaRepository<DroppedEntry, UUID
                      WHERE f.follower.id = :viewerId AND f.followed.id = u.id
                      AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
                  ))
+            AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                            (b.blocker.id = :viewerId AND b.blocked.id = u.id)
+                            OR (b.blocker.id = u.id AND b.blocked.id = :viewerId))
             ORDER BY d.createdAt DESC, d.id DESC
             """)
     Page<DroppedEntry> findReviewsByContentId(

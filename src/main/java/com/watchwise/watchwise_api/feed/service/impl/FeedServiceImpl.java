@@ -107,7 +107,7 @@ public class FeedServiceImpl implements FeedService {
     @Override
     @Transactional(readOnly = true)
     public CursorPageResponseDTO<FeedItemDTO> getFeed(UUID userId, String cursor, Integer size) {
-        List<UUID> followedIds = followerRepository.findFollowedIdsByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
+        List<UUID> followedIds = followerRepository.findVisibleFollowedIdsByFollowerId(userId);
         followedIds = followedIds == null ? List.of() : followedIds;
         return readFeed(userId, cursor, size, followedIds);
     }
@@ -115,7 +115,7 @@ public class FeedServiceImpl implements FeedService {
     @Override
     @Transactional(readOnly = true)
     public FeedPageViewDTO getFeedView(UUID userId, String cursor, Integer size) {
-        List<UUID> followedIds = followerRepository.findFollowedIdsByFollowerIdAndStatus(userId, FollowStatus.ACCEPTED);
+        List<UUID> followedIds = followerRepository.findVisibleFollowedIdsByFollowerId(userId);
         followedIds = followedIds == null ? List.of() : followedIds;
         RawFeedPage rawPage = selectRawFeedPage(userId, cursor, size, followedIds);
         CursorPageResponseDTO<FeedItemDTO> rawFeed = enrichSelectedPage(userId, rawPage);

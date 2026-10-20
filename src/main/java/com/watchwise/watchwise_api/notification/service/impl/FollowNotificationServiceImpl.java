@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.notification.entity.NotificationType;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.notification.service.FollowNotificationService;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +20,7 @@ public class FollowNotificationServiceImpl implements FollowNotificationService 
 
     private final NotificationRepository notificationRepository;
     private final Clock clock;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public void notifyFollowRequested(User requester, User profileOwner) {
@@ -41,6 +43,9 @@ public class FollowNotificationServiceImpl implements FollowNotificationService 
     }
 
     private void create(User recipient, User actor, NotificationType type, String message) {
+        if (userBlockAccessService.isBlockedEitherDirection(recipient.getId(), actor.getId())) {
+            return;
+        }
         LocalDateTime now = now();
         notificationRepository.save(Notification.builder()
                 .user(recipient)
@@ -56,6 +61,8 @@ public class FollowNotificationServiceImpl implements FollowNotificationService 
     private void createAll(User profileOwner, Collection<User> requesters) {
         LocalDateTime now = now();
         notificationRepository.saveAll(requesters.stream()
+                .filter(requester -> !userBlockAccessService.isBlockedEitherDirection(
+                        profileOwner.getId(), requester.getId()))
                 .map(requester -> Notification.builder()
                         .user(requester)
                         .latestActor(profileOwner)

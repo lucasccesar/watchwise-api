@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.notification.repository.NotificationRepositor
 import com.watchwise.watchwise_api.notification.service.SocialNotificationService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,7 @@ public class SocialNotificationServiceImpl implements SocialNotificationService 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
     private final Clock clock;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     @Transactional
@@ -54,7 +56,8 @@ public class SocialNotificationServiceImpl implements SocialNotificationService 
             NotificationTargetType targetType,
             UUID targetId,
             NotificationType notificationType) {
-        if (Objects.equals(actorId, recipientId)) {
+        if (Objects.equals(actorId, recipientId)
+                || userBlockAccessService.isBlockedEitherDirection(actorId, recipientId)) {
             return;
         }
 

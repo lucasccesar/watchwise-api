@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -64,6 +65,9 @@ class FollowedPersonServiceImplTest {
 
     @Mock
     private TmdbClient tmdbClient;
+
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -371,6 +375,18 @@ class FollowedPersonServiceImplTest {
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessage("This user profile is private");
 
+        verify(followedPersonRepository, never()).findByUserId(any(), any());
+    }
+
+    @Test
+    void shouldHideFollowedPeopleWhenTargetAndViewerAreBlocked() {
+        UUID viewerId = UUID.randomUUID();
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        org.mockito.Mockito.doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(viewerId, userId);
+
+        assertThatThrownBy(() -> followedPersonService.getFollowedPeople(viewerId, userId, 1, 10))
+                .isInstanceOf(NotFoundException.class);
         verify(followedPersonRepository, never()).findByUserId(any(), any());
     }
 

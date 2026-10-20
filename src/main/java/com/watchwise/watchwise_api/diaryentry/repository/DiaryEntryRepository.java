@@ -158,6 +158,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                                  WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                                     OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
                   AND (:sort <> 'FOLLOWING' OR EXISTS (
                            SELECT 1 FROM followers f
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
@@ -176,6 +179,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                                  WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                                     OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
                   AND (:sort <> 'FOLLOWING' OR EXISTS (
                            SELECT 1 FROM followers f
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
@@ -200,6 +206,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                                  WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                                     OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
                   AND (:sort <> 'FOLLOWING' OR EXISTS (
                            SELECT 1 FROM followers f
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
@@ -218,6 +227,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                                  WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                                     OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
                   AND (:sort <> 'FOLLOWING' OR EXISTS (
                            SELECT 1 FROM followers f
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
@@ -1260,6 +1272,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                      WHERE f.follower.id = :viewerId AND f.followed.id = u.id
                      AND f.status = com.watchwise.watchwise_api.follower.entity.FollowStatus.ACCEPTED
                  ))
+            AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE
+                            (b.blocker.id = :viewerId AND b.blocked.id = u.id)
+                            OR (b.blocker.id = u.id AND b.blocked.id = :viewerId))
             ORDER BY d.createdAt DESC, d.id DESC
             """)
     Page<DiaryEntry> findReviewsByContentId(

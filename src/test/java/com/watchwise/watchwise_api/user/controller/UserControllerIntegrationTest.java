@@ -853,6 +853,37 @@ class UserControllerIntegrationTest {
     }
 
     @Test
+    void shouldReturnOnlyNameAndUsernameForBlockedProfile() throws Exception {
+        Cookie viewerAccessToken = registerAndGetAccessToken("blockprofileviewer", "blockprofileviewer@email.com");
+        mockMvc.perform(registerRequest("blockprofiletarget", "blockprofiletarget@email.com"))
+                .andExpect(status().isCreated());
+        User viewer = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(
+                "blockprofileviewer", "blockprofileviewer").orElseThrow();
+        User target = userRepository.findByUsernameIgnoreCaseOrEmailIgnoreCase(
+                "blockprofiletarget", "blockprofiletarget").orElseThrow();
+        target.setDescription("private description");
+        target.setProfilePicture("https://example.com/avatar.png");
+        target.setBanner("https://example.com/banner.png");
+        userRepository.save(target);
+        userBlockRepository.saveAndFlush(UserBlock.builder()
+                .blocker(viewer).blocked(target).createdAt(LocalDateTime.now()).build());
+
+        mockMvc.perform(get("/users/" + target.getId()).cookie(viewerAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(target.getId().toString()))
+                .andExpect(jsonPath("$.username").value(target.getUsername()))
+                .andExpect(jsonPath("$.name").value(target.getName()))
+                .andExpect(jsonPath("$.blockRelationship").value("BLOCKED_BY_ME"))
+                .andExpect(jsonPath("$.isContentRestrictedByBlock").value(true))
+                .andExpect(jsonPath("$.description").doesNotExist())
+                .andExpect(jsonPath("$.profilePicture").doesNotExist())
+                .andExpect(jsonPath("$.banner").doesNotExist())
+                .andExpect(jsonPath("$.followersCount").doesNotExist())
+                .andExpect(jsonPath("$.totalMinutesWatchedMovies").doesNotExist())
+                .andExpect(jsonPath("$.genreCountsMovies").doesNotExist());
+    }
+
+    @Test
     @DisplayName("[getUserById] Should Include Watch Time Stats - When Target User's Diary Has An Episode Entry")
     void shouldIncludeWatchTimeStatsWhenTargetUsersDiaryHasAnEpisodeEntry() throws Exception {
         Cookie viewerAccessToken = registerAndGetAccessToken("viewerstats", "viewerstats@email.com");

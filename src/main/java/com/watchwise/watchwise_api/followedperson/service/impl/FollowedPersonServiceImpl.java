@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -34,6 +35,7 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
     private final NewTransactionExecutor newTransactionExecutor;
     private final PageRequestFactory pageRequestFactory;
     private final TmdbClient tmdbClient;
+    private final UserBlockAccessService userBlockAccessService;
 
     @Override
     public void followPerson(UUID userId, String personTmdbId) {
@@ -106,6 +108,7 @@ public class FollowedPersonServiceImpl implements FollowedPersonService {
     }
 
     private void assertCanViewFollowedPeople(UUID viewerId, UUID targetUserId, User target) {
+        userBlockAccessService.assertContentVisible(viewerId, targetUserId);
         if (Boolean.TRUE.equals(target.getIsProfilePublic()) || viewerId.equals(targetUserId)) {
             return;
         }

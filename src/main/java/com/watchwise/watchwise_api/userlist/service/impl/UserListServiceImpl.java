@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
@@ -82,6 +83,7 @@ public class UserListServiceImpl implements UserListService {
     private final UserListItemRepository userListItemRepository;
     private final SeriesProgressReader seriesProgressReader;
     private final UserContentPosterService userContentPosterService;
+    private final UserBlockAccessService userBlockAccessService;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
     private static final int USER_LIST_PAGE_SIZE = 10;
@@ -93,6 +95,7 @@ public class UserListServiceImpl implements UserListService {
             String sortBy, String sortDirection, UUID contentId) {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
+        userBlockAccessService.assertContentVisible(viewerId, userId);
 
         boolean isOwner = viewerId.equals(userId);
         boolean viewerFollowsTarget = !isOwner && viewerFollowsTarget(viewerId, userId);
@@ -133,7 +136,7 @@ public class UserListServiceImpl implements UserListService {
         validateUserListPageSize(pageSize);
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize, USER_LIST_PAGE_SIZE);
         Page<UserList> lists = userListRepository
-                .findByVisibilityOrderByLikesCountDescCreatedAtDescIdDesc(UserListVisibility.PUBLIC, pageRequest);
+                .findVisibleByVisibility(viewerId, UserListVisibility.PUBLIC, pageRequest);
         return mapToResponseDtoPage(lists, viewerId, null);
     }
 
@@ -444,6 +447,7 @@ public class UserListServiceImpl implements UserListService {
 
     private void assertListIsVisibleTo(UUID viewerId, UserList userList) {
         UUID ownerId = userList.getUser().getId();
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
 
         if (viewerId.equals(ownerId) || userList.getVisibility() == UserListVisibility.PUBLIC) {
             return;

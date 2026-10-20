@@ -116,6 +116,17 @@ class FollowerServiceImplTest {
         );
     }
 
+    @Test
+    void shouldHideFollowerListsWhenTargetAndViewerAreBlocked() {
+        when(userRepository.findById(followedId)).thenReturn(Optional.of(followedUser));
+        doThrow(new NotFoundException("Resource not found"))
+                .when(userBlockAccessService).assertContentVisible(followerId, followedId);
+
+        assertThatThrownBy(() -> followerService.getFollowers(followerId, followedId, 1, 10))
+                .isInstanceOf(NotFoundException.class);
+        verify(followerRepository, never()).findByFollowedIdAndStatus(any(), any(), any());
+    }
+
     private Follower buildFollow(FollowStatus status) {
         return Follower.builder()
                 .id(UUID.randomUUID())
@@ -701,8 +712,12 @@ class FollowerServiceImplTest {
                 .status(FollowStatus.PENDING)
                 .createdAt(LocalDateTime.now())
                 .build();
-        when(followerRepository.findPendingByFollowedIdForUpdate(followedId))
-                .thenReturn(List.of(firstPending, secondPending));
+        when(followerRepository.findPendingFollowerIdsByFollowedId(followedId))
+                .thenReturn(List.of(followerId, secondRequester.getId()));
+        when(followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(followerId, followedId))
+                .thenReturn(Optional.of(firstPending));
+        when(followerRepository.findPendingByFollowerIdAndFollowedIdForUpdate(secondRequester.getId(), followedId))
+                .thenReturn(Optional.of(secondPending));
 
         followerService.acceptAllPendingFollowRequestsFor(followedUser);
 
@@ -711,6 +726,19 @@ class FollowerServiceImplTest {
         verify(followerRepository).saveAll(List.of(firstPending, secondPending));
         verify(followNotificationService).notifyFollowRequestsAccepted(
                 followedUser, List.of(followerUser, secondRequester));
+    }
+
+    @Test
+    void shouldNotAcceptPendingFollowRequestAcrossAConcurrentOrExistingBlock() {
+        when(followerRepository.findPendingFollowerIdsByFollowedId(followedId)).thenReturn(List.of(followerId));
+        doThrow(new ForbiddenException("This interaction is not allowed"))
+                .when(userBlockAccessService).lockAndAssertInteractionAllowed(followedId, followerId);
+
+        followerService.acceptAllPendingFollowRequestsFor(followedUser);
+
+        verify(followerRepository).deleteByFollowerIdAndFollowedId(followerId, followedId);
+        verify(followerRepository, never()).saveAll(any());
+        verifyNoInteractions(followNotificationService);
     }
 
     private DataIntegrityViolationException buildDataIntegrityViolationException(String constraintName) {
