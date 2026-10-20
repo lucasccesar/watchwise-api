@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.comment.service;
 
 import com.watchwise.watchwise_api.comment.dto.CommentCreationDTO;
 import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
+import com.watchwise.watchwise_api.comment.dto.CommentUpdateDTO;
 import org.springframework.data.domain.Page;
 
 import java.util.UUID;
@@ -33,5 +34,7 @@ public interface CommentService {
     CommentResponseDTO createCommentOnPicksTemplate(UUID userId, UUID templateId, CommentCreationDTO commentCreationDTO);
 
     void deleteComment(UUID userId, UUID commentId);
+
+    CommentResponseDTO updateComment(UUID userId, UUID commentId, CommentUpdateDTO commentUpdateDTO);
 
 }

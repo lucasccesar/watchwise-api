@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.comment.controller;
 
 import com.watchwise.watchwise_api.comment.dto.CommentCreationDTO;
 import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
+import com.watchwise.watchwise_api.comment.dto.CommentUpdateDTO;
 import com.watchwise.watchwise_api.comment.service.CommentService;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import jakarta.validation.Valid;
@@ -134,6 +135,13 @@ public class CommentController {
     public ResponseEntity<Void> deleteComment(@PathVariable UUID commentId) {
         commentService.deleteComment(getCurrentUserId(), commentId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/comments/{commentId}")
+    public ResponseEntity<CommentResponseDTO> updateComment(
+            @PathVariable UUID commentId,
+            @Valid @RequestBody CommentUpdateDTO commentUpdateDTO) {
+        return ResponseEntity.ok(commentService.updateComment(getCurrentUserId(), commentId, commentUpdateDTO));
     }
 
     private UUID getCurrentUserId() {

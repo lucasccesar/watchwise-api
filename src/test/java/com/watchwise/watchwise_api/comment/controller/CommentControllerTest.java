@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.comment.controller;
 
 import com.watchwise.watchwise_api.comment.dto.CommentCreationDTO;
 import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
+import com.watchwise.watchwise_api.comment.dto.CommentUpdateDTO;
 import com.watchwise.watchwise_api.comment.service.CommentService;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import org.junit.jupiter.api.AfterEach;
@@ -262,6 +263,24 @@ class CommentControllerTest {
         commentController.deleteComment(commentId);
 
         verify(commentService).deleteComment(currentUserId, commentId);
+    }
+
+    @Test
+    @DisplayName("[updateComment] Should Return Updated Comment And Resolve Current User - When Called")
+    void shouldReturnUpdatedCommentAndResolveCurrentUserWhenUpdatingComment() {
+        UUID commentId = UUID.randomUUID();
+        CommentUpdateDTO updateDTO = new CommentUpdateDTO("Edited comment", true);
+        LocalDateTime now = LocalDateTime.now();
+        CommentResponseDTO updated = new CommentResponseDTO(
+                commentId, null, null, null, null, null, "Edited comment", true,
+                now.minusMinutes(2), now, 3, true);
+        when(commentService.updateComment(currentUserId, commentId, updateDTO)).thenReturn(updated);
+
+        ResponseEntity<CommentResponseDTO> result = commentController.updateComment(commentId, updateDTO);
+
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isEqualTo(updated);
+        verify(commentService).updateComment(currentUserId, commentId, updateDTO);
     }
 
     private CommentResponseDTO buildResponseDto() {

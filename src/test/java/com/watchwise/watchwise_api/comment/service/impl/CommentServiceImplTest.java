@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.comment.service.impl;
 
 import com.watchwise.watchwise_api.comment.dto.CommentCreationDTO;
 import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
+import com.watchwise.watchwise_api.comment.dto.CommentUpdateDTO;
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.comment.mapper.CommentMapper;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
@@ -1286,5 +1287,58 @@ class CommentServiceImplTest {
                 .hasMessage("Comment not found");
 
         verify(commentRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("[updateComment] Should Edit Only Mutable Fields And Preserve Like State - When Owned")
+    void shouldEditOnlyMutableFieldsAndPreserveLikeStateWhenOwned() {
+        Comment parent = buildContentComment(fightClub);
+        LocalDateTime createdAt = LocalDateTime.now().minusDays(1);
+        LocalDateTime previousUpdatedAt = LocalDateTime.now().minusHours(1);
+        Comment comment = Comment.builder()
+                .id(UUID.randomUUID())
+                .user(lucas)
+                .content(fightClub)
+                .parentComment(parent)
+                .text("Existing reply")
+                .containsSpoiler(false)
+                .createdAt(createdAt)
+                .updatedAt(previousUpdatedAt)
+                .likesCount(7)
+                .build();
+        UUID commentId = comment.getId();
+        when(commentRepository.findById(commentId)).thenReturn(Optional.of(comment));
+        when(commentRepository.save(comment)).thenReturn(comment);
+        when(likeService.getLikedCommentIds(lucasId, List.of(commentId))).thenReturn(Set.of(commentId));
+        when(commentMapper.commentToResponseDto(comment, true)).thenReturn(responseDto);
+
+        CommentResponseDTO result = commentService.updateComment(
+                lucasId, commentId, new CommentUpdateDTO("Edited comment", true));
+
+        assertThat(result).isEqualTo(responseDto);
+        assertThat(comment.getText()).isEqualTo("Edited comment");
+        assertThat(comment.getContainsSpoiler()).isTrue();
+        assertThat(comment.getLikesCount()).isEqualTo(7);
+        assertThat(comment.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(comment.getUpdatedAt()).isAfter(previousUpdatedAt);
+        assertThat(comment.getUser().getId()).isEqualTo(lucasId);
+        assertThat(comment.getContent()).isEqualTo(fightClub);
+        assertThat(comment.getParentComment()).isEqualTo(parent);
+        verify(commentMapper).commentToResponseDto(comment, true);
+        verifyNoInteractions(socialNotificationService);
+    }
+
+    @Test
+    @DisplayName("[updateComment] Should Not Find Comment Owned By Another User - When Requester Is Not Author")
+    void shouldNotFindCommentOwnedByAnotherUserWhenRequesterIsNotAuthor() {
+        Comment comment = buildContentComment(fightClub);
+        when(commentRepository.findById(comment.getId())).thenReturn(Optional.of(comment));
+
+        assertThatThrownBy(() -> commentService.updateComment(
+                marinaId, comment.getId(), new CommentUpdateDTO("Edited comment", null)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Comment not found");
+
+        verify(commentRepository, never()).save(any());
     }
 }

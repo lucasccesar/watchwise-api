@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.comment.service.impl;
 
 import com.watchwise.watchwise_api.comment.dto.CommentCreationDTO;
 import com.watchwise.watchwise_api.comment.dto.CommentResponseDTO;
+import com.watchwise.watchwise_api.comment.dto.CommentUpdateDTO;
 import com.watchwise.watchwise_api.comment.entity.Comment;
 import com.watchwise.watchwise_api.comment.mapper.CommentMapper;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
@@ -260,6 +261,21 @@ public class CommentServiceImpl implements CommentService {
         Comment comment = findOwnedComment(userId, commentId);
 
         commentRepository.delete(comment);
+    }
+
+    @Override
+    @Transactional
+    public CommentResponseDTO updateComment(UUID userId, UUID commentId, CommentUpdateDTO commentUpdateDTO) {
+        Comment comment = findOwnedComment(userId, commentId);
+        comment.setText(commentUpdateDTO.text());
+        if (commentUpdateDTO.containsSpoiler() != null) {
+            comment.setContainsSpoiler(commentUpdateDTO.containsSpoiler());
+        }
+        comment.setUpdatedAt(LocalDateTime.now());
+
+        Comment savedComment = commentRepository.save(comment);
+        boolean likedByEditor = likeService.getLikedCommentIds(userId, List.of(commentId)).contains(commentId);
+        return commentMapper.commentToResponseDto(savedComment, likedByEditor);
     }
 
     private Comment findOwnedComment(UUID userId, UUID commentId) {
