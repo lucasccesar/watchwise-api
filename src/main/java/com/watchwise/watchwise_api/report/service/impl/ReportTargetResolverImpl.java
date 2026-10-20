@@ -78,7 +78,6 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
         User target = userRepository.findById(targetId)
                 .orElseThrow(() -> new NotFoundException("Report target not found"));
         rejectSelfReport(reporterId, target.getId());
-        assertProfileTargetVisible(reporterId, target.getId());
 
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("username", target.getUsername());
@@ -213,25 +212,25 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
             return;
         }
         if (comment.getList() != null) {
-            assertListTargetVisible(reporterId, comment.getList());
+            assertListContainerVisible(reporterId, comment.getList());
             return;
         }
         if (comment.getDiaryEntry() != null) {
-            assertProfileTargetVisible(reporterId, comment.getDiaryEntry().getUser().getId());
+            assertProfileContainerVisible(reporterId, comment.getDiaryEntry().getUser().getId());
             return;
         }
         if (comment.getDroppedEntry() != null) {
-            assertProfileTargetVisible(reporterId, comment.getDroppedEntry().getUser().getId());
+            assertProfileContainerVisible(reporterId, comment.getDroppedEntry().getUser().getId());
             return;
         }
         if (comment.getPick() != null) {
-            assertPickTargetVisible(reporterId, comment.getPick());
+            assertPickContainerVisible(reporterId, comment.getPick());
             return;
         }
         if (comment.getPicksTemplate() != null) {
             User creator = comment.getPicksTemplate().getCreator();
             if (creator != null && userBlockAccessService.isBlockedEitherDirection(reporterId, creator.getId())) {
-                return;
+                throw new NotFoundException("Report target not found");
             }
             return;
         }
@@ -241,6 +240,17 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
     private void assertProfileTargetVisible(UUID reporterId, UUID ownerId) {
         if (reporterId.equals(ownerId) || userBlockAccessService.isBlockedEitherDirection(reporterId, ownerId)) {
             return;
+        }
+        try {
+            userVisibilityService.assertCanView(reporterId, ownerId);
+        } catch (ForbiddenException inaccessible) {
+            throw new NotFoundException("Report target not found");
+        }
+    }
+
+    private void assertProfileContainerVisible(UUID reporterId, UUID ownerId) {
+        if (!reporterId.equals(ownerId) && userBlockAccessService.isBlockedEitherDirection(reporterId, ownerId)) {
+            throw new NotFoundException("Report target not found");
         }
         try {
             userVisibilityService.assertCanView(reporterId, ownerId);
@@ -263,9 +273,53 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
         throw new NotFoundException("Report target not found");
     }
 
+    private void assertListContainerVisible(UUID reporterId, UserList list) {
+        UUID ownerId = list.getUser().getId();
+        if (reporterId.equals(ownerId)) {
+            return;
+        }
+        if (userBlockAccessService.isBlockedEitherDirection(reporterId, ownerId)) {
+            throw new NotFoundException("Report target not found");
+        }
+        if (list.getVisibility() == UserListVisibility.PUBLIC
+                || (list.getVisibility() == UserListVisibility.FOLLOWERS
+                    && followerRepository.existsByFollowerIdAndFollowedIdAndStatus(
+                            reporterId, ownerId, FollowStatus.ACCEPTED))) {
+            return;
+        }
+        throw new NotFoundException("Report target not found");
+    }
+
     private void assertPickTargetVisible(UUID reporterId, Pick pick) {
         UUID ownerId = pick.getUser().getId();
         if (reporterId.equals(ownerId) || userBlockAccessService.isBlockedEitherDirection(reporterId, ownerId)) {
+            return;
+        }
+        User templateCreator = pick.getPicksTemplate().getCreator();
+        if (templateCreator != null
+                && userBlockAccessService.isBlockedEitherDirection(reporterId, templateCreator.getId())) {
+            throw new NotFoundException("Report target not found");
+        }
+        if (pick.getVisibility() == PickVisibility.PUBLIC
+                || (pick.getVisibility() == PickVisibility.FOLLOWERS
+                    && followerRepository.existsByFollowerIdAndFollowedIdAndStatus(
+                            reporterId, ownerId, FollowStatus.ACCEPTED))) {
+            return;
+        }
+        throw new NotFoundException("Report target not found");
+    }
+
+    private void assertPickContainerVisible(UUID reporterId, Pick pick) {
+        UUID ownerId = pick.getUser().getId();
+        if (!reporterId.equals(ownerId) && userBlockAccessService.isBlockedEitherDirection(reporterId, ownerId)) {
+            throw new NotFoundException("Report target not found");
+        }
+        User templateCreator = pick.getPicksTemplate().getCreator();
+        if (templateCreator != null
+                && userBlockAccessService.isBlockedEitherDirection(reporterId, templateCreator.getId())) {
+            throw new NotFoundException("Report target not found");
+        }
+        if (reporterId.equals(ownerId)) {
             return;
         }
         if (pick.getVisibility() == PickVisibility.PUBLIC

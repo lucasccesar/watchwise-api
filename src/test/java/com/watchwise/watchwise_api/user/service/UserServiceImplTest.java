@@ -24,6 +24,7 @@ import com.watchwise.watchwise_api.user.dto.UserResponseDTO;
 import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.report.service.ReportReporterDeletionService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -87,6 +88,9 @@ class UserServiceImplTest {
 
     @Mock
     private UserBlockAccessService userBlockAccessService;
+
+    @Mock
+    private ReportReporterDeletionService reportReporterDeletionService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -1466,6 +1470,7 @@ class UserServiceImplTest {
         userService.deleteAccount(id, deleteAccountDTO);
 
         verify(userRepository).delete(savedUser);
+        verify(reportReporterDeletionService).removeReporterSubmissions(id);
     }
 
     @Test

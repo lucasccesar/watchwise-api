@@ -28,6 +28,7 @@ import com.watchwise.watchwise_api.user.service.UserService;
 import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.report.service.ReportReporterDeletionService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -61,6 +62,7 @@ public class UserServiceImpl implements UserService {
     private final FollowerRepository followerRepository;
     private final UserVisibilityService userVisibilityService;
     private final UserBlockAccessService userBlockAccessService;
+    private final ReportReporterDeletionService reportReporterDeletionService;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -371,6 +373,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional
     public void deleteAccount(UUID id, DeleteAccountDTO deleteAccountDTO) {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
 
@@ -378,6 +381,7 @@ public class UserServiceImpl implements UserService {
             throw new UnauthorizedException("Invalid password");
         }
 
+        reportReporterDeletionService.removeReporterSubmissions(id);
         userRepository.delete(user);
     }
 

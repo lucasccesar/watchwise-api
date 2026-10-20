@@ -7,6 +7,8 @@ import com.watchwise.watchwise_api.report.entity.ReportSubmission;
 import com.watchwise.watchwise_api.report.entity.ReportTargetType;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -19,6 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +46,7 @@ class ReportRepositoryTest {
     @Autowired ReportCaseRepository reportCaseRepository;
     @Autowired ReportSubmissionRepository reportSubmissionRepository;
     @Autowired UserRepository userRepository;
+    @PersistenceContext EntityManager entityManager;
 
     @Test
     void permitsOnlyOneActiveCaseForATypedTarget() {
@@ -84,11 +88,86 @@ class ReportRepositoryTest {
         assertThat(otherType.getTargetType()).isEqualTo(ReportTargetType.REVIEW);
     }
 
+    @Test
+    void deletesOnlyClosedCasesOlderThanTheCutoff() {
+        LocalDateTime now = LocalDateTime.now();
+        ReportCase expired = saveClosedCase(ReportCaseStatus.RESOLVED, now.minusDays(91));
+        ReportCase recent = saveClosedCase(ReportCaseStatus.DISMISSED, now.minusDays(89));
+        ReportCase active = saveCase(ReportCaseStatus.IN_REVIEW, ReportTargetType.USER, UUID.randomUUID());
+
+        int deleted = reportCaseRepository.deleteClosedBefore(now.minusDays(90), 500);
+        entityManager.clear();
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(reportCaseRepository.findById(expired.getId())).isEmpty();
+        assertThat(reportCaseRepository.findById(recent.getId())).isPresent();
+        assertThat(reportCaseRepository.findById(active.getId())).isPresent();
+    }
+
+    @Test
+    void deletingReporterSubmissionsLeavesSharedCasesAndRemovesEmptyCases() {
+        UUID targetId = UUID.randomUUID();
+        User reporterA = saveUser("reporter-a");
+        User reporterB = saveUser("reporter-b");
+        ReportCase shared = saveCase(ReportCaseStatus.OPEN, ReportTargetType.USER_LIST, targetId);
+        ReportCase onlyReporterA = saveCase(ReportCaseStatus.OPEN, ReportTargetType.COMMENT, UUID.randomUUID());
+        saveSubmission(shared, reporterA.getId());
+        saveSubmission(shared, reporterB.getId());
+        saveSubmission(onlyReporterA, reporterA.getId());
+
+        reportSubmissionRepository.deleteByReporterId(reporterA.getId());
+        reportCaseRepository.deleteEmptyCases();
+        entityManager.clear();
+
+        assertThat(reportCaseRepository.findById(shared.getId())).isPresent();
+        assertThat(reportSubmissionRepository.findByReportCaseIdOrderByCreatedAtAsc(shared.getId()))
+                .extracting(submission -> submission.getReporter().getId()).containsExactly(reporterB.getId());
+        assertThat(reportCaseRepository.findById(onlyReporterA.getId())).isEmpty();
+    }
+
+    @Test
+    void findsDistinctActiveTargetsForReporterInStableOrder() {
+        User reporter = saveUser("active-target-reporter");
+        UUID commentId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        ReportCase activeComment = saveCase(ReportCaseStatus.OPEN, ReportTargetType.COMMENT, commentId);
+        ReportCase closedComment = saveCase(ReportCaseStatus.RESOLVED, ReportTargetType.COMMENT, commentId);
+        ReportCase activeUser = saveCase(ReportCaseStatus.IN_REVIEW, ReportTargetType.USER, userId);
+        saveSubmission(activeComment, reporter.getId());
+        saveSubmission(closedComment, reporter.getId());
+        saveSubmission(activeUser, reporter.getId());
+
+        var targets = reportSubmissionRepository.findActiveTargetIdentitiesByReporterId(
+                reporter.getId(), List.of(ReportCaseStatus.OPEN, ReportCaseStatus.IN_REVIEW));
+
+        assertThat(targets)
+                .extracting(target -> target.getTargetType().name() + "|" + target.getTargetId())
+                .containsExactly("COMMENT|" + commentId, "USER|" + userId);
+    }
+
+    @Test
+    void indexesReporterSubmissionsForAccountDeletionCleanup() {
+        @SuppressWarnings("unchecked")
+        List<String> indexes = entityManager.createNativeQuery(
+                        "SELECT indexname FROM pg_indexes WHERE tablename = 'report_submissions'")
+                .getResultList();
+
+        assertThat(indexes).contains("idx_report_submissions_reporter_id");
+    }
+
     private ReportCase saveCase(ReportCaseStatus status, ReportTargetType targetType, UUID targetId) {
         LocalDateTime now = LocalDateTime.now();
         return reportCaseRepository.saveAndFlush(ReportCase.builder()
                 .targetType(targetType).targetId(targetId).status(status)
-                .createdAt(now).updatedAt(now).build());
+                .createdAt(now).updatedAt(now)
+                .closedAt(status == ReportCaseStatus.RESOLVED || status == ReportCaseStatus.DISMISSED ? now : null)
+                .build());
+    }
+
+    private ReportCase saveClosedCase(ReportCaseStatus status, LocalDateTime closedAt) {
+        return reportCaseRepository.saveAndFlush(ReportCase.builder()
+                .targetType(ReportTargetType.USER).targetId(UUID.randomUUID()).status(status)
+                .createdAt(closedAt).updatedAt(closedAt).closedAt(closedAt).build());
     }
 
     private ReportSubmission saveSubmission(ReportCase reportCase, UUID reporterId) {
