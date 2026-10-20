@@ -21,6 +21,14 @@ import java.util.UUID;
 
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
 
+    @Modifying
+    @Query("""
+            DELETE FROM Notification n
+            WHERE (n.user.id = :firstUserId AND n.latestActor.id = :secondUserId)
+               OR (n.user.id = :secondUserId AND n.latestActor.id = :firstUserId)
+            """)
+    int deleteBetweenUsers(@Param("firstUserId") UUID firstUserId, @Param("secondUserId") UUID secondUserId);
+
     boolean existsByUserIdAndIsReadFalse(UUID userId);
 
     @EntityGraph(attributePaths = {"content", "latestActor"})

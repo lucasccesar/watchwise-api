@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.userblock.dto.BlockedUserDTO;
 import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
@@ -37,6 +38,7 @@ class UserBlockServiceImplTest {
     @Mock UserMapper userMapper;
     @Mock FollowerRepository followerRepository;
     @Mock AdvisoryLock advisoryLock;
+    @Mock NotificationRepository notificationRepository;
     @Mock PageRequestFactory pageRequestFactory;
     @InjectMocks UserBlockServiceImpl service;
     private final UUID blockerId = UUID.randomUUID();
@@ -51,6 +53,7 @@ class UserBlockServiceImplTest {
         verify(userBlockRepository).saveAndFlush(any(UserBlock.class));
         verify(followerRepository).deleteByFollowerIdAndFollowedId(blockerId, blockedId);
         verify(followerRepository).deleteByFollowerIdAndFollowedId(blockedId, blockerId);
+        verify(notificationRepository).deleteBetweenUsers(blockerId, blockedId);
     }
 
     @Test void shouldRejectSelfBlockBeforeWriting() {

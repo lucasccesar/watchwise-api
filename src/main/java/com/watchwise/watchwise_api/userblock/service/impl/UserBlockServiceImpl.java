@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
 import com.watchwise.watchwise_api.common.transaction.UserPairLockIdentity;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
+import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -31,6 +32,7 @@ public class UserBlockServiceImpl implements UserBlockService {
     private final FollowerRepository followerRepository;
     private final AdvisoryLock advisoryLock;
     private final PageRequestFactory pageRequestFactory;
+    private final NotificationRepository notificationRepository;
 
     @Override
     @Transactional
@@ -54,6 +56,7 @@ public class UserBlockServiceImpl implements UserBlockService {
 
         followerRepository.deleteByFollowerIdAndFollowedId(blockerId, blockedId);
         followerRepository.deleteByFollowerIdAndFollowedId(blockedId, blockerId);
+        notificationRepository.deleteBetweenUsers(blockerId, blockedId);
     }
 
     @Override

@@ -8,9 +8,24 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 public interface UserBlockRepository extends JpaRepository<UserBlock, UUID> {
+
+    interface PairDirection {
+        UUID getBlockerId();
+        UUID getBlockedId();
+    }
+
+    @Query("""
+            SELECT b.blocker.id AS blockerId, b.blocked.id AS blockedId
+            FROM UserBlock b
+            WHERE (b.blocker.id = :firstUserId AND b.blocked.id = :secondUserId)
+               OR (b.blocker.id = :secondUserId AND b.blocked.id = :firstUserId)
+            """)
+    List<PairDirection> findPairDirections(@Param("firstUserId") UUID firstUserId,
+            @Param("secondUserId") UUID secondUserId);
 
     @Query("""
             SELECT CASE WHEN COUNT(b) > 0 THEN true ELSE false END
