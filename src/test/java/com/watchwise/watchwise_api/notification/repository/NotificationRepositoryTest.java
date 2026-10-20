@@ -159,6 +159,28 @@ class NotificationRepositoryTest {
     }
 
     @Test
+    void deletesAggregatesContainingBlockedActorsAndLegacyAmbiguousRowsOnlyForThePair() {
+        User otherActor = userRepository.saveAndFlush(User.builder()
+                .username("other-actor").name("other-actor").email("other-actor@email.com").password("hashed")
+                .profilePicture("https://example.com/other.png").isProfilePublic(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build());
+        Notification mixedAggregate = saveSocialAggregate(lucas, otherActor, 2, UUID.randomUUID());
+        notificationRepository.insertSocialAggregateActorIfAbsent(mixedAggregate.getId(), marina.getId());
+        notificationRepository.insertSocialAggregateActorIfAbsent(mixedAggregate.getId(), otherActor.getId());
+        Notification ambiguousLegacy = saveSocialAggregate(lucas, otherActor, 2, UUID.randomUUID());
+        Notification singleOtherActor = saveSocialAggregate(lucas, otherActor, 1, UUID.randomUUID());
+        Notification reversePair = saveSocialAggregate(marina, lucas, 1, UUID.randomUUID());
+
+        notificationRepository.deleteBetweenUsers(lucas.getId(), marina.getId());
+        entityManager.clear();
+
+        assertThat(notificationRepository.findById(mixedAggregate.getId())).isEmpty();
+        assertThat(notificationRepository.findById(ambiguousLegacy.getId())).isEmpty();
+        assertThat(notificationRepository.findById(reversePair.getId())).isEmpty();
+        assertThat(notificationRepository.findById(singleOtherActor.getId())).isPresent();
+    }
+
+    @Test
     @DisplayName("[notifications] Should Persist Legacy And Social Rows - When Both Shapes Are Valid")
     void shouldPersistLegacyAndSocialRowsWhenBothShapesAreValid() {
         Notification legacy = notificationRepository.saveAndFlush(buildNotification(LocalDateTime.now().minusMinutes(1)));
@@ -197,6 +219,22 @@ class NotificationRepositoryTest {
         assertThat(saved.getTargetType()).isNull();
         assertThat(saved.getTargetId()).isNull();
         assertThat(saved.getInteractionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void persistsAReportResolutionNotificationWithoutSocialActorOrContent() {
+        UUID caseId = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+
+        Notification saved = notificationRepository.saveAndFlush(Notification.builder()
+                .user(lucas).type(NotificationType.REPORT_RESOLVED).message("Your report was resolved")
+                .targetType(NotificationTargetType.REPORT_CASE).targetId(caseId).interactionCount(1)
+                .isRead(false).createdAt(now).updatedAt(now).build());
+
+        assertThat(saved.getLatestActor()).isNull();
+        assertThat(saved.getContent()).isNull();
+        assertThat(saved.getTargetType()).isEqualTo(NotificationTargetType.REPORT_CASE);
+        assertThat(saved.getTargetId()).isEqualTo(caseId);
     }
 
     @Test
@@ -367,6 +405,14 @@ class NotificationRepositoryTest {
 
     private Notification buildNotification(LocalDateTime createdAt) {
         return buildSystemNotification(NotificationType.RELEASE, createdAt);
+    }
+
+    private Notification saveSocialAggregate(User recipient, User latestActor, int interactionCount, UUID targetId) {
+        LocalDateTime now = LocalDateTime.now();
+        return notificationRepository.saveAndFlush(Notification.builder()
+                .user(recipient).latestActor(latestActor).type(NotificationType.LIKE_RECEIVED)
+                .message("social notification").targetType(NotificationTargetType.DIARY_ENTRY).targetId(targetId)
+                .interactionCount(interactionCount).isRead(false).createdAt(now).updatedAt(now).build());
     }
 
     private Notification buildSystemNotification(NotificationType type, LocalDateTime createdAt) {

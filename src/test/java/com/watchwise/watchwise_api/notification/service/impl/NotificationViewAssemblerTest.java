@@ -121,6 +121,21 @@ class NotificationViewAssemblerTest {
     }
 
     @Test
+    void shouldRenderReportTargetAsGenericAndNonNavigableWithoutLoadingSocialTarget() {
+        UUID caseId = UUID.randomUUID();
+        NotificationResponseDTO report = notification(NotificationType.REPORT_RESOLVED, null, null,
+                null, NotificationTargetType.REPORT_CASE, caseId, 1, false);
+
+        NotificationViewDTO result = assembler.assemble(List.of(report), viewerId).getFirst();
+
+        assertThat(result.targetPreview().targetType()).isEqualTo(NotificationTargetType.REPORT_CASE);
+        assertThat(result.targetPreview().targetId()).isEqualTo(caseId);
+        assertThat(result.targetPreview().title()).isEqualTo("Report");
+        assertThat(result.targetPreview().previewStatus()).isEqualTo(ContentPreviewStatus.AVAILABLE);
+        verifyNoInteractions(targetPreviewReader, personPreviewResolver, contentCardAssembler);
+    }
+
+    @Test
     void shouldResolveDuplicatePeopleAndSocialTargetsInOneBatchWhileKeepingOrder() {
         UUID commentId = UUID.randomUUID();
         UUID diaryId = UUID.randomUUID();

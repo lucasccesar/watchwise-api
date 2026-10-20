@@ -211,6 +211,9 @@ public class NotificationTargetPreviewReader {
                     : unavailable(key);
             case PICK -> pickPreview(key, picks.get(key.targetId()));
             case PICKS_TEMPLATE -> templatePreview(key, templates.get(key.targetId()));
+            case REPORT_CASE -> new NotificationTargetPreviewDTO(
+                    key.targetType(), key.targetId(), "Report", null, null, null, null,
+                    ContentPreviewStatus.AVAILABLE);
         };
     }
 

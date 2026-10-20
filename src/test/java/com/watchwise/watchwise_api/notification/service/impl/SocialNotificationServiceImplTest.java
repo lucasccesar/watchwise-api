@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -89,6 +90,7 @@ class SocialNotificationServiceImplTest {
         assertThat(idCaptor.getValue()).isNotNull();
         assertThat(messageCaptor.getValue()).isEqualTo("Joao liked your review");
         assertThat(nowCaptor.getValue()).isEqualTo(now());
+        verify(notificationRepository).insertSocialAggregateActorIfAbsent(insertedId, joao.getId());
         verify(notificationRepository, never()).save(any());
         verify(notificationRepository, never()).saveAndFlush(any());
     }
@@ -123,6 +125,7 @@ class SocialNotificationServiceImplTest {
         assertThat(saved.getIsRead()).isFalse();
         assertThat(saved.getCreatedAt()).isEqualTo(now());
         assertThat(saved.getUpdatedAt()).isEqualTo(now());
+        verify(notificationRepository).insertSocialAggregateActorIfAbsent(existing.getId(), maria.getId());
         verify(notificationRepository, never()).saveAndFlush(any());
     }
 
@@ -133,6 +136,11 @@ class SocialNotificationServiceImplTest {
         Notification existing = existingAggregate(oldId, joao, NotificationType.LIKE_RECEIVED, true, 4,
                 "Joao and 3 more users liked your review", now().minusHours(1), now().minusHours(1));
         stubExistingAggregate(pedro, existing);
+        when(notificationRepository.saveAndFlush(any(Notification.class))).thenAnswer(invocation -> {
+            Notification replacement = invocation.getArgument(0);
+            replacement.setId(UUID.randomUUID());
+            return replacement;
+        });
 
         socialNotificationService.notifyLikeReceived(
                 pedro.getId(), recipientId, NotificationTargetType.DIARY_ENTRY, targetId);
@@ -154,6 +162,32 @@ class SocialNotificationServiceImplTest {
         assertThat(replacement.getIsRead()).isFalse();
         assertThat(replacement.getCreatedAt()).isEqualTo(now());
         assertThat(replacement.getUpdatedAt()).isEqualTo(now());
+        verify(notificationRepository).insertSocialAggregateActorIfAbsent(replacement.getId(), pedro.getId());
+    }
+
+    @Test
+    void replacesLegacyAggregateWithUnknownActorsBeforeAddingANewInteraction() {
+        Notification legacy = existingAggregate(UUID.randomUUID(), joao, NotificationType.LIKE_RECEIVED, false, 3,
+                "Joao and 2 more users liked your review", now().minusMinutes(5), now().minusMinutes(5));
+        stubExistingAggregate(maria, legacy);
+        when(notificationRepository.hasSocialAggregateActors(legacy.getId())).thenReturn(false);
+        when(notificationRepository.saveAndFlush(any(Notification.class))).thenAnswer(invocation -> {
+            Notification replacement = invocation.getArgument(0);
+            replacement.setId(UUID.randomUUID());
+            return replacement;
+        });
+
+        socialNotificationService.notifyLikeReceived(
+                maria.getId(), recipientId, NotificationTargetType.DIARY_ENTRY, targetId);
+
+        ArgumentCaptor<Notification> replacementCaptor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).delete(legacy);
+        verify(notificationRepository).saveAndFlush(replacementCaptor.capture());
+        Notification replacement = replacementCaptor.getValue();
+        assertThat(replacement.getInteractionCount()).isEqualTo(1);
+        assertThat(replacement.getLatestActor()).isSameAs(maria);
+        assertThat(replacement.getMessage()).isEqualTo("Maria liked your review");
+        verify(notificationRepository).insertSocialAggregateActorIfAbsent(replacement.getId(), maria.getId());
     }
 
     @Test
@@ -296,6 +330,9 @@ class SocialNotificationServiceImplTest {
                 any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(0);
         when(notificationRepository.findSocialAggregateForUpdate(
                 eq(recipientId), eq(existing.getType()), any(), eq(targetId))).thenReturn(Optional.of(existing));
+        lenient().when(notificationRepository.hasSocialAggregateActors(existing.getId())).thenReturn(true);
+        lenient().when(notificationRepository.countSocialAggregateActors(existing.getId()))
+                .thenReturn((long) existing.getInteractionCount() + 1);
     }
 
     private Notification existingAggregate(

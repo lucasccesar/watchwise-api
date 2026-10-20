@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.notification.dto.NotificationResponseDTO;
 import com.watchwise.watchwise_api.notification.dto.NotificationTargetPreviewDTO;
 import com.watchwise.watchwise_api.notification.dto.NotificationViewDTO;
+import com.watchwise.watchwise_api.notification.entity.NotificationTargetType;
 import com.watchwise.watchwise_api.person.dto.PersonPreviewDTO;
 import com.watchwise.watchwise_api.person.service.PersonPreviewResolver;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -125,6 +126,7 @@ public class NotificationViewAssembler {
         notifications.stream()
                 .map(this::targetKey)
                 .filter(Objects::nonNull)
+                .filter(key -> key.targetType() != NotificationTargetType.REPORT_CASE)
                 .forEach(keys::add);
         if (keys.isEmpty()) {
             return Map.of();
@@ -151,7 +153,9 @@ public class NotificationViewAssembler {
         NotificationTargetKey targetKey = targetKey(notification);
         NotificationTargetPreviewDTO targetPreview = targetKey == null
                 ? null
-                : targets.getOrDefault(targetKey, unavailableTarget(targetKey));
+                : targetKey.targetType() == NotificationTargetType.REPORT_CASE
+                    ? reportCasePreview(targetKey)
+                    : targets.getOrDefault(targetKey, unavailableTarget(targetKey));
 
         return new NotificationViewDTO(
                 notification.id(), notification.type(), notification.message(), notification.content(),
@@ -170,6 +174,11 @@ public class NotificationViewAssembler {
             return null;
         }
         return new NotificationTargetKey(notification.targetType(), notification.targetId());
+    }
+
+    private NotificationTargetPreviewDTO reportCasePreview(NotificationTargetKey key) {
+        return new NotificationTargetPreviewDTO(key.targetType(), key.targetId(), "Report", null,
+                null, null, null, ContentPreviewStatus.AVAILABLE);
     }
 
     private ContentCardDTO unavailableCard(ContentRefDTO content, ContentCoordinate coordinate) {

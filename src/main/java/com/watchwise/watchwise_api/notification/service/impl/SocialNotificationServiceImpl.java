@@ -83,14 +83,31 @@ public class SocialNotificationServiceImpl implements SocialNotificationService 
 
             Notification aggregate = aggregateOptional.get();
             if (Objects.equals(insertedId, aggregate.getId())) {
+                notificationRepository.insertSocialAggregateActorIfAbsent(aggregate.getId(), actorId);
                 return;
             }
 
             if (Boolean.FALSE.equals(aggregate.getIsRead())) {
+                boolean hasActorHistory = notificationRepository.hasSocialAggregateActors(aggregate.getId());
+                if (!hasActorHistory && aggregate.getInteractionCount() > 1) {
+                    notificationRepository.delete(aggregate);
+                    notificationRepository.flush();
+                    Notification replacement = buildAggregate(
+                            aggregate.getUser(), actor, notificationType, targetType, targetId, now);
+                    Notification saved = notificationRepository.saveAndFlush(replacement);
+                    notificationRepository.insertSocialAggregateActorIfAbsent(saved.getId(), actorId);
+                    return;
+                }
+                if (!hasActorHistory && aggregate.getLatestActor() != null) {
+                    notificationRepository.insertSocialAggregateActorIfAbsent(
+                            aggregate.getId(), aggregate.getLatestActor().getId());
+                }
+                notificationRepository.insertSocialAggregateActorIfAbsent(aggregate.getId(), actorId);
+                int actorCount = Math.toIntExact(notificationRepository.countSocialAggregateActors(aggregate.getId()));
                 int interactionCount = aggregate.getInteractionCount() + 1;
                 aggregate.setInteractionCount(interactionCount);
                 aggregate.setLatestActor(actor);
-                aggregate.setMessage(messageFor(actor.getUsername(), interactionCount, notificationType, targetType));
+                aggregate.setMessage(messageFor(actor.getUsername(), actorCount, notificationType, targetType));
                 aggregate.setCreatedAt(now);
                 aggregate.setUpdatedAt(now);
                 aggregate.setIsRead(false);
@@ -100,36 +117,48 @@ public class SocialNotificationServiceImpl implements SocialNotificationService 
 
             notificationRepository.delete(aggregate);
             notificationRepository.flush();
-            Notification replacement = Notification.builder()
-                    .user(aggregate.getUser())
-                    .type(notificationType)
-                    .message(messageFor(actor.getUsername(), 1, notificationType, targetType))
-                    .latestActor(actor)
-                    .targetType(targetType)
-                    .targetId(targetId)
-                    .interactionCount(1)
-                    .isRead(false)
-                    .createdAt(now)
-                    .updatedAt(now)
-                    .build();
-            notificationRepository.saveAndFlush(replacement);
+            Notification replacement = buildAggregate(
+                    aggregate.getUser(), actor, notificationType, targetType, targetId, now);
+            Notification saved = notificationRepository.saveAndFlush(replacement);
+            notificationRepository.insertSocialAggregateActorIfAbsent(saved.getId(), actorId);
             return;
         }
 
         throw new IllegalStateException("Social notification aggregate was not created");
     }
 
+    private Notification buildAggregate(
+            User recipient,
+            User actor,
+            NotificationType notificationType,
+            NotificationTargetType targetType,
+            UUID targetId,
+            LocalDateTime now) {
+        return Notification.builder()
+                .user(recipient)
+                .type(notificationType)
+                .message(messageFor(actor.getUsername(), 1, notificationType, targetType))
+                .latestActor(actor)
+                .targetType(targetType)
+                .targetId(targetId)
+                .interactionCount(1)
+                .isRead(false)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
     private String messageFor(
             String username,
-            int interactionCount,
+            int actorCount,
             NotificationType notificationType,
             NotificationTargetType targetType) {
         String verb = notificationType == NotificationType.LIKE_RECEIVED ? "liked" : "commented on";
         String target = targetType.getDisplayLabel();
-        if (interactionCount == 1) {
+        if (actorCount == 1) {
             return username + " " + verb + " your " + target;
         }
-        int additionalUsers = interactionCount - 1;
+        int additionalUsers = actorCount - 1;
         String userLabel = additionalUsers == 1 ? "user" : "users";
         return username + " and " + additionalUsers + " more " + userLabel + " " + verb + " your " + target;
     }

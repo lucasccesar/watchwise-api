@@ -275,6 +275,8 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
                     "Follow notification types are not supported by content tracking");
             case LIKE_RECEIVED, COMMENT_RECEIVED -> throw new IllegalArgumentException(
                     "Social notification types are not supported by content tracking");
+            case REPORT_RESOLVED -> throw new IllegalArgumentException(
+                    "Report notifications are not supported by content tracking");
         };
     }
 

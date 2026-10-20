@@ -9,7 +9,8 @@ public enum NotificationTargetType {
     DROPPED_ENTRY("review"),
     USER_LIST("list"),
     PICK("Pick"),
-    PICKS_TEMPLATE("template");
+    PICKS_TEMPLATE("template"),
+    REPORT_CASE("report");
 
     private final String displayLabel;
 

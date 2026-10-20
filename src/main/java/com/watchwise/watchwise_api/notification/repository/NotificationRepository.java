@@ -21,11 +21,23 @@ import java.util.UUID;
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
 
     @Modifying
-    @Query("""
-            DELETE FROM Notification n
-            WHERE (n.user.id = :firstUserId AND n.latestActor.id = :secondUserId)
-               OR (n.user.id = :secondUserId AND n.latestActor.id = :firstUserId)
-            """)
+    @Query(value = """
+            DELETE FROM notifications n
+            WHERE (n.user_id = :firstUserId AND n.actor_user_id = :secondUserId)
+               OR (n.user_id = :secondUserId AND n.actor_user_id = :firstUserId)
+               OR EXISTS (
+                    SELECT 1 FROM notification_actors a
+                    WHERE a.notification_id = n.id
+                      AND ((n.user_id = :firstUserId AND a.actor_user_id = :secondUserId)
+                        OR (n.user_id = :secondUserId AND a.actor_user_id = :firstUserId))
+               )
+               OR (n.user_id = :firstUserId AND n.type IN ('LIKE_RECEIVED', 'COMMENT_RECEIVED')
+                   AND n.interaction_count > 1
+                   AND NOT EXISTS (SELECT 1 FROM notification_actors a WHERE a.notification_id = n.id))
+               OR (n.user_id = :secondUserId AND n.type IN ('LIKE_RECEIVED', 'COMMENT_RECEIVED')
+                   AND n.interaction_count > 1
+                   AND NOT EXISTS (SELECT 1 FROM notification_actors a WHERE a.notification_id = n.id))
+            """, nativeQuery = true)
     int deleteBetweenUsers(@Param("firstUserId") UUID firstUserId, @Param("secondUserId") UUID secondUserId);
 
     boolean existsByUserIdAndIsReadFalse(UUID userId);
@@ -96,6 +108,24 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
             @Param("targetType") String targetType,
             @Param("targetId") UUID targetId,
             @Param("now") LocalDateTime now);
+
+    @Modifying
+    @Query(value = """
+            INSERT INTO notification_actors (notification_id, actor_user_id)
+            VALUES (:notificationId, :actorId)
+            ON CONFLICT (notification_id, actor_user_id) DO NOTHING
+            """, nativeQuery = true)
+    int insertSocialAggregateActorIfAbsent(
+            @Param("notificationId") UUID notificationId,
+            @Param("actorId") UUID actorId);
+
+    @Query(value = "SELECT EXISTS (SELECT 1 FROM notification_actors WHERE notification_id = :notificationId)",
+            nativeQuery = true)
+    boolean hasSocialAggregateActors(@Param("notificationId") UUID notificationId);
+
+    @Query(value = "SELECT COUNT(*) FROM notification_actors WHERE notification_id = :notificationId",
+            nativeQuery = true)
+    long countSocialAggregateActors(@Param("notificationId") UUID notificationId);
 
     @Modifying
     @Transactional(propagation = Propagation.REQUIRES_NEW)
