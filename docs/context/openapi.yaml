@@ -19,8 +19,10 @@ servers:
 tags:
   - name: Auth
   - name: Users
+    description: Perfis de pares bloqueados retornam somente id, username, name e o estado do bloqueio; as demais leituras pessoais do par retornam 404.
   - name: Settings
   - name: User Blocks
+    description: Bloqueio recíproco de conteúdo; remoção do bloqueio não restaura follows nem notificações.
   - name: Followers
   - name: Follow People
   - name: People
@@ -28,10 +30,18 @@ tags:
   - name: Watchlist
   - name: Dropped
   - name: Picks Templates
+    description: Templates de autores bloqueados são ocultos de leituras diretas, busca e descoberta; templates oficiais sem creator continuam visíveis.
   - name: Picks
+    description: Picks de autores bloqueados são ocultos de leituras diretas, busca e descoberta.
   - name: Content
   - name: Comments
+    description: Autores bloqueados são filtrados antes da paginação e dos previews; interações entre o par são proibidas.
   - name: Lists
+    description: Listas de autores bloqueados são ocultadas de leituras diretas, busca e descoberta.
+  - name: Reports
+    description: Usuários enviam denúncias sem receber histórico ou acesso aos snapshots.
+  - name: Admin Reports
+    description: A fila de moderação e os snapshots são acessíveis somente a usuários com role ADMIN persistida.
   - name: Diary
   - name: Likes
   - name: Notifications
@@ -420,11 +430,14 @@ paths:
       summary: Bloquear outro usuário
       description: >
         Cria o bloqueio direcional idempotente e remove follows ACCEPTED/PENDING nos dois sentidos,
-        inclusive ao repetir um bloqueio existente. Exige cookie/header CSRF. Bloqueio em qualquer
-        sentido impede seguir/aceitar solicitação e novos comentários em recursos do outro usuário,
-        além de respostas a comentários dele (inclusive em Content global). Template sem creator
-        e comentário raiz em Content não têm dono para verificar. Não é filtro universal de
-        perfil, busca, feed, likes ou agregados públicos e não apaga comentários existentes.
+        inclusive ao repetir um bloqueio existente. Exige cookie/header CSRF. Em qualquer sentido, o
+        par não pode consultar o conteúdo pessoal do outro: leituras diretas retornam 404 e o perfil
+        mantém somente id, username, name e o estado do bloqueio. Bloqueio impede follows, comentários,
+        respostas e curtidas entre o par; bloqueia reviews/comentários do autor nas páginas e previews,
+        filtra listas/Picks/templates em busca e descoberta, remove atividades do feed e notificações do
+        par, e suprime novas notificações. Comentários raiz em Content global permanecem permitidos,
+        mas são ocultados ao autor bloqueado. O conteúdo não é apagado; desbloquear restaura as leituras,
+        sem restaurar follows ou notificações. Agregados públicos de Content sem viewer permanecem globais.
       responses:
         "204": { description: Usuário bloqueado ou bloqueio já existente }
         "400": { description: Autobloqueio ou userId inválido }
@@ -497,7 +510,10 @@ paths:
         Retorna o perfil do usuário (sem email). Se o perfil for público,
         qualquer usuário autenticado pode consultar. Se for privado, só o
         próprio dono ou quem o segue com uma relação ACCEPTED pode consultar;
-        uma solicitação PENDING não concede acesso. Exige autenticação, como
+        uma solicitação PENDING não concede acesso. Para um par bloqueado, a rota
+        retorna somente id, username, name, blockRelationship e
+        isContentRestrictedByBlock; o restante do perfil e todas as estatísticas
+        são omitidos, inclusive se o perfil for público. Exige autenticação, como
         qualquer outra rota fora da discover (ver Access policy no CLAUDE.md).
       parameters:
         - $ref: "#/components/parameters/userId"
@@ -2479,6 +2495,25 @@ paths:
 
   # ---------- COMMENTS (por id) ----------
   /comments/{commentId}:
+    patch:
+      tags: [Comments]
+      summary: Editar um comentário próprio
+      parameters:
+        - $ref: "#/components/parameters/commentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommentUpdate" }
+      responses:
+        "200":
+          description: Comentário atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+        "400": { description: Texto inválido; retorna ApiError }
+        "401": { description: Não autenticado }
+        "404": { description: "Comentário não encontrado, ou não pertence ao usuário autenticado" }
     delete:
       tags: [Comments]
       summary: Remover um comentário próprio
@@ -3757,6 +3792,108 @@ paths:
         "403": { description: "Acesso negado por visibilidade, bloqueio em qualquer sentido com dono/autor da resposta, ou CSRF ausente/inválido" }
         "404": { description: "Registro do diário não encontrado, ou parentCommentId não encontrado" }
 
+  # ---------- REPORTS ----------
+  /reports:
+    post:
+      tags: [Reports]
+      summary: Denunciar um alvo gerado por usuário
+      description: >
+        Agrupa denúncias em um case ativo por targetType + targetId. Cada reporter pode submeter
+        uma vez por case; repetição é idempotente. O alvo pode ser USER, COMMENT, REVIEW, USER_LIST,
+        PICK, PICKS_TEMPLATE ou DROPPED_ENTRY; Content TMDB não é denunciável. Perfil USER pode ser
+        denunciado pelo ID mesmo se privado. Conteúdo de um autor bloqueado pode ser denunciado pelo ID
+        conhecido; bloqueio apenas do creator do template não libera um Pick de outro autor. Outros alvos
+        privados/inacessíveis retornam 404.
+        Não há endpoint de histórico do reporter nem enforcement automático.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportCreationDTO" }
+      responses:
+        "201":
+          description: Denúncia recebida ou repetição idempotente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportSubmissionResponseDTO" }
+        "400": { description: Campos inválidos, auto-denúncia ou UNMARKED_SPOILER em alvo diferente de COMMENT/REVIEW }
+        "401": { description: Não autenticado }
+        "403": { description: Cookie/header CSRF ausente ou inválido }
+        "404": { description: Alvo inexistente ou inacessível fora da exceção de bloqueio }
+
+  /admin/reports:
+    get:
+      tags: [Admin Reports]
+      summary: Listar cases de denúncia por status
+      description: Exige role ADMIN persistida no banco; status é obrigatório.
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/ReportCaseStatus" }
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: Página de cases de moderação
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/AdminReportCaseDTO" }
+        "400": { description: Status ou paginação inválidos }
+        "401": { description: Não autenticado }
+        "403": { description: Role ADMIN necessária }
+
+  /admin/reports/{caseId}:
+    get:
+      tags: [Admin Reports]
+      summary: Ler um case e suas submissões
+      description: Snapshot, reporters e notas internas são retornados somente a ADMIN.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Case detalhado de moderação
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminReportCaseDetailDTO" }
+        "401": { description: Não autenticado }
+        "403": { description: Role ADMIN necessária }
+        "404": { description: Case não encontrado }
+    patch:
+      tags: [Admin Reports]
+      summary: Atualizar status e notas internas do case
+      description: Fluxo permitido OPEN → IN_REVIEW → RESOLVED ou DISMISSED; cases terminais não reabrem.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminReportCasePatchDTO" }
+      responses:
+        "200":
+          description: Case atualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminReportCaseDTO" }
+        "400": { description: Transição inválida ou notas acima de 2.000 caracteres }
+        "401": { description: Não autenticado }
+        "403": { description: Role ADMIN ou cookie/header CSRF inválido }
+        "404": { description: Case não encontrado }
+
   # ---------- NOTIFICATIONS ----------
   /notifications:
     get:
@@ -3876,7 +4013,8 @@ paths:
       description: >
         Exige autenticação por cookie JWT. É uma leitura sem escrita: não cria referências `Content`
         nem persiste metadata de filme ou série. `scope=CONTENT` combina filmes e séries; `MOVIE`,
-        `SERIES` e `PERSON` limitam a fonte ao tipo correspondente. O termo é aparado antes da validação
+        `SERIES`, `PERSON`, `LIST`, `PICKS_TEMPLATE` e `USER` limitam a fonte ao tipo correspondente. `PICKS_TEMPLATE`
+        aceita o filtro opcional `origin`; `LIST` aceita o filtro opcional `itemType`. O termo é aparado antes da validação
         e da consulta. A busca de filmes envia a regiao preferida do viewer ao TMDB; as buscas de series
         e pessoas nao recebem regiao porque esses endpoints do TMDB nao oferecem esse parametro. O
         enriquecimento dos cards usa idioma e regiao preferidos. No escopo `CONTENT`, `page` e `size`
@@ -3895,7 +4033,17 @@ paths:
           in: query
           required: true
           description: Fonte visual da tela.
-          schema: { type: string, enum: [CONTENT, MOVIE, SERIES, PERSON] }
+          schema: { type: string, enum: [CONTENT, MOVIE, SERIES, PERSON, LIST, PICKS_TEMPLATE, USER] }
+        - name: origin
+          in: query
+          required: false
+          description: Origem dos Picks Templates; somente com scope=PICKS_TEMPLATE. Ausente significa todas as origens.
+          schema: { type: string, enum: [OFFICIAL, COMMUNITY] }
+        - name: itemType
+          in: query
+          required: false
+          description: Tipo presente na lista; somente com scope=LIST.
+          schema: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE, LIST] }
         - name: page
           in: query
           required: false
@@ -3913,7 +4061,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SearchView" }
         "400":
-          description: q, scope, page ou size inválidos; o erro ocorre antes da consulta externa.
+          description: q, scope, page, size ou combinação inválida de scope com origin/itemType; o erro ocorre antes da consulta externa.
           content:
             application/json:
               schema:
@@ -5525,6 +5673,14 @@ components:
               type: string
               enum: [SELF, FOLLOWING, NOT_FOLLOWING]
               description: Relação do viewer autenticado com o perfil consultado; não expõe solicitações pendentes de perfis privados inacessíveis.
+            blockRelationship:
+              type: string
+              nullable: true
+              enum: [NONE, BLOCKED_BY_ME, BLOCKED_ME, MUTUAL]
+              description: Estado direcional de bloqueio com o viewer; fornecido no perfil restrito por bloqueio.
+            isContentRestrictedByBlock:
+              type: boolean
+              description: Quando true, o JSON inclui apenas id, username, name e os campos de estado do bloqueio.
 
     FollowCounts:
       type: object
@@ -7010,6 +7166,13 @@ components:
         parentCommentId: { type: string, format: uuid, nullable: true }
         containsSpoiler: { type: boolean, default: false }
 
+    CommentUpdate:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 280 }
+        containsSpoiler: { type: boolean, nullable: true, description: "Omitido ou null preserva o valor atual." }
+
     CommentPage:
       allOf:
         - $ref: "#/components/schemas/PageMeta"
@@ -8044,12 +8207,13 @@ components:
         Notificacoes sociais de curtida ou comentario deixam content nulo e usam
         targetType e targetId para identificar o alvo da interacao. Notificacoes de
         follow deixam content, targetType, targetId e interactionCount nulos e usam
-        latestActor para identificar o usuario que iniciou a acao.
+        latestActor para identificar o usuario que iniciou a acao. REPORT_RESOLVED
+        não tem ator nem content; targetType REPORT_CASE é genérico e não navegável.
       properties:
         id: { type: string, format: uuid }
         type:
           type: string
-          enum: [RELEASE, ANNOUNCED_DATE, CANCELLED, RENEWED, NEW_EPISODE, FOLLOWED_PERSON_NEW_CREDIT, LIKE_RECEIVED, COMMENT_RECEIVED, FOLLOW_REQUEST, NEW_FOLLOWER, FOLLOW_REQUEST_ACCEPTED]
+          enum: [RELEASE, ANNOUNCED_DATE, CANCELLED, RENEWED, NEW_EPISODE, FOLLOWED_PERSON_NEW_CREDIT, LIKE_RECEIVED, COMMENT_RECEIVED, FOLLOW_REQUEST, NEW_FOLLOWER, FOLLOW_REQUEST_ACCEPTED, REPORT_RESOLVED]
         message: { type: string }
         content:
           allOf:
@@ -8068,8 +8232,8 @@ components:
         targetType:
           type: string
           nullable: true
-          enum: [COMMENT, DIARY_ENTRY, DROPPED_ENTRY, USER_LIST, PICK, PICKS_TEMPLATE]
-          description: Tipo do alvo da interacao; nulo em notificacoes do sistema e de follow.
+          enum: [COMMENT, DIARY_ENTRY, DROPPED_ENTRY, USER_LIST, PICK, PICKS_TEMPLATE, REPORT_CASE]
+          description: Tipo do alvo da interação; REPORT_CASE identifica uma notificação genérica não navegável.
         targetId:
           type: string
           format: uuid
@@ -8092,11 +8256,11 @@ components:
 
     NotificationTargetPreview:
       type: object
-      description: Preview compacto do alvo de uma notificação social.
+      description: Preview compacto do alvo de uma notificação; REPORT_CASE é genérico e não navegável.
       properties:
         targetType:
           type: string
-          enum: [COMMENT, DIARY_ENTRY, DROPPED_ENTRY, USER_LIST, PICK, PICKS_TEMPLATE]
+          enum: [COMMENT, DIARY_ENTRY, DROPPED_ENTRY, USER_LIST, PICK, PICKS_TEMPLATE, REPORT_CASE]
         targetId: { type: string, format: uuid }
         title: { type: string, nullable: true }
         excerpt: { type: string, nullable: true }
@@ -8107,6 +8271,73 @@ components:
             - $ref: "#/components/schemas/ContentCard"
           nullable: true
         previewStatus: { type: string, enum: [AVAILABLE, PARTIAL, UNAVAILABLE] }
+
+    ReportTargetType:
+      type: string
+      enum: [USER, COMMENT, REVIEW, USER_LIST, PICK, PICKS_TEMPLATE, DROPPED_ENTRY]
+    ReportReason:
+      type: string
+      enum: [SPAM_OR_MISLEADING, HARASSMENT_OR_BULLYING, HATE_SPEECH, UNMARKED_SPOILER, SEXUAL_OR_VIOLENT_CONTENT, OTHER]
+    ReportCaseStatus:
+      type: string
+      enum: [OPEN, IN_REVIEW, RESOLVED, DISMISSED]
+    ReportCreationDTO:
+      type: object
+      required: [targetType, targetId, reason]
+      properties:
+        targetType: { $ref: "#/components/schemas/ReportTargetType" }
+        targetId: { type: string, format: uuid }
+        reason:
+          allOf:
+            - $ref: "#/components/schemas/ReportReason"
+          description: UNMARKED_SPOILER só pode ser usado em COMMENT ou REVIEW.
+        details: { type: string, maxLength: 280, nullable: true }
+    ReportSubmissionResponseDTO:
+      type: object
+      required: [status, submittedAt]
+      properties:
+        status: { $ref: "#/components/schemas/ReportCaseStatus" }
+        submittedAt: { type: string, format: date-time }
+      description: Confirmação sem caseId, snapshot ou notas internas; reporter não possui endpoint de histórico.
+    AdminReportCaseDTO:
+      type: object
+      required: [id, targetType, targetId, status, submissionsCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        targetType: { $ref: "#/components/schemas/ReportTargetType" }
+        targetId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/ReportCaseStatus" }
+        submissionsCount: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time, nullable: true }
+    AdminReportCaseSubmissionDTO:
+      type: object
+      required: [id, reporterId, reporterUsername, reason, targetSnapshot, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        reporterId: { type: string, format: uuid }
+        reporterUsername: { type: string }
+        reason: { $ref: "#/components/schemas/ReportReason" }
+        details: { type: string, nullable: true }
+        targetSnapshot: { type: string, description: JSON textual com evidência allowlistada e imutável. }
+        createdAt: { type: string, format: date-time }
+    AdminReportCaseDetailDTO:
+      allOf:
+        - $ref: "#/components/schemas/AdminReportCaseDTO"
+        - type: object
+          properties:
+            internalNotes: { type: string, nullable: true }
+            submissions:
+              type: array
+              items: { $ref: "#/components/schemas/AdminReportCaseSubmissionDTO" }
+      description: Disponível somente para role ADMIN persistida.
+    AdminReportCasePatchDTO:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: "#/components/schemas/ReportCaseStatus" }
+        internalNotes: { type: string, maxLength: 2000, nullable: true }
 
     NotificationView:
       allOf:
@@ -8165,7 +8396,7 @@ components:
 
     SearchView:
       type: object
-      required: [scope, query, page, size, totalPages, totalResults, hasNext, contents, people]
+      required: [scope, query, page, size, totalPages, totalResults, hasNext, contents, people, lists, templates, users]
       description: >
         Envelope paginado do read model visual de Search. `contents` e `people` são arrays separados:
         somente o array correspondente ao escopo é preenchido, exceto `CONTENT`, que preenche `contents`
@@ -8175,7 +8406,7 @@ components:
         última página acessível é a 500. Se um item de um slot global não puder ser materializado, ele é
         omitido de `contents` e os slots posteriores não são promovidos para preencher sua posição.
       properties:
-        scope: { type: string, enum: [CONTENT, MOVIE, SERIES, PERSON] }
+        scope: { type: string, enum: [CONTENT, MOVIE, SERIES, PERSON, LIST, PICKS_TEMPLATE, USER] }
         query: { type: string }
         page: { type: integer, minimum: 1, maximum: 500 }
         size: { type: integer, minimum: 1, maximum: 20 }
@@ -8188,6 +8419,68 @@ components:
         people:
           type: array
           items: { $ref: "#/components/schemas/SearchPersonView" }
+        lists:
+          type: array
+          items: { $ref: "#/components/schemas/SearchListView" }
+        templates:
+          type: array
+          items: { $ref: "#/components/schemas/PicksTemplatePreview" }
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/SearchUserView" }
+
+    SearchListView:
+      type: object
+      required: [id, owner, name, visibility, updatedAt, previewCards, itemsCount, displayScope, likesCount, commentsCount, likedByViewer, ownedByViewer]
+      properties:
+        id: { type: string, format: uuid }
+        owner: { $ref: "#/components/schemas/UserPreviewDTO" }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        visibility: { type: string, enum: [PUBLIC, FOLLOWERS, PRIVATE] }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        previewCards:
+          type: array
+          maxItems: 5
+          items: { $ref: "#/components/schemas/SearchListPreviewCard" }
+        itemsCount: { type: integer, format: int64, minimum: 0 }
+        displayScope:
+          type: string
+          enum: [MOVIES, SERIES, MOVIES_AND_SERIES, SEASONS, EPISODES, MIXED, LISTS, EMPTY]
+        likesCount: { type: integer, format: int64, minimum: 0 }
+        commentsCount: { type: integer, format: int64, minimum: 0 }
+        likedByViewer: { type: boolean }
+        ownedByViewer: { type: boolean }
+
+    SearchListPreviewCard:
+      type: object
+      required: [type, previewStatus]
+      properties:
+        type: { type: string, enum: [MOVIE, SERIES, SEASON, EPISODE] }
+        tmdbId: { type: string, nullable: true }
+        seriesTmdbId: { type: string, nullable: true }
+        seasonNumber: { type: integer, nullable: true }
+        episodeNumber: { type: integer, nullable: true }
+        title: { type: string, nullable: true }
+        posterUrl: { type: string, format: uri, nullable: true }
+        previewStatus: { type: string, enum: [AVAILABLE, PARTIAL, UNAVAILABLE] }
+
+    SearchUserView:
+      type: object
+      required: [id, name, username, profileDetailsVisible, ownedByViewer, followsViewer]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        username: { type: string }
+        profilePicture: { type: string, format: uri, nullable: true }
+        description: { type: string, nullable: true }
+        profileDetailsVisible: { type: boolean }
+        watchedCount: { type: integer, format: int64, nullable: true }
+        listsCount: { type: integer, format: int64, nullable: true }
+        followersCount: { type: integer, format: int64, nullable: true }
+        ownedByViewer: { type: boolean }
+        viewerFollowStatus: { type: string, enum: [PENDING, ACCEPTED], nullable: true }
+        followsViewer: { type: boolean }
 
     SearchContentView:
       type: object

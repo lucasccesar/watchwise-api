@@ -4,34 +4,96 @@ Levantamento das regras de negócio "especiais" já implementadas no código —
 não-óbvias que vão além de validação genérica de campo (tamanho, formato, obrigatoriedade). Não inclui
 regras de features ainda não construídas nem simples constraints de tamanho/formato de DTO.
 
+## Search visual local
+
+- **Contrato visual aditivo** (`SearchViewServiceImpl`): `GET /search/view` mantém os escopos externos
+  existentes e também aceita `LIST`, `PICKS_TEMPLATE` e `USER`. O envelope sempre contém os cinco arrays
+  tipados; somente o array do escopo solicitado é preenchido. A busca raw `GET /search` não muda.
+- **Visibilidade de listas na busca** (`UserListViewRepositoryImpl`, modo `SEARCH`): o viewer enxerga
+  suas próprias listas em qualquer visibilidade, listas `PUBLIC` e listas `FOLLOWERS` de donos que segue
+  com relação `ACCEPTED`. A consulta aplica essa regra antes de paginar e contar; `PRIVATE` de outro usuário
+  nunca entra no total.
+- **Escopo visual de lista** (`UserListItemServiceImpl`): a agregação em lote mantém o `itemScope` coarse
+  usado pelas regras de inserção e acrescenta `displayScope`, distinguindo `MOVIES`, `SERIES`,
+  `MOVIES_AND_SERIES`, `SEASONS`, `EPISODES`, `MIXED`, `LISTS` e `EMPTY`. O card Search reaproveita a mesma
+  agregação já usada pelo modelo visual de listas, sem consulta por card.
+- **Busca de usuários** (`UserRepository.searchByNameOrUsernameForView`, `SearchUserViewReader`): nome e
+  username usam correspondência parcial e ordem determinística de relevância. O card carrega relações e
+  estatísticas em lote. `watchedCount` conta linhas de `DiaryEntry` com `ignore = false`, incluindo rewatches.
+  Perfil privado expõe identidade e relação de follow, mas oculta descrição, watched, listas e seguidores,
+  salvo para o dono ou para quem segue o perfil com `ACCEPTED`.
+- **Bloqueios não são filtro universal de busca**: Search não oculta automaticamente perfis bloqueados nem
+  expõe um campo de bloqueio. A tentativa de seguir continua protegida pelo `UserBlockAccessService` e usa
+  o erro genérico de interação proibida.
+- **Picks Templates na busca** (`PicksTemplateService.searchForView`): `origin` pode filtrar `OFFICIAL` ou
+  `COMMUNITY`; a ordenação é exata, prefixo, contém, curtidas, criação e UUID. A montagem de capa, criador,
+  categorias, contadores e estado `myPicksCount` continua centralizada no `PicksTemplatePreviewAssembler`.
+- **Paginação e custo**: o limite visual é de 20 resultados. Previews de listas são limitados a cinco por
+  lista e resolvidos em lote, com deduplicação de coordenadas. Não há N+1 de banco ou TMDB.
+
 ## UserBlock e efeitos sociais
 
 - **Bloqueio é direcional e idempotente** (`UserBlockServiceImpl.block`/`unblock`): cada usuário
   administra apenas o par em que é `blocker`. Bloquear a si próprio retorna `400`; alvo inexistente
   retorna `404`. Repetir bloqueio ou desbloqueio retorna `204`; desbloquear um par ausente, inclusive
   um ID sem usuário, é no-op. Desbloquear não remove o bloqueio inverso.
-- **Concorrência na criação e limpeza** (`UserBlockServiceImpl.block`): bloqueio e follow usam o mesmo
-  advisory lock PostgreSQL por par não ordenado de usuários. O insert do bloqueio e a remoção dos follows
+- **Concorrência na criação, remoção e limpeza** (`UserBlockServiceImpl.block`/`unblock`): bloqueio,
+  desbloqueio e follow usam o mesmo advisory lock PostgreSQL por par não ordenado de usuários. O insert
+  ou delete do bloqueio e a remoção dos follows
   rodam na transação externa; uma falha na limpeza dá rollback em todas as alterações. O índice único e o
   CHECK de V72 protegem duplicatas e autobloqueio no banco.
 - **Bloqueio desfaz follow nos dois sentidos** (`UserBlockServiceImpl.block`): remove relações
   `ACCEPTED` e `PENDING`, inclusive quando o bloqueio já existia. Desbloquear não restaura nenhuma.
-  `UserBlockAccessServiceImpl.assertInteractionAllowed` rejeita com `403` uma interação entre usuários
+  `UserBlockAccessServiceImpl.lockAndAssertInteractionAllowed` rejeita com `403` uma interação entre usuários
   bloqueados em qualquer sentido; `FollowerServiceImpl.followUser` e `acceptFollowRequest` o reutilizam
   (uma solicitação já removida pelo bloqueio retorna `404` antes da verificação de interação).
+- **Perfil bloqueado expõe só identidade mínima** (`UserServiceImpl.getUserById`): a consulta de perfil
+  mantém `id`, `username` e `name`, acrescenta `blockRelationship` (`NONE`, `BLOCKED_BY_ME`, `BLOCKED_ME`
+  ou `MUTUAL`) e `isContentRestrictedByBlock`, e omite todos os outros campos. A resposta segura existe
+  mesmo se o perfil for privado; a busca de usuários continua usando `UserPreviewDTO`.
+- **Bloqueio é barreira recíproca para conteúdo pessoal** (`UserBlockAccessServiceImpl.assertContentVisible`):
+  um par bloqueado recebe `404` ao consultar perfil detalhado, progresso, mapa de avaliações de episódios,
+  diário/histórico/reviews, Top 5, watchlist, dropped, pessoas acompanhadas, listas de seguidores/seguindo,
+  month/year in review, all-time stats, listas, Picks e templates. O guard roda antes de contagens, paginação
+  ou enriquecimento TMDB. Terceiros continuam vendo conteúdo público; ao desbloquear, conteúdo volta a ficar
+  disponível, mas follows e notificações removidos não são restaurados.
+- **Previews de listas aninhadas também respeitam o bloqueio** (`UserListItemServiceImpl.getItemsWithState`,
+  `UserListItemRepository.findVisibleChildListsByIdIn`): respostas raw e visuais omitem o preview da lista filha
+  quando seu dono está bloqueado; a checagem dos filhos da lista é feita em lote antes de montar os itens.
+- **Busca e descoberta excluem conteúdo do par antes da paginação** (`UserListViewRepositoryImpl`,
+  `UserListRepository`, `PickRepository`, `PicksTemplateRepository`): listas, Picks e templates de autor
+  bloqueado não aparecem nos resultados nem nas contagens de busca/descoberta. O preview do usuário continua
+  pesquisável. Templates oficiais sem creator não são atribuídos a um usuário para fins de bloqueio.
+- **Feed e notificações respeitam o bloqueio** (`FollowerRepository.findVisibleFollowedIdsByFollowerId`,
+  `NotificationRepository`, migration V77): o feed parte somente de follows aceitos não bloqueados; agregados
+  sociais registram todos os atores que contribuíram, e o bloqueio remove o agregado que inclui o outro usuário,
+  mesmo quando o `latestActor` é uma terceira pessoa. Agregados legados com múltiplas interações e sem histórico
+  de atores são removidos conservadoramente da caixa de entrada do par; os demais atores/recipients não são
+  afetados. Notificações diretas do par também são removidas e novos eventos entre eles não são criados.
+- **Interações concorrentes compartilham a trava por par** (`UserBlockAccessServiceImpl.lockAndAssertInteractionAllowed`,
+  `CommentServiceImpl`, `LikeServiceImpl`, `FollowerServiceImpl.acceptAllPendingFollowRequestsFor`): a checagem
+  acontece sob a mesma advisory lock do bloqueio e dentro da transação de escrita, impedindo follow, aceitação,
+  resposta, comentário em alvo pessoal ou curtida após o bloqueio confirmar. Descurtir e remover follow continuam
+  permitidos. Comentários raiz em Content global permanecem disponíveis; autores bloqueados são excluídos das
+  páginas/contagens de comentários e das listas de reviews antes de ordenar e paginar.
 - **Novos comentários e respostas** (`CommentServiceImpl.createCommentOnList`, `createCommentOnDiaryEntry`,
   `createCommentOnDroppedEntry`, `createCommentOnPick`, `createCommentOnPicksTemplate` e
-  `findParentComment`): bloqueio nos dois sentidos impede comentar em recurso do outro usuário
-  e responder a comentário dele, inclusive em Content global. Template sem creator não tem dono para
-  verificar. Comentário raiz em Content não verifica dono, pois Content é compartilhado.
+  `assertInteractionsAllowed`): bloqueio nos dois sentidos impede comentar em recurso do outro usuário
+  e responder a comentário dele, inclusive em Content global. Para Pick, tanto o dono do Pick quanto o creator
+  do template são verificados e travados; comentários e curtidas em Pick seguem a mesma regra. Template sem
+  creator não tem dono para verificar. Comentário raiz em Content não verifica dono, pois Content é compartilhado.
+- **Edição de comentário** (`CommentServiceImpl.updateComment`): somente o autor pode alterar `text`
+  (não vazio, até 280 caracteres) e, quando enviado, `containsSpoiler`. O alvo, autor, comentário-pai,
+  curtidas e `createdAt` permanecem intactos; a edição atualiza `updatedAt`, não cria notificação e
+  retorna o estado real de curtida do autor. Comentário inexistente ou de outro autor retorna `404`.
 - **Filtrar antes de paginar e contar** (`CommentRepository.findVisibleBy*`, `countVisible*`,
   `findRecentVisible*` e `CommentPreviewAssembler`): autores bloqueados nos dois sentidos são excluídos
   na consulta SQL/JPQL, inclusive no COUNT, antes de LIMIT/OFFSET e antes do ranking das três prévias
   recentes. A ordenação da página continua `createdAt ASC, id ASC`; prévias usam os mais recentes.
   Isso cobre Content, listas, diário, dropped, Picks e templates. Contagens personalizadas de diário,
   dropped, listas (incluindo itens/progresso/detalhe), Picks e templates seguem o mesmo filtro.
-  Agregados públicos sem viewer permanecem globais; bloqueio não é um filtro universal de perfil/feed,
-  busca, likes ou estatísticas públicas, nem apaga os comentários existentes.
+  Agregados públicos de Content sem viewer permanecem globais. Comentários existentes não são apagados;
+  ficam ocultos entre as duas contas enquanto o bloqueio existir.
 - **Lista de bloqueados é privada** (`UserBlockServiceImpl.getBlockedUsers`): apenas bloqueios de saída,
   paginados por `PageRequestFactory`, ordenados por `createdAt DESC, id DESC`; cada item contém
   `user: PublicUserDTO` e `createdAt`, sem e-mail, credenciais ou dados de sessão do bloqueado.
@@ -3218,3 +3280,35 @@ regras de features ainda não construídas nem simples constraints de tamanho/fo
   `recentEpisodes`, `recentReviews`, `recentActivity` e blocos de Top 5 preservam seus campos antigos
   e acrescentam card com `BASIC_METADATA`/`SOCIAL_METADATA`. O poster customizado é do dono do perfil;
   não há batch client-side de detalhe nem estado do viewer no cache de metadata.
+
+## Denúncias e moderação
+
+- **O alvo é sempre tipado e a evidência é allowlisted** (`ReportTargetResolverImpl`): os alvos são
+  `USER`, `COMMENT`, `REVIEW` (`DiaryEntry` com texto), `USER_LIST`, `PICK`, `PICKS_TEMPLATE` e
+  `DROPPED_ENTRY`; TMDB `Content` não é alvo. Cada snapshot JSON textual guarda somente a identidade
+  tipada, preview público do autor e os campos de texto/seleção relevantes no instante da denúncia.
+  Não serializa entities, e-mail, senha, role, estatísticas ou outros dados privados. Template oficial
+  sem creator pode ser denunciado com owner null.
+- **Acesso ao alvo respeita a visibilidade normal, com exceção para o par bloqueado** (`ReportTargetResolverImpl`):
+  auto-denúncia retorna `400`. Um alvo que o reporter bloqueou ou que o bloqueou pode ser denunciado
+  pelo ID conhecido, mesmo que o conteúdo esteja oculto; outros alvos privados inacessíveis retornam
+  `404`. Perfil `USER` é reportável pelo ID mesmo quando privado, desde que não seja o perfil do reporter.
+  Para um Pick cujo dono não está bloqueado, o bloqueio do template creator não concede essa exceção.
+  `UNMARKED_SPOILER` só é válido para `COMMENT` e `REVIEW`.
+- **Denúncias agrupam por `(targetType, targetId)` enquanto ativas** (`ReportServiceImpl`):
+  `OPEN`/`IN_REVIEW` compartilham um `ReportCase`; a advisory lock `report-target|<tipo>|<id>` serializa
+  a criação quando ainda não há linha, com índice parcial único no banco como backstop. Cada reporter
+  submete uma vez por case; uma repetição devolve status e timestamp existentes sem duplicar dados.
+  Após `RESOLVED`/`DISMISSED`, o case é terminal e nova denúncia abre outro case.
+- **A fila e os snapshots são exclusivos de ADMIN persistido** (`AdminReportServiceImpl`): a role é
+  carregada de `UserRepository` em cada leitura/escrita. Transições permitidas são `OPEN -> IN_REVIEW`
+  e `IN_REVIEW -> RESOLVED|DISMISSED`; notas internas têm até 2.000 caracteres e nunca aparecem ao
+  reporter. Não existe endpoint para consultar o próprio histórico de denúncias nem enforcement automático.
+- **Fechamento, exclusão e retenção** (`ReportNotificationServiceImpl`,
+  `ReportReporterDeletionServiceImpl`, `ReportCleanupServiceImpl`): fechar cria uma notificação não
+  agregada por submission, com mensagem distinta de resolvida/dispensada e sem notas. Excluir a conta
+  remove suas submissions e cases que ficam vazios na mesma transação da exclusão da conta. A limpeza
+  adquire, em ordem determinística, os mesmos advisory locks dos alvos com cases ativos antes de apagar
+  submissions; assim, um novo reporte do mesmo alvo não é apagado pela limpeza concorrente. O índice
+  `idx_report_submissions_reporter_id` (V78) evita varredura completa nessa exclusão. Snapshots dos cases
+  terminais são apagados em lotes de até 500 após 90 dias.

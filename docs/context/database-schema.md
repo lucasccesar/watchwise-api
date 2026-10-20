@@ -3,7 +3,8 @@
 Este documento acompanha o schema vigente nas migrations do projeto. Os nomes das entidades abaixo
 seguem a convenção usada no código Java; os nomes entre parênteses preservam a nomenclatura do modelo
 lógico original. O diagrama visual complementar está em [`database-schema.html`](database-schema.html);
-V72 e `user_blocks` estão descritos neste Markdown, sem atualização do HTML nesta entrega.
+V72 e V74–V78 (`user_blocks`, denúncias, notificações de resolução, atores de agregados e índices) estão descritos
+neste Markdown, sem atualização do HTML nesta entrega.
 
 ## Regras gerais
 
@@ -38,6 +39,9 @@ V72 e `user_blocks` estão descritos neste Markdown, sem atualização do HTML n
 | `comments` (`COMENTARIO`) | Autor, exatamente um alvo entre conteúdo, lista, diário, dropped, Pick ou template, resposta opcional, spoiler, timestamps e contador de likes. |
 | `likes` (`CURTIDA`) | Usuário e exatamente um alvo entre comentário, diário, dropped, lista, Pick ou template. |
 | `notifications` (`NOTIFICACAO`) | Usuário, conteúdo opcional, tipo, mensagem, leitura, pessoa TMDB opcional e agregação social opcional. |
+| `notification_actors` | Autores distintos que contribuíram para um agregado social não lido; cascade na exclusão da notificação/usuário. V77. |
+| `report_cases` | Alvo tipado, estado de moderação, notas internas e timestamps de abertura/fechamento. V74. |
+| `report_submissions` | Denúncia individual por reporter/case, motivo, detalhes e snapshot JSON textual imutável. V74. |
 | `picks_templates` (`PICKS_TEMPLATES`) | Template, creator nullable, origem, instruções, período de elegibilidade e likes. |
 | `picks_template_categories` (`PICKS_TEMPLATE_CATEGORIES`) | Template, grupo, ordem, tipo permitido e modo `OPEN`/`FIXED`. |
 | `picks_template_options` (`PICKS_TEMPLATE_OPTIONS`) | Opção fixa por categoria, apontando para conteúdo ou pessoa, com contexto opcional. |
@@ -72,6 +76,36 @@ Criada por `V72__create-user-blocks.sql`, depende somente de `users`.
 `idx_user_blocks_blocked_id` indexa `blocked_id`. A exclusão de qualquer usuário remove o bloqueio.
 Os efeitos sociais consultam os dois sentidos, embora cada usuário administre somente seus bloqueios.
 
+### `report_cases` e `report_submissions`
+
+Criadas por `V74__create-report-cases-and-submissions.sql`. `report_cases` identifica o alvo por
+`(target_type, target_id)` sem FK para a tabela reportada, pois os alvos podem pertencer a tabelas
+diferentes e o snapshot deve sobreviver à exclusão do conteúdo. `target_type` aceita `USER`, `COMMENT`,
+`REVIEW`, `USER_LIST`, `PICK`, `PICKS_TEMPLATE` e `DROPPED_ENTRY`; `status` aceita `OPEN`, `IN_REVIEW`,
+`RESOLVED` e `DISMISSED`. `ck_report_cases_closed_at_by_status` em V76 exige `closed_at` nulo nos casos
+ativos e preenchido nos terminais. O índice parcial `uq_report_cases_active_target` permite somente um
+case `OPEN`/`IN_REVIEW` por alvo tipado; `idx_report_cases_status_created_at` ordena a fila administrativa.
+
+`report_submissions` aponta para `report_cases` e `users` com `ON DELETE CASCADE`. Cada reporter pode
+submeter uma vez por case via `uq_report_submissions_case_reporter`. `reason` aceita
+`SPAM_OR_MISLEADING`, `HARASSMENT_OR_BULLYING`, `HATE_SPEECH`, `UNMARKED_SPOILER`,
+`SEXUAL_OR_VIOLENT_CONTENT` e `OTHER`; `details` tem no máximo 280 caracteres. `target_snapshot` é texto
+JSON allowlisted e congela apenas identidade tipada, autor público e evidência escrita relevante; não
+serializa entities nem dados privados. `idx_report_submissions_reporter_id` (V78) apoia a remoção das
+submissions na exclusão de conta. Casos resolvidos/dispensados e seus snapshots são removidos após
+90 dias; excluir o reporter remove suas submissions e cases que ficam vazios.
+
+`notifications` usa `type = REPORT_RESOLVED` e `target_type = REPORT_CASE` para avisar cada reporter do
+fechamento do case. A referência não tem FK; a prévia é genérica e não navegável. V75 permite essa forma
+no `ck_notifications_social_shape` sem ator, conteúdo ou snapshot.
+
+`notification_actors` (V77) guarda uma linha por par `(notification_id, actor_user_id)` para cada usuário
+que contribuiu para um agregado de likes/comentários. `pk_notification_actors` identifica o par; os dois
+FKs usam `ON DELETE CASCADE`, e `idx_notification_actors_actor_notification` permite localizar os
+agregados de um ator ao bloquear o par. O agregado inteiro é removido se qualquer participante for
+bloqueado. A migração também apaga agregados históricos ambíguos com mais de uma interação das caixas
+de entrada que já participam de bloqueios, pois o schema anterior preservava somente `latestActor`.
+
 Settings é apenas uma projeção de leitura de `users`, `followers` e `user_blocks`, sem tabela própria.
 `users.profile_picture` e `users.banner` continuam armazenando URLs; remover o banner limpa somente
 `users.banner`, sem tabela, arquivo, upload ou serviço de armazenamento de mídia.
@@ -98,12 +132,12 @@ Settings é apenas uma projeção de leitura de `users`, `followers` e `user_blo
 | --- | --- | --- |
 | `id` | `UUID` | PK. |
 | `user_id` | `UUID` | Destinatário obrigatório; FK para `users` com `ON DELETE CASCADE`. |
-| `type` | `VARCHAR(30)` | `RELEASE`, `ANNOUNCED_DATE`, `CANCELLED`, `RENEWED`, `NEW_EPISODE`, `FOLLOWED_PERSON_NEW_CREDIT`, `LIKE_RECEIVED`, `COMMENT_RECEIVED`, `FOLLOW_REQUEST`, `NEW_FOLLOWER` ou `FOLLOW_REQUEST_ACCEPTED`. |
+| `type` | `VARCHAR(30)` | Tipos de sistema, sociais e follow, incluindo `REPORT_RESOLVED` (V75). |
 | `message` | `VARCHAR(280)` | Texto exibido ao destinatário. |
 | `content_id` | `UUID` | Nullable. FK para `contents` com `ON DELETE CASCADE`; obrigatório para tipos de sistema e nulo para tipos sociais. |
 | `person_tmdb_id` | `VARCHAR(20)` | Nullable; usado por `FOLLOWED_PERSON_NEW_CREDIT`. |
 | `actor_user_id` | `UUID` | Nullable. FK para `users` com `ON DELETE SET NULL`, preservando a notificação quando o autor da interação é excluído. |
-| `target_type` | `VARCHAR(30)` | Nullable; em notificações sociais é `COMMENT`, `DIARY_ENTRY`, `DROPPED_ENTRY`, `USER_LIST`, `PICK` ou `PICKS_TEMPLATE`. |
+| `target_type` | `VARCHAR(30)` | Nullable; alvo social ou `REPORT_CASE` para notificação genérica de resolução (V75). |
 | `target_id` | `UUID` | Nullable; identifica o alvo da interação social. |
 | `interaction_count` | `INTEGER` | Obrigatório, default `1` e positivo; quantidade agregada da interação social. |
 | `is_read` | `BOOLEAN` | Obrigatório, default `FALSE`. |

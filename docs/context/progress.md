@@ -5163,3 +5163,50 @@ envelope misto de `CONTENT` com `page=1` e `size=18`, a alternância filme/séri
 card, a lista `people` vazia e a ausência de referências persistidas em `Content`. A regra de paginação
 mista permanece global: ranks de filme e série alternam até uma fonte acabar, sem promover um rank posterior
 quando um slot não é materializado. A verificação focada passou com 104 testes, sem falhas, erros ou ignorados.
+
+O Search visual local foi ampliado com os escopos `LIST`, `PICKS_TEMPLATE` e `USER`, preservando o contrato
+raw existente. Lists reutiliza o pipeline visual de listas, inclui relevância, visibilidade do viewer,
+contadores, escopo visual exato e previews de conteúdo em lote. Users pesquisa nome e username, calcula
+watched/lists/followers em consultas agrupadas, expõe relações de follow e redige detalhes de perfis privados.
+Picks Templates recebeu uma leitura específica por relevância e filtro de origem sem alterar os sorts públicos
+existentes. A migration V73 adiciona índices trigram para nome/username de usuários e nome de templates.
+Os testes focados de listas, usuários, templates, índices e integração visual passaram durante a implementação;
+os commits de código não incluem trailer de coautoria.
+
+## 2026-10-20 — Edição de comentários
+
+Adicionado `PATCH /comments/{commentId}` para o autor editar o texto e, opcionalmente, o marcador de spoiler.
+O serviço preserva autor, alvo, comentário-pai, curtidas e data de criação; atualiza `updatedAt`, não emite
+notificação e retorna `likedByMe` calculado para o próprio autor. IDs inexistentes e comentários de terceiros
+retornam 404. DTO, controller e service foram verificados com 86 testes focados, sem falhas.
+
+O bloqueio recíproco foi ampliado sobre a entidade V72 existente. `GET /users/{userId}` informa os quatro
+estados direcionais e, para o par bloqueado, serializa somente `id`, `username`, `name` e o estado de
+restrição; progresso, diário, reviews, Top 5, watchlist, dropped, pessoas acompanhadas, listas e resumos
+retornam sem expor conteúdo. Buscas/descobertas de listas, Picks e templates, feed, comentários, reviews e
+notificações filtram o par antes de paginação/contagem. Interações de follow, comentário, resposta e like
+revalidam o bloqueio sob advisory lock dentro da transação; aceitação em lote não contorna essa trava.
+Bloquear remove follows e notificações entre as contas; o conteúdo não é apagado e volta a ficar acessível
+após desbloquear, sem restaurar relações ou notificações. Foram verificados 278 testes unitários focados,
+199 testes de integração/repositório com PostgreSQL e 13 cenários concorrentes, todos sem falhas.
+
+O fluxo de denúncias foi implementado com `POST /reports`, agrupamento por alvo tipado, uma submissão
+por usuário em cada caso ativo, fila e detalhe administrativos protegidos pela role persistida `ADMIN`,
+transições explícitas de estado e snapshots allowlisted (lista explícita de campos permitidos). Denúncias
+de alvos bloqueados continuam possíveis pelo ID conhecido; alvos privados inacessíveis retornam 404 e
+autodenúncias retornam 400. Ao resolver ou dispensar um caso, cada denunciante recebe uma notificação
+genérica sem notas internas. Exclusão de conta remove submissões e casos vazios atomicamente; locks por
+alvo ativo serializam essa limpeza com novas denúncias. Casos terminais e seus snapshots são removidos
+em lotes após 90 dias. A OpenAPI, as regras de negócio e o esquema do banco foram sincronizados.
+
+Na revisão de bordas, o desbloqueio passou a compartilhar a trava transacional por par com o bloqueio;
+comentários/curtidas em Picks também verificam e travam o creator do template; previews de listas filhas
+usam a query em lote que já aplica visibilidade e bloqueio. Denúncias de perfil `USER` aceitam ID de perfil
+privado; exceções de visibilidade para comentário/Pick dependem do autor do alvo reportado. Relações de
+Pick e creator agora são carregadas explicitamente nos caminhos de interação fora da sessão JPA. V77
+registra atores de agregados sociais e elimina os agregados históricos ambíguos necessários à privacidade;
+V78 indexa `reporter_id` para a exclusão eficiente de submissões.
+
+Na verificação final, a suíte Maven completa passou com 4.254 testes em 290 relatórios Surefire, sem falhas,
+erros ou testes ignorados. O processo retornou código 0; o Surefire registrou apenas o aviso de encerramento
+tardio do fork após `System.exit(0)`. A revisão independente final não encontrou pendências.
