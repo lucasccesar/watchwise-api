@@ -216,7 +216,7 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public void likePick(UUID userId, UUID pickId) {
-        Pick pick = pickRepository.findById(pickId)
+        Pick pick = pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
 
         try {
@@ -263,7 +263,7 @@ public class LikeServiceImpl implements LikeService {
 
     @Override
     public void likePicksTemplate(UUID userId, UUID templateId) {
-        PicksTemplate template = picksTemplateRepository.findById(templateId)
+        PicksTemplate template = picksTemplateRepository.findByIdWithCreator(templateId)
                 .orElseThrow(() -> new NotFoundException("Picks template not found"));
 
         try {
@@ -398,6 +398,9 @@ public class LikeServiceImpl implements LikeService {
             counterpartIds.add(comment.getDroppedEntry().getUser().getId());
         } else if (comment.getPick() != null) {
             counterpartIds.add(comment.getPick().getUser().getId());
+            if (comment.getPick().getPicksTemplate().getCreator() != null) {
+                counterpartIds.add(comment.getPick().getPicksTemplate().getCreator().getId());
+            }
         } else if (comment.getPicksTemplate() != null && comment.getPicksTemplate().getCreator() != null) {
             counterpartIds.add(comment.getPicksTemplate().getCreator().getId());
         }
@@ -406,6 +409,11 @@ public class LikeServiceImpl implements LikeService {
 
     private void assertPickIsVisibleTo(UUID viewerId, Pick pick) {
         UUID ownerId = pick.getUser().getId();
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
+        if (pick.getPicksTemplate().getCreator() != null) {
+            userBlockAccessService.assertContentVisible(
+                    viewerId, pick.getPicksTemplate().getCreator().getId());
+        }
         if (viewerId.equals(ownerId) || pick.getVisibility() == com.watchwise.watchwise_api.pick.entity.PickVisibility.PUBLIC) {
             return;
         }

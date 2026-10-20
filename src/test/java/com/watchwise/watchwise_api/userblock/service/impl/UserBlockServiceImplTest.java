@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserPairLockIdentity;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
@@ -83,7 +84,21 @@ class UserBlockServiceImplTest {
         UserBlock row = UserBlock.builder().blocker(blocker).blocked(blocked).createdAt(LocalDateTime.now()).build();
         when(userBlockRepository.findByBlockerIdAndBlockedId(blockerId, blockedId)).thenReturn(Optional.of(row));
         service.unblock(blockerId, blockedId);
-        verify(userBlockRepository).delete(row);
+        var order = inOrder(advisoryLock, userBlockRepository);
+        order.verify(advisoryLock).lock(UserPairLockIdentity.of(blockerId, blockedId));
+        order.verify(userBlockRepository).findByBlockerIdAndBlockedId(blockerId, blockedId);
+        order.verify(userBlockRepository).delete(row);
+    }
+
+    @Test void shouldStillAcquirePairLockWhenUnblockIsAnIdempotentNoOp() {
+        when(userBlockRepository.findByBlockerIdAndBlockedId(blockerId, blockedId)).thenReturn(Optional.empty());
+
+        service.unblock(blockerId, blockedId);
+
+        var order = inOrder(advisoryLock, userBlockRepository);
+        order.verify(advisoryLock).lock(UserPairLockIdentity.of(blockerId, blockedId));
+        order.verify(userBlockRepository).findByBlockerIdAndBlockedId(blockerId, blockedId);
+        verify(userBlockRepository, never()).delete(any(UserBlock.class));
     }
 
     @Test void shouldReturnMappedBlockedUserPage() {

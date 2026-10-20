@@ -42,6 +42,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -52,6 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -103,6 +105,9 @@ class LikeServiceImplTest {
 
     @Captor
     private ArgumentCaptor<Like> likeCaptor;
+
+    @Captor
+    private ArgumentCaptor<Collection<UUID>> counterpartIdsCaptor;
 
     private UUID lucasId;
     private UUID marinaId;
@@ -210,6 +215,29 @@ class LikeServiceImplTest {
 
         verify(likeRepository, never()).saveAndFlush(any());
         verify(commentRepository, never()).incrementLikesCount(commentId);
+    }
+
+    @Test
+    void shouldIncludePickTemplateCreatorWhenLikingACommentOnAnotherUsersPick() {
+        User pickOwner = User.builder().id(UUID.randomUUID()).username("pick-owner").name("Pick Owner")
+                .email("pick-owner@example.com").password("hash").isProfilePublic(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        User commentAuthor = User.builder().id(UUID.randomUUID()).username("comment-author").name("Comment Author")
+                .email("comment-author@example.com").password("hash").isProfilePublic(true)
+                .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        Pick pickWithSeparateOwner = Pick.builder().id(pickId).picksTemplate(template).user(pickOwner)
+                .visibility(PickVisibility.PUBLIC).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        Comment comment = Comment.builder().id(commentId).user(commentAuthor).pick(pickWithSeparateOwner)
+                .text("Pick comment").containsSpoiler(false).createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now()).build();
+        when(commentRepository.findByIdWithTargets(commentId)).thenReturn(Optional.of(comment));
+        when(likeRepository.existsByUserIdAndCommentId(lucasId, commentId)).thenReturn(true);
+
+        likeService.likeComment(lucasId, commentId);
+
+        verify(userBlockAccessService).lockAndAssertInteractionAllowed(eq(lucasId), counterpartIdsCaptor.capture());
+        assertThat(counterpartIdsCaptor.getValue())
+                .containsExactlyInAnyOrder(commentAuthor.getId(), pickOwner.getId(), marinaId);
     }
 
     private Comment buildContentComment() {
@@ -953,7 +981,7 @@ class LikeServiceImplTest {
     @DisplayName("[likePick] Should Save Like And Increment Counter - When Pick Is Public")
     void shouldSaveLikeAndIncrementCounterForPublicPick() {
         when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
-        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
         when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -974,7 +1002,7 @@ class LikeServiceImplTest {
         when(likeRepository.existsByUserIdAndPickId(lucasId, pickId))
                 .thenReturn(false)
                 .thenReturn(true);
-        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
         when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(likeRepository.saveAndFlush(any(Like.class)))
@@ -993,7 +1021,7 @@ class LikeServiceImplTest {
         pick = Pick.builder().id(pickId).picksTemplate(template).user(lucas).visibility(PickVisibility.PRIVATE)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
-        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
         when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -1008,7 +1036,7 @@ class LikeServiceImplTest {
     void shouldAllowAcceptedFollowerToLikeFollowersPick() {
         pick.setVisibility(PickVisibility.FOLLOWERS);
         when(likeRepository.existsByUserIdAndPickId(lucasId, pickId)).thenReturn(false);
-        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
         when(followerRepository.existsByFollowerIdAndFollowedIdAndStatus(lucasId, marinaId, FollowStatus.ACCEPTED))
                 .thenReturn(true);
         when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
@@ -1024,7 +1052,7 @@ class LikeServiceImplTest {
     @DisplayName("[likePick] Should Reject Stranger - When Pick Is Private")
     void shouldRejectStrangerWhenPickIsPrivate() {
         pick.setVisibility(PickVisibility.PRIVATE);
-        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
         when(pickRepository.findByIdForUpdate(pickId)).thenReturn(Optional.of(pick));
 
         assertThatThrownBy(() -> likeService.likePick(lucasId, pickId))
@@ -1051,7 +1079,7 @@ class LikeServiceImplTest {
     @DisplayName("[likePicksTemplate] Should Like Template Without Checking Pick Ownership")
     void shouldLikePicksTemplateWithoutCheckingPickOwnership() {
         when(likeRepository.existsByUserIdAndPicksTemplateId(lucasId, templateId)).thenReturn(false);
-        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(template));
+        when(picksTemplateRepository.findByIdWithCreator(templateId)).thenReturn(Optional.of(template));
         when(picksTemplateRepository.findByIdForUpdate(templateId)).thenReturn(Optional.of(template));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -1077,7 +1105,7 @@ class LikeServiceImplTest {
                 .updatedAt(LocalDateTime.now())
                 .build();
         when(likeRepository.existsByUserIdAndPicksTemplateId(lucasId, templateId)).thenReturn(false);
-        when(picksTemplateRepository.findById(templateId)).thenReturn(Optional.of(template));
+        when(picksTemplateRepository.findByIdWithCreator(templateId)).thenReturn(Optional.of(template));
         when(picksTemplateRepository.findByIdForUpdate(templateId)).thenReturn(Optional.of(template));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(likeRepository.saveAndFlush(any(Like.class))).thenAnswer(invocation -> invocation.getArgument(0));

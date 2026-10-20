@@ -50,6 +50,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -802,7 +803,7 @@ class CommentServiceImplTest {
 
     @Test
     void shouldRejectCommentOnBlockedPickOwner() {
-        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
         doThrow(new ForbiddenException("Blocked interaction"))
                 .when(userBlockAccessService).lockAndAssertInteractionAllowed(lucasId, List.of(marinaId));
 
@@ -1033,7 +1034,7 @@ class CommentServiceImplTest {
     @Test
     @DisplayName("[createCommentOnPick] Should Save Comment Targeting Pick - When Pick Is Public")
     void shouldSaveCommentTargetingPickWhenPickIsPublic() {
-        when(pickRepository.findById(pickId)).thenReturn(Optional.of(pick));
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)).thenReturn(Optional.of(pick));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(commentRepository.save(any(Comment.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(commentMapper.commentToResponseDto(any(Comment.class), eq(false))).thenReturn(responseDto);
@@ -1053,6 +1054,31 @@ class CommentServiceImplTest {
         assertThat(saved.getPicksTemplate()).isNull();
         notificationOrder.verify(socialNotificationService).notifyCommentReceived(
                 lucasId, marinaId, NotificationTargetType.PICK, pickId);
+    }
+
+    @Test
+    @DisplayName("[createCommentOnPick] Should Reject Interaction - When Template Creator Is Blocked")
+    void shouldRejectCommentOnPickWhenTemplateCreatorIsBlocked() {
+        User independentPickOwner = User.builder().id(UUID.randomUUID()).username("pick-owner")
+                .name("Pick Owner").email("pick-owner@example.com").password("hash")
+                .isProfilePublic(true).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        Pick pickOwnedByAnotherUser = Pick.builder().id(pickId).picksTemplate(template).user(independentPickOwner)
+                .visibility(PickVisibility.PUBLIC).createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
+        when(pickRepository.findByIdWithUserAndTemplateAndCreator(pickId))
+                .thenReturn(Optional.of(pickOwnedByAnotherUser));
+        doAnswer(invocation -> {
+            Collection<UUID> counterparts = invocation.getArgument(1);
+            if (counterparts.contains(marinaId)) {
+                throw new ForbiddenException("This interaction is not allowed");
+            }
+            return null;
+        }).when(userBlockAccessService).lockAndAssertInteractionAllowed(eq(lucasId), anyCollection());
+
+        assertThatThrownBy(() -> commentService.createCommentOnPick(
+                lucasId, pickId, new CommentCreationDTO("Comment on blocked template", null, null)))
+                .isInstanceOf(ForbiddenException.class);
+
+        verify(commentRepository, never()).save(any(Comment.class));
     }
 
     @Test

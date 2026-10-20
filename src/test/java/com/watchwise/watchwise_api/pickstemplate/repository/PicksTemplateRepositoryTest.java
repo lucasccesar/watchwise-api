@@ -88,6 +88,22 @@ class PicksTemplateRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByIdWithCreator] Should Fetch Creator For Detached Template Reads")
+    void shouldFetchCreatorForDetachedTemplateRead() {
+        LocalDateTime now = LocalDateTime.now();
+        User creator = saveUser("detached-template-creator", now);
+        PicksTemplate template = repository.saveAndFlush(PicksTemplate.builder()
+                .creator(creator).origin(PickOrigin.COMMUNITY).name("Community template")
+                .createdAt(now).updatedAt(now).build());
+        entityManager.clear();
+
+        PicksTemplate found = repository.findByIdWithCreator(template.getId()).orElseThrow();
+
+        assertThat(Hibernate.isInitialized(found.getCreator())).isTrue();
+        assertThat(found.getCreator().getId()).isEqualTo(creator.getId());
+    }
+
+    @Test
     @DisplayName("[findByCreatorIdOrderByCreatedAtDescIdDesc] Should Isolate And Order Owned Templates Across Pages - When Another Creator Has A Newer Template")
     void shouldIsolateAndOrderOwnedTemplatesAcrossPagesWhenAnotherCreatorHasANewerTemplate() {
         LocalDateTime now = LocalDateTime.of(2026, 10, 12, 12, 0);

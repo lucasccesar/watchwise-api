@@ -15,6 +15,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPage;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPageMode;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPageRequest;
@@ -70,6 +71,8 @@ class UserListItemPageReaderImplTest {
     private DiaryEntryRepository diaryEntryRepository;
     @Mock
     private ContentRepository contentRepository;
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
     @InjectMocks

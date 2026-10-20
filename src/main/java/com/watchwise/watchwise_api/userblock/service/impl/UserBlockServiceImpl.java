@@ -60,7 +60,9 @@ public class UserBlockServiceImpl implements UserBlockService {
     }
 
     @Override
+    @Transactional
     public void unblock(UUID blockerId, UUID blockedId) {
+        advisoryLock.lock(UserPairLockIdentity.of(blockerId, blockedId));
         userBlockRepository.findByBlockerIdAndBlockedId(blockerId, blockedId)
                 .ifPresent(userBlockRepository::delete);
     }

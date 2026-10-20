@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.notification.repository.NotificationRepositor
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
+import com.watchwise.watchwise_api.userblock.entity.UserBlock;
 import com.watchwise.watchwise_api.userblock.repository.UserBlockRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockService;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,7 +82,7 @@ class UserBlockConcurrencyIntegrationTest {
     @Autowired UserBlockService blockService;
     @Autowired FollowerService followerService;
     @Autowired UserRepository userRepository;
-    @Autowired UserBlockRepository blockRepository;
+    @MockitoSpyBean UserBlockRepository blockRepository;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoSpyBean FollowerRepository followerRepository;
@@ -273,6 +274,46 @@ class UserBlockConcurrencyIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("[unblock] Should Serialize A Concurrent Reblock - When Unblock Read The Existing Row First")
+    void shouldSerializeConcurrentReblockWhenUnblockReadTheExistingRowFirst() throws Exception {
+        blockRepository.saveAndFlush(UserBlock.builder().blocker(first).blocked(second)
+                .createdAt(LocalDateTime.now()).build());
+        CountDownLatch unblockRead = new CountDownLatch(1);
+        CountDownLatch releaseUnblock = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            Object result = callBlockRepository(invocation);
+            unblockRead.countDown();
+            await(releaseUnblock);
+            return result;
+        }).when(blockRepository).findByBlockerIdAndBlockedId(first.getId(), second.getId());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        AtomicLong reblockPid = new AtomicLong();
+        CountDownLatch reblockStarted = new CountDownLatch(1);
+        try {
+            Future<?> unblock = executor.submit(() -> blockService.unblock(first.getId(), second.getId()));
+            assertThat(unblockRead.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<?> reblock = executor.submit(() -> inTransaction(() -> {
+                reblockPid.set(currentBackendPid());
+                reblockStarted.countDown();
+                blockService.block(first.getId(), second.getId());
+            }));
+            assertThat(reblockStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            boolean serialized = awaitAdvisoryWaitOrCompletion(reblockPid.get(), reblock);
+            releaseUnblock.countDown();
+            unblock.get(10, TimeUnit.SECONDS);
+            reblock.get(10, TimeUnit.SECONDS);
+
+            assertThat(blockRepository.existsByBlockerIdAndBlockedId(first.getId(), second.getId())).isTrue();
+            assertThat(blockRepository.count()).isEqualTo(1);
+            assertThat(serialized).as("the new block waits for the in-flight unblock").isTrue();
+        } finally {
+            releaseUnblock.countDown();
+            shutdown(executor);
+        }
+    }
+
     private void assertMutationWaitsForBlock(boolean reverseBlock, Class<? extends Throwable> expectedException,
             Runnable mutation) throws Exception {
         CountDownLatch cleanupStarted = new CountDownLatch(1);
@@ -319,6 +360,10 @@ class UserBlockConcurrencyIntegrationTest {
 
     private Object callRepository(InvocationOnMock invocation) throws Throwable {
         return mockingDetails(followerRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+    }
+
+    private Object callBlockRepository(InvocationOnMock invocation) throws Throwable {
+        return mockingDetails(blockRepository).getMockCreationSettings().getDefaultAnswer().answer(invocation);
     }
 
     private User saveUser(String username, boolean publicProfile) {

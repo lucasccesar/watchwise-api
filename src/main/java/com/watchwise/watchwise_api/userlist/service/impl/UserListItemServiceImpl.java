@@ -30,6 +30,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import com.watchwise.watchwise_api.userlist.service.UserListContentStateResult;
 import com.watchwise.watchwise_api.userlist.service.UserListContentStateService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -60,6 +61,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final UserListItemMapper userListItemMapper;
     private final UserListContentStateService userListContentStateService;
     private final UserContentPosterService userContentPosterService;
+    private final UserBlockAccessService userBlockAccessService;
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
@@ -86,8 +88,10 @@ public class UserListItemServiceImpl implements UserListItemService {
                 .findByUserListIdWithContentAndChildListOrderByPositionAsc(listId);
         UserListContentStateResult stateResult = userListContentStateService.resolve(viewerId, entities);
         Map<UUID, String> customPosterByContentId = loadPostersForOwner(entities);
+        Set<UUID> visibleChildListIds = loadVisibleChildListIds(viewerId, entities);
         List<UserListItemResponseDTO> items = entities.stream()
-                .map(item -> toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId(), customPosterByContentId))
+                .map(item -> toVisibilityScopedResponseDto(
+                        item, stateResult.stateByItemId(), customPosterByContentId, visibleChildListIds))
                 .toList();
         return new UserListItemsWithState(
                 items,
@@ -95,15 +99,15 @@ public class UserListItemServiceImpl implements UserListItemService {
     }
 
     private UserListItemResponseDTO toVisibilityScopedResponseDto(
-            UUID viewerId, UserListItem item, Map<UUID, ContentStateDTO> stateByItemId,
-            Map<UUID, String> customPosterByContentId) {
+            UserListItem item, Map<UUID, ContentStateDTO> stateByItemId,
+            Map<UUID, String> customPosterByContentId, Set<UUID> visibleChildListIds) {
         UserListItemResponseDTO dto = userListItemMapper.userListItemToResponseDto(item);
         ContentStateDTO contentState = item.getId() == null ? null : stateByItemId.get(item.getId());
         String customPosterUrl = item.getContent() == null
                 ? null
                 : customPosterByContentId.get(item.getContent().getId());
 
-        if (item.getChildList() != null && !isVisibleTo(viewerId, item.getChildList())) {
+        if (item.getChildList() != null && !visibleChildListIds.contains(item.getChildList().getId())) {
             return new UserListItemResponseDTO(
                     dto.id(), dto.content(), null, dto.position(), dto.description(), dto.createdAt(), dto.updatedAt(),
                     null, null);
@@ -112,6 +116,21 @@ public class UserListItemServiceImpl implements UserListItemService {
         return new UserListItemResponseDTO(
                 dto.id(), dto.content(), dto.childList(), dto.position(), dto.description(), dto.createdAt(), dto.updatedAt(),
                 customPosterUrl, contentState);
+    }
+
+    private Set<UUID> loadVisibleChildListIds(UUID viewerId, List<UserListItem> items) {
+        List<UUID> childListIds = items.stream()
+                .map(UserListItem::getChildList)
+                .filter(java.util.Objects::nonNull)
+                .map(UserList::getId)
+                .distinct()
+                .toList();
+        if (childListIds.isEmpty()) {
+            return Set.of();
+        }
+        return userListItemRepository.findVisibleChildListsByIdIn(childListIds, viewerId).stream()
+                .map(UserList::getId)
+                .collect(Collectors.toSet());
     }
 
     @Override
@@ -334,7 +353,7 @@ public class UserListItemServiceImpl implements UserListItemService {
             Map<UUID, String> customPosterByContentId = loadPostersForOwner(saved);
             List<UserListItemResponseDTO> items = saved.stream()
                     .map(item -> toVisibilityScopedResponseDto(
-                            userId, item, stateResult.stateByItemId(), customPosterByContentId))
+                            item, stateResult.stateByItemId(), customPosterByContentId, Set.of()))
                     .toList();
             return new UserListItemsWithState(
                     items,
@@ -400,7 +419,9 @@ public class UserListItemServiceImpl implements UserListItemService {
     private UserListItemResponseDTO toResponseDto(UUID viewerId, UserListItem item) {
         UserListContentStateResult stateResult = userListContentStateService.resolve(viewerId, List.of(item));
         Map<UUID, String> customPosterByContentId = loadPostersForOwner(List.of(item));
-        return toVisibilityScopedResponseDto(viewerId, item, stateResult.stateByItemId(), customPosterByContentId);
+        Set<UUID> visibleChildListIds = loadVisibleChildListIds(viewerId, List.of(item));
+        return toVisibilityScopedResponseDto(
+                item, stateResult.stateByItemId(), customPosterByContentId, visibleChildListIds);
     }
 
     private Map<UUID, String> loadPostersForOwner(List<UserListItem> items) {
@@ -512,7 +533,13 @@ public class UserListItemServiceImpl implements UserListItemService {
     private boolean isVisibleTo(UUID viewerId, UserList list) {
         UUID ownerId = list.getUser().getId();
 
-        if (viewerId.equals(ownerId) || list.getVisibility() == UserListVisibility.PUBLIC) {
+        if (viewerId.equals(ownerId)) {
+            return true;
+        }
+        if (userBlockAccessService.isBlockedEitherDirection(viewerId, ownerId)) {
+            return false;
+        }
+        if (list.getVisibility() == UserListVisibility.PUBLIC) {
             return true;
         }
 

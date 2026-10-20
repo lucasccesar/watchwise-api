@@ -311,6 +311,24 @@ class CommentRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findByIdWithTargets] Should Initialize Pick Template Creator - When Comment Targets A Pick")
+    void shouldInitializePickTemplateCreatorWhenCommentTargetsAPick() {
+        PicksTemplate template = savePicksTemplate(marina, "Template with creator");
+        Pick pick = savePick(template, lucas);
+        Comment saved = commentRepository.saveAndFlush(buildPickComment(marina, pick, "Pick comment"));
+        entityManager.clear();
+
+        Comment found = commentRepository.findByIdWithTargets(saved.getId()).orElseThrow();
+        PicksTemplate loadedTemplate = found.getPick().getPicksTemplate();
+
+        assertThat(Hibernate.isInitialized(found.getPick())).isTrue();
+        assertThat(Hibernate.isInitialized(found.getPick().getUser())).isTrue();
+        assertThat(Hibernate.isInitialized(loadedTemplate)).isTrue();
+        assertThat(Hibernate.isInitialized(loadedTemplate.getCreator())).isTrue();
+        assertThat(loadedTemplate.getCreator().getId()).isEqualTo(marina.getId());
+    }
+
+    @Test
     @DisplayName("[findByIdWithTargets] Should Return Comment With Null List And Diary Entry - When Comment Targets Content")
     void shouldReturnCommentWithNullListAndDiaryEntryWhenCommentTargetsContent() {
         Comment saved = commentRepository.saveAndFlush(buildContentComment(lucas, fightClub, "Great movie!"));

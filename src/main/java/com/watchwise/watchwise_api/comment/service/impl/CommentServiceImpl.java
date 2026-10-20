@@ -118,7 +118,7 @@ public class CommentServiceImpl implements CommentService {
 
     @Override
     public Page<CommentResponseDTO> getCommentsForPick(UUID viewerId, UUID pickId, Integer pageNumber, Integer pageSize) {
-        Pick pick = pickRepository.findById(pickId)
+        Pick pick = pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
         userBlockAccessService.assertContentVisible(viewerId, pick.getUser().getId());
         if (pick.getPicksTemplate().getCreator() != null) {
@@ -226,11 +226,22 @@ public class CommentServiceImpl implements CommentService {
     @Override
     @Transactional
     public CommentResponseDTO createCommentOnPick(UUID userId, UUID pickId, CommentCreationDTO commentCreationDTO) {
-        Pick pick = pickRepository.findById(pickId)
+        Pick pick = pickRepository.findByIdWithUserAndTemplateAndCreator(pickId)
                 .orElseThrow(() -> new NotFoundException("Pick not found"));
         assertPickIsVisibleTo(userId, pick);
         Comment parentComment = resolveParentCommentOnPick(userId, commentCreationDTO.parentCommentId(), pickId);
-        assertInteractionsAllowed(userId, pick.getUser().getId(), parentComment);
+        List<UUID> counterpartIds = new java.util.ArrayList<>();
+        counterpartIds.add(pick.getUser().getId());
+        if (pick.getPicksTemplate().getCreator() != null) {
+            UUID templateCreatorId = pick.getPicksTemplate().getCreator().getId();
+            if (!counterpartIds.contains(templateCreatorId)) {
+                counterpartIds.add(templateCreatorId);
+            }
+        }
+        if (parentComment != null) {
+            counterpartIds.add(parentComment.getUser().getId());
+        }
+        userBlockAccessService.lockAndAssertInteractionAllowed(userId, counterpartIds);
         Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
                 .pick(pick)
                 .build();
@@ -452,6 +463,10 @@ public class CommentServiceImpl implements CommentService {
 
     private void assertPickIsVisibleTo(UUID viewerId, Pick pick) {
         UUID ownerId = pick.getUser().getId();
+        userBlockAccessService.assertContentVisible(viewerId, ownerId);
+        if (pick.getPicksTemplate().getCreator() != null) {
+            userBlockAccessService.assertContentVisible(viewerId, pick.getPicksTemplate().getCreator().getId());
+        }
         if (viewerId.equals(ownerId) || pick.getVisibility() == PickVisibility.PUBLIC) {
             return;
         }

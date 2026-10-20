@@ -325,7 +325,8 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             LEFT JOIN FETCH c.diaryEntry d LEFT JOIN FETCH d.user
             LEFT JOIN FETCH c.droppedEntry de LEFT JOIN FETCH de.user
             LEFT JOIN FETCH c.pick p LEFT JOIN FETCH p.user
-            LEFT JOIN FETCH c.picksTemplate t
+            LEFT JOIN FETCH p.picksTemplate pickTemplate LEFT JOIN FETCH pickTemplate.creator
+            LEFT JOIN FETCH c.picksTemplate t LEFT JOIN FETCH t.creator
             WHERE c.id = :id
             """)
     Optional<Comment> findByIdWithTargets(@Param("id") UUID id);

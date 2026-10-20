@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.contentposter.service.UserContentPosterServic
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
+import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
@@ -84,6 +85,9 @@ class UserListItemServiceImplTest {
     @Mock
     private UserListContentStateService userListContentStateService;
 
+    @Mock
+    private UserBlockAccessService userBlockAccessService;
+
     @InjectMocks
     private UserListItemServiceImpl userListItemService;
 
@@ -149,6 +153,8 @@ class UserListItemServiceImplTest {
                 item.getId(), null, buildPreviewDto(childList), 1, null, LocalDateTime.now(), LocalDateTime.now());
         when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
                 .thenReturn(List.of(item));
+        when(userListItemRepository.findVisibleChildListsByIdIn(List.of(childList.getId()), marinaId))
+                .thenReturn(List.of(childList));
         when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
 
         List<UserListItemResponseDTO> result = userListItemService.getItems(marinaId, listId);
@@ -179,6 +185,27 @@ class UserListItemServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getItems] Should Mask ChildList Metadata - When Viewer Blocked Its Owner")
+    void shouldMaskChildListMetadataWhenViewerBlockedItsOwner() {
+        UserList childList = buildUserList(UUID.randomUUID(), marina, "Blocked owner's list", UserListVisibility.PUBLIC);
+        UserListItem item = buildChildListItem(scifi, childList, 1);
+        UserListItemResponseDTO mapped = new UserListItemResponseDTO(
+                item.getId(), null, buildPreviewDto(childList), 1, "desc", LocalDateTime.now(), LocalDateTime.now());
+        when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
+                .thenReturn(List.of(item));
+        when(userListItemRepository.findVisibleChildListsByIdIn(List.of(childList.getId()), lucasId))
+                .thenReturn(List.of());
+        when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
+
+        List<UserListItemResponseDTO> result = userListItemService.getItems(lucasId, listId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).childList()).isNull();
+        assertThat(result.get(0).id()).isEqualTo(mapped.id());
+        assertThat(result.get(0).position()).isEqualTo(mapped.position());
+    }
+
+    @Test
     @DisplayName("[getItems] Should Keep ChildList Metadata - When Viewer Is The Nested List's Owner")
     void shouldKeepChildListMetadataWhenViewerIsTheNestedListsOwner() {
         UserList childList = buildUserList(UUID.randomUUID(), marina, "Marina's private list", UserListVisibility.PRIVATE);
@@ -187,6 +214,8 @@ class UserListItemServiceImplTest {
                 item.getId(), null, buildPreviewDto(childList), 1, null, LocalDateTime.now(), LocalDateTime.now());
         when(userListItemRepository.findByUserListIdWithContentAndChildListOrderByPositionAsc(listId))
                 .thenReturn(List.of(item));
+        when(userListItemRepository.findVisibleChildListsByIdIn(List.of(childList.getId()), marinaId))
+                .thenReturn(List.of(childList));
         when(userListItemMapper.userListItemToResponseDto(item)).thenReturn(mapped);
 
         List<UserListItemResponseDTO> result = userListItemService.getItems(marinaId, listId);
