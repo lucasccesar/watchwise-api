@@ -3,6 +3,7 @@ import com.watchwise.watchwise_api.platformimport.model.ImportLinkState;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
 import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +20,7 @@ public class ImportLedgerImpl implements ImportLedger {
    "SELECT EXISTS (SELECT 1 FROM import_jobs WHERE id = ? AND user_id = ?)",
    Boolean.class, jobId, ownerId);
   if (!Boolean.TRUE.equals(jobBelongsToOwner)) {
-   throw new IllegalArgumentException("Import job does not belong to owner");
+   throw new NotFoundException("Import job not found");
   }
   jdbc.update("""
    INSERT INTO external_import_links(id,user_id,source_namespace,object_kind,source_id,state,owning_job_id,payload_hash,created_at,updated_at)

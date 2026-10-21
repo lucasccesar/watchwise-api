@@ -21,6 +21,7 @@ import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportLedgerImpl;
+import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.platformimport.entity.ExternalImportLink;
 import com.watchwise.watchwise_api.platformimport.repository.ExternalImportLinkRepository;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -92,7 +93,7 @@ class ImportLedgerRepositoryTest {
         LinkReservation original = ledger.reserve(owner, ownerJob, key, "hash");
 
         assertThatThrownBy(() -> ledger.reserve(owner, otherJob, key, "hash"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(NotFoundException.class);
 
         assertThat(ledger.reserve(owner, ownerJob, key, "hash")).isEqualTo(original);
         assertThat(jdbc.queryForObject("select count(*) from external_import_links where user_id = ? and source_id = ?", Integer.class, owner, key.sourceId())).isEqualTo(1);
@@ -170,7 +171,7 @@ class ImportLedgerRepositoryTest {
         UUID otherJob = job(otherOwner);
         ImportSourceKey key = new ImportSourceKey("trakt", "diary_event", "wrong-job-owner");
         assertThatThrownBy(() -> ledger.reserve(owner, otherJob, key, "hash"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(NotFoundException.class);
         assertThat(jdbc.queryForObject("select count(*) from external_import_links where source_id = ?", Integer.class, key.sourceId())).isZero();
     }
 
