@@ -1,3 +1,6 @@
 package com.watchwise.watchwise_api.platformimport.model;
 
-public enum ImportDecision { CREATE, MERGE, SKIP, REPLACE, KEEP }
+public enum ImportDecision {
+    RESOLVE_TARGET, SKIP_ITEM, EDIT_FIELD, ASSIGN_PASS, CONFIRM_WATCH_SCOPE,
+    LINK_IMPORTED_LIST, RESOLVE_REVIEW_ORDER, REMOVE_NOMINEE, REMOVE_CATEGORY, SET_CATEGORY_OPEN
+}

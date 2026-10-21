@@ -1,3 +1,6 @@
 package com.watchwise.watchwise_api.platformimport.model;
 
-public enum ImportJobState { PENDING, PROCESSING, COMPLETED, COMPLETED_WITH_ERRORS, FAILED, CANCELLED }
+public enum ImportJobState {
+    ANALYZING, AWAITING_SELECTION, RESOLVING, READY, IMPORTING,
+    COMPLETED, COMPLETED_WITH_WARNINGS, FAILED, CANCELLED, EXPIRED
+}

@@ -14,7 +14,7 @@ public record MediaReference(
             throw new IllegalArgumentException("Content type is required");
         }
         boolean valid = switch (type) {
-            case MOVIE, SERIES -> present(tmdbId) && !present(seriesTmdbId)
+            case MOVIE, SERIES -> present(tmdbId) && seriesTmdbId == null
                     && seasonNumber == null && episodeNumber == null;
             case SEASON -> !present(tmdbId) && present(seriesTmdbId)
                     && positive(seasonNumber) && episodeNumber == null;

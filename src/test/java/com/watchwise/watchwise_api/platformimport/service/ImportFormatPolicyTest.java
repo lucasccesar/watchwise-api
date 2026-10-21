@@ -12,7 +12,7 @@ class ImportFormatPolicyTest {
     private final ImportFormatPolicy policy = new ImportFormatPolicy();
 
     @Test
-    @DisplayName("accepts Should Accept Approved Matrix - When Kind Format And Platform Match")
+    @DisplayName("[accepts] Should Accept Approved Matrix - When Kind Format And Platform Match")
     void acceptsShouldAcceptApprovedMatrixWhenKindFormatAndPlatformMatch() {
         assertThat(policy.accepts(ImportInputKind.PLATFORM_ARCHIVE, ImportSourceFormat.TRAKT_ZIP, ImportPlatform.TRAKT)).isTrue();
         assertThat(policy.accepts(ImportInputKind.PLATFORM_ARCHIVE, ImportSourceFormat.LETTERBOXD_ZIP, ImportPlatform.LETTERBOXD)).isTrue();
@@ -24,7 +24,7 @@ class ImportFormatPolicyTest {
     }
 
     @Test
-    @DisplayName("accepts Should Reject Invalid Combinations - When Any Input Is Null Or Mismatched")
+    @DisplayName("[accepts] Should Reject Invalid Combinations - When Any Input Is Null Or Mismatched")
     void acceptsShouldRejectInvalidCombinationsWhenAnyInputIsNullOrMismatched() {
         assertThat(policy.accepts(null, ImportSourceFormat.TRAKT_ZIP, ImportPlatform.TRAKT)).isFalse();
         assertThat(policy.accepts(ImportInputKind.PLATFORM_ARCHIVE, null, ImportPlatform.TRAKT)).isFalse();
