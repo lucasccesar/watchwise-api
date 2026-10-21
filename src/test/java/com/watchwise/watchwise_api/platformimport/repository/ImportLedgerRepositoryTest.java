@@ -18,13 +18,17 @@ import org.junit.jupiter.api.BeforeEach;
 import com.watchwise.watchwise_api.platformimport.model.ImportLinkState;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
 import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
+import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportLedgerImpl;
+import com.watchwise.watchwise_api.platformimport.entity.ExternalImportLink;
+import com.watchwise.watchwise_api.platformimport.repository.ExternalImportLinkRepository;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.UUID;
+import java.time.LocalDateTime;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -56,6 +60,7 @@ class ImportLedgerRepositoryTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired ImportLedger ledger;
+    @Autowired ExternalImportLinkRepository externalImportLinkRepository;
 
     @BeforeEach
     void clearImportData() {
@@ -74,6 +79,23 @@ class ImportLedgerRepositoryTest {
         assertThat(jdbc.queryForObject("select count(*) from external_import_links where user_id = ?", Integer.class, user)).isEqualTo(1);
         assertThat(duplicate).isEqualTo(first);
         assertThat(duplicate.owningJobId()).isEqualTo(firstJob);
+    }
+
+    @Test
+    @DisplayName("[ImportLedger.reserve] Should Reject A Foreign Job For An Existing Link - When Source Identity Already Exists")
+    void shouldRejectAForeignJobForAnExistingLinkWhenSourceIdentityAlreadyExists() {
+        UUID owner = user("a2-existing-link-owner");
+        UUID otherOwner = user("a2-existing-link-other");
+        UUID ownerJob = job(owner);
+        UUID otherJob = job(otherOwner);
+        ImportSourceKey key = new ImportSourceKey("trakt", "diary_event", "existing-link-owner-check");
+        LinkReservation original = ledger.reserve(owner, ownerJob, key, "hash");
+
+        assertThatThrownBy(() -> ledger.reserve(owner, otherJob, key, "hash"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(ledger.reserve(owner, ownerJob, key, "hash")).isEqualTo(original);
+        assertThat(jdbc.queryForObject("select count(*) from external_import_links where user_id = ? and source_id = ?", Integer.class, owner, key.sourceId())).isEqualTo(1);
     }
 
     @Test
@@ -117,11 +139,18 @@ class ImportLedgerRepositoryTest {
     @Test
     @DisplayName("[external_content_aliases] Should Allow Distinct Targets And Constrain Duplicate Candidates - When Titles Match")
     void shouldAllowDistinctTargetsAndConstrainDuplicateCandidatesWhenTitlesMatch() {
-        insertAlias("target:movie:1", null);
-        insertAlias("target:movie:2", null);
-        insertAlias("target:movie:1", null);
-        assertThat(jdbc.queryForObject("select count(*) from external_content_aliases", Integer.class)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from contents where tmdb_id = '1'", Integer.class)).isZero();
+        insertAlias(MediaReference.movie("1001"), null, "Alias Movie", "alias movie", "GLOBAL");
+        insertAlias(MediaReference.movie("1002"), null, "Alias Movie", "alias movie", "GLOBAL");
+        insertAlias(MediaReference.movie("1001"), null, "Alias Movie", "alias movie", "GLOBAL");
+        insertAlias(MediaReference.series("2001"), null, "Alias Series", "alias series", "GLOBAL");
+        insertAlias(MediaReference.season("3001", 2), null, "Alias Season", "alias season", "GLOBAL");
+        insertSeasonZeroAlias();
+        insertAlias(MediaReference.episode("3001", 2, 3), null, "Alias Episode", "alias episode", "GLOBAL");
+        insertPersonAlias("Person Alias", "person alias", "42");
+        assertThat(jdbc.queryForObject("select count(*) from external_content_aliases", Integer.class)).isEqualTo(7);
+        assertThat(jdbc.queryForObject("select target_key from external_content_aliases where target_type = 'SEASON' and season_number = 0", String.class))
+                .isEqualTo("CONTENT|SEASON|3001|0");
+        assertThat(jdbc.queryForObject("select count(*) from contents where tmdb_id in ('1001', '1002')", Integer.class)).isZero();
     }
 
     @Test
@@ -141,7 +170,7 @@ class ImportLedgerRepositoryTest {
         UUID otherJob = job(otherOwner);
         ImportSourceKey key = new ImportSourceKey("trakt", "diary_event", "wrong-job-owner");
         assertThatThrownBy(() -> ledger.reserve(owner, otherJob, key, "hash"))
-                .isInstanceOf(org.springframework.dao.EmptyResultDataAccessException.class);
+                .isInstanceOf(IllegalArgumentException.class);
         assertThat(jdbc.queryForObject("select count(*) from external_import_links where source_id = ?", Integer.class, key.sourceId())).isZero();
     }
 
@@ -154,6 +183,52 @@ class ImportLedgerRepositoryTest {
         UUID anotherJob = job(owner);
         assertThatThrownBy(() -> jdbc.update("update import_jobs set state = 'IMPORTING' where id = ?", anotherJob))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("[import_jobs] Should Allow Null Platform Only For Watchwise Template - When Creating Job")
+    void shouldAllowNullPlatformOnlyForWatchwiseTemplateWhenCreatingJob() {
+        UUID owner = user("a2-platform-template");
+        UUID templateJob = UUID.randomUUID();
+        insertJob(templateJob, owner, "PICKS_TEMPLATE", "WATCHWISE_TEMPLATE_JSON", null);
+        assertThat(jdbc.queryForObject("select platform from import_jobs where id = ?", String.class, templateJob)).isNull();
+
+        insertJob(UUID.randomUUID(), owner, "PLATFORM_ARCHIVE", "TRAKT_ZIP", "TRAKT");
+        insertJob(UUID.randomUUID(), owner, "PLATFORM_ARCHIVE", "LETTERBOXD_ZIP", "LETTERBOXD");
+        insertJob(UUID.randomUUID(), owner, "SINGLE_LIST", "TRAKT_JSON", "TRAKT");
+        insertJob(UUID.randomUUID(), owner, "SINGLE_LIST", "LETTERBOXD_CSV", "LETTERBOXD");
+        insertJob(UUID.randomUUID(), owner, "SINGLE_WATCHLIST", "TRAKT_JSON", "TRAKT");
+        insertJob(UUID.randomUUID(), owner, "SINGLE_WATCHLIST", "LETTERBOXD_CSV", "LETTERBOXD");
+
+        assertThatThrownBy(() -> insertJob(UUID.randomUUID(), owner, "PLATFORM_ARCHIVE", "TRAKT_ZIP", null))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertJob(UUID.randomUUID(), owner, "PLATFORM_ARCHIVE", "LETTERBOXD_ZIP", "TRAKT"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("[external_content_aliases] Should Reject Invalid Typed IDs And Natural Keys - When Alias Fields Disagree")
+    void shouldRejectInvalidTypedIdsAndNaturalKeysWhenAliasFieldsDisagree() {
+        assertRejectedAlias("CONTENT", "MOVIE", "CONTENT|MOVIE|2001", null, null, null, null, null);
+        assertRejectedAlias("CONTENT", "SEASON", "CONTENT|SEASON|77|1", "2002", "77", 1, null, null);
+        assertRejectedAlias("CONTENT", "EPISODE", "CONTENT|EPISODE|77|1|2", null, "77", 1, null, null);
+        assertRejectedAlias("CONTENT", "MOVIE", "CONTENT|MOVIE|9999", "2003", null, null, null, null);
+        assertRejectedAlias("PERSON", "PERSON", "PERSON|42", "99", null, null, null, "42");
+        assertRejectedAlias("PERSON", "PERSON", "PERSON|99", null, null, null, null, "42");
+    }
+
+    @Test
+    @DisplayName("[external_import_links.source_id] Should Persist More Than 255 Characters - When Using JPA Mapping")
+    void shouldPersistMoreThan255CharactersWhenUsingJpaMapping() {
+        UUID owner = user("a2-long-source");
+        UUID job = job(owner);
+        String sourceId = "x".repeat(300);
+        ExternalImportLink saved = externalImportLinkRepository.saveAndFlush(ExternalImportLink.builder()
+                .userId(owner).sourceNamespace("trakt").objectKind("diary_event").sourceId(sourceId)
+                .state(ImportLinkState.IN_PROGRESS).owningJobId(job).createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now()).build());
+        assertThat(jdbc.queryForObject("select source_id from external_import_links where id = ?", String.class, saved.getId()))
+                .hasSize(300);
     }
 
     @Test
@@ -191,15 +266,36 @@ class ImportLedgerRepositoryTest {
         assertThat(ledger.isConsumed(owner, key)).isFalse();
         ledger.markApplied(owner, key, "DIARY_ENTRY", UUID.randomUUID());
         assertThat(ledger.isConsumed(owner, key)).isTrue();
+        UUID appliedTarget = jdbc.queryForObject("select target_id from external_import_links where source_id='state-key'", UUID.class);
+        ledger.markApplied(owner, key, "DIARY_ENTRY", appliedTarget);
+        assertThatThrownBy(() -> ledger.markApplied(owner, key, "DIARY_ENTRY", UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ledger.markSkipped(owner, key, "DIARY_ENTRY", appliedTarget, "conflict"))
+                .isInstanceOf(IllegalStateException.class);
         ImportSourceKey skipped = new ImportSourceKey("trakt", "diary_event", "skipped-key");
         ledger.reserve(owner, job, skipped, "hash"); ledger.markSkipped(owner, skipped, "DIARY_ENTRY", UUID.randomUUID(), "user declined");
         assertThat(ledger.isConsumed(owner, skipped)).isTrue();
+        UUID skippedTarget = jdbc.queryForObject("select target_id from external_import_links where source_id='skipped-key'", UUID.class);
+        ledger.markSkipped(owner, skipped, "DIARY_ENTRY", skippedTarget, "user declined");
+        assertThatThrownBy(() -> ledger.markApplied(owner, skipped, "DIARY_ENTRY", skippedTarget))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ledger.markSkipped(owner, skipped, "DIARY_ENTRY", skippedTarget, "changed reason"))
+                .isInstanceOf(IllegalStateException.class);
+        ImportSourceKey missing = new ImportSourceKey("trakt", "diary_event", "not-reserved");
+        assertThatThrownBy(() -> ledger.markApplied(owner, missing, "DIARY_ENTRY", UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ledger.markSkipped(owner, missing, "DIARY_ENTRY", UUID.randomUUID(), "missing"))
+                .isInstanceOf(IllegalStateException.class);
         ImportSourceKey tombstone = new ImportSourceKey("trakt", "diary_event", "tombstone-key");
         ledger.reserve(owner, job, tombstone, "hash");
         UUID target = UUID.randomUUID();
         ledger.markApplied(owner, tombstone, "DIARY_ENTRY", target);
         ledger.markDeletedByTarget(owner, "DIARY_ENTRY", target);
         assertThat(ledger.isConsumed(owner, tombstone)).isTrue();
+        assertThatThrownBy(() -> ledger.markApplied(owner, tombstone, "DIARY_ENTRY", target))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ledger.markSkipped(owner, tombstone, "DIARY_ENTRY", target, "deleted"))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -221,10 +317,15 @@ class ImportLedgerRepositoryTest {
 
     private UUID job(UUID owner) {
         UUID id = UUID.randomUUID();
+        insertJob(id, owner, "PLATFORM_ARCHIVE", "TRAKT_ZIP", "TRAKT");
+        return id;
+    }
+
+    private void insertJob(UUID id, UUID owner, String inputKind, String sourceFormat, String platform) {
         jdbc.update("""
             insert into import_jobs(id, user_id, input_kind, source_format, platform, source_namespace, state, preview_version,
-            selection_json, timezone, storage_key, work_pending, created_at, updated_at) values (?, ?, 'PLATFORM_ARCHIVE', 'TRAKT_ZIP', 'TRAKT', 'trakt', 'READY', 1, '{}', 'UTC', ?, true, now(), now())""", id, owner, "generated/" + id);
-        return id;
+            selection_json, timezone, storage_key, work_pending, created_at, updated_at) values (?, ?, ?, ?, ?, 'trakt', 'READY', 1, '{}', 'UTC', ?, true, now(), now())""",
+                id, owner, inputKind, sourceFormat, platform, "generated/" + id);
     }
 
     private boolean insertLink(UUID id, UUID owner, UUID job) {
@@ -233,10 +334,52 @@ class ImportLedgerRepositoryTest {
             values (?, ?, 'trakt', 'diary_event', 'same-source', 'IN_PROGRESS', ?, now(), now()) on conflict do nothing""", id, owner, job) == 1;
     }
 
-    private void insertAlias(String targetKey, Integer year) {
+    private void insertAlias(com.watchwise.watchwise_api.content.dto.MediaReference target, Integer year,
+                             String originalTitle, String normalizedTitle, String scope) {
+        String targetKey = targetKey(target);
         jdbc.update("""
-            insert into external_content_aliases(id, scope_key, target_kind, original_title, normalized_title, release_year, target_key, target_type,
-            target_tmdb_id, provenance, trust, created_at, updated_at) values (?, 'GLOBAL', 'CONTENT', 'Same Title', 'same title', ?, ?, 'MOVIE', '1', 'seed', 'CURATED_SEED', now(), now()) on conflict do nothing""", UUID.randomUUID(), year, targetKey);
+            insert into external_content_aliases(id, scope_key, target_kind, original_title, normalized_title, release_year,
+                target_key, target_type, target_tmdb_id, series_tmdb_id, season_number, episode_number,
+                provenance, trust, created_at, updated_at)
+            values (?, ?, 'CONTENT', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'seed', 'CURATED_SEED', now(), now()) on conflict do nothing
+            """, UUID.randomUUID(), scope, originalTitle, normalizedTitle, year, targetKey, target.type().name(),
+                target.tmdbId(), target.seriesTmdbId(), target.seasonNumber(), target.episodeNumber());
+    }
+
+    private void insertPersonAlias(String originalTitle, String normalizedTitle, String personTmdbId) {
+        jdbc.update("""
+            insert into external_content_aliases(id, scope_key, target_kind, original_title, normalized_title,
+                target_key, target_type, person_tmdb_id, provenance, trust)
+            values (?, 'GLOBAL', 'PERSON', ?, ?, ?, 'PERSON', ?, 'seed', 'CURATED_SEED')
+            """, UUID.randomUUID(), originalTitle, normalizedTitle, "PERSON|" + personTmdbId, personTmdbId);
+    }
+
+    private void insertSeasonZeroAlias() {
+        jdbc.update("""
+            insert into external_content_aliases(id, scope_key, target_kind, original_title, normalized_title,
+                target_key, target_type, series_tmdb_id, season_number, provenance, trust)
+            values (?, 'GLOBAL', 'CONTENT', 'Specials', 'specials', 'CONTENT|SEASON|3001|0', 'SEASON', '3001', 0,
+                'seed', 'CURATED_SEED')
+            """, UUID.randomUUID());
+    }
+
+    private void assertRejectedAlias(String targetKind, String targetType, String targetKey, String tmdbId,
+                                     String seriesId, Integer season, Integer episode, String personId) {
+        assertThatThrownBy(() -> jdbc.update("""
+            insert into external_content_aliases(id, scope_key, target_kind, original_title, normalized_title, target_key,
+                target_type, target_tmdb_id, series_tmdb_id, season_number, episode_number, person_tmdb_id, provenance, trust)
+            values (?, 'GLOBAL', ?, 'Malformed', 'malformed', ?, ?, ?, ?, ?, ?, ?, 'test', 'UNVERIFIED_CANDIDATE')
+            """, UUID.randomUUID(), targetKind, targetKey, targetType, tmdbId, seriesId, season, episode, personId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private static String targetKey(com.watchwise.watchwise_api.content.dto.MediaReference reference) {
+        return switch (reference.type()) {
+            case MOVIE, SERIES -> "CONTENT|" + reference.type() + "|" + reference.tmdbId();
+            case SEASON -> "CONTENT|SEASON|" + reference.seriesTmdbId() + "|" + reference.seasonNumber();
+            case EPISODE -> "CONTENT|EPISODE|" + reference.seriesTmdbId() + "|" + reference.seasonNumber()
+                    + "|" + reference.episodeNumber();
+        };
     }
 
     private UUID content() {

@@ -3,7 +3,7 @@ import jakarta.persistence.*; import lombok.*; import java.time.LocalDateTime; i
 @Entity @Table(name="letterboxd_seed_loads") @Getter @Builder @NoArgsConstructor(access=AccessLevel.PROTECTED) @AllArgsConstructor
 public class LetterboxdSeedLoad {
  @Id @GeneratedValue(strategy=GenerationType.UUID) @Setter private UUID id;
- @Column(name="seed_version", nullable=false) private String seedVersion;
- @Column(nullable=false) private String checksum;
+ @Column(name="seed_version", nullable=false, length=100) private String seedVersion;
+ @Column(nullable=false, length=128) private String checksum;
  @Column(name="loaded_at", nullable=false) private LocalDateTime loadedAt;
 }

@@ -29,4 +29,11 @@ class MediaReferenceTest {
         assertThat(MediaReference.season("9", 2).seasonNumber()).isEqualTo(2);
         assertThat(MediaReference.episode("9", 2, 3).episodeNumber()).isEqualTo(3);
     }
+
+    @Test
+    @DisplayName("[factories] Should Allow Season Zero - When Referencing A Special Season")
+    void factoriesShouldAllowSeasonZeroWhenReferencingASpecialSeason() {
+        assertThat(MediaReference.season("9", 0).seasonNumber()).isZero();
+        assertThat(MediaReference.episode("9", 0, 1).seasonNumber()).isZero();
+    }
 }

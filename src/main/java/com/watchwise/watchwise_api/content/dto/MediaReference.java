@@ -17,9 +17,9 @@ public record MediaReference(
             case MOVIE, SERIES -> present(tmdbId) && seriesTmdbId == null
                     && seasonNumber == null && episodeNumber == null;
             case SEASON -> !present(tmdbId) && present(seriesTmdbId)
-                    && positive(seasonNumber) && episodeNumber == null;
+                    && nonNegative(seasonNumber) && episodeNumber == null;
             case EPISODE -> !present(tmdbId) && present(seriesTmdbId)
-                    && positive(seasonNumber) && positive(episodeNumber);
+                    && nonNegative(seasonNumber) && positive(episodeNumber);
         };
         if (!valid) {
             throw new IllegalArgumentException("Media reference identifiers do not match content type");
@@ -48,5 +48,9 @@ public record MediaReference(
 
     private static boolean positive(Integer value) {
         return value != null && value > 0;
+    }
+
+    private static boolean nonNegative(Integer value) {
+        return value != null && value >= 0;
     }
 }

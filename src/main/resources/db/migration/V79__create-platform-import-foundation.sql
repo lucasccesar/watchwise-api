@@ -3,7 +3,7 @@ CREATE TABLE import_jobs (
     user_id UUID NOT NULL,
     input_kind VARCHAR(30) NOT NULL,
     source_format VARCHAR(40) NOT NULL,
-    platform VARCHAR(20) NOT NULL,
+    platform VARCHAR(20),
     source_account_id VARCHAR(255),
     source_namespace VARCHAR(255) NOT NULL,
     state VARCHAR(40) NOT NULL,
@@ -22,7 +22,16 @@ CREATE TABLE import_jobs (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP,
-    CONSTRAINT fk_import_jobs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    CONSTRAINT fk_import_jobs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT ck_import_jobs_input_platform_format CHECK (
+        (input_kind = 'PICKS_TEMPLATE' AND source_format = 'WATCHWISE_TEMPLATE_JSON' AND platform IS NULL)
+        OR (platform IS NOT NULL AND (
+            (input_kind = 'PLATFORM_ARCHIVE' AND source_format = 'TRAKT_ZIP' AND platform = 'TRAKT')
+            OR (input_kind = 'PLATFORM_ARCHIVE' AND source_format = 'LETTERBOXD_ZIP' AND platform = 'LETTERBOXD')
+            OR (input_kind IN ('SINGLE_LIST', 'SINGLE_WATCHLIST') AND source_format = 'TRAKT_JSON' AND platform = 'TRAKT')
+            OR (input_kind IN ('SINGLE_LIST', 'SINGLE_WATCHLIST') AND source_format = 'LETTERBOXD_CSV' AND platform = 'LETTERBOXD')
+        ))
+    )
 );
 CREATE INDEX idx_import_jobs_runnable ON import_jobs(next_run_at, id) WHERE work_pending = true;
 CREATE UNIQUE INDEX uq_import_jobs_one_writer_per_user ON import_jobs(user_id) WHERE state = 'IMPORTING';
@@ -103,9 +112,28 @@ CREATE TABLE external_content_aliases (
     CONSTRAINT ck_external_content_aliases_scope CHECK (scope_key = 'GLOBAL' OR scope_key LIKE 'USER:%'),
     CONSTRAINT fk_external_content_aliases_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT ck_external_content_aliases_scope_owner CHECK ((scope_key = 'GLOBAL' AND user_id IS NULL) OR (scope_key = 'USER:' || user_id::text AND user_id IS NOT NULL)),
-    CONSTRAINT ck_external_content_aliases_target CHECK (
-        (target_kind = 'CONTENT' AND target_type IN ('MOVIE', 'SERIES', 'SEASON', 'EPISODE') AND person_tmdb_id IS NULL)
-        OR (target_kind = 'PERSON' AND person_tmdb_id IS NOT NULL AND target_tmdb_id IS NULL AND series_tmdb_id IS NULL)
+    CONSTRAINT ck_external_content_aliases_typed_target CHECK (
+        (target_kind = 'CONTENT' AND target_type = 'MOVIE'
+            AND target_tmdb_id IS NOT NULL AND btrim(target_tmdb_id) <> '' AND position('|' in target_tmdb_id) = 0
+            AND series_tmdb_id IS NULL AND season_number IS NULL AND episode_number IS NULL AND person_tmdb_id IS NULL
+            AND target_key = 'CONTENT|MOVIE|' || target_tmdb_id)
+        OR (target_kind = 'CONTENT' AND target_type = 'SERIES'
+            AND target_tmdb_id IS NOT NULL AND btrim(target_tmdb_id) <> '' AND position('|' in target_tmdb_id) = 0
+            AND series_tmdb_id IS NULL AND season_number IS NULL AND episode_number IS NULL AND person_tmdb_id IS NULL
+            AND target_key = 'CONTENT|SERIES|' || target_tmdb_id)
+        OR (target_kind = 'CONTENT' AND target_type = 'SEASON'
+            AND target_tmdb_id IS NULL AND series_tmdb_id IS NOT NULL AND btrim(series_tmdb_id) <> ''
+            AND position('|' in series_tmdb_id) = 0 AND season_number IS NOT NULL AND season_number >= 0 AND episode_number IS NULL AND person_tmdb_id IS NULL
+            AND target_key = 'CONTENT|SEASON|' || series_tmdb_id || '|' || season_number::text)
+        OR (target_kind = 'CONTENT' AND target_type = 'EPISODE'
+            AND target_tmdb_id IS NULL AND series_tmdb_id IS NOT NULL AND btrim(series_tmdb_id) <> ''
+            AND position('|' in series_tmdb_id) = 0 AND season_number IS NOT NULL AND season_number >= 0
+            AND episode_number IS NOT NULL AND episode_number > 0 AND person_tmdb_id IS NULL
+            AND target_key = 'CONTENT|EPISODE|' || series_tmdb_id || '|' || season_number::text || '|' || episode_number::text)
+        OR (target_kind = 'PERSON' AND target_type = 'PERSON'
+            AND person_tmdb_id IS NOT NULL AND btrim(person_tmdb_id) <> '' AND position('|' in person_tmdb_id) = 0
+            AND target_tmdb_id IS NULL AND series_tmdb_id IS NULL AND season_number IS NULL AND episode_number IS NULL
+            AND target_key = 'PERSON|' || person_tmdb_id)
     )
 );
 CREATE UNIQUE INDEX uq_external_content_aliases_candidate ON external_content_aliases(scope_key, target_kind, normalized_title, release_year, target_key) NULLS NOT DISTINCT;

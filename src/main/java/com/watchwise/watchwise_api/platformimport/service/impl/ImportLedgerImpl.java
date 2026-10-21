@@ -15,6 +15,12 @@ public class ImportLedgerImpl implements ImportLedger {
 
  @Override @Transactional
  public LinkReservation reserve(UUID ownerId, UUID jobId, ImportSourceKey key, String payloadHash) {
+  Boolean jobBelongsToOwner = jdbc.queryForObject(
+   "SELECT EXISTS (SELECT 1 FROM import_jobs WHERE id = ? AND user_id = ?)",
+   Boolean.class, jobId, ownerId);
+  if (!Boolean.TRUE.equals(jobBelongsToOwner)) {
+   throw new IllegalArgumentException("Import job does not belong to owner");
+  }
   jdbc.update("""
    INSERT INTO external_import_links(id,user_id,source_namespace,object_kind,source_id,state,owning_job_id,payload_hash,created_at,updated_at)
    SELECT ?, ?, ?, ?, ?, 'IN_PROGRESS', j.id, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -56,9 +62,29 @@ public class ImportLedgerImpl implements ImportLedger {
  }
 
  private void updateState(UUID ownerId, ImportSourceKey key, ImportLinkState state, String targetType, UUID targetId, String reason) {
-  jdbc.update("""
+  int updated = jdbc.update("""
    UPDATE external_import_links SET state=?,target_type=?,target_id=?,outcome_reason=?,updated_at=CURRENT_TIMESTAMP
-   WHERE user_id=? AND source_namespace=? AND object_kind=? AND source_id=? AND state <> 'TOMBSTONE'
+   WHERE user_id=? AND source_namespace=? AND object_kind=? AND source_id=? AND state='IN_PROGRESS'
    """, state.name(), targetType, targetId, reason, ownerId, key.namespace(), key.objectKind(), key.sourceId());
+  if (updated == 1) return;
+
+  ExistingLink existing = jdbc.query("""
+   SELECT state,target_type,target_id,outcome_reason FROM external_import_links
+   WHERE user_id=? AND source_namespace=? AND object_kind=? AND source_id=?
+   """, rs -> rs.next() ? new ExistingLink(ImportLinkState.valueOf(rs.getString("state")),
+    rs.getString("target_type"), rs.getObject("target_id", UUID.class), rs.getString("outcome_reason")) : null,
+   ownerId, key.namespace(), key.objectKind(), key.sourceId());
+  if (existing == null) {
+   throw new IllegalStateException("No source reservation exists for the requested transition");
+  }
+  boolean identicalRepeat = existing.state() == state
+   && java.util.Objects.equals(existing.targetType(), targetType)
+   && java.util.Objects.equals(existing.targetId(), targetId)
+   && java.util.Objects.equals(existing.reason(), reason);
+  if (!identicalRepeat) {
+   throw new IllegalStateException("Source link already has a conflicting terminal state");
+  }
  }
+
+ private record ExistingLink(ImportLinkState state, String targetType, UUID targetId, String reason) { }
 }
