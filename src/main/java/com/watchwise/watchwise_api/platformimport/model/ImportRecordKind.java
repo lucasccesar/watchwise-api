@@ -1,0 +1,7 @@
+package com.watchwise.watchwise_api.platformimport.model;
+
+public enum ImportRecordKind {
+    DIARY_EVENT, REVIEW, WATCHED_MARKER, WATCHED_SUMMARY, CURRENT_RATING,
+    LIST_METADATA, LIST_ITEM, WATCHLIST_ITEM, SERIES_EXPANSION,
+    TEMPLATE, TEMPLATE_CATEGORY, TEMPLATE_OPTION
+}
