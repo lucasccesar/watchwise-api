@@ -13,6 +13,7 @@ CREATE TABLE import_jobs (
     zip_digest VARCHAR(128),
     timezone VARCHAR(100) NOT NULL,
     storage_key VARCHAR(500) NOT NULL,
+    upload_size_bytes BIGINT NOT NULL DEFAULT 0 CHECK (upload_size_bytes >= 0),
     checkpoint TEXT,
     work_phase VARCHAR(40),
     work_pending BOOLEAN NOT NULL DEFAULT FALSE,

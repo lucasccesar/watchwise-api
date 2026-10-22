@@ -23,6 +23,7 @@ public class ImportJob {
  @Column(name="zip_digest", length=128) private String zipDigest;
  @Column(nullable=false, length=100) private String timezone;
  @Column(name="storage_key", nullable=false, length=500) private String storageKey;
+ @Column(name="upload_size_bytes", nullable=false) private long uploadSizeBytes;
  @Column(columnDefinition="TEXT") private String checkpoint;
  @Column(name="work_phase", length=40) private String workPhase;
  @Column(name="work_pending", nullable=false) private boolean workPending;

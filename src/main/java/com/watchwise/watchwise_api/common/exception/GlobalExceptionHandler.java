@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.databind.exc.InvalidFormatException;
@@ -133,6 +134,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                         HttpStatus.TOO_MANY_REQUESTS.value(),
                         "Too Many Requests",
                         ex.getMessage(),
+                        request.getRequestURI()
+                ));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ResponseEntity<ApiError> handleMaxUploadSizeExceeded(
+            MaxUploadSizeExceededException ex,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(new ApiError(
+                        LocalDateTime.now(),
+                        HttpStatus.PAYLOAD_TOO_LARGE.value(),
+                        "Payload Too Large",
+                        "Uploaded file exceeds the configured size limit",
                         request.getRequestURI()
                 ));
     }

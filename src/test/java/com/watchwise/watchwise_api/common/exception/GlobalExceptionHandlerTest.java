@@ -4,14 +4,20 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -76,6 +82,39 @@ class GlobalExceptionHandlerTest {
         assertThat(apiError.message()).doesNotContain("SQL");
         assertThat(apiError.message()).doesNotContain("TMDB");
         assertThat(apiError.path()).isEqualTo("/games/today");
+    }
+
+    @Test
+    @DisplayName("[handleMaxUploadSizeExceeded] Should Return 413 ApiError - When Multipart Upload Exceeds Limit")
+    void shouldReturn413ApiErrorWhenMultipartUploadExceedsLimit() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/imports/uploads");
+
+        var response = handler.handleMaxUploadSizeExceeded(new MaxUploadSizeExceededException(1024), request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(413);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error()).isEqualTo("Payload Too Large");
+        assertThat(response.getBody().message()).isEqualTo("Uploaded file exceeds the configured size limit");
+        assertThat(response.getBody().path()).isEqualTo("/imports/uploads");
+    }
+
+    @Test
+    @DisplayName("[handleHttpMediaTypeNotSupported] Should Return 415 ApiError - When Upload Uses Unsupported Content Type")
+    void shouldReturn415ApiErrorWhenUploadUsesUnsupportedContentType() {
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest("POST", "/imports/uploads");
+        WebRequest request = new ServletWebRequest(servletRequest);
+        HttpMediaTypeNotSupportedException exception = new HttpMediaTypeNotSupportedException(
+                MediaType.APPLICATION_JSON,
+                List.of(MediaType.MULTIPART_FORM_DATA));
+
+        var response = handler.handleHttpMediaTypeNotSupported(
+                exception, new HttpHeaders(), HttpStatus.UNSUPPORTED_MEDIA_TYPE, request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(415);
+        assertThat(response.getBody()).isInstanceOf(ApiError.class);
+        ApiError apiError = (ApiError) response.getBody();
+        assertThat(apiError.message()).contains("application/json", "multipart/form-data");
+        assertThat(apiError.path()).isEqualTo("/imports/uploads");
     }
 
     private void dummyMethod(String argument) {
