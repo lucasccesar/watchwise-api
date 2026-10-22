@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
 import com.watchwise.watchwise_api.comment.service.impl.CommentPreviewAssembler;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
@@ -98,13 +99,13 @@ import java.lang.reflect.Method;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -161,6 +162,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private NewTransactionExecutor newTransactionExecutor;
+
+    @Mock
+    private UserContentMutationLock userContentMutationLock;
 
     @Mock
     private WatchlistEntryService watchlistEntryService;
@@ -233,9 +237,13 @@ class DiaryEntryServiceImplTest {
     private User lucas;
     private User marina;
     private Content fightClub;
+    private final Map<String, Content> preparedSeriesReferences = new HashMap<>();
+    private final Map<String, Content> preparedSeasonReferences = new HashMap<>();
 
     @BeforeEach
     void setUp() {
+        preparedSeriesReferences.clear();
+        preparedSeasonReferences.clear();
         ReflectionTestUtils.setField(diaryEntryService, "entityManager", entityManager);
 
         lucasId = UUID.randomUUID();
@@ -265,6 +273,13 @@ class DiaryEntryServiceImplTest {
 
         lenient().when(likeService.getLikedDiaryEntryIds(any(), any())).thenReturn(Set.of());
         lenient().when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
+        lenient().when(diaryEntryRepository.existsById(any(UUID.class))).thenReturn(true);
+        lenient().when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                        any(), anyInt(), isNull(), eq(ContentType.SEASON)))
+                .thenAnswer(invocation -> Optional.ofNullable(preparedSeasonReferences.get(
+                        seasonReferenceKey(invocation.getArgument(0), invocation.getArgument(1)))));
+        lenient().when(contentRepository.findByTmdbIdAndType(any(), eq(ContentType.SERIES)))
+                .thenAnswer(invocation -> Optional.ofNullable(preparedSeriesReferences.get(invocation.getArgument(0))));
         lenient().when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(emptySeasonDetails()));
@@ -2043,6 +2058,10 @@ class DiaryEntryServiceImplTest {
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue())
                 .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null));
+        InOrder mutationOrder = inOrder(contentService, userContentMutationLock, diaryEntryRepository);
+        mutationOrder.verify(contentService).getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean());
+        mutationOrder.verify(userContentMutationLock).lock(lucasId);
+        mutationOrder.verify(diaryEntryRepository).saveAndFlush(any(DiaryEntry.class));
     }
 
     @Test
@@ -2423,7 +2442,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "900", 1, null, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, season.getId())).thenReturn(0);
         DiaryEntry savedEntry = buildEntry(lucas, season);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
@@ -2442,12 +2461,12 @@ class DiaryEntryServiceImplTest {
     @Test
     @DisplayName("[createDiaryEntry] Should Honor IsRewatch And Set WatchNumber To 2 - When No Prior Entry Exists But Content Type Is SERIES")
     void shouldHonorIsRewatchAndSetWatchNumberToTwoWhenNoPriorEntryExistsButContentTypeIsSeries() {
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean()))
                 .thenReturn(new ContentRefDTO(series.getId(), "900", ContentType.SERIES, null, null, null, null, null,
                         LocalDateTime.now(), LocalDateTime.now()));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, series.getId())).thenReturn(0);
         DiaryEntry savedEntry = buildEntry(lucas, series);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenReturn(savedEntry);
@@ -2668,9 +2687,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, firstEpisode, 1), buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
@@ -2710,12 +2728,11 @@ class DiaryEntryServiceImplTest {
                         buildDiaryEntry(lucas, firstEpisode, 2), buildDiaryEntry(lucas, finaleEpisode, 2)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1))
                 .thenReturn(Optional.of(buildDiaryEntry(lucas, season, 1)));
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 2))
                 .thenReturn(Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
@@ -2783,9 +2800,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, nonFinaleEpisode, 1), buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, true, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, nonFinaleEpisode)));
 
@@ -2795,7 +2811,8 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(contentService).getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true));
+        verify(contentService).getOrCreateReference(
+                new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true));
     }
 
     @Test
@@ -2855,7 +2872,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntry] Should Auto-Create Series Entry With WatchNumber 1 - When The First Complete Pass Finishes")
     void shouldAutoCreateSeriesEntryWithWatchNumberOneWhenTheFirstCompletePassFinishes() {
         Content finaleSeason = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         stubContentResolution(finaleSeason);
@@ -2867,9 +2884,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, finaleSeason, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(series.getId(), "1399", ContentType.SERIES, null, null, null, null, null, null, null));
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
 
@@ -2892,7 +2908,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntry] Should Auto-Create A Second Series Entry With WatchNumber 2 - When A Full Rewatch Completes")
     void shouldAutoCreateASecondSeriesEntryWithWatchNumberTwoWhenAFullRewatchCompletes() {
         Content finaleSeason = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         stubContentResolution(finaleSeason);
@@ -2904,11 +2920,10 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, finaleSeason, 1), buildDiaryEntry(lucas, finaleSeason, 2)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(series.getId(), "1399", ContentType.SERIES, null, null, null, null, null, null, null));
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1))
                 .thenReturn(Optional.of(buildDiaryEntry(lucas, series, 1)));
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 2)).thenReturn(Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleSeason)));
 
@@ -2929,7 +2944,8 @@ class DiaryEntryServiceImplTest {
     void shouldNotAutoCreateASeriesEntryWhenOnlySomeSeasonsHaveBeenRewatched() {
         Content firstSeason = buildSeason("1399", 1);
         Content finaleSeason = buildFinaleSeason("1399", 2);
-        UUID seriesId = UUID.randomUUID();
+        Content series = buildContent("1399", ContentType.SERIES);
+        UUID seriesId = series.getId();
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         stubContentResolution(firstSeason);
@@ -2944,7 +2960,7 @@ class DiaryEntryServiceImplTest {
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(seriesId, "1399", ContentType.SERIES, null, null, null, null, null, null, null));
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, seriesId, 1))
-                .thenReturn(Optional.of(buildDiaryEntry(lucas, buildContent("1399", ContentType.SERIES), 1)));
+                .thenReturn(Optional.of(buildDiaryEntry(lucas, series, 1)));
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, firstSeason)));
 
@@ -2995,7 +3011,7 @@ class DiaryEntryServiceImplTest {
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         stubContentResolution(season);
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -3081,14 +3097,13 @@ class DiaryEntryServiceImplTest {
                         buildDiaryEntry(lucas, firstEpisode, 3), buildDiaryEntry(lucas, finaleEpisode, 3)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(eq(lucasId), eq(season.getId()), anyInt()))
                 .thenAnswer(invocation -> persistedSeasonPasses.contains((Integer) invocation.getArgument(2))
                         ? Optional.of(buildDiaryEntry(lucas, season, invocation.getArgument(2)))
                         : Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> {
             DiaryEntry saved = invocation.getArgument(0);
             if (season.getId().equals(saved.getContent().getId())) {
@@ -3111,14 +3126,14 @@ class DiaryEntryServiceImplTest {
                 .toList();
         assertThat(savedSeasonEntries).extracting(DiaryEntry::getWatchNumber).containsExactly(1, 2, 3);
         assertThat(savedSeasonEntries).allSatisfy(entry -> assertThat(entry.getAutoGenerated()).isTrue());
-        verify(newTransactionExecutor, times(3)).runInNewTransaction(any());
+        verifyNoInteractions(newTransactionExecutor);
     }
 
     @Test
     @DisplayName("[createDiaryEntry] Should Auto-Create Exactly Three Sequential Series Entries - When Three Complete Passes Are Pending At Once")
     void shouldAutoCreateExactlyThreeSequentialSeriesEntriesWhenThreeCompletePassesArePendingAtOnce() {
         Content finaleSeason = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
         Set<Integer> persistedSeriesPasses = new HashSet<>();
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
@@ -3133,12 +3148,11 @@ class DiaryEntryServiceImplTest {
                         buildDiaryEntry(lucas, finaleSeason, 3)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(series.getId(), "1399", ContentType.SERIES, null, null, null, null, null, null, null));
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(eq(lucasId), eq(series.getId()), anyInt()))
                 .thenAnswer(invocation -> persistedSeriesPasses.contains((Integer) invocation.getArgument(2))
                         ? Optional.of(buildDiaryEntry(lucas, series, invocation.getArgument(2)))
                         : Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> {
             DiaryEntry saved = invocation.getArgument(0);
             if (series.getId().equals(saved.getContent().getId())) {
@@ -3161,7 +3175,7 @@ class DiaryEntryServiceImplTest {
                 .toList();
         assertThat(savedSeriesEntries).extracting(DiaryEntry::getWatchNumber).containsExactly(1, 2, 3);
         assertThat(savedSeriesEntries).allSatisfy(entry -> assertThat(entry.getAutoGenerated()).isTrue());
-        verify(newTransactionExecutor, times(3)).runInNewTransaction(any());
+        verifyNoInteractions(newTransactionExecutor);
     }
 
     @Test
@@ -3170,7 +3184,7 @@ class DiaryEntryServiceImplTest {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
         finaleEpisode.setIsSeriesFinale(true);
         Content season = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         stubContentResolution(finaleEpisode);
@@ -3182,7 +3196,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, true, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(season));
@@ -3190,9 +3204,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, season, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(series.getId(), "1399", ContentType.SERIES, null, null, null, null, null, null, null));
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
@@ -3249,12 +3262,11 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, firstEpisode, 1), buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompletionSignalResult signal = invokeTriggerCompletionCascade(lucasId, finaleEpisode, LocalDate.of(2024, 5, 1));
@@ -3282,13 +3294,12 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(firstEpisodeEntry, secondEpisodeEntry));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userRepository.getReferenceById(marinaId)).thenReturn(marina);
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(watchCompanionRepository.findByDiaryEntryIdIn(List.of(firstEpisodeEntry.getId(), secondEpisodeEntry.getId())))
                 .thenReturn(List.of(
@@ -3319,12 +3330,11 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(firstEpisodeEntry, secondEpisodeEntry));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(watchCompanionRepository.findByDiaryEntryIdIn(List.of(firstEpisodeEntry.getId(), secondEpisodeEntry.getId())))
                 .thenReturn(List.of(
@@ -3343,7 +3353,7 @@ class DiaryEntryServiceImplTest {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
         finaleEpisode.setIsSeriesFinale(true);
         Content season = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
 
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
                 .thenReturn(Optional.of(finaleEpisode));
@@ -3351,7 +3361,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, true, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(season));
@@ -3359,10 +3369,9 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, season, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(series.getId(), "1399", ContentType.SERIES, null, null, null, null, null, null, null));
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompletionSignalResult signal = invokeTriggerCompletionCascade(lucasId, finaleEpisode, LocalDate.of(2024, 7, 1));
@@ -3381,7 +3390,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[createDiaryEntry] Should Ignore Only The Below-Requested Levels - When A Season-Level Request Cascades To Complete The Series")
     void shouldIgnoreOnlyTheBelowRequestedLevelsWhenASeasonLevelRequestCascadesToCompleteTheSeries() throws Exception {
         Content season = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
 
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(season));
@@ -3389,10 +3398,9 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, season, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(series.getId(), "1399", ContentType.SERIES, null, null, null, null, null, null, null));
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         CompletionSignalResult signal = invokeTriggerCompletionCascade(lucasId, season, LocalDate.of(2024, 7, 1), ContentType.SEASON);
@@ -3407,7 +3415,7 @@ class DiaryEntryServiceImplTest {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
         finaleEpisode.setIsSeriesFinale(true);
         Content season = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         stubContentResolution(finaleEpisode);
@@ -3419,7 +3427,7 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, true, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("1399", ContentType.SEASON))
                 .thenReturn(Optional.of(season));
@@ -3427,9 +3435,8 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, season, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO("1399", ContentType.SERIES, null, null, null, null, null)))
                 .thenReturn(new ContentRefDTO(series.getId(), "1399", ContentType.SERIES, null, null, null, null, null, null, null));
-        when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
+        lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
-        stubNewTransactionPassthrough();
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
                 .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
@@ -3450,8 +3457,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Recover And Use The Existing Season Entry - When The Auto-Generated Save Fails Due To Concurrent Creation")
-    void shouldRecoverAndUseTheExistingSeasonEntryWhenTheAutoGeneratedSaveFailsDueToConcurrentCreation() {
+    @DisplayName("[createDiaryEntry] Should Skip Season Completion - When The Same Pass Already Has A Season Entry")
+    void shouldSkipSeasonCompletionWhenTheSamePassAlreadyHasASeasonEntry() {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
         Content season = buildSeason("1399", 1);
         DiaryEntry existingSeasonEntry = buildEntry(lucas, season);
@@ -3468,11 +3475,10 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
-        when(newTransactionExecutor.runInNewTransaction(any()))
-                .thenThrow(buildDataIntegrityViolationException("uq_diary_entries_user_content_watch_number"));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "1399", 1, null, ContentType.SEASON)).thenReturn(Optional.of(season));
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1))
-                .thenReturn(Optional.empty(), Optional.of(existingSeasonEntry));
+                .thenReturn(Optional.of(existingSeasonEntry));
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
 
@@ -3483,12 +3489,13 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
         verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verify(diaryEntryRepository, times(2)).findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1);
+        verify(diaryEntryRepository).findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1);
+        verifyNoInteractions(newTransactionExecutor);
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Propagate The Original Exception - When The Auto-Generated Save Fails And The Expected Entry Still Cannot Be Found")
-    void shouldPropagateTheOriginalExceptionWhenTheAutoGeneratedSaveFailsAndTheExpectedEntryStillCannotBeFound() {
+    @DisplayName("[createDiaryEntry] Should Propagate Completion Save Failure - Within The Outer Diary Transaction")
+    void shouldPropagateCompletionSaveFailureWithinTheOuterDiaryTransaction() {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
         Content season = buildSeason("1399", 1);
         DataIntegrityViolationException exception = buildDataIntegrityViolationException("uq_diary_entries_user_content_watch_number");
@@ -3503,11 +3510,15 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(List.of(buildDiaryEntry(lucas, finaleEpisode, 1)));
         when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null)))
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
-        when(newTransactionExecutor.runInNewTransaction(any())).thenThrow(exception);
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1))
-                .thenReturn(Optional.empty());
-        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                "1399", 1, null, ContentType.SEASON)).thenReturn(Optional.of(season));
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> {
+            DiaryEntry entry = invocation.getArgument(0);
+            if (entry.getContent().getType() == ContentType.SEASON) {
+                throw exception;
+            }
+            return entry;
+        });
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, true, null),
@@ -3515,6 +3526,7 @@ class DiaryEntryServiceImplTest {
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
                 .isSameAs(exception);
+        verifyNoInteractions(newTransactionExecutor);
     }
 
     // ---------- createDiaryEntriesInBulk ----------
@@ -3640,9 +3652,8 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 2))
                 .thenReturn(Optional.of(buildDiaryEntry(lucas, season, 2)));
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
+        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(inv -> inv.getArgument(0));
-        stubNewTransactionPassthrough();
 
         CompletionSignalResult completion = invokeTriggerCompletionCascade(lucasId, finale, LocalDate.now());
 
@@ -3721,10 +3732,9 @@ class DiaryEntryServiceImplTest {
                 historicalSeason.getId(), null, ContentType.SEASON, "900", 1, null, null, null, null, null));
         when(contentRepository.getReferenceById(e1.getId())).thenReturn(e1);
         when(contentRepository.getReferenceById(e2.getId())).thenReturn(e2);
-        when(contentRepository.getReferenceById(historicalSeason.getId())).thenReturn(historicalSeason);
+        lenient().when(contentRepository.getReferenceById(historicalSeason.getId())).thenReturn(historicalSeason);
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(inv -> inv.getArgument(0));
         when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
-        stubNewTransactionPassthrough();
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenAnswer(inv -> {
             DiaryEntry entry = inv.getArgument(0);
             Content entryContent = entry.getContent();
@@ -4054,7 +4064,6 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(Optional.empty(), Optional.of(buildDiaryEntry(lucas, series, 1)));
         when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
 
         when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class)))
                 .thenAnswer(invocation -> {
@@ -4683,10 +4692,13 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
 
         Answer<ContentRefDTO> contentResolutionAnswer = inv -> {
             ContentRefCreationDTO refDto = inv.getArgument(0);
+            if (refDto.type() == ContentType.SERIES) {
+                return new ContentRefDTO(UUID.randomUUID(), "900", ContentType.SERIES,
+                        null, null, null, null, null, null, null);
+            }
             if (refDto.type() == ContentType.SEASON) {
                 return new ContentRefDTO(season.getId(), null, ContentType.SEASON, "900", 1, null, null, null, null, null);
             }
@@ -4737,6 +4749,10 @@ class DiaryEntryServiceImplTest {
         assertThat(result).filteredOn(entry -> entry.content().type() == ContentType.SEASON)
                 .extracting(DiaryEntryResponseDTO::watchNumber, DiaryEntryResponseDTO::autoGenerated)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(2, true));
+        InOrder resolutionOrder = inOrder(contentService, userContentMutationLock);
+        resolutionOrder.verify(contentService, times(3))
+                .getOrCreateReference(any(ContentRefCreationDTO.class), eq(true));
+        resolutionOrder.verify(userContentMutationLock).lock(lucasId);
     }
 
     @Test
@@ -4756,10 +4772,13 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
                 .thenReturn(Optional.empty());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
 
         Answer<ContentRefDTO> contentResolutionAnswer = inv -> {
             ContentRefCreationDTO refDto = inv.getArgument(0);
+            if (refDto.type() == ContentType.SERIES) {
+                return new ContentRefDTO(UUID.randomUUID(), "900", ContentType.SERIES,
+                        null, null, null, null, null, null, null);
+            }
             if (refDto.type() == ContentType.SEASON) {
                 return new ContentRefDTO(season.getId(), null, ContentType.SEASON, "900", 1, null, null, null, null, null);
             }
@@ -4831,7 +4850,7 @@ class DiaryEntryServiceImplTest {
         Content episode = buildFinaleEpisode("900", 1, 1);
         episode.setIsSeriesFinale(true);
         Content season = buildFinaleSeason("900", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
 
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
                 .thenReturn(Optional.of(season));
@@ -4845,7 +4864,6 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
         when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
-        stubNewTransactionPassthrough();
 
         Answer<ContentRefDTO> contentResolutionAnswer = inv -> {
             ContentRefCreationDTO refDto = inv.getArgument(0);
@@ -5058,6 +5076,23 @@ class DiaryEntryServiceImplTest {
 
         verify(diaryEntryRepository).save(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getComment()).isEqualTo("New comment");
+        verify(userContentMutationLock).lock(lucasId);
+    }
+
+    @Test
+    @DisplayName("[updateDiaryEntry] Should Not Resurrect Entry - When It Was Deleted Before The Mutation Lock Was Acquired")
+    void shouldNotResurrectEntryWhenDeletedBeforeMutationLockWasAcquired() {
+        DiaryEntry entry = buildEntry(lucas, fightClub);
+        when(diaryEntryRepository.findById(entry.getId())).thenReturn(Optional.of(entry));
+        when(diaryEntryRepository.existsById(entry.getId())).thenReturn(false);
+
+        assertThatThrownBy(() -> diaryEntryService.updateDiaryEntry(lucasId, entry.getId(),
+                new DiaryEntryUpdateDTO("Updated review", null, null, null, null)))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Diary entry not found");
+
+        verify(userContentMutationLock).lock(lucasId);
+        verify(diaryEntryRepository, never()).save(any());
     }
 
     @Test
@@ -5108,6 +5143,7 @@ class DiaryEntryServiceImplTest {
                 .hasMessageContaining("watchedDate cannot predate the content's release date");
 
         verify(diaryEntryRepository, never()).save(any());
+        verify(userContentMutationLock, never()).lock(lucasId);
     }
 
     @Test
@@ -5179,6 +5215,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.deleteDiaryEntry(lucasId, entry.getId(), false);
 
+        verify(userContentMutationLock).lock(lucasId);
         verify(diaryEntryRepository).delete(entry);
         verify(userContentPosterService, never()).delete(lucasId, fightClub.getId());
     }
@@ -5290,7 +5327,7 @@ class DiaryEntryServiceImplTest {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
         Content season = buildSeason("1399", 1);
         Content finaleSeason = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
         DiaryEntry episodeEntry = buildEntry(lucas, finaleEpisode);
         DiaryEntry seasonEntry = buildEntry(lucas, season);
         seasonEntry.setAutoGenerated(true);
@@ -5325,7 +5362,7 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[deleteDiaryEntry] Should Not Retract Series Entry - When It Was Created Manually")
     void shouldNotRetractSeriesEntryWhenItWasCreatedManually() {
         Content finaleSeason = buildFinaleSeason("1399", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
         DiaryEntry seasonEntry = buildEntry(lucas, finaleSeason);
         DiaryEntry seriesEntry = buildEntry(lucas, series);
 
@@ -5349,7 +5386,7 @@ class DiaryEntryServiceImplTest {
     void shouldNotRetractSeriesEntryWhenTheSeriesIsStillComplete() {
         Content season = buildSeason("1399", 1);
         Content finaleSeason = buildFinaleSeason("1399", 2);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES).build();
+        Content series = buildContent("1399", ContentType.SERIES);
         DiaryEntry seasonEntry = buildEntry(lucas, season);
         DiaryEntry seriesEntry = buildEntry(lucas, series);
         seriesEntry.setAutoGenerated(true);
@@ -5466,7 +5503,7 @@ class DiaryEntryServiceImplTest {
     void shouldDeleteAllAutoGeneratedEpisodeSeasonAndSeriesEntriesWhenASeriesEntryIsDeletedDirectly() {
         Content episode = buildEpisode("900", 1, 1);
         Content season = buildSeason("900", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
         DiaryEntry episodeEntry = buildEntry(lucas, episode);
         episodeEntry.setAutoGenerated(true);
         DiaryEntry seasonEntry = buildEntry(lucas, season);
@@ -5493,7 +5530,7 @@ class DiaryEntryServiceImplTest {
     void shouldPreserveManuallyEditedEntriesWhenASeriesEntryIsDeletedDirectly() {
         Content episode = buildEpisode("900", 1, 1);
         Content season = buildSeason("900", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
         DiaryEntry episodeEntry = buildEntry(lucas, episode);
         episodeEntry.setAutoGenerated(false);
         DiaryEntry seasonEntry = buildEntry(lucas, season);
@@ -5546,7 +5583,7 @@ class DiaryEntryServiceImplTest {
     void shouldDeleteManuallyEditedSeriesHistoryWhenDeletingASeriesEntryDirectlyWithOverrideProtectedEntriesTrue() {
         Content episode = buildEpisode("900", 1, 1);
         Content season = buildSeason("900", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
         DiaryEntry episodeEntry = buildEntry(lucas, episode);
         episodeEntry.setAutoGenerated(false);
         DiaryEntry seasonEntry = buildEntry(lucas, season);
@@ -5573,7 +5610,7 @@ class DiaryEntryServiceImplTest {
     void shouldDeleteOnlyTheAutoGeneratedEntriesOfAMixedSeriesHistoryWhenASeriesEntryIsDeletedDirectly() {
         Content episode = buildEpisode("900", 1, 1);
         Content season = buildSeason("900", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
         DiaryEntry autoGeneratedEpisodeEntry = buildEntry(lucas, episode);
         autoGeneratedEpisodeEntry.setAutoGenerated(true);
         DiaryEntry manuallyEditedSeasonEntry = buildEntry(lucas, season);
@@ -5601,7 +5638,7 @@ class DiaryEntryServiceImplTest {
     void shouldOnlyWipeTheDeletedEntrysOwnWatchCycleWhenOtherRewatchCyclesOfTheSameSeriesExist() {
         Content episode = buildEpisode("900", 1, 1);
         Content season = buildSeason("900", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
 
         DiaryEntry secondWatchEpisodeEntry = buildDiaryEntry(lucas, episode, 2);
         secondWatchEpisodeEntry.setAutoGenerated(true);
@@ -5632,7 +5669,7 @@ class DiaryEntryServiceImplTest {
     void shouldDeleteEveryEpisodeSeasonAndSeriesEntryAcrossAllWatchNumbersWhenCalled() {
         Content episode = buildEpisode("900", 1, 1);
         Content season = buildSeason("900", 1);
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
 
         DiaryEntry firstWatchEpisode = buildDiaryEntry(lucas, episode, 1);
         DiaryEntry secondWatchEpisode = buildDiaryEntry(lucas, episode, 2);
@@ -5654,7 +5691,7 @@ class DiaryEntryServiceImplTest {
     @Test
     @DisplayName("[deleteAllDiaryEntriesForSeries] Should Include Manually-Edited Entries - When Called")
     void shouldIncludeManuallyEditedEntriesWhenDeletingAllDiaryEntriesForSeries() {
-        Content series = Content.builder().id(UUID.randomUUID()).tmdbId("900").type(ContentType.SERIES).build();
+        Content series = buildContent("900", ContentType.SERIES);
         DiaryEntry manuallyEditedEntry = buildDiaryEntry(lucas, series, 1);
         manuallyEditedEntry.setAutoGenerated(false);
 
@@ -5693,11 +5730,6 @@ class DiaryEntryServiceImplTest {
                         null, null, LocalDateTime.now(), LocalDateTime.now()));
     }
 
-    private void stubNewTransactionPassthrough() {
-        when(newTransactionExecutor.runInNewTransaction(any()))
-                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
-    }
-
     private record CompletionSignalResult(DiaryEntry completedSeason, DiaryEntry completedSeries) {
     }
 
@@ -5707,6 +5739,7 @@ class DiaryEntryServiceImplTest {
 
     private CompletionSignalResult invokeTriggerCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate,
             ContentType requestedType) throws Exception {
+        ReflectionTestUtils.invokeMethod(diaryEntryService, "resolveCompletionReferencesBeforeLock", loggedContent);
         Method cascadeMethod = DiaryEntryServiceImpl.class.getDeclaredMethod(
                 "triggerCompletionCascade", UUID.class, Content.class, LocalDate.class, ContentType.class);
         cascadeMethod.setAccessible(true);
@@ -5843,13 +5876,17 @@ class DiaryEntryServiceImplTest {
 
     private Content buildContent(String tmdbId, ContentType type) {
         LocalDateTime now = LocalDateTime.now();
-        return Content.builder()
+        Content content = Content.builder()
                 .id(UUID.randomUUID())
                 .tmdbId(tmdbId)
                 .type(type)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
+        if (type == ContentType.SERIES) {
+            preparedSeriesReferences.putIfAbsent(tmdbId, content);
+        }
+        return content;
     }
 
     private Content buildEpisode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
@@ -5871,7 +5908,7 @@ class DiaryEntryServiceImplTest {
     }
 
     private Content buildSeason(String seriesTmdbId, Integer seasonNumber) {
-        return Content.builder()
+        Content season = Content.builder()
                 .id(UUID.randomUUID())
                 .seriesTmdbId(seriesTmdbId)
                 .seasonNumber(seasonNumber)
@@ -5879,6 +5916,12 @@ class DiaryEntryServiceImplTest {
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+        preparedSeasonReferences.putIfAbsent(seasonReferenceKey(seriesTmdbId, seasonNumber), season);
+        return season;
+    }
+
+    private String seasonReferenceKey(String seriesTmdbId, Integer seasonNumber) {
+        return seriesTmdbId + ":" + seasonNumber;
     }
 
     private Content buildFinaleSeason(String seriesTmdbId, Integer seasonNumber) {

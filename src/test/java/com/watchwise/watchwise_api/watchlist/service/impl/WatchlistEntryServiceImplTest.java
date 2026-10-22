@@ -6,6 +6,9 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
+import com.watchwise.watchwise_api.content.dto.MediaReference;
+import com.watchwise.watchwise_api.content.dto.WatchlistEligibility;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
@@ -18,6 +21,7 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.ContentWatchEligibilityService;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentreleasedatesnapshot.service.ContentReleaseDateSnapshotService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -71,6 +75,7 @@ import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -87,6 +92,8 @@ class WatchlistEntryServiceImplTest {
     @Mock private FollowerRepository followerRepository;
     @Mock private WatchlistEntryMapper watchlistEntryMapper;
     @Mock private AdvisoryLock advisoryLock;
+    @Mock private UserContentMutationLock userContentMutationLock;
+    @Mock private ContentWatchEligibilityService contentWatchEligibilityService;
     @Mock private ContentReleaseDateSnapshotService releaseDateSnapshotService;
     @Mock private ContentCardAssembler contentCardAssembler;
     @Mock private SeriesProgressReadRepository seriesProgressReadRepository;
@@ -110,6 +117,8 @@ class WatchlistEntryServiceImplTest {
         lenient().when(releaseDateSnapshotService.countUpcoming(
                         any(UUID.class), nullable(ContentType.class), nullable(String.class), any(LocalDate.class)))
                 .thenReturn(0L);
+        lenient().when(contentWatchEligibilityService.getWatchlistEligibility(any(UUID.class), any(MediaReference.class)))
+                .thenReturn(new WatchlistEligibility(true, null, java.util.Set.of()));
     }
 
     @Test
@@ -191,9 +200,41 @@ class WatchlistEntryServiceImplTest {
         watchlistEntryService.insertEntry(userId, ContentType.MOVIE, new WatchlistEntryCreationDTO("550"));
 
         verify(advisoryLock).lock("watchlist|" + userId);
+        verify(userContentMutationLock).lock(userId);
         verify(releaseDateSnapshotService).writeThrough(user, movie);
         verify(watchlistEntryRepository).flush();
         verify(watchlistEntryRepository).save(any(WatchlistEntry.class));
+        var lockOrder = inOrder(contentService, releaseDateSnapshotService, userContentMutationLock,
+                contentWatchEligibilityService, advisoryLock, watchlistEntryRepository);
+        lockOrder.verify(contentService).getOrCreateReference(any(ContentRefCreationDTO.class));
+        lockOrder.verify(releaseDateSnapshotService).writeThrough(user, movie);
+        lockOrder.verify(userContentMutationLock).lock(userId);
+        lockOrder.verify(contentWatchEligibilityService).getWatchlistEligibility(userId, MediaReference.movie("550"));
+        lockOrder.verify(advisoryLock).lock("watchlist|" + userId);
+        lockOrder.verify(watchlistEntryRepository).countByUserId(userId);
+    }
+
+    @Test
+    void shouldResolveContentThenLockAndRejectWatchedMovieBeforeWatchlistMutation() {
+        ContentRefDTO reference = new ContentRefDTO(
+                UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null,
+                LocalDateTime.now(), LocalDateTime.now());
+        when(contentService.getOrCreateReference(any(ContentRefCreationDTO.class))).thenReturn(reference);
+        when(contentWatchEligibilityService.getWatchlistEligibility(userId, MediaReference.movie("550")))
+                .thenReturn(new WatchlistEligibility(false, "WATCHED_CONTENT", java.util.Set.of("DIARY_ENTRY")));
+
+        assertThatThrownBy(() -> watchlistEntryService.insertEntry(
+                userId, ContentType.MOVIE, new WatchlistEntryCreationDTO("550")))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("Content already has watched activity");
+
+        var order = inOrder(contentService, userContentMutationLock, contentWatchEligibilityService,
+                advisoryLock, watchlistEntryRepository);
+        order.verify(contentService).getOrCreateReference(any(ContentRefCreationDTO.class));
+        order.verify(userContentMutationLock).lock(userId);
+        order.verify(contentWatchEligibilityService).getWatchlistEligibility(userId, MediaReference.movie("550"));
+        verify(advisoryLock, never()).lock("watchlist|" + userId);
+        verify(watchlistEntryRepository, never()).save(any(WatchlistEntry.class));
     }
 
     @Test

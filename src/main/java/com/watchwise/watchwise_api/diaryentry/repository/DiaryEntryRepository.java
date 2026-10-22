@@ -258,6 +258,28 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     Set<UUID> findWatchedDirectContentIds(
             @Param("userId") UUID userId, @Param("contentIds") Collection<UUID> contentIds);
 
+    @Query(value = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId AND c.type = :type AND c.tmdb_id = :tmdbId
+            ) OR (
+                :type = 'SERIES' AND EXISTS (
+                    SELECT 1
+                    FROM diary_entries d
+                    JOIN contents c ON c.id = d.content_id
+                    WHERE d.user_id = :userId
+                      AND c.type IN ('SEASON', 'EPISODE')
+                      AND c.series_tmdb_id = :tmdbId
+                )
+            )
+            """, nativeQuery = true)
+    boolean existsWatchEvidenceForWatchlist(
+            @Param("userId") UUID userId,
+            @Param("type") String type,
+            @Param("tmdbId") String tmdbId);
+
     @Query("""
             SELECT d FROM DiaryEntry d JOIN FETCH d.content
             WHERE d.user.id = :userId

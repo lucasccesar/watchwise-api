@@ -13,12 +13,16 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbMovieFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
+import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentposter.repository.UserContentPosterRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.Follower;
@@ -44,6 +48,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -66,8 +71,10 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
@@ -108,6 +115,12 @@ class DiaryEntryControllerIntegrationTest {
 
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Autowired
+    private DiaryEntryService diaryEntryService;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @Autowired
     private UserContentPosterRepository userContentPosterRepository;
@@ -1349,6 +1362,29 @@ class DiaryEntryControllerIntegrationTest {
         User entity = userRepository.findById(user.id()).orElseThrow();
         assertThat(diaryEntryRepository.findByUserIdOrderByCreatedAtDesc(entity.getId(), PageRequest.of(0, 10)))
                 .hasSize(1);
+    }
+
+    @Test
+    @DisplayName("[createDiaryEntry] Should Roll Back The Generated Season Entry - When The Outer Diary Transaction Rolls Back")
+    void shouldRollbackGeneratedSeasonEntryWhenTheOuterDiaryTransactionRollsBack() throws Exception {
+        RegisteredUser user = registerUser("diarycompletionrollback");
+        when(tmdbClient.getSeasonFullDetails(eq("atomic-series"), eq(1), any()))
+                .thenReturn(foundSeason(1, new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null)));
+        when(tmdbClient.getTvFullDetails(eq("atomic-series"), any()))
+                .thenReturn(foundTv("atomic-series", 0, 1));
+        DiaryEntryCreationDTO request = new DiaryEntryCreationDTO(
+                new ContentRefCreationDTO(null, ContentType.EPISODE, "atomic-series", 1, 1, null, null),
+                null, null, LocalDate.of(2021, 1, 1), null, null, null);
+
+        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
+            DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntry(user.id(), request);
+            assertThat(result.completedSeason()).isNotNull();
+            throw new IllegalStateException("force rollback after automatic completion");
+        })).isInstanceOf(IllegalStateException.class)
+                .hasMessage("force rollback after automatic completion");
+
+        assertThat(diaryEntryRepository.findAll())
+                .noneMatch(entry -> entry.getUser().getId().equals(user.id()));
     }
 
     @Test

@@ -6,10 +6,13 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.transaction.AdvisoryLock;
+import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.MediaReference;
+import com.watchwise.watchwise_api.content.dto.WatchlistEligibility;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -17,6 +20,7 @@ import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
+import com.watchwise.watchwise_api.content.service.ContentWatchEligibilityService;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentreleasedatesnapshot.service.ContentReleaseDateSnapshotService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -75,6 +79,8 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private final WatchlistEntryMapper watchlistEntryMapper;
     private final PageRequestFactory pageRequestFactory;
     private final AdvisoryLock advisoryLock;
+    private final UserContentMutationLock userContentMutationLock;
+    private final ContentWatchEligibilityService contentWatchEligibilityService;
     private final ContentReleaseDateSnapshotService releaseDateSnapshotService;
     private final ContentCardAssembler contentCardAssembler;
     private final SeriesProgressReadRepository seriesProgressReadRepository;
@@ -479,16 +485,26 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     public WatchlistEntryResponseDTO insertEntry(
             UUID userId, ContentType type, WatchlistEntryCreationDTO watchlistEntryCreationDTO) {
         validateType(type);
-        advisoryLock.lock(lockIdentity(userId));
 
         ContentRefCreationDTO contentRefCreation = new ContentRefCreationDTO(
                 watchlistEntryCreationDTO.tmdbId(), type, null, null, null, null, null);
         ContentRefDTO contentRef = contentService.getOrCreateReference(contentRefCreation);
-
-        long currentCount = watchlistEntryRepository.countByUserId(userId);
         User user = userRepository.getReferenceById(userId);
         Content content = contentRepository.getReferenceById(contentRef.id());
         releaseDateSnapshotService.writeThrough(user, content);
+
+        MediaReference mediaReference = type == ContentType.MOVIE
+                ? MediaReference.movie(contentRef.tmdbId())
+                : MediaReference.series(contentRef.tmdbId());
+        userContentMutationLock.lock(userId);
+        WatchlistEligibility eligibility = contentWatchEligibilityService
+                .getWatchlistEligibility(userId, mediaReference);
+        if (!eligibility.allowed()) {
+            throw new ConflictException("Content already has watched activity");
+        }
+        advisoryLock.lock(lockIdentity(userId));
+
+        long currentCount = watchlistEntryRepository.countByUserId(userId);
         LocalDateTime now = LocalDateTime.now();
 
         WatchlistEntry newEntry = WatchlistEntry.builder()

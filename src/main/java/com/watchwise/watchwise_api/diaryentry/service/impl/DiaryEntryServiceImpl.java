@@ -14,7 +14,7 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbSeasonSummary;
 import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupResult;
-import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
@@ -71,6 +71,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -120,7 +121,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final FollowerRepository followerRepository;
     private final DiaryEntryMapper diaryEntryMapper;
     private final UserMapper userMapper;
-    private final NewTransactionExecutor newTransactionExecutor;
+    private final UserContentMutationLock userContentMutationLock;
     private final WatchlistEntryService watchlistEntryService;
     private final DroppedEntryRepository droppedEntryRepository;
     private final LikeService likeService;
@@ -814,9 +815,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         List<UUID> companionIds = validateCompanions(userId, diaryEntryCreationDTO.watchedWith());
         ResolvedContentRef resolvedContent = resolveContentRefForCreation(userId, diaryEntryCreationDTO);
         ContentRefDTO contentRef = contentService.getOrCreateReference(resolvedContent.content(), resolvedContent.trustedRuntimeMinutes());
+        Content content = contentRepository.getReferenceById(contentRef.id());
+        resolveCompletionReferencesBeforeLock(content);
+        userContentMutationLock.lock(userId);
 
         User user = userRepository.getReferenceById(userId);
-        Content content = contentRepository.getReferenceById(contentRef.id());
 
         DiaryEntry entry;
         try {
@@ -982,6 +985,34 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     @Transactional
     public DiaryEntryResponseDTO updateDiaryEntry(UUID userId, UUID diaryEntryId, DiaryEntryUpdateDTO diaryEntryUpdateDTO) {
         DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
+        LocalDate watchedDate = diaryEntryUpdateDTO.watchedDate();
+        List<UUID> companionIds = diaryEntryUpdateDTO.watchedWith() == null
+                ? null
+                : validateCompanions(userId, diaryEntryUpdateDTO.watchedWith());
+
+        if (watchedDate != null) {
+            assertWatchedDateNotInFuture(watchedDate);
+            Content updatedContent = entry.getContent();
+            assertWatchedDateNotBeforeRelease(watchedDate,
+                    resolveReleaseDate(updatedContent.getType(), updatedContent.getTmdbId(), updatedContent.getSeriesTmdbId(),
+                            updatedContent.getSeasonNumber(), updatedContent.getEpisodeNumber()));
+        }
+        if (diaryEntryUpdateDTO.watchedInTheater() != null) {
+            assertWatchedInTheaterAllowed(entry.getContent().getType(), diaryEntryUpdateDTO.watchedInTheater());
+        }
+
+        userContentMutationLock.lock(userId);
+        if (!diaryEntryRepository.existsById(diaryEntryId)) {
+            throw new NotFoundException("Diary entry not found");
+        }
+        try {
+            entityManager.refresh(entry);
+        } catch (EntityNotFoundException e) {
+            throw new NotFoundException("Diary entry not found");
+        }
+        if (!entry.getUser().getId().equals(userId)) {
+            throw new NotFoundException("Diary entry not found");
+        }
 
         if (diaryEntryUpdateDTO.comment() != null) {
             entry.setComment(diaryEntryUpdateDTO.comment());
@@ -989,20 +1020,13 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (diaryEntryUpdateDTO.score() != null) {
             entry.setScore(diaryEntryUpdateDTO.score());
         }
-        if (diaryEntryUpdateDTO.watchedDate() != null) {
-            assertWatchedDateNotInFuture(diaryEntryUpdateDTO.watchedDate());
-            Content updatedContent = entry.getContent();
-            assertWatchedDateNotBeforeRelease(diaryEntryUpdateDTO.watchedDate(),
-                    resolveReleaseDate(updatedContent.getType(), updatedContent.getTmdbId(), updatedContent.getSeriesTmdbId(),
-                            updatedContent.getSeasonNumber(), updatedContent.getEpisodeNumber()));
-            entry.setWatchedDate(diaryEntryUpdateDTO.watchedDate());
+        if (watchedDate != null) {
+            entry.setWatchedDate(watchedDate);
         }
         if (diaryEntryUpdateDTO.watchedInTheater() != null) {
-            assertWatchedInTheaterAllowed(entry.getContent().getType(), diaryEntryUpdateDTO.watchedInTheater());
             entry.setWatchedInTheater(diaryEntryUpdateDTO.watchedInTheater());
         }
-        if (diaryEntryUpdateDTO.watchedWith() != null) {
-            List<UUID> companionIds = validateCompanions(userId, diaryEntryUpdateDTO.watchedWith());
+        if (companionIds != null) {
             watchCompanionRepository.deleteByDiaryEntryId(entry.getId());
             saveCompanions(entry, companionIds);
         }
@@ -1256,12 +1280,14 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     @Override
     @Transactional
     public void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries) {
+        userContentMutationLock.lock(userId);
         deleteDiaryEntry(userId, diaryEntryId, overrideProtectedEntries, new ArrayList<>());
     }
 
     @Override
     @Transactional
     public void deleteAllDiaryEntriesForSeries(UUID userId, String seriesTmdbId) {
+        userContentMutationLock.lock(userId);
         List<DiaryEntry> allEntries = Stream.of(
                         diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId),
                         diaryEntryRepository.findAllSeasonEntriesInSeries(userId, seriesTmdbId),
@@ -1405,14 +1431,26 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         List<Integer> episodeNumbers = bulkEpisodeNumbers(seasonDetails, finaleEpisodeNumber, cutoff);
+        Map<Integer, List<Integer>> episodeNumbersBySeason = Map.of(seasonNumber, episodeNumbers);
+        Map<Integer, Integer> finaleEpisodeNumbersBySeason = Map.of(seasonNumber, finaleEpisodeNumber);
+        Map<Integer, Map<Integer, Integer>> runtimesBySeason = Map.of(
+                seasonNumber, episodeRuntimeMinutesFromTmdb(seasonDetails));
+        Map<Integer, Boolean> seriesFinaleBySeason = new LinkedHashMap<>();
+        seriesFinaleBySeason.put(seasonNumber, isSeriesFinale);
+        Map<EpisodeKey, ContentRefDTO> episodeReferences = resolveBulkEpisodeReferences(
+                seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
+                runtimesBySeason, seriesFinaleBySeason);
+        resolveBulkCompletionReferences(seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
+                episodeReferences);
+        userContentMutationLock.lock(userId);
+
         BulkPassPlan passPlan = buildBulkPassPlan(
                 episodeNumbers.stream().map(episodeNumber -> new EpisodeKey(seasonNumber, episodeNumber)).toList(),
                 diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(userId, seriesTmdbId, seasonNumber));
-        Map<Integer, Integer> episodeRuntimeMinutes = episodeRuntimeMinutesFromTmdb(seasonDetails);
         for (int episodeNumber : episodeNumbers) {
-            DiaryEntry entry = bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
-                    episodeNumber == finaleEpisodeNumber, isSeriesFinale, watchedDate, created, requestedType, companionIds,
-                    episodeRuntimeMinutes.get(episodeNumber), true, passPlan,
+            DiaryEntry entry = bulkLogEpisode(userId, seasonNumber, episodeNumber,
+                    episodeNumber == finaleEpisodeNumber, watchedDate, created, requestedType, companionIds,
+                    episodeReferences.get(new EpisodeKey(seasonNumber, episodeNumber)), passPlan,
                     new BulkCompletionBoundary(episodeNumbers, null, passPlan.targetWatchNumber()));
             if (entry != null) {
                 created.add(entry);
@@ -1568,41 +1606,26 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return explicitFinaleEpisodeNumber;
     }
 
-    private DiaryEntry bulkLogEpisode(UUID userId, String seriesTmdbId, Integer seasonNumber, int episodeNumber,
-            boolean isSeasonFinale, Boolean isSeriesFinale, LocalDate watchedDate, List<DiaryEntry> created,
-            ContentType requestedType, List<UUID> companionIds, Integer runtimeMinutes, boolean trustedRuntimeMinutes,
+    private DiaryEntry bulkLogEpisode(UUID userId, Integer seasonNumber, int episodeNumber,
+            boolean isSeasonFinale, LocalDate watchedDate, List<DiaryEntry> created,
+            ContentType requestedType, List<UUID> companionIds, ContentRefDTO episodeRef,
             BulkPassPlan passPlan, BulkCompletionBoundary completionBoundary) {
         EpisodeKey episodeKey = new EpisodeKey(seasonNumber, episodeNumber);
         if (!passPlan.needsEpisode(episodeKey) && !isSeasonFinale) {
             return null;
         }
-        boolean matchesKnownGlobalSeasonFinale = !isSeasonFinale || contentRepository
-                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE)
-                .map(Content::getEpisodeNumber)
-                .map(existingEpisodeNumber -> existingEpisodeNumber == episodeNumber)
-                .orElse(true);
-        boolean matchesKnownGlobalSeriesFinale = !Boolean.TRUE.equals(isSeriesFinale) || contentRepository
-                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON)
-                .map(Content::getSeasonNumber)
-                .map(existingSeasonNumber -> existingSeasonNumber == seasonNumber)
-                .orElse(true);
-        Boolean seasonFinaleFlag = isSeasonFinale && matchesKnownGlobalSeasonFinale ? Boolean.TRUE : null;
-        Boolean seriesFinaleFlag = isSeasonFinale && matchesKnownGlobalSeasonFinale && matchesKnownGlobalSeriesFinale
-                && Boolean.TRUE.equals(isSeriesFinale)
-                ? Boolean.TRUE : null;
-        ContentRefDTO episodeRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
-                null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber,
-                seasonFinaleFlag, seriesFinaleFlag, runtimeMinutes, null), trustedRuntimeMinutes);
+        ContentRefDTO resolvedReference = Objects.requireNonNull(episodeRef,
+                "Bulk episode references must be resolved before acquiring the content-state lock");
 
         User user = userRepository.getReferenceById(userId);
-        Content episodeContent = contentRepository.getReferenceById(episodeRef.id());
+        Content episodeContent = contentRepository.getReferenceById(resolvedReference.id());
         if (isSeasonFinale) {
             entityManager.refresh(episodeContent);
         }
 
         if (!passPlan.needsEpisode(episodeKey)) {
-            CompletionSignal completion = triggerBulkCompletionCascade(userId, episodeContent, watchedDate, requestedType,
-                    completionBoundary, seriesFinaleFlag);
+            CompletionSignal completion = triggerBulkCompletionCascade(
+                    userId, episodeContent, watchedDate, requestedType, completionBoundary);
             if (completion.completedSeason() != null) {
                 created.add(completion.completedSeason());
             }
@@ -1622,8 +1645,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         saveCompanions(entry, companionIds);
 
         CompletionSignal completion = isSeasonFinale
-                ? triggerBulkCompletionCascade(userId, episodeContent, watchedDate, requestedType, completionBoundary,
-                        seriesFinaleFlag)
+                ? triggerBulkCompletionCascade(userId, episodeContent, watchedDate, requestedType, completionBoundary)
                 : CompletionSignal.NONE;
         if (completion.completedSeason() != null) {
             created.add(completion.completedSeason());
@@ -1633,6 +1655,90 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
 
         return entry;
+    }
+
+    private ContentRefDTO resolveBulkEpisodeReference(String seriesTmdbId, Integer seasonNumber, int episodeNumber,
+            Boolean isSeasonFinale, Boolean isSeriesFinale, Integer runtimeMinutes) {
+        boolean requestedSeasonFinale = Boolean.TRUE.equals(isSeasonFinale);
+        boolean matchesKnownGlobalSeasonFinale = !requestedSeasonFinale || contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE)
+                .map(Content::getEpisodeNumber)
+                .map(existingEpisodeNumber -> existingEpisodeNumber == episodeNumber)
+                .orElse(true);
+        boolean matchesKnownGlobalSeriesFinale = !Boolean.TRUE.equals(isSeriesFinale) || contentRepository
+                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON)
+                .map(Content::getSeasonNumber)
+                .map(existingSeasonNumber -> existingSeasonNumber == seasonNumber)
+                .orElse(true);
+        Boolean seasonFinaleFlag = requestedSeasonFinale && matchesKnownGlobalSeasonFinale ? Boolean.TRUE : null;
+        Boolean seriesFinaleFlag = requestedSeasonFinale && matchesKnownGlobalSeasonFinale && matchesKnownGlobalSeriesFinale
+                && Boolean.TRUE.equals(isSeriesFinale)
+                ? Boolean.TRUE : null;
+        return contentService.getOrCreateReference(new ContentRefCreationDTO(
+                null, ContentType.EPISODE, seriesTmdbId, seasonNumber, episodeNumber,
+                seasonFinaleFlag, seriesFinaleFlag, runtimeMinutes, null), true);
+    }
+
+    private Map<EpisodeKey, ContentRefDTO> resolveBulkEpisodeReferences(
+            String seriesTmdbId,
+            Map<Integer, List<Integer>> episodeNumbersBySeason,
+            Map<Integer, Integer> finaleEpisodeNumbersBySeason,
+            Map<Integer, Map<Integer, Integer>> runtimesBySeason,
+            Map<Integer, Boolean> seriesFinaleBySeason) {
+        Map<EpisodeKey, ContentRefDTO> references = new LinkedHashMap<>();
+        episodeNumbersBySeason.forEach((seasonNumber, episodeNumbers) -> {
+            int finaleEpisodeNumber = finaleEpisodeNumbersBySeason.get(seasonNumber);
+            Map<Integer, Integer> runtimes = runtimesBySeason.getOrDefault(seasonNumber, Map.of());
+            for (int episodeNumber : episodeNumbers) {
+                references.put(new EpisodeKey(seasonNumber, episodeNumber), resolveBulkEpisodeReference(
+                        seriesTmdbId, seasonNumber, episodeNumber,
+                        episodeNumber == finaleEpisodeNumber ? Boolean.TRUE : null,
+                        seriesFinaleBySeason.get(seasonNumber), runtimes.get(episodeNumber)));
+            }
+        });
+        return references;
+    }
+
+    private void resolveBulkCompletionReferences(
+            String seriesTmdbId,
+            Map<Integer, List<Integer>> episodeNumbersBySeason,
+            Map<Integer, Integer> finaleEpisodeNumbersBySeason,
+            Map<EpisodeKey, ContentRefDTO> episodeReferences) {
+        contentService.getOrCreateReference(new ContentRefCreationDTO(
+                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
+        episodeNumbersBySeason.forEach((seasonNumber, episodeNumbers) -> {
+            Integer finaleEpisodeNumber = finaleEpisodeNumbersBySeason.get(seasonNumber);
+            ContentRefDTO finaleEpisode = finaleEpisodeNumber == null
+                    ? null
+                    : episodeReferences.get(new EpisodeKey(seasonNumber, finaleEpisodeNumber));
+            Boolean isSeriesFinale = finaleEpisode == null ? null : finaleEpisode.isSeriesFinale();
+            contentService.getOrCreateReference(new ContentRefCreationDTO(
+                    null, ContentType.SEASON, seriesTmdbId, seasonNumber, null, null, isSeriesFinale));
+        });
+    }
+
+    private void resolveCompletionReferencesBeforeLock(Content content) {
+        if (content.getType() == ContentType.EPISODE) {
+            Optional<Content> finaleEpisode = contentRepository
+                    .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(
+                            content.getSeriesTmdbId(), content.getSeasonNumber(), ContentType.EPISODE);
+            if (finaleEpisode.isEmpty()) {
+                return;
+            }
+            Boolean isSeriesFinale = finaleEpisode.get().getIsSeriesFinale();
+            contentService.getOrCreateReference(new ContentRefCreationDTO(
+                    null, ContentType.SEASON, content.getSeriesTmdbId(), content.getSeasonNumber(), null,
+                    null, isSeriesFinale));
+            if (Boolean.TRUE.equals(isSeriesFinale)
+                    || contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(
+                            content.getSeriesTmdbId(), ContentType.SEASON).isPresent()) {
+                contentService.getOrCreateReference(new ContentRefCreationDTO(
+                        content.getSeriesTmdbId(), ContentType.SERIES, null, null, null, null, null));
+            }
+        } else if (content.getType() == ContentType.SEASON) {
+            contentService.getOrCreateReference(new ContentRefCreationDTO(
+                    content.getSeriesTmdbId(), ContentType.SERIES, null, null, null, null, null));
+        }
     }
 
     private void bulkLogSeries(UUID userId, String seriesTmdbId, Integer explicitFinaleSeasonNumber,
@@ -1663,8 +1769,19 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             }
         }
 
-        contentService.getOrCreateReference(new ContentRefCreationDTO(
-                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
+        Map<Integer, Map<Integer, Integer>> runtimesBySeason = new LinkedHashMap<>();
+        seasonDetailsByNumber.forEach((seasonNumber, details) ->
+                runtimesBySeason.put(seasonNumber, episodeRuntimeMinutesFromTmdb(details)));
+        Map<Integer, Boolean> seriesFinaleBySeason = new LinkedHashMap<>();
+        for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
+            seriesFinaleBySeason.put(seasonNumber, seasonNumber == finaleSeasonNumber);
+        }
+        Map<EpisodeKey, ContentRefDTO> episodeReferences = resolveBulkEpisodeReferences(
+                seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
+                runtimesBySeason, seriesFinaleBySeason);
+        resolveBulkCompletionReferences(seriesTmdbId, episodeNumbersBySeason, finaleEpisodeNumbersBySeason,
+                episodeReferences);
+        userContentMutationLock.lock(userId);
 
         List<EpisodeKey> eligibleEpisodes = episodeNumbersBySeason.entrySet().stream()
                 .flatMap(entry -> entry.getValue().stream().map(episodeNumber -> new EpisodeKey(entry.getKey(), episodeNumber)))
@@ -1675,13 +1792,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         for (int seasonNumber = 1; seasonNumber <= finaleSeasonNumber; seasonNumber++) {
             boolean isSeriesFinaleSeason = seasonNumber == finaleSeasonNumber;
-            TmdbSeasonFullDetails seasonDetails = seasonDetailsByNumber.get(seasonNumber);
             int finaleEpisodeNumber = finaleEpisodeNumbersBySeason.get(seasonNumber);
-            Map<Integer, Integer> episodeRuntimeMinutes = episodeRuntimeMinutesFromTmdb(seasonDetails);
             for (int episodeNumber : episodeNumbersBySeason.get(seasonNumber)) {
-                DiaryEntry entry = bulkLogEpisode(userId, seriesTmdbId, seasonNumber, episodeNumber,
-                        episodeNumber == finaleEpisodeNumber, isSeriesFinaleSeason, watchedDate, created,
-                        ContentType.SERIES, companionIds, episodeRuntimeMinutes.get(episodeNumber), true, passPlan,
+                DiaryEntry entry = bulkLogEpisode(userId, seasonNumber, episodeNumber,
+                        episodeNumber == finaleEpisodeNumber, watchedDate, created,
+                        ContentType.SERIES, companionIds,
+                        episodeReferences.get(new EpisodeKey(seasonNumber, episodeNumber)), passPlan,
                         new BulkCompletionBoundary(episodeNumbersBySeason.get(seasonNumber), finaleSeasonNumber,
                                 passPlan.targetWatchNumber()));
                 if (entry != null) {
@@ -1828,7 +1944,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private CompletionSignal triggerBulkCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate,
-            ContentType requestedType, BulkCompletionBoundary boundary, Boolean globalSeriesFinale) {
+            ContentType requestedType, BulkCompletionBoundary boundary) {
         if (loggedContent.getType() != ContentType.EPISODE) {
             return CompletionSignal.NONE;
         }
@@ -1836,7 +1952,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         List<DiaryEntry> episodeHistory = diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(
                 userId, seriesTmdbId, loggedContent.getSeasonNumber());
         DiaryEntry completedSeason = completeSeasonPass(userId, seriesTmdbId, loggedContent.getSeasonNumber(),
-                boundary.eligibleEpisodes(), boundary.targetWatchNumber(), globalSeriesFinale, watchedDate,
+                boundary.eligibleEpisodes(), boundary.targetWatchNumber(), watchedDate,
                 requestedType, episodeHistory);
         if (boundary.seriesFinaleSeasonNumber() == null) {
             DiaryEntry completedSeries = completedSeason == null ? null
@@ -1849,20 +1965,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return new CompletionSignal(completedSeason, completedSeries);
     }
 
-    private DiaryEntry persistAutoGeneratedEntry(UUID userId, User user, Content content, LocalDate watchedDate,
+    private DiaryEntry persistAutoGeneratedEntry(User user, Content content, LocalDate watchedDate,
             int expectedWatchNumber, boolean ignore, List<UUID> unanimousCompanionIds) {
-        try {
-            return newTransactionExecutor.runInNewTransaction(() -> {
-                DiaryEntry entry = persistDiaryEntry(user, content, null, null, watchedDate, null, null, null, true, ignore,
-                        expectedWatchNumber);
-                saveCompanions(entry, unanimousCompanionIds);
-                return entry;
-            });
-        } catch (DataIntegrityViolationException e) {
-            return diaryEntryRepository
-                    .findFirstByUserIdAndContentIdAndWatchNumber(userId, content.getId(), expectedWatchNumber)
-                    .orElseThrow(() -> e);
-        }
+        DiaryEntry entry = persistDiaryEntry(user, content, null, null, watchedDate, null, null, null, true, ignore,
+                expectedWatchNumber);
+        saveCompanions(entry, unanimousCompanionIds);
+        return entry;
     }
 
     private List<UUID> computeUnanimousCompanions(List<UUID> childEntryIds) {
@@ -1902,7 +2010,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         DiaryEntry lastCreated = null;
         for (int pass : positiveWatchNumbers(history)) {
             DiaryEntry created = completeSeasonPass(userId, seriesTmdbId, seasonNumber, eligibleEpisodes, pass,
-                    seasonFinaleEpisode.get().getIsSeriesFinale(), watchedDate, requestedType, history);
+                    watchedDate, requestedType, history);
             if (created != null) {
                 lastCreated = created;
             }
@@ -1918,7 +2026,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         DiaryEntry lastCreated = null;
         for (int pass : positiveWatchNumbers(history)) {
             DiaryEntry created = completeSeasonPass(userId, seriesTmdbId, seasonNumber, eligibleEpisodes, pass,
-                    null, watchedDate, requestedType, history);
+                    watchedDate, requestedType, history);
             if (created != null) {
                 lastCreated = created;
             }
@@ -1932,7 +2040,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     }
 
     private DiaryEntry completeSeasonPass(UUID userId, String seriesTmdbId, int seasonNumber,
-            List<Integer> eligibleEpisodes, int pass, Boolean globalSeriesFinale, LocalDate watchedDate,
+            List<Integer> eligibleEpisodes, int pass, LocalDate watchedDate,
             ContentType requestedType, List<DiaryEntry> history) {
         Set<Integer> eligible = Set.copyOf(eligibleEpisodes);
         List<DiaryEntry> children = history.stream()
@@ -1943,14 +2051,17 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (!present.containsAll(eligible)) {
             return null;
         }
-        ContentRefDTO seasonRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
-                null, ContentType.SEASON, seriesTmdbId, seasonNumber, null, null, globalSeriesFinale));
-        if (diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(userId, seasonRef.id(), pass).isPresent()) {
+        Content seasonContent = contentRepository
+                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
+                        seriesTmdbId, seasonNumber, null, ContentType.SEASON)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Season completion reference was not prepared before acquiring the content-state lock"));
+        if (diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(
+                userId, seasonContent.getId(), pass).isPresent()) {
             return null;
         }
         User user = userRepository.getReferenceById(userId);
-        Content seasonContent = contentRepository.getReferenceById(seasonRef.id());
-        return persistAutoGeneratedEntry(userId, user, seasonContent, watchedDate, pass,
+        return persistAutoGeneratedEntry(user, seasonContent, watchedDate, pass,
                 isBelowRequestedLevel(ContentType.SEASON, requestedType),
                 computeUnanimousCompanions(children.stream().map(DiaryEntry::getId).toList()));
     }
@@ -2013,14 +2124,15 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         if (present.size() != finaleSeasonNumber) {
             return null;
         }
-        ContentRefDTO seriesRef = contentService.getOrCreateReference(new ContentRefCreationDTO(
-                seriesTmdbId, ContentType.SERIES, null, null, null, null, null));
-        if (diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(userId, seriesRef.id(), pass).isPresent()) {
+        Content seriesContent = contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Series completion reference was not prepared before acquiring the content-state lock"));
+        if (diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(
+                userId, seriesContent.getId(), pass).isPresent()) {
             return null;
         }
         User user = userRepository.getReferenceById(userId);
-        Content seriesContent = contentRepository.getReferenceById(seriesRef.id());
-        return persistAutoGeneratedEntry(userId, user, seriesContent, watchedDate, pass,
+        return persistAutoGeneratedEntry(user, seriesContent, watchedDate, pass,
                 isBelowRequestedLevel(ContentType.SERIES, requestedType),
                 computeUnanimousCompanions(children.stream().map(DiaryEntry::getId).toList()));
     }
@@ -2047,6 +2159,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DeletionImpactDTO computeDeletionImpact(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries) {
+        userContentMutationLock.lock(userId);
         List<DiaryEntry> cascadeDeleted = new ArrayList<>();
 
         deleteDiaryEntry(userId, diaryEntryId, overrideProtectedEntries, cascadeDeleted);
