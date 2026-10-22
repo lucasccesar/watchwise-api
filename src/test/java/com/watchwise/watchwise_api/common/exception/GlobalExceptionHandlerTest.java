@@ -16,10 +16,13 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class GlobalExceptionHandlerTest {
 
@@ -88,14 +91,30 @@ class GlobalExceptionHandlerTest {
     @DisplayName("[handleMaxUploadSizeExceeded] Should Return 413 ApiError - When Multipart Upload Exceeds Limit")
     void shouldReturn413ApiErrorWhenMultipartUploadExceedsLimit() {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/imports/uploads");
+        WebRequest webRequest = new ServletWebRequest(request);
 
-        var response = handler.handleMaxUploadSizeExceeded(new MaxUploadSizeExceededException(1024), request);
+        var response = handler.handleMaxUploadSizeExceededException(
+                new MaxUploadSizeExceededException(1024), new HttpHeaders(), HttpStatus.PAYLOAD_TOO_LARGE, webRequest);
 
         assertThat(response.getStatusCode().value()).isEqualTo(413);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().error()).isEqualTo("Payload Too Large");
-        assertThat(response.getBody().message()).isEqualTo("Uploaded file exceeds the configured size limit");
-        assertThat(response.getBody().path()).isEqualTo("/imports/uploads");
+        assertThat(response.getBody()).isInstanceOf(ApiError.class);
+        ApiError apiError = (ApiError) response.getBody();
+        assertThat(apiError.error()).isEqualTo("Payload Too Large");
+        assertThat(apiError.message()).isEqualTo("Uploaded file exceeds the configured size limit");
+        assertThat(apiError.path()).isEqualTo("/imports/uploads");
+    }
+
+    @Test
+    @DisplayName("[handleMaxUploadSizeExceededException] Should Register Without Ambiguity - When MVC Initializes Advice")
+    void shouldRegisterMaxUploadHandlerWithoutAmbiguityWhenMvcInitializesAdvice() {
+        try (AnnotationConfigApplicationContext applicationContext = new AnnotationConfigApplicationContext()) {
+            applicationContext.registerBean(GlobalExceptionHandler.class);
+            applicationContext.refresh();
+            ExceptionHandlerExceptionResolver resolver = new ExceptionHandlerExceptionResolver();
+            resolver.setApplicationContext(applicationContext);
+
+            assertThatCode(resolver::afterPropertiesSet).doesNotThrowAnyException();
+        }
     }
 
     @Test

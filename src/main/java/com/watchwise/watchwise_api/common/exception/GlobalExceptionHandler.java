@@ -138,19 +138,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 ));
     }
 
-    @ExceptionHandler(MaxUploadSizeExceededException.class)
-    ResponseEntity<ApiError> handleMaxUploadSizeExceeded(
+    @Override
+    protected ResponseEntity<Object> handleMaxUploadSizeExceededException(
             MaxUploadSizeExceededException ex,
-            HttpServletRequest request
+            HttpHeaders headers,
+            HttpStatusCode status,
+            WebRequest request
     ) {
-        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(new ApiError(
-                        LocalDateTime.now(),
-                        HttpStatus.PAYLOAD_TOO_LARGE.value(),
-                        "Payload Too Large",
-                        "Uploaded file exceeds the configured size limit",
-                        request.getRequestURI()
-                ));
+        String path = ((ServletWebRequest) request).getRequest().getRequestURI();
+        ApiError apiError = new ApiError(
+                LocalDateTime.now(),
+                HttpStatus.PAYLOAD_TOO_LARGE.value(),
+                "Payload Too Large",
+                "Uploaded file exceeds the configured size limit",
+                path
+        );
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(apiError);
     }
 
     @ExceptionHandler(DailyGamesUnavailableException.class)
