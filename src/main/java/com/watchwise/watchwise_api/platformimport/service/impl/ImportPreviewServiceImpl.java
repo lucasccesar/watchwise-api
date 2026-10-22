@@ -185,6 +185,15 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 .map(this::toPreviewItem);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ImportPlanVersion currentVersion(UUID ownerId, UUID jobId) {
+        requireOwnerAndJob(ownerId, jobId);
+        ImportJob job = importJobRepository.findOwnedById(jobId, ownerId)
+                .orElseThrow(() -> new NotFoundException("Import job not found"));
+        return version(job, job.getPreviewVersion());
+    }
+
     private ImportJob lockOwnedJob(UUID ownerId, UUID jobId) {
         return importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)
                 .orElseThrow(() -> new NotFoundException("Import job not found"));
@@ -863,7 +872,14 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private ImportPreviewItemDTO toPreviewItem(ImportItem item) {
-        return new ImportPreviewItemDTO(item.getId(), item.getNormalizedKind(), item.getDecision(), item.getOutcome());
+        return new ImportPreviewItemDTO(
+                item.getId(), item.getOrdinal(), item.getNormalizedKind(),
+                item.getDecision(), item.getOutcome(), item.getIssue(), optionalJson(item.getPayloadJson()),
+                optionalJson(item.getResolvedTargetJson()));
+    }
+
+    private JsonNode optionalJson(String value) {
+        return value == null || value.isBlank() ? null : readPayload(value);
     }
 
     private ImportPlanVersion version(ImportJob job, long version) {

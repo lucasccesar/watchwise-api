@@ -15,4 +15,6 @@ public interface ImportPreviewService {
     ImportPlanVersion resolve(UUID ownerId, UUID jobId, List<ImportResolutionOperation> decisions, long expectedVersion);
 
     Page<ImportPreviewItemDTO> preview(UUID ownerId, UUID jobId, int page, int size);
+
+    ImportPlanVersion currentVersion(UUID ownerId, UUID jobId);
 }

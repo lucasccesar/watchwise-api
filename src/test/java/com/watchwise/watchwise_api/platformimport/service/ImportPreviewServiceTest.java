@@ -509,7 +509,8 @@ class ImportPreviewServiceTest {
 
         assertThat(result.getContent()).containsExactly(
                 new com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO(
-                        itemId, ImportRecordKind.LIST_ITEM, null, null));
+                        itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null,
+                        objectMapper.createObjectNode(), null));
         assertThat(result.getTotalElements()).isEqualTo(1);
     }
 

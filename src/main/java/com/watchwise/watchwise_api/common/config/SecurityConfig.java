@@ -9,6 +9,8 @@ import com.watchwise.watchwise_api.common.security.JwtService;
 import com.watchwise.watchwise_api.common.security.PickCreationThrottleFilter;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.common.security.SpaCsrfTokenRequestHandler;
+import com.watchwise.watchwise_api.platformimport.config.ImportMultipartRequestGateFilter;
+import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +24,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
 import org.springframework.security.web.csrf.CsrfFilter;
@@ -70,6 +73,20 @@ public class SecurityConfig {
     }
 
     @Bean
+    public ImportMultipartRequestGateFilter importMultipartRequestGateFilter(
+            ImportLimits importLimits, ObjectMapper objectMapper, Clock clock) {
+        return new ImportMultipartRequestGateFilter(importLimits, objectMapper, clock);
+    }
+
+    @Bean
+    public FilterRegistrationBean<ImportMultipartRequestGateFilter> importMultipartRequestGateFilterRegistration(
+            ImportMultipartRequestGateFilter filter) {
+        FilterRegistrationBean<ImportMultipartRequestGateFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
     public JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint(ObjectMapper objectMapper) {
         return new JsonAuthenticationEntryPoint(objectMapper);
     }
@@ -94,6 +111,7 @@ public class SecurityConfig {
             HttpSecurity http,
             JwtCookieAuthenticationFilter jwtCookieAuthenticationFilter,
             PickCreationThrottleFilter pickCreationThrottleFilter,
+            ImportMultipartRequestGateFilter importMultipartRequestGateFilter,
             JsonAuthenticationEntryPoint jsonAuthenticationEntryPoint,
             JsonAccessDeniedHandler jsonAccessDeniedHandler,
             CsrfTokenRepository csrfTokenRepository,
@@ -117,6 +135,7 @@ public class SecurityConfig {
                 .addFilterBefore(jwtCookieAuthenticationFilter, CsrfFilter.class)
                 .addFilterAfter(pickCreationThrottleFilter, JwtCookieAuthenticationFilter.class)
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
+                .addFilterAfter(importMultipartRequestGateFilter, AuthorizationFilter.class)
                 .build();
     }
 }

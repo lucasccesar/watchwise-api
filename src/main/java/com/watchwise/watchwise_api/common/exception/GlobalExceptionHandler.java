@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.common.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Validation;
+import jakarta.persistence.OptimisticLockException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpHeaders;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.databind.exc.InvalidFormatException;
@@ -74,6 +76,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                         HttpStatus.CONFLICT.value(),
                         "Conflict",
                         ex.getMessage(),
+                        request.getRequestURI()
+                ));
+    }
+
+    @ExceptionHandler({ObjectOptimisticLockingFailureException.class, OptimisticLockException.class})
+    ResponseEntity<ApiError> handleOptimisticLockingFailure(
+            RuntimeException ex,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError(
+                        LocalDateTime.now(),
+                        HttpStatus.CONFLICT.value(),
+                        "Conflict",
+                        "Import job changed during the request; reload and retry",
                         request.getRequestURI()
                 ));
     }

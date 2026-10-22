@@ -20,11 +20,11 @@ public class ImportJob {
  @Version @Column(nullable=false) private long version;
  @Column(name="preview_version", nullable=false) @Setter private long previewVersion;
  @Column(name="selection_json", nullable=false, columnDefinition="TEXT") @Setter private String selectionJson;
- @Column(name="zip_digest", length=128) private String zipDigest;
+ @Setter @Column(name="zip_digest", length=128) private String zipDigest;
  @Column(nullable=false, length=100) private String timezone;
  @Column(name="storage_key", nullable=false, length=500) private String storageKey;
- @Column(name="upload_size_bytes", nullable=false) private long uploadSizeBytes;
- @Column(columnDefinition="TEXT") private String checkpoint;
+ @Setter @Column(name="upload_size_bytes", nullable=false) private long uploadSizeBytes;
+ @Setter @Column(columnDefinition="TEXT") private String checkpoint;
  @Column(name="work_phase", length=40) @Setter private String workPhase;
  @Column(name="work_pending", nullable=false) @Setter private boolean workPending;
  @Column(name="next_run_at") @Setter private LocalDateTime nextRunAt;

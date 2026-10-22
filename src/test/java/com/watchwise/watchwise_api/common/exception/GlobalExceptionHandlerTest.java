@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.common.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
@@ -13,6 +14,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
@@ -115,6 +117,35 @@ class GlobalExceptionHandlerTest {
 
             assertThatCode(resolver::afterPropertiesSet).doesNotThrowAnyException();
         }
+    }
+
+    @Test
+    @DisplayName("[handleOptimisticLockingFailure] Should Return Generic 409 ApiError - When Concurrent Update Loses")
+    void shouldReturnGeneric409ApiErrorWhenConcurrentUpdateLoses() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/imports/123/commit");
+
+        var response = handler.handleOptimisticLockingFailure(
+                new ObjectOptimisticLockingFailureException("ImportJob", "secret row details"), request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().error()).isEqualTo("Conflict");
+        assertThat(response.getBody().message()).isEqualTo("Import job changed during the request; reload and retry");
+        assertThat(response.getBody().message()).doesNotContain("secret row details");
+        assertThat(response.getBody().path()).isEqualTo("/imports/123/commit");
+    }
+
+    @Test
+    @DisplayName("[handleOptimisticLockingFailure] Should Return Generic 409 ApiError - When Persistence Reports Optimistic Lock Failure")
+    void shouldReturnGeneric409ApiErrorWhenPersistenceReportsOptimisticLockFailure() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/imports/123/commit");
+
+        var response = handler.handleOptimisticLockingFailure(
+                new OptimisticLockException("secret persistence details"), request);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(response.getBody().message()).isEqualTo("Import job changed during the request; reload and retry");
+        assertThat(response.getBody().message()).doesNotContain("secret persistence details");
     }
 
     @Test

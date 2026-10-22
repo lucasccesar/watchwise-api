@@ -55,8 +55,10 @@ public class PrivateImportFileStore implements ImportFileStore {
     }
 
     @Override
-    public StoredImportFile store(InputStream input, long limit) throws IOException {
+    public StoredImportFile store(InputStream input, long limit, String generatedKey) throws IOException {
         if (limit <= 0 || limit > limits.maxUploadBytes()) throw new BadRequestException("Invalid import upload limit");
+        Path target = resolve(generatedKey);
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Import storage key already exists");
         if (!uploadSlots.tryAcquire()) throw new TooManyRequestsException("Too many concurrent import uploads");
         Path temporary = null;
         try {
@@ -77,10 +79,9 @@ public class PrivateImportFileStore implements ImportFileStore {
                     count += read;
                 }
             }
-            String key = UUID.randomUUID().toString();
-            Files.move(temporary, root.resolve(key), StandardCopyOption.ATOMIC_MOVE);
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
             temporary = null;
-            return new StoredImportFile(key, HexFormat.of().formatHex(digest.digest()), count);
+            return new StoredImportFile(generatedKey, HexFormat.of().formatHex(digest.digest()), count);
         } catch (IOException | RuntimeException | Error ex) {
             if (temporary != null) {
                 try {
