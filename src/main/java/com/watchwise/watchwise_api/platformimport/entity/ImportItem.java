@@ -18,12 +18,12 @@ public class ImportItem {
  @Column(name="source_event_key", length=1200) private String sourceEventKey;
  @Column(name="parent_source_id", length=1000) private String parentSourceId;
  @Column(name="normalized_content_key", length=1000) private String normalizedContentKey;
- @Column(name="resolved_content_key", length=1000) private String resolvedContentKey;
+ @Column(name="resolved_content_key", length=1000) @Setter private String resolvedContentKey;
  @Column(name="parser_version", length=100) private String parserVersion;
- @Column(name="resolved_target_json", columnDefinition="TEXT") private String resolvedTargetJson;
- @Column(name="payload_json", columnDefinition="TEXT") private String payloadJson;
- @Enumerated(EnumType.STRING) @Column(length=40) private ImportDecision decision;
- @Column(length=40) private String outcome;
- @Column(columnDefinition="TEXT") private String issue;
+ @Column(name="resolved_target_json", columnDefinition="TEXT") @Setter private String resolvedTargetJson;
+ @Column(name="payload_json", columnDefinition="TEXT") @Setter private String payloadJson;
+ @Enumerated(EnumType.STRING) @Column(length=40) @Setter private ImportDecision decision;
+ @Column(length=40) @Setter private String outcome;
+ @Column(columnDefinition="TEXT") @Setter private String issue;
  @Column(nullable=false) private long ordinal;
 }
