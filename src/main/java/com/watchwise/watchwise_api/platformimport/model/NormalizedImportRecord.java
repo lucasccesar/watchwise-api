@@ -22,11 +22,12 @@ public record NormalizedImportRecord(
     }
 
     private static boolean hasQuery(JsonNode payload) {
-        JsonNode query = payload.get("sourceQuery");
-        if (query == null) query = payload.get("query");
-        if (query == null) query = payload.path("source").path("sourceQuery");
-        if (query == null || !query.isObject()) query = payload.path("source").path("query");
-        if (query == null || !query.isObject() || !query.path("kind").isTextual()
+        JsonNode source = payload.path("source");
+        JsonNode query = payload.path("sourceQuery");
+        if (!query.isObject()) query = payload.path("query");
+        if (!query.isObject()) query = source.path("sourceQuery");
+        if (!query.isObject()) query = source.path("query");
+        if (!query.isObject() || !query.path("kind").isTextual()
                 || !query.path("title").isTextual()) return false;
         try {
             AliasQuery.Kind kind = AliasQuery.Kind.valueOf(query.path("kind").asString());

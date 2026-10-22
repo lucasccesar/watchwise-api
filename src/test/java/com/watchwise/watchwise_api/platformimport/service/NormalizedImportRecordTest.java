@@ -27,6 +27,19 @@ class NormalizedImportRecordTest {
     }
 
     @Test
+    @DisplayName("[NormalizedImportRecord] Should Use Top-Level Query - When Source Query Is Malformed")
+    void shouldUseTopLevelQueryWhenSourceQueryIsMalformed() throws Exception {
+        var payload = mapper.readTree("""
+                {"sourceQuery":"invalid","query":{"kind":"CONTENT","title":"Arrival","contentType":"MOVIE"}}
+                """);
+
+        var record = new NormalizedImportRecord("item", ImportRecordKind.DIARY_EVENT,
+                new ImportSourceKey("namespace", "event", "1"), null, null, payload, 0);
+
+        assertThat(record.target()).isNull();
+    }
+
+    @Test
     @DisplayName("[NormalizedImportRecord] Should Reject Missing Target - When Payload Has No Alias Query")
     void shouldRejectMissingTargetWhenPayloadHasNoAliasQuery() throws Exception {
         var payload = mapper.readTree("{\"title\":\"Arrival\"}");
