@@ -16,4 +16,6 @@ public interface ImportUploadQuotaService {
     void markStored(UUID ownerId, UUID jobId, StoredImportFile storedFile);
 
     void markFailed(UUID ownerId, UUID jobId);
+
+    void reactivate(UUID ownerId, UUID jobId);
 }

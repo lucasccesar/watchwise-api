@@ -175,10 +175,8 @@ public class ImportJobServiceImpl implements ImportJobService {
     }
 
     @Override
-    @Transactional
     public ImportJobDTO retry(UUID ownerId, UUID jobId) {
-        ImportJob job = importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)
-                .orElseThrow(() -> new NotFoundException("Import job not found"));
+        ImportJob job = findOwned(ownerId, jobId);
         if (job.getState() != ImportJobState.FAILED) {
             throw new ConflictException("Only failed import jobs can be retried");
         }
@@ -190,14 +188,8 @@ public class ImportJobServiceImpl implements ImportJobService {
         } catch (IOException exception) {
             throw new ConflictException("The import source file is no longer available");
         }
-        LocalDateTime now = LocalDateTime.now(clock);
-        job.setState(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE
-                ? ImportJobState.ANALYZING : ImportJobState.RESOLVING);
-        job.setWorkPhase(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE ? "INSPECT" : "RESOLVE");
-        job.setWorkPending(true);
-        job.setNextRunAt(now);
-        job.setUpdatedAt(now);
-        return toDto(ownerId, job);
+        uploadQuotaService.reactivate(ownerId, jobId);
+        return get(ownerId, jobId);
     }
 
     @Override

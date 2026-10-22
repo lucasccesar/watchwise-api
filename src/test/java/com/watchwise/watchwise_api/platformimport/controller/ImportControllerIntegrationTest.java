@@ -56,14 +56,17 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -197,6 +200,22 @@ class ImportControllerIntegrationTest {
                         .param("platform", "TRAKT"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    @DisplayName("[createImport] Should Return 400 ApiError - When Multipart File Part Is Missing")
+    void shouldReturn400ApiErrorWhenMultipartFilePartIsMissing() throws Exception {
+        RegisteredUser owner = createUser();
+
+        mockMvc.perform(multipart("/imports")
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .param("inputKind", "SINGLE_LIST")
+                        .param("sourceFormat", "TRAKT_JSON")
+                        .param("platform", "TRAKT"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"));
     }
 
     @Test
@@ -370,6 +389,122 @@ class ImportControllerIntegrationTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.state").value("RESOLVING"));
         assertThat(importJobRepository.findById(jobId).orElseThrow().isWorkPending()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[retryImport] Should Return 429 ApiError - When Retry Would Exceed Pending Job Limit")
+    void shouldReturn429ApiErrorWhenRetryWouldExceedPendingJobLimit() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID failedJobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob failedJob = importJobRepository.findById(failedJobId).orElseThrow();
+        failedJob.setState(ImportJobState.FAILED);
+        failedJob.setWorkPending(false);
+        importJobRepository.saveAndFlush(failedJob);
+
+        importLimits.setMaxPendingJobsPerUser(1);
+        uploadAndReturnJobId(owner, new byte[]{'a'});
+
+        mockMvc.perform(post("/imports/{importId}/retry", failedJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429));
+
+        ImportJob persistedFailedJob = importJobRepository.findById(failedJobId).orElseThrow();
+        assertThat(persistedFailedJob.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(persistedFailedJob.isWorkPending()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[retryImport] Should Return 429 ApiError - When Retry Would Exceed Pending Byte Limit")
+    void shouldReturn429ApiErrorWhenRetryWouldExceedPendingByteLimit() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID failedJobId = uploadAndReturnJobId(owner, new byte[]{'a', 'b', 'c'});
+        ImportJob failedJob = importJobRepository.findById(failedJobId).orElseThrow();
+        failedJob.setState(ImportJobState.FAILED);
+        failedJob.setWorkPending(false);
+        importJobRepository.saveAndFlush(failedJob);
+
+        importLimits.setMaxPendingUploadBytesPerUser(5);
+        uploadAndReturnJobId(owner, new byte[]{'d', 'e', 'f'});
+
+        mockMvc.perform(post("/imports/{importId}/retry", failedJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429));
+
+        ImportJob persistedFailedJob = importJobRepository.findById(failedJobId).orElseThrow();
+        assertThat(persistedFailedJob.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(persistedFailedJob.isWorkPending()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[retryImport] Should Return 429 ApiError - When Retry Would Exceed Global Byte Limit")
+    void shouldReturn429ApiErrorWhenRetryWouldExceedGlobalByteLimit() throws Exception {
+        RegisteredUser failedOwner = createUser();
+        UUID failedJobId = uploadAndReturnJobId(failedOwner, new byte[]{'a', 'b', 'c'});
+        ImportJob failedJob = importJobRepository.findById(failedJobId).orElseThrow();
+        failedJob.setState(ImportJobState.FAILED);
+        failedJob.setWorkPending(false);
+        importJobRepository.saveAndFlush(failedJob);
+
+        RegisteredUser activeOwner = createUser();
+        importLimits.setMaxPendingUploadBytesGlobal(5);
+        uploadAndReturnJobId(activeOwner, new byte[]{'d', 'e', 'f'});
+
+        mockMvc.perform(post("/imports/{importId}/retry", failedJobId)
+                        .cookie(failedOwner.accessToken(), failedOwner.csrfToken())
+                        .header("X-XSRF-TOKEN", failedOwner.csrfToken().getValue()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429));
+
+        assertThat(importJobRepository.findById(failedJobId).orElseThrow().getState())
+                .isEqualTo(ImportJobState.FAILED);
+    }
+
+    @Test
+    @DisplayName("[retryImport] Should Recheck Quota After A Concurrent Upload - When Retry Validates Its Source First")
+    void shouldRecheckQuotaAfterAConcurrentUploadWhenRetryValidatesItsSourceFirst() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID failedJobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        ImportJob failedJob = importJobRepository.findById(failedJobId).orElseThrow();
+        failedJob.setState(ImportJobState.FAILED);
+        failedJob.setWorkPending(false);
+        importJobRepository.saveAndFlush(failedJob);
+        importLimits.setMaxPendingJobsPerUser(1);
+
+        CountDownLatch retryStartedFileCheck = new CountDownLatch(1);
+        CountDownLatch allowRetryToContinue = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            retryStartedFileCheck.countDown();
+            assertThat(allowRetryToContinue.await(10, TimeUnit.SECONDS)).isTrue();
+            return invocation.callRealMethod();
+        }).when(importFileStore).open(failedJob.getStorageKey());
+
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<Integer> retryStatus = executor.submit(() -> mockMvc.perform(
+                            post("/imports/{importId}/retry", failedJobId)
+                                    .cookie(owner.accessToken(), owner.csrfToken())
+                                    .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
+                    .andReturn().getResponse().getStatus());
+
+            assertThat(retryStartedFileCheck.await(10, TimeUnit.SECONDS)).isTrue();
+            int uploadStatus = mockMvc.perform(upload(owner, "list.json", "application/json", new byte[]{'x'}))
+                    .andReturn().getResponse().getStatus();
+            allowRetryToContinue.countDown();
+
+            assertThat(uploadStatus).isEqualTo(202);
+            assertThat(retryStatus.get()).isEqualTo(429);
+        } finally {
+            allowRetryToContinue.countDown();
+        }
+
+        assertThat(importJobRepository.findAll().stream()
+                .filter(job -> job.getState() != ImportJobState.FAILED)
+                .count()).isEqualTo(1);
+        assertThat(importJobRepository.findById(failedJobId).orElseThrow().getState())
+                .isEqualTo(ImportJobState.FAILED);
     }
 
     @Test
