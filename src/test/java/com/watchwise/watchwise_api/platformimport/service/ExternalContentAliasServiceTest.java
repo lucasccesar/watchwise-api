@@ -34,6 +34,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -87,6 +91,68 @@ class ExternalContentAliasServiceTest {
         assertThat(jdbc.queryForObject("select target_tmdb_id from external_content_aliases where scope_key = 'GLOBAL'", String.class))
                 .isEqualTo("123");
         verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[remember] Should Replace Prior Owner Choice - When The User Confirms A Different Target")
+    void shouldReplacePriorOwnerChoiceWhenTheUserConfirmsADifferentTarget() {
+        UUID owner = user("replace-owner-choice");
+        AliasQuery query = new AliasQuery("Example Film", 2001, ContentType.MOVIE);
+        ImportTarget oldChoice = new ImportTarget.ContentTarget(MediaReference.movie("123"));
+        ImportTarget newChoice = new ImportTarget.ContentTarget(MediaReference.movie("456"));
+        insertGlobalMovieAlias("Example Film", "example film", 2001, "789");
+
+        aliasService.remember(owner, query, oldChoice, AliasTrust.USER_CONFIRMED);
+        aliasService.remember(owner, query, newChoice, AliasTrust.USER_CONFIRMED);
+
+        AliasResolution resolution = aliasService.resolve(owner, query);
+
+        assertThat(resolution.status()).isEqualTo(AliasResolution.Status.MATCHED);
+        assertThat(resolution.candidates()).containsExactly(newChoice);
+        assertThat(jdbc.queryForObject("select count(*) from external_content_aliases where scope_key = ?",
+                Integer.class, "USER:" + owner)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select target_tmdb_id from external_content_aliases where scope_key = 'GLOBAL'",
+                String.class)).isEqualTo("789");
+        verifyNoInteractions(tmdbClient);
+    }
+
+    @Test
+    @DisplayName("[remember] Should Keep One Owner Alias - When Concurrent Choices Target The Same Query")
+    void shouldKeepOneOwnerAliasWhenConcurrentChoicesTargetTheSameQuery() throws Exception {
+        UUID owner = user("concurrent-owner-choice");
+        AliasQuery query = new AliasQuery("Concurrent Film", 2001, ContentType.MOVIE);
+        ImportTarget firstChoice = new ImportTarget.ContentTarget(MediaReference.movie("123"));
+        ImportTarget secondChoice = new ImportTarget.ContentTarget(MediaReference.movie("456"));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            var first = executor.submit(() -> {
+                ready.countDown();
+                if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Start signal timed out");
+                aliasService.remember(owner, query, firstChoice, AliasTrust.USER_CONFIRMED);
+                return null;
+            });
+            var second = executor.submit(() -> {
+                ready.countDown();
+                if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Start signal timed out");
+                aliasService.remember(owner, query, secondChoice, AliasTrust.USER_CONFIRMED);
+                return null;
+            });
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(jdbc.queryForObject(
+                "select count(*) from external_content_aliases where scope_key = ?", Integer.class,
+                "USER:" + owner)).isEqualTo(1);
+        assertThat(aliasService.resolve(owner, query).status()).isEqualTo(AliasResolution.Status.MATCHED);
     }
 
     @Test

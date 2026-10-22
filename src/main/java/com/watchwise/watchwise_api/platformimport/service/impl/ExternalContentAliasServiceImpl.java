@@ -121,7 +121,32 @@ public class ExternalContentAliasServiceImpl implements ExternalContentAliasServ
         if (trust != AliasTrust.USER_CONFIRMED) {
             throw new BadRequestException("Only explicit user choices can be remembered in user scope");
         }
-        persist(owner, query, target, AliasTrust.USER_CONFIRMED, "USER:" + owner, "user-confirmed");
+        String scopeKey = "USER:" + owner;
+        String normalizedTitle = normalizer.normalizeTitle(query.title());
+        String lockKey = scopeKey.length() + ":" + scopeKey + "|" + query.kind().name() + "|"
+                + normalizedTitle.length() + ":" + normalizedTitle + "|"
+                + (query.year() == null ? "null" : query.year());
+        AliasFields fields = fields(target);
+        transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.query("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", resultSet -> {
+                if (resultSet.next()) resultSet.getObject(1);
+                return null;
+            }, lockKey);
+            String targetTypeClause = query.contentType() == null ? "" : " AND target_type = ?";
+            String deleteSql = """
+                    DELETE FROM external_content_aliases
+                    WHERE scope_key = ? AND target_kind = ? AND normalized_title = ?
+                      AND release_year IS NOT DISTINCT FROM ? AND trust = ? AND target_key <> ?
+                    """ + targetTypeClause;
+            if (query.contentType() == null) {
+                jdbcTemplate.update(deleteSql, scopeKey, query.kind().name(), normalizedTitle, query.year(),
+                        AliasTrust.USER_CONFIRMED.name(), fields.targetKey());
+            } else {
+                jdbcTemplate.update(deleteSql, scopeKey, query.kind().name(), normalizedTitle, query.year(),
+                        AliasTrust.USER_CONFIRMED.name(), fields.targetKey(), query.contentType().name());
+            }
+            persist(owner, query, target, AliasTrust.USER_CONFIRMED, scopeKey, "user-confirmed");
+        });
     }
 
     private Map<QueryKey, AliasResolution> resolveExisting(UUID owner, Map<QueryKey, AliasQuery> queries) {
