@@ -29,6 +29,8 @@ import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
+import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -43,9 +45,13 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -64,6 +70,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -71,6 +78,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 
 @SpringBootTest(properties = {
         "spring.docker.compose.enabled=false",
@@ -104,6 +119,7 @@ class ImportWorkerIntegrationTest {
     @Autowired private ImportItemRepository itemRepository;
     @Autowired private ImportFileCleanupTaskRepository cleanupTaskRepository;
     @Autowired private ImportFileStore fileStore;
+    @MockitoSpyBean private PrivateImportFileStore privateImportFileStore;
     @Autowired private ImportLedger ledger;
     @Autowired private com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService uploadQuotaService;
     @Autowired private ImportWorker worker;
@@ -310,6 +326,49 @@ class ImportWorkerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[ImportJobService] Should Clean Up Published File - When Account Is Deleted During Upload")
+    void shouldCleanUpPublishedFileWhenAccountIsDeletedDuringUpload() throws Exception {
+        User owner = createUser();
+        CountDownLatch storageStarted = new CountDownLatch(1);
+        CountDownLatch allowStorageToFinish = new CountDownLatch(1);
+        AtomicReference<String> storageKey = new AtomicReference<>();
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(2);
+            storageKey.set(key);
+            storageKeys.add(key);
+            storageStarted.countDown();
+            assertThat(allowStorageToFinish.await(10, TimeUnit.SECONDS)).isTrue();
+            return invocation.callRealMethod();
+        }).when(privateImportFileStore).store(any(), anyLong(), anyString());
+
+        MockMultipartFile file = new MockMultipartFile("file", "archive.zip", "application/zip",
+                "synthetic-zip".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<ImportJobDTO> upload = executor.submit(() -> jobService.create(owner.getId(), file,
+                    ImportInputKind.PLATFORM_ARCHIVE, ImportSourceFormat.TRAKT_ZIP,
+                    ImportPlatform.TRAKT, null, "UTC"));
+
+            assertThat(storageStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            ImportJob reservation = jobRepository.findAllByUserId(owner.getId()).getFirst();
+            assertThat(reservation.getZipDigest()).isNull();
+
+            userService.deleteAccount(owner.getId(), new DeleteAccountDTO("Password123"));
+            cleanupJob.runOnce(Instant.now());
+            assertThat(cleanupTaskRepository.count()).isZero();
+
+            allowStorageToFinish.countDown();
+            assertThatThrownBy(() -> upload.get(10, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class);
+
+            cleanupJob.runOnce(Instant.now());
+            assertFileMissing(storageKey.get());
+            assertThat(cleanupTaskRepository.count()).isZero();
+        } finally {
+            allowStorageToFinish.countDown();
+        }
+    }
+
+    @Test
     @DisplayName("[ImportCleanupJob] Should Delete Expired Bytes - While Preserving Deferred Payload")
     void shouldDeleteExpiredBytesWhilePreservingDeferredPayload() throws Exception {
         User owner = createUser();
@@ -422,6 +481,7 @@ class ImportWorkerIntegrationTest {
                 .selectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{}}")
                 .timezone("UTC")
                 .storageKey(storageKey)
+                .zipDigest("a".repeat(64))
                 .uploadSizeBytes(bytes)
                 .workPhase("APPLY")
                 .workPending(false)

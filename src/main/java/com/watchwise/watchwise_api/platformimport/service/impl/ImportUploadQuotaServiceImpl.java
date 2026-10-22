@@ -15,8 +15,14 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportFileCleanupTa
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
+import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.hibernate.exception.ConstraintViolationException;
 
@@ -24,12 +30,19 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.DateTimeException;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
+    private static final Logger log = LoggerFactory.getLogger(ImportUploadQuotaServiceImpl.class);
     private static final String GLOBAL_LOCK_ID = "import-upload:quota:global";
+    private static final int ACCOUNT_CLEANUP_BATCH_SIZE = 200;
     private static final Set<ImportJobState> PENDING_STATES = Set.of(
             ImportJobState.ANALYZING,
             ImportJobState.AWAITING_SELECTION,
@@ -38,17 +51,23 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
             ImportJobState.IMPORTING);
 
     private final AdvisoryLock advisoryLock;
+    private final JdbcTemplate jdbc;
     private final ImportJobRepository importJobRepository;
     private final ImportFileCleanupTaskRepository cleanupTaskRepository;
+    private final ImportFileStore importFileStore;
     private final ImportLimits importLimits;
     private final Clock clock;
 
-    public ImportUploadQuotaServiceImpl(AdvisoryLock advisoryLock, ImportJobRepository importJobRepository,
+    public ImportUploadQuotaServiceImpl(AdvisoryLock advisoryLock, JdbcTemplate jdbc,
+                                        ImportJobRepository importJobRepository,
                                         ImportFileCleanupTaskRepository cleanupTaskRepository,
+                                        ImportFileStore importFileStore,
                                         ImportLimits importLimits, Clock clock) {
         this.advisoryLock = advisoryLock;
+        this.jdbc = jdbc;
         this.importJobRepository = importJobRepository;
         this.cleanupTaskRepository = cleanupTaskRepository;
+        this.importFileStore = importFileStore;
         this.importLimits = importLimits;
         this.clock = clock;
     }
@@ -64,8 +83,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         if (uploadBytes < 1 || uploadBytes > importLimits.maxUploadBytes()) {
             throw new IllegalArgumentException("Import reservation size is invalid");
         }
-        advisoryLock.lock(GLOBAL_LOCK_ID);
-        advisoryLock.lock("import-upload:quota:owner:" + ownerId);
+        lockQuota(ownerId);
         requireQuotaAvailable(ownerId, uploadBytes);
 
         String normalizedAccountId = normalizeSourceAccountId(sourceAccountId);
@@ -99,6 +117,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
     @Override
     @Transactional
     public void markStored(UUID ownerId, UUID jobId, StoredImportFile storedFile) {
+        lockQuota(ownerId);
         ImportJob job = lockOwnedJob(ownerId, jobId);
         if (storedFile == null || !job.getStorageKey().equals(storedFile.key())
                 || job.getUploadSizeBytes() != storedFile.bytes() || storedFile.sha256() == null
@@ -114,8 +133,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
     @Override
     @Transactional
     public void markFailed(UUID ownerId, UUID jobId) {
-        advisoryLock.lock(GLOBAL_LOCK_ID);
-        advisoryLock.lock("import-upload:quota:owner:" + ownerId);
+        lockQuota(ownerId);
         ImportJob job = lockOwnedJob(ownerId, jobId);
         job.setState(ImportJobState.FAILED);
         job.setWorkPending(false);
@@ -134,8 +152,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
     @Override
     @Transactional
     public void reactivate(UUID ownerId, UUID jobId) {
-        advisoryLock.lock(GLOBAL_LOCK_ID);
-        advisoryLock.lock("import-upload:quota:owner:" + ownerId);
+        lockQuota(ownerId);
         ImportJob job = lockOwnedJob(ownerId, jobId);
         if (job.getState() != ImportJobState.FAILED) {
             throw new ConflictException("Only failed import jobs can be retried");
@@ -172,6 +189,93 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
             }
             throw exception;
         }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void prepareAccountDeletion(UUID ownerId) {
+        if (ownerId == null) throw new IllegalArgumentException("Import quota owner is required");
+        advisoryLock.lock("import-upload:quota:owner:" + ownerId);
+
+        UUID afterId = null;
+        while (true) {
+            List<StoredFileReference> batch = findStoredFiles(ownerId, afterId);
+            if (batch.isEmpty()) return;
+
+            List<String> validKeys = new ArrayList<>(batch.size());
+            for (StoredFileReference file : batch) {
+                try {
+                    importFileStore.validateKey(file.storageKey());
+                    validKeys.add(file.storageKey());
+                } catch (com.watchwise.watchwise_api.common.exception.BadRequestException exception) {
+                    log.error("Import job {} contains an invalid storage key during account deletion", file.id());
+                }
+            }
+            enqueueCleanupBatch(validKeys);
+            afterId = batch.getLast().id();
+        }
+    }
+
+    @Override
+    @Transactional
+    public void enqueueCleanup(String storageKey) {
+        if (storageKey == null || !storageKey.matches("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")) {
+            throw new IllegalArgumentException("Import cleanup storage key is invalid");
+        }
+        if (cleanupTaskRepository.existsByStorageKey(storageKey)) return;
+        LocalDateTime now = LocalDateTime.now(clock);
+        cleanupTaskRepository.save(ImportFileCleanupTask.builder()
+                .storageKey(storageKey)
+                .readyAt(now)
+                .attempts(0)
+                .createdAt(now)
+                .build());
+    }
+
+    private List<StoredFileReference> findStoredFiles(UUID ownerId, UUID afterId) {
+        String sql = afterId == null
+                ? "SELECT id, storage_key FROM import_jobs "
+                    + "WHERE user_id = ? AND upload_size_bytes > 0 AND zip_digest IS NOT NULL "
+                    + "ORDER BY id ASC LIMIT ?"
+                : "SELECT id, storage_key FROM import_jobs "
+                    + "WHERE user_id = ? AND upload_size_bytes > 0 AND zip_digest IS NOT NULL AND id > ? "
+                    + "ORDER BY id ASC LIMIT ?";
+        return afterId == null
+                ? jdbc.query(sql, (result, row) -> new StoredFileReference(
+                        result.getObject("id", UUID.class), result.getString("storage_key")),
+                        ownerId, ACCOUNT_CLEANUP_BATCH_SIZE)
+                : jdbc.query(sql, (result, row) -> new StoredFileReference(
+                        result.getObject("id", UUID.class), result.getString("storage_key")),
+                        ownerId, afterId, ACCOUNT_CLEANUP_BATCH_SIZE);
+    }
+
+    private void enqueueCleanupBatch(List<String> storageKeys) {
+        if (storageKeys.isEmpty()) return;
+        String placeholders = String.join(",", java.util.Collections.nCopies(storageKeys.size(), "?"));
+        Set<String> existingKeys = new HashSet<>(jdbc.queryForList(
+                "SELECT storage_key FROM import_file_cleanup_tasks WHERE storage_key IN (" + placeholders + ")",
+                String.class, storageKeys.toArray()));
+        List<String> newKeys = storageKeys.stream().filter(key -> !existingKeys.contains(key)).toList();
+        if (newKeys.isEmpty()) return;
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        jdbc.batchUpdate("""
+                INSERT INTO import_file_cleanup_tasks (id, storage_key, ready_at, attempts, created_at)
+                VALUES (?, ?, ?, 0, ?)
+                """, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement statement, int index) throws SQLException {
+                statement.setObject(1, UUID.randomUUID());
+                statement.setString(2, newKeys.get(index));
+                statement.setObject(3, now);
+                statement.setObject(4, now);
+            }
+
+            @Override
+            public int getBatchSize() {
+                return newKeys.size();
+            }
+        });
     }
 
     private void requireQuotaAvailable(UUID ownerId, long uploadBytes) {
@@ -220,6 +324,13 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         return importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)
                 .orElseThrow(() -> new NotFoundException("Import job not found"));
     }
+
+    private void lockQuota(UUID ownerId) {
+        advisoryLock.lock(GLOBAL_LOCK_ID);
+        advisoryLock.lock("import-upload:quota:owner:" + ownerId);
+    }
+
+    private record StoredFileReference(UUID id, String storageKey) { }
 
     private String normalizeSourceAccountId(String sourceAccountId) {
         if (sourceAccountId == null || sourceAccountId.isBlank()) return null;

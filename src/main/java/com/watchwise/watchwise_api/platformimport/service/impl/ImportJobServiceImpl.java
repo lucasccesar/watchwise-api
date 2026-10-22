@@ -89,7 +89,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         String storageKey = UUID.randomUUID().toString();
         ImportJob reservation = uploadQuotaService.reserve(ownerId, inputKind, sourceFormat, platform,
                 sourceAccountId, timeZone, storageKey, file.getSize());
-        StoredImportFile storedFile;
+        StoredImportFile storedFile = null;
         try (InputStream input = file.getInputStream()) {
             storedFile = importFileStore.store(input, importLimits.maxUploadBytes(), storageKey);
             if (storedFile.bytes() != file.getSize()) {
@@ -101,6 +101,13 @@ public class ImportJobServiceImpl implements ImportJobService {
                 uploadQuotaService.markFailed(ownerId, reservation.getId());
             } catch (RuntimeException cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
+            }
+            if (storedFile != null) {
+                try {
+                    uploadQuotaService.enqueueCleanup(storageKey);
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
             }
             if (failure instanceof RuntimeException runtimeException) throw runtimeException;
             throw new IllegalStateException("Private import storage failed", failure);

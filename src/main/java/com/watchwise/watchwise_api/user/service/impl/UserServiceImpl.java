@@ -29,15 +29,9 @@ import com.watchwise.watchwise_api.user.service.UserVisibilityService;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.report.service.ReportReporterDeletionService;
-import com.watchwise.watchwise_api.platformimport.entity.ImportFileCleanupTask;
-import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
-import com.watchwise.watchwise_api.platformimport.repository.ImportFileCleanupTaskRepository;
-import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
-import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
 import io.micrometer.common.util.StringUtils;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -49,7 +43,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.Clock;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -59,8 +52,6 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
-    private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
-
     private final UserMapper userMapper;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -72,10 +63,7 @@ public class UserServiceImpl implements UserService {
     private final UserVisibilityService userVisibilityService;
     private final UserBlockAccessService userBlockAccessService;
     private final ReportReporterDeletionService reportReporterDeletionService;
-    private final ImportJobRepository importJobRepository;
-    private final ImportFileCleanupTaskRepository importFileCleanupTaskRepository;
-    private final ImportFileStore importFileStore;
-    private final Clock clock;
+    private final ImportUploadQuotaService importUploadQuotaService;
 
     static final int MIN_USERNAME_LENGTH = 3;
     static final int WATCH_TIME_WINDOW_DAYS = 30;
@@ -394,31 +382,9 @@ public class UserServiceImpl implements UserService {
             throw new UnauthorizedException("Invalid password");
         }
 
-        enqueueImportFilesForCleanup(id);
+        importUploadQuotaService.prepareAccountDeletion(id);
         reportReporterDeletionService.removeReporterSubmissions(id);
         userRepository.delete(user);
-    }
-
-    private void enqueueImportFilesForCleanup(UUID userId) {
-        List<ImportFileCleanupTask> tasks = new java.util.ArrayList<>();
-        LocalDateTime now = LocalDateTime.now(clock);
-        for (ImportJob job : importJobRepository.findAllByUserId(userId)) {
-            if (job.getUploadSizeBytes() <= 0 || importFileCleanupTaskRepository.existsByStorageKey(job.getStorageKey())) {
-                continue;
-            }
-            try {
-                importFileStore.validateKey(job.getStorageKey());
-                tasks.add(ImportFileCleanupTask.builder()
-                        .storageKey(job.getStorageKey())
-                        .readyAt(now)
-                        .attempts(0)
-                        .createdAt(now)
-                        .build());
-            } catch (com.watchwise.watchwise_api.common.exception.BadRequestException exception) {
-                log.error("Import job {} contains an invalid storage key during account deletion", job.getId());
-            }
-        }
-        if (!tasks.isEmpty()) importFileCleanupTaskRepository.saveAll(tasks);
     }
 
     private String extractConstraintName(DataIntegrityViolationException e) {

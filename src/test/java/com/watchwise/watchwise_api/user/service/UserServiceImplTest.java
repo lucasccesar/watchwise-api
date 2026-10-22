@@ -25,9 +25,7 @@ import com.watchwise.watchwise_api.user.dto.ViewerProfileRelation;
 import com.watchwise.watchwise_api.userblock.entity.UserBlockRelationship;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.report.service.ReportReporterDeletionService;
-import com.watchwise.watchwise_api.platformimport.repository.ImportFileCleanupTaskRepository;
-import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
-import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
+import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -52,9 +50,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -99,16 +94,7 @@ class UserServiceImplTest {
     private ReportReporterDeletionService reportReporterDeletionService;
 
     @Mock
-    private ImportJobRepository importJobRepository;
-
-    @Mock
-    private ImportFileCleanupTaskRepository importFileCleanupTaskRepository;
-
-    @Mock
-    private ImportFileStore importFileStore;
-
-    @Mock
-    private Clock clock;
+    private ImportUploadQuotaService importUploadQuotaService;
 
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -128,8 +114,6 @@ class UserServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        lenient().when(clock.instant()).thenReturn(Instant.parse("2026-10-22T12:00:00Z"));
-        lenient().when(clock.getZone()).thenReturn(ZoneOffset.UTC);
         postUserDTO = new PostUserDTO(
                 "  JohnDoe  ",
                 "  JOHN.DOE@EMAIL.COM  ",
@@ -1489,6 +1473,7 @@ class UserServiceImplTest {
 
         userService.deleteAccount(id, deleteAccountDTO);
 
+        verify(importUploadQuotaService).prepareAccountDeletion(id);
         verify(userRepository).delete(savedUser);
         verify(reportReporterDeletionService).removeReporterSubmissions(id);
     }
@@ -1505,6 +1490,7 @@ class UserServiceImplTest {
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("Invalid password");
 
+        verifyNoInteractions(importUploadQuotaService);
         verify(userRepository, never()).delete(any());
     }
 
@@ -1519,6 +1505,7 @@ class UserServiceImplTest {
                 .isInstanceOf(NotFoundException.class)
                 .hasMessage("User not found");
 
+        verifyNoInteractions(importUploadQuotaService);
         verifyNoInteractions(passwordEncoder);
         verify(userRepository, never()).delete(any());
     }
