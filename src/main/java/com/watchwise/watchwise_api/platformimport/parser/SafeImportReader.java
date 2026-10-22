@@ -67,12 +67,7 @@ public class SafeImportReader {
                         String name = normalize(entry.getName());
                         if (root != null) name = name.substring(root.length());
                         try (CheckedEntryStream input = new CheckedEntryStream(zip.getInputStream(entry), entry, total)) {
-                            consumer.accept(name, new FilterInputStream(input) {
-                                @Override
-                                public void close() {
-                                    // The ZIP reader owns the stream so it can drain and verify the entry.
-                                }
-                            });
+                            consumer.accept(name, new NonClosingInputStream(input));
                             input.transferTo(java.io.OutputStream.nullOutputStream());
                             input.verify();
                         }
@@ -186,6 +181,16 @@ public class SafeImportReader {
             if (entry.getSize() != bytes || entry.getCrc() != crc.getValue()) {
                 throw new BadRequestException("Import archive entry metadata mismatch");
             }
+        }
+    }
+
+    private static class NonClosingInputStream extends FilterInputStream {
+        NonClosingInputStream(InputStream input) {
+            super(input);
+        }
+
+        @Override
+        public void close() {
         }
     }
 }

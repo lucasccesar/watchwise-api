@@ -5,7 +5,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Locale;
 import java.util.regex.Pattern;
+import org.springframework.stereotype.Component;
 
+@Component
 public class ImportIdentityNormalizer {
     private static final Pattern UNICODE_WHITESPACE = Pattern.compile("[\\p{IsWhite_Space}]+");
 
