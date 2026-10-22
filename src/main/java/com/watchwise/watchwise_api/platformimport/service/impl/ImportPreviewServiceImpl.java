@@ -115,6 +115,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
         job.setPreviewVersion(nextVersion);
         job.setSelectionJson(storedSelection);
+        job.setCheckpoint(null);
         job.setState(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE
                 ? ImportJobState.ANALYZING : ImportJobState.RESOLVING);
         job.setWorkPhase(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE ? "NORMALIZE" : "RESOLVE");
@@ -744,6 +745,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         }
         item.setDecision(metadata.decision());
         item.setPayloadJson(appendDecisionOverlay(item, operation, metadata.overlayKey()));
+        if (operation instanceof ImportResolutionOperation.ResolveTarget) {
+            item.setOutcome("MATCHED");
+        } else if (operation instanceof ImportResolutionOperation.SkipItem
+                || operation instanceof ImportResolutionOperation.RemoveNominee
+                || operation instanceof ImportResolutionOperation.RemoveCategory) {
+            item.setOutcome("RESOLVED");
+        }
         if (preparedTarget != null) {
             ImportTarget target = preparedTarget.target();
             item.setResolvedTargetJson(writeJson(objectMapper.valueToTree(target)));

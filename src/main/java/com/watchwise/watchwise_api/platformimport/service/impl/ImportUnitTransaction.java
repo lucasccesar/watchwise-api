@@ -1,0 +1,335 @@
+package com.watchwise.watchwise_api.platformimport.service.impl;
+
+import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
+import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
+import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
+import com.watchwise.watchwise_api.platformimport.model.ImportLinkState;
+import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
+import com.watchwise.watchwise_api.platformimport.model.ImportSourceKey;
+import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
+import com.watchwise.watchwise_api.platformimport.model.ImportTarget;
+import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
+import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
+import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
+import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
+import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
+import com.watchwise.watchwise_api.platformimport.service.ImportUnitApplier;
+import com.watchwise.watchwise_api.user.repository.UserRepository;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+public class ImportUnitTransaction {
+    private static final Duration LEASE_DURATION = Duration.ofMinutes(2);
+    private static final int NORMALIZE_BATCH_SIZE = 200;
+
+    private final ImportJobRepository jobRepository;
+    private final ImportItemRepository itemRepository;
+    private final UserRepository userRepository;
+    private final ImportLedger ledger;
+    private final List<ImportUnitApplier> appliers;
+    private final ObjectMapper objectMapper;
+    private final Clock clock;
+
+    public ImportUnitTransaction(ImportJobRepository jobRepository, ImportItemRepository itemRepository,
+                                 UserRepository userRepository, ImportLedger ledger,
+                                 List<ImportUnitApplier> appliers, ObjectMapper objectMapper, Clock clock) {
+        this.jobRepository = jobRepository;
+        this.itemRepository = itemRepository;
+        this.userRepository = userRepository;
+        this.ledger = ledger;
+        this.appliers = List.copyOf(appliers);
+        this.objectMapper = objectMapper;
+        this.clock = clock;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean apply(ImportExecutionContext context, UUID unitId) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.IMPORTING);
+        if (job == null) return false;
+        ImportItem item = itemRepository.findById(unitId).orElse(null);
+        if (item == null || !item.getJobId().equals(context.jobId())
+                || item.getPlanGeneration() != context.planGeneration()) return false;
+        if ("APPLIED".equals(item.getOutcome()) || "SKIPPED".equals(item.getOutcome())) return true;
+
+        ImportSourceKey sourceKey = sourceKey(item);
+        LinkReservation reservation = ledger.reserve(context.ownerId(), context.jobId(), sourceKey,
+                payloadHash(item.getPayloadJson()));
+        if (reservation.state() != ImportLinkState.IN_PROGRESS) {
+            item.setOutcome("SKIPPED");
+            item.setIssue("SOURCE_ALREADY_CONSUMED");
+            itemRepository.save(item);
+            job.setCheckpoint(Long.toString(item.getOrdinal()));
+            renew(job);
+            return true;
+        }
+        if (!context.jobId().equals(reservation.owningJobId())) throw new WaitForOtherJobException();
+
+        if (item.getDecision() == ImportDecision.SKIP_ITEM) {
+            ledger.markSkipped(context.ownerId(), sourceKey, null, null, "USER_SKIPPED");
+            item.setOutcome("SKIPPED");
+            item.setIssue(null);
+        } else {
+            ImportUnitApplier applier = applierFor(item);
+            applier.apply(context, item.getId());
+            if (!ledger.isConsumed(context.ownerId(), sourceKey)) {
+                throw new IllegalStateException("Import unit did not commit its source ledger transition");
+            }
+            item.setOutcome("APPLIED");
+            item.setIssue(null);
+        }
+
+        itemRepository.save(item);
+        job.setCheckpoint(Long.toString(item.getOrdinal()));
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean saveNormalized(ImportExecutionContext context, List<NormalizedImportRecord> records) {
+        if (records == null || records.isEmpty()) return true;
+        ImportJob job = lockRunnableJob(context, ImportJobState.ANALYZING);
+        if (job == null || !"NORMALIZE".equals(job.getWorkPhase())) return false;
+        List<ImportItem> items = records.stream().map(record -> normalizedItem(context, record)).toList();
+        itemRepository.saveAll(items);
+        job.setCheckpoint("NORMALIZE:" + records.getLast().ordinal());
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean finishInspection(ImportExecutionContext context, ImportInventory inventory) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.ANALYZING);
+        if (job == null || !"INSPECT".equals(job.getWorkPhase())) return false;
+        job.setCheckpoint(writeJson(inventory));
+        job.setState(ImportJobState.AWAITING_SELECTION);
+        job.setWorkPhase(null);
+        job.setWorkPending(false);
+        job.setNextRunAt(null);
+        releaseLease(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean finishNormalization(ImportExecutionContext context) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.ANALYZING);
+        if (job == null || !"NORMALIZE".equals(job.getWorkPhase())) return false;
+        job.setState(ImportJobState.RESOLVING);
+        job.setWorkPhase("RESOLVE");
+        job.setWorkPending(true);
+        job.setNextRunAt(now().plusSeconds(1));
+        releaseLease(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean saveResolution(ImportExecutionContext context, List<ResolutionUpdate> updates) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        List<ImportItem> changedItems = new java.util.ArrayList<>(updates.size());
+        for (ResolutionUpdate update : updates) {
+            ImportItem item = itemRepository.findById(update.itemId()).orElse(null);
+            if (item == null || !item.getJobId().equals(context.jobId())
+                    || item.getPlanGeneration() != context.planGeneration()) continue;
+            item.setOutcome(update.outcome());
+            item.setResolvedTargetJson(update.resolvedTargetJson());
+            item.setNormalizedContentKey(update.normalizedContentKey());
+            item.setIssue(update.issue());
+            changedItems.add(item);
+        }
+        itemRepository.saveAll(changedItems);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean settleResolution(ImportExecutionContext context, ResolutionState state) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        if (state == ResolutionState.RETRY) {
+            job.setWorkPending(true);
+            job.setNextRunAt(now().plus(state.backoff()));
+        } else if (state == ResolutionState.CONTINUE) {
+            job.setWorkPending(true);
+            job.setNextRunAt(now());
+        } else if (state == ResolutionState.WAITING_FOR_USER) {
+            job.setWorkPending(false);
+            job.setNextRunAt(null);
+        } else {
+            job.setState(ImportJobState.READY);
+            job.setWorkPhase("APPLY");
+            job.setWorkPending(false);
+            job.setNextRunAt(null);
+        }
+        releaseLease(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean finishApplyChunk(ImportExecutionContext context, boolean moreUnits) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.IMPORTING);
+        if (job == null || !"APPLY".equals(job.getWorkPhase())) return false;
+        if (moreUnits) {
+            job.setWorkPending(true);
+            job.setNextRunAt(now());
+            releaseLease(job);
+            return true;
+        }
+        itemRepository.compactAppliedPayloads(context.jobId(), context.planGeneration());
+        job.setState(ImportJobState.COMPLETED);
+        job.setWorkPending(false);
+        job.setNextRunAt(null);
+        job.setCheckpoint(job.getCheckpoint() == null ? "COMPLETED" : job.getCheckpoint());
+        releaseLease(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean scheduleRetry(ImportExecutionContext context, Duration delay, boolean terminal) {
+        ImportJob job = lockRunnableJob(context, null);
+        if (job == null) return false;
+        if (terminal) {
+            job.setState(ImportJobState.FAILED);
+            job.setWorkPending(false);
+            job.setNextRunAt(null);
+        } else {
+            job.setWorkPending(true);
+            job.setNextRunAt(now().plus(delay));
+        }
+        releaseLease(job);
+        return true;
+    }
+
+    private ImportJob lockRunnableJob(ImportExecutionContext context, ImportJobState expectedState) {
+        ImportJob job = jobRepository.findByIdForUpdate(context.jobId()).orElse(null);
+        LocalDateTime now = now();
+        if (job == null || !job.getUserId().equals(context.ownerId())
+                || !userRepository.existsById(context.ownerId())
+                || (expectedState != null && job.getState() != expectedState)
+                || !job.isWorkPending()
+                || !context.leaseToken().equals(job.getLeaseToken())
+                || job.getLeaseUntil() == null || !job.getLeaseUntil().isAfter(now)
+                || job.getPreviewVersion() != context.previewVersion()
+                || readPlanGeneration(job.getSelectionJson()) != context.planGeneration()) {
+            return null;
+        }
+        return job;
+    }
+
+    private ImportItem normalizedItem(ImportExecutionContext context, NormalizedImportRecord record) {
+        UUID itemId = uuidForItem(context, record.itemId());
+        ImportItem item = ImportItem.builder()
+                .id(itemId)
+                .jobId(context.jobId())
+                .planGeneration(context.planGeneration())
+                .normalizedKind(record.kind())
+                .sourceNamespace(record.sourceKey().namespace())
+                .objectKind(record.sourceKey().objectKind())
+                .sourceId(record.sourceKey().sourceId())
+                .sourceEventKey(record.sourceKey().sourceId())
+                .parentSourceId(record.parentSourceId())
+                .payloadJson(writeJson(record.payload()))
+                .resolvedTargetJson(writeJson(record.target()))
+                .ordinal(record.ordinal())
+                .build();
+        return item;
+    }
+
+    private UUID uuidForItem(ImportExecutionContext context, String itemId) {
+        String seed = context.jobId() + ":" + context.planGeneration() + ":" + itemId;
+        return UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private ImportUnitApplier applierFor(ImportItem item) {
+        List<ImportUnitApplier> matches = appliers.stream()
+                .filter(applier -> applier.supports(item.getNormalizedKind())).toList();
+        if (matches.size() != 1) {
+            throw new IllegalStateException("Import unit must have exactly one applier");
+        }
+        return matches.getFirst();
+    }
+
+    private ImportSourceKey sourceKey(ImportItem item) {
+        return new ImportSourceKey(item.getSourceNamespace(), item.getObjectKind(), item.getSourceId());
+    }
+
+    private String payloadHash(String payload) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest((payload == null ? "" : payload).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private long readPlanGeneration(String selectionJson) {
+        if (selectionJson == null || selectionJson.isBlank()) return 0;
+        try {
+            JsonNode root = objectMapper.readTree(selectionJson);
+            JsonNode generation = root.get("planGeneration");
+            return generation == null ? 0 : generation.asLong(-1);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Stored import plan is invalid", exception);
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Import checkpoint could not be serialized", exception);
+        }
+    }
+
+    private void renew(ImportJob job) {
+        LocalDateTime now = now();
+        job.setLeaseUntil(now.plus(LEASE_DURATION));
+        job.setNextRunAt(now);
+        job.setUpdatedAt(now);
+    }
+
+    private void releaseLease(ImportJob job) {
+        job.setLeaseToken(null);
+        job.setLeaseUntil(null);
+        job.setUpdatedAt(now());
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock);
+    }
+
+    public enum ResolutionState {
+        READY(Duration.ZERO), WAITING_FOR_USER(Duration.ZERO), CONTINUE(Duration.ZERO), RETRY(Duration.ofMinutes(1));
+
+        private final Duration backoff;
+
+        ResolutionState(Duration backoff) {
+            this.backoff = backoff;
+        }
+
+        public Duration backoff() {
+            return backoff;
+        }
+    }
+
+    public record ResolutionUpdate(UUID itemId, String outcome, String resolvedTargetJson,
+                                   String normalizedContentKey, String issue) { }
+
+    public static final class WaitForOtherJobException extends RuntimeException { }
+}

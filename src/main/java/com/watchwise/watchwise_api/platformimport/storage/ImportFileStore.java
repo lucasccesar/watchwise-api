@@ -6,6 +6,8 @@ import java.io.InputStream;
 import java.util.UUID;
 
 public interface ImportFileStore {
+    void validateKey(String generatedKey);
+
     default StoredImportFile store(InputStream input, long limit) throws IOException {
         return store(input, limit, UUID.randomUUID().toString());
     }

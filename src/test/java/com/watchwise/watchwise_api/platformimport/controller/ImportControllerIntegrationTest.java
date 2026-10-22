@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportFileCleanupTa
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
+import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.user.entity.User;
@@ -81,6 +82,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.import.max-pending-jobs-per-user=2",
         "app.import.max-pending-upload-bytes-per-user=5",
         "app.import.max-pending-upload-bytes-global=20",
+        "app.import.worker.enabled=false",
+        "app.import.cleanup.enabled=false",
         "spring.servlet.multipart.max-file-size=1MB",
         "spring.servlet.multipart.max-request-size=2MB"
 })
@@ -118,6 +121,9 @@ class ImportControllerIntegrationTest {
 
     @Autowired
     private ImportFileCleanupTaskRepository cleanupTaskRepository;
+
+    @Autowired
+    private ImportCleanupJob cleanupJob;
 
     @Autowired
     private ImportLimits importLimits;
@@ -342,6 +348,47 @@ class ImportControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[commitImport] Should Reject A Second Active Writer - When The Partial Unique Index Conflicts")
+    void shouldRejectASecondActiveWriterWhenThePartialUniqueIndexConflicts() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID firstJobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        UUID secondJobId = uploadAndReturnJobId(owner, new byte[]{'{', '}'});
+        for (UUID jobId : List.of(firstJobId, secondJobId)) {
+            ImportJob job = importJobRepository.findById(jobId).orElseThrow();
+            job.setState(ImportJobState.READY);
+            job.setWorkPending(false);
+            importJobRepository.saveAndFlush(job);
+        }
+        String firstPreview = mockMvc.perform(get("/imports/{importId}", firstJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andReturn().getResponse().getContentAsString();
+        String secondPreview = mockMvc.perform(get("/imports/{importId}", secondJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andReturn().getResponse().getContentAsString();
+        String firstDigest = objectMapper.readTree(firstPreview).get("previewDigest").asString();
+        String secondDigest = objectMapper.readTree(secondPreview).get("previewDigest").asString();
+
+        mockMvc.perform(post("/imports/{importId}/commit", firstJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previewVersion\":0,\"digest\":\"" + firstDigest + "\"}"))
+                .andExpect(status().isAccepted());
+        mockMvc.perform(post("/imports/{importId}/commit", secondJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previewVersion\":0,\"digest\":\"" + secondDigest + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409));
+
+        assertThat(importJobRepository.findById(firstJobId).orElseThrow().getState())
+                .isEqualTo(ImportJobState.IMPORTING);
+        assertThat(importJobRepository.findById(secondJobId).orElseThrow().getState())
+                .isEqualTo(ImportJobState.READY);
+    }
+
+    @Test
     @DisplayName("[commitImport] Should Return 409 ApiError - When Preview Digest Does Not Match")
     void shouldReturn409ApiErrorWhenPreviewDigestDoesNotMatch() throws Exception {
         RegisteredUser owner = createUser();
@@ -358,6 +405,47 @@ class ImportControllerIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409));
         assertThat(importJobRepository.findById(jobId).orElseThrow().getState()).isEqualTo(ImportJobState.READY);
+    }
+
+    @Test
+    @DisplayName("[commitImport] Should Return 409 ApiError - When Another Job For The Owner Is Already Applying")
+    void shouldReturn409ApiErrorWhenAnotherJobForTheOwnerIsAlreadyApplying() throws Exception {
+        RegisteredUser owner = createUser();
+        UUID firstJobId = uploadAndReturnJobId(owner, new byte[]{'[', ']'});
+        UUID secondJobId = uploadAndReturnJobId(owner, new byte[]{'{', '}'});
+        for (UUID jobId : List.of(firstJobId, secondJobId)) {
+            ImportJob job = importJobRepository.findById(jobId).orElseThrow();
+            job.setState(ImportJobState.READY);
+            job.setWorkPending(false);
+            importJobRepository.saveAndFlush(job);
+        }
+        String firstPreview = mockMvc.perform(get("/imports/{importId}", firstJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andReturn().getResponse().getContentAsString();
+        String firstDigest = objectMapper.readTree(firstPreview).get("previewDigest").asString();
+        String secondPreview = mockMvc.perform(get("/imports/{importId}", secondJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken()))
+                .andReturn().getResponse().getContentAsString();
+        String secondDigest = objectMapper.readTree(secondPreview).get("previewDigest").asString();
+
+        mockMvc.perform(post("/imports/{importId}/commit", firstJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previewVersion\":0,\"digest\":\"" + firstDigest + "\"}"))
+                .andExpect(status().isAccepted());
+        mockMvc.perform(post("/imports/{importId}/commit", secondJobId)
+                        .cookie(owner.accessToken(), owner.csrfToken())
+                        .header("X-XSRF-TOKEN", owner.csrfToken().getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"previewVersion\":0,\"digest\":\"" + secondDigest + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409));
+
+        assertThat(importJobRepository.findById(firstJobId).orElseThrow().getState())
+                .isEqualTo(ImportJobState.IMPORTING);
+        assertThat(importJobRepository.findById(secondJobId).orElseThrow().getState())
+                .isEqualTo(ImportJobState.READY);
     }
 
     @Test
@@ -416,8 +504,8 @@ class ImportControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[retryImport] Should Return 429 ApiError - When Retry Would Exceed Pending Byte Limit")
-    void shouldReturn429ApiErrorWhenRetryWouldExceedPendingByteLimit() throws Exception {
+    @DisplayName("[uploadQuota] Should Count Failed Stored Bytes And Allow Retry Without Double Counting")
+    void shouldCountFailedStoredBytesAndAllowRetryWithoutDoubleCounting() throws Exception {
         RegisteredUser owner = createUser();
         UUID failedJobId = uploadAndReturnJobId(owner, new byte[]{'a', 'b', 'c'});
         ImportJob failedJob = importJobRepository.findById(failedJobId).orElseThrow();
@@ -426,22 +514,24 @@ class ImportControllerIntegrationTest {
         importJobRepository.saveAndFlush(failedJob);
 
         importLimits.setMaxPendingUploadBytesPerUser(5);
-        uploadAndReturnJobId(owner, new byte[]{'d', 'e', 'f'});
+        mockMvc.perform(upload(owner, "list.json", "application/json", new byte[]{'d', 'e', 'f'}))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429));
 
         mockMvc.perform(post("/imports/{importId}/retry", failedJobId)
                         .cookie(owner.accessToken(), owner.csrfToken())
                         .header("X-XSRF-TOKEN", owner.csrfToken().getValue()))
-                .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.status").value(429));
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.state").value("RESOLVING"));
 
         ImportJob persistedFailedJob = importJobRepository.findById(failedJobId).orElseThrow();
-        assertThat(persistedFailedJob.getState()).isEqualTo(ImportJobState.FAILED);
-        assertThat(persistedFailedJob.isWorkPending()).isFalse();
+        assertThat(persistedFailedJob.getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(persistedFailedJob.isWorkPending()).isTrue();
     }
 
     @Test
-    @DisplayName("[retryImport] Should Return 429 ApiError - When Retry Would Exceed Global Byte Limit")
-    void shouldReturn429ApiErrorWhenRetryWouldExceedGlobalByteLimit() throws Exception {
+    @DisplayName("[uploadQuota] Should Count Failed Bytes Globally And Allow Their Retry Without Double Counting")
+    void shouldCountFailedBytesGloballyAndAllowRetryWithoutDoubleCounting() throws Exception {
         RegisteredUser failedOwner = createUser();
         UUID failedJobId = uploadAndReturnJobId(failedOwner, new byte[]{'a', 'b', 'c'});
         ImportJob failedJob = importJobRepository.findById(failedJobId).orElseThrow();
@@ -451,16 +541,18 @@ class ImportControllerIntegrationTest {
 
         RegisteredUser activeOwner = createUser();
         importLimits.setMaxPendingUploadBytesGlobal(5);
-        uploadAndReturnJobId(activeOwner, new byte[]{'d', 'e', 'f'});
+        mockMvc.perform(upload(activeOwner, "list.json", "application/json", new byte[]{'d', 'e', 'f'}))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429));
 
         mockMvc.perform(post("/imports/{importId}/retry", failedJobId)
                         .cookie(failedOwner.accessToken(), failedOwner.csrfToken())
                         .header("X-XSRF-TOKEN", failedOwner.csrfToken().getValue()))
-                .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.status").value(429));
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.state").value("RESOLVING"));
 
         assertThat(importJobRepository.findById(failedJobId).orElseThrow().getState())
-                .isEqualTo(ImportJobState.FAILED);
+                .isEqualTo(ImportJobState.RESOLVING);
     }
 
     @Test
@@ -594,8 +686,8 @@ class ImportControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[createImport] Should Release Reserved Quota And Queue File Cleanup - When Durable Storage Fails")
-    void shouldReleaseReservedQuotaAndQueueFileCleanupWhenDurableStorageFails() throws Exception {
+    @DisplayName("[createImport] Should Keep Reserved Bytes Until Cleanup Confirms Removal - When Durable Storage Fails")
+    void shouldKeepReservedBytesUntilCleanupConfirmsRemovalWhenDurableStorageFails() throws Exception {
         RegisteredUser owner = createUser();
         doThrow(new IOException("private storage failure"))
                 .when(importFileStore).store(any(), anyLong(), anyString());
@@ -606,11 +698,16 @@ class ImportControllerIntegrationTest {
 
         ImportJob failedJob = importJobRepository.findAll().getFirst();
         assertThat(failedJob.getState()).isEqualTo(ImportJobState.FAILED);
-        assertThat(failedJob.getUploadSizeBytes()).isZero();
+        assertThat(failedJob.getUploadSizeBytes()).isEqualTo(2);
         assertThat(failedJob.isWorkPending()).isFalse();
         assertThat(cleanupTaskRepository.findAll())
                 .extracting(ImportFileCleanupTask::getStorageKey)
                 .containsExactly(failedJob.getStorageKey());
+
+        cleanupJob.runOnce(java.time.Instant.now());
+
+        assertThat(importJobRepository.findById(failedJob.getId()).orElseThrow().getUploadSizeBytes()).isZero();
+        assertThat(cleanupTaskRepository.findAll()).isEmpty();
     }
 
     @Test

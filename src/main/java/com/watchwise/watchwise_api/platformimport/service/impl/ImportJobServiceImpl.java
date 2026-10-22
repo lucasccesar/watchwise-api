@@ -12,6 +12,7 @@ import com.watchwise.watchwise_api.platformimport.dto.ImportSelectionDTO;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.mapper.ImportJobMapper;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
+import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportModeKey;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlanVersion;
@@ -27,11 +28,14 @@ import com.watchwise.watchwise_api.platformimport.service.ImportPreviewService;
 import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
 import org.springframework.data.domain.Page;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,6 +45,7 @@ import java.time.ZoneId;
 import java.time.DateTimeException;
 import java.util.Locale;
 import java.util.UUID;
+import org.hibernate.exception.ConstraintViolationException;
 
 @Service
 public class ImportJobServiceImpl implements ImportJobService {
@@ -52,11 +57,13 @@ public class ImportJobServiceImpl implements ImportJobService {
     private final ImportJobMapper importJobMapper;
     private final ImportLimits importLimits;
     private final Clock clock;
+    private final ObjectMapper objectMapper;
 
     public ImportJobServiceImpl(ImportJobRepository importJobRepository, ImportModeRegistry importModeRegistry,
                                 ImportPreviewService importPreviewService,
                                 ImportUploadQuotaService uploadQuotaService, ImportFileStore importFileStore,
-                                ImportJobMapper importJobMapper, ImportLimits importLimits, Clock clock) {
+                                ImportJobMapper importJobMapper, ImportLimits importLimits, Clock clock,
+                                ObjectMapper objectMapper) {
         this.importJobRepository = importJobRepository;
         this.importModeRegistry = importModeRegistry;
         this.importPreviewService = importPreviewService;
@@ -65,6 +72,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         this.importJobMapper = importJobMapper;
         this.importLimits = importLimits;
         this.clock = clock;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -105,7 +113,7 @@ public class ImportJobServiceImpl implements ImportJobService {
     public ImportJobDTO get(UUID ownerId, UUID jobId) {
         ImportJob job = findOwned(ownerId, jobId);
         ImportPlanVersion version = importPreviewService.currentVersion(ownerId, jobId);
-        return importJobMapper.toDto(job, version.digest());
+        return mapDto(job, version.digest());
     }
 
     @Override
@@ -143,7 +151,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         if (job.getState() == ImportJobState.IMPORTING
                 || job.getState() == ImportJobState.COMPLETED
                 || job.getState() == ImportJobState.COMPLETED_WITH_WARNINGS) {
-            return importJobMapper.toDto(job, currentVersion.digest());
+            return mapDto(job, currentVersion.digest());
         }
         if (job.getState() != ImportJobState.READY) {
             throw new ConflictException("Import preview is not ready to commit");
@@ -154,7 +162,15 @@ public class ImportJobServiceImpl implements ImportJobService {
         job.setWorkPending(true);
         job.setNextRunAt(now);
         job.setUpdatedAt(now);
-        return importJobMapper.toDto(job, currentVersion.digest());
+        try {
+            importJobRepository.flush();
+        } catch (DataIntegrityViolationException exception) {
+            if (isActiveWriterConflict(exception)) {
+                throw new ConflictException("Another import is already applying for this user");
+            }
+            throw exception;
+        }
+        return mapDto(job, currentVersion.digest());
     }
 
     @Override
@@ -170,6 +186,9 @@ public class ImportJobServiceImpl implements ImportJobService {
         job.setState(ImportJobState.CANCELLED);
         job.setWorkPending(false);
         job.setNextRunAt(null);
+        job.setLeaseToken(null);
+        job.setLeaseUntil(null);
+        job.setWorkPhase(null);
         job.setUpdatedAt(LocalDateTime.now(clock));
         return toDto(ownerId, job);
     }
@@ -179,6 +198,9 @@ public class ImportJobServiceImpl implements ImportJobService {
         ImportJob job = findOwned(ownerId, jobId);
         if (job.getState() != ImportJobState.FAILED) {
             throw new ConflictException("Only failed import jobs can be retried");
+        }
+        if (job.getWorkPhase() == null || job.getWorkPhase().isBlank()) {
+            throw new ConflictException("The import source file is no longer available");
         }
         if (job.getUploadSizeBytes() < 1) {
             throw new ConflictException("The import source file is no longer available");
@@ -207,13 +229,36 @@ public class ImportJobServiceImpl implements ImportJobService {
 
     private ImportJobDTO toDto(UUID ownerId, ImportJob job) {
         ImportPlanVersion version = importPreviewService.currentVersion(ownerId, job.getId());
-        return importJobMapper.toDto(job, version.digest());
+        return mapDto(job, version.digest());
+    }
+
+    private ImportJobDTO mapDto(ImportJob job, String digest) {
+        ImportJobDTO dto = importJobMapper.toDto(job, digest);
+        ImportInventory inventory = null;
+        if (job.getState() == ImportJobState.AWAITING_SELECTION && job.getCheckpoint() != null) {
+            try {
+                inventory = objectMapper.readValue(job.getCheckpoint(), ImportInventory.class);
+            } catch (JacksonException exception) {
+                throw new IllegalStateException("Stored import inventory is invalid", exception);
+            }
+        }
+        return new ImportJobDTO(dto.id(), dto.inputKind(), dto.sourceFormat(), dto.platform(), dto.state(),
+                dto.version(), dto.previewVersion(), dto.previewDigest(), dto.createdAt(), dto.updatedAt(),
+                dto.expiresAt(), inventory);
     }
 
     private ImportJob findOwned(UUID ownerId, UUID jobId) {
         if (ownerId == null || jobId == null) throw new BadRequestException("Import owner and job are required");
         return importJobRepository.findOwnedById(jobId, ownerId)
                 .orElseThrow(() -> new NotFoundException("Import job not found"));
+    }
+
+    private boolean isActiveWriterConflict(DataIntegrityViolationException exception) {
+        Throwable cause = exception.getCause();
+        if (cause instanceof ConstraintViolationException violation) {
+            return "uq_import_jobs_one_writer_per_user".equals(violation.getConstraintName());
+        }
+        return false;
     }
 
     private void validateMode(ImportInputKind inputKind, ImportSourceFormat sourceFormat, ImportPlatform platform) {

@@ -28,8 +28,8 @@ public class ImportJob {
  @Column(name="work_phase", length=40) @Setter private String workPhase;
  @Column(name="work_pending", nullable=false) @Setter private boolean workPending;
  @Column(name="next_run_at") @Setter private LocalDateTime nextRunAt;
- @Column(name="lease_token") private UUID leaseToken;
- @Column(name="lease_until") private LocalDateTime leaseUntil;
+ @Setter @Column(name="lease_token") private UUID leaseToken;
+ @Setter @Column(name="lease_until") private LocalDateTime leaseUntil;
  @Column(name="created_at", nullable=false) private LocalDateTime createdAt;
  @Column(name="updated_at", nullable=false) @Setter private LocalDateTime updatedAt;
  @Column(name="expires_at") private LocalDateTime expiresAt;

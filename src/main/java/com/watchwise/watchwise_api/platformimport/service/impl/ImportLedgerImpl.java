@@ -28,12 +28,33 @@ public class ImportLedgerImpl implements ImportLedger {
    FROM import_jobs j WHERE j.id = ? AND j.user_id = ?
    ON CONFLICT (user_id,source_namespace,object_kind,source_id) DO NOTHING
    """, UUID.randomUUID(), ownerId, key.namespace(), key.objectKind(), key.sourceId(), payloadHash, jobId, ownerId);
-  return jdbc.queryForObject("""
-   SELECT id,state,owning_job_id FROM external_import_links
-   WHERE user_id=? AND source_namespace=? AND object_kind=? AND source_id=?
-   """, (rs, row) -> new LinkReservation(rs.getObject("id", UUID.class),
-    ImportLinkState.valueOf(rs.getString("state")), rs.getObject("owning_job_id", UUID.class)),
+  ExistingReservation existing = jdbc.queryForObject("""
+   SELECT link.id, link.state, link.owning_job_id, job.state AS owning_job_state,
+       (job.lease_until IS NULL OR job.lease_until <= CAST(CURRENT_TIMESTAMP AS TIMESTAMP)) AS lease_expired
+   FROM external_import_links link
+   LEFT JOIN import_jobs job ON job.id=link.owning_job_id
+   WHERE link.user_id=? AND link.source_namespace=? AND link.object_kind=? AND link.source_id=?
+   FOR UPDATE OF link
+   """, (rs, row) -> new ExistingReservation(rs.getObject("id", UUID.class),
+    ImportLinkState.valueOf(rs.getString("state")), rs.getObject("owning_job_id", UUID.class),
+    rs.getString("owning_job_state"), rs.getBoolean("lease_expired")),
     ownerId, key.namespace(), key.objectKind(), key.sourceId());
+
+  if (existing.state() == ImportLinkState.IN_PROGRESS && !jobId.equals(existing.owningJobId())
+      && canTransfer(existing)) {
+   jdbc.update("""
+    UPDATE external_import_links SET owning_job_id=?, updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND state='IN_PROGRESS' AND owning_job_id IS NOT DISTINCT FROM ?
+    """, jobId, existing.id(), existing.owningJobId());
+   return new LinkReservation(existing.id(), ImportLinkState.IN_PROGRESS, jobId);
+  }
+  return new LinkReservation(existing.id(), existing.state(), existing.owningJobId());
+ }
+
+ private boolean canTransfer(ExistingReservation reservation) {
+  if (reservation.owningJobId() == null) return true;
+  return reservation.leaseExpired() && ("CANCELLED".equals(reservation.owningJobState())
+      || "FAILED".equals(reservation.owningJobState()) || "EXPIRED".equals(reservation.owningJobState()));
  }
 
  @Override @Transactional
@@ -88,4 +109,6 @@ public class ImportLedgerImpl implements ImportLedger {
  }
 
  private record ExistingLink(ImportLinkState state, String targetType, UUID targetId, String reason) { }
+ private record ExistingReservation(UUID id, ImportLinkState state, UUID owningJobId,
+                                    String owningJobState, boolean leaseExpired) { }
 }

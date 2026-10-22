@@ -101,6 +101,11 @@ public class PrivateImportFileStore implements ImportFileStore {
         return Files.newInputStream(pathForReading(generatedKey), StandardOpenOption.READ);
     }
 
+    @Override
+    public void validateKey(String generatedKey) {
+        resolve(generatedKey);
+    }
+
     public Path pathForReading(String generatedKey) throws IOException {
         Path path = resolve(generatedKey);
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || !path.toRealPath().startsWith(root)) {

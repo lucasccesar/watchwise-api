@@ -19,5 +19,6 @@ public interface ImportJobMapper {
     @Mapping(source = "job.createdAt", target = "createdAt")
     @Mapping(source = "job.updatedAt", target = "updatedAt")
     @Mapping(source = "job.expiresAt", target = "expiresAt")
+    @Mapping(target = "inventory", ignore = true)
     ImportJobDTO toDto(ImportJob job, String digest);
 }

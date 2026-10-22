@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportPlatform;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
+import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -19,6 +20,7 @@ public record ImportJobDTO(
         String previewDigest,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
-        LocalDateTime expiresAt
+        LocalDateTime expiresAt,
+        ImportInventory inventory
 ) {
 }

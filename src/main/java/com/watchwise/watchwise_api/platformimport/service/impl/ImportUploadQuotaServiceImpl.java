@@ -17,6 +17,8 @@ import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -90,6 +92,7 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
                 .workPending(false)
                 .createdAt(now)
                 .updatedAt(now)
+                .expiresAt(now.plusHours(24))
                 .build());
     }
 
@@ -115,7 +118,6 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         advisoryLock.lock("import-upload:quota:owner:" + ownerId);
         ImportJob job = lockOwnedJob(ownerId, jobId);
         job.setState(ImportJobState.FAILED);
-        job.setUploadSizeBytes(0);
         job.setWorkPending(false);
         job.setWorkPhase(null);
         job.setNextRunAt(null);
@@ -141,21 +143,41 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         if (job.getUploadSizeBytes() < 1) {
             throw new ConflictException("The import source file is no longer available");
         }
-        requireQuotaAvailable(ownerId, job.getUploadSizeBytes());
-
         LocalDateTime now = LocalDateTime.now(clock);
-        job.setState(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE
-                ? ImportJobState.ANALYZING : ImportJobState.RESOLVING);
-        job.setWorkPhase(job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE ? "INSPECT" : "RESOLVE");
+        if (job.getExpiresAt() != null && !job.getExpiresAt().isAfter(now)) {
+            throw new ConflictException("The import source file is no longer available");
+        }
+        requireRetryQuotaAvailable(ownerId);
+        String phase = job.getWorkPhase();
+        if (phase == null || phase.isBlank()) {
+            phase = job.getInputKind() == ImportInputKind.PLATFORM_ARCHIVE ? "INSPECT" : "RESOLVE";
+        }
+        job.setState(switch (phase) {
+            case "INSPECT", "NORMALIZE" -> ImportJobState.ANALYZING;
+            case "APPLY" -> ImportJobState.IMPORTING;
+            default -> ImportJobState.RESOLVING;
+        });
+        job.setWorkPhase(phase);
+        job.setPreviewVersion(Math.addExact(job.getPreviewVersion(), 1));
         job.setWorkPending(true);
         job.setNextRunAt(now);
         job.setUpdatedAt(now);
+        job.setLeaseToken(null);
+        job.setLeaseUntil(null);
+        try {
+            importJobRepository.flush();
+        } catch (DataIntegrityViolationException exception) {
+            if (isActiveWriterConflict(exception)) {
+                throw new ConflictException("Another import is already applying for this user");
+            }
+            throw exception;
+        }
     }
 
     private void requireQuotaAvailable(UUID ownerId, long uploadBytes) {
         long pendingJobs = importJobRepository.countPendingByOwnerId(ownerId, PENDING_STATES);
-        long ownerBytes = importJobRepository.sumPendingUploadBytesByOwnerId(ownerId, PENDING_STATES);
-        long globalBytes = importJobRepository.sumPendingUploadBytes(PENDING_STATES);
+        long ownerBytes = importJobRepository.sumStoredUploadBytesByOwnerId(ownerId);
+        long globalBytes = importJobRepository.sumStoredUploadBytes();
         if (pendingJobs >= importLimits.maxPendingJobsPerUser()) {
             throw new TooManyRequestsException("Too many pending import jobs");
         }
@@ -165,6 +187,29 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         if (exceedsQuota(globalBytes, uploadBytes, importLimits.maxPendingUploadBytesGlobal())) {
             throw new TooManyRequestsException("Global pending import upload quota exceeded");
         }
+    }
+
+    private void requireRetryQuotaAvailable(UUID ownerId) {
+        long pendingJobs = importJobRepository.countPendingByOwnerId(ownerId, PENDING_STATES);
+        long ownerBytes = importJobRepository.sumStoredUploadBytesByOwnerId(ownerId);
+        long globalBytes = importJobRepository.sumStoredUploadBytes();
+        if (pendingJobs >= importLimits.maxPendingJobsPerUser()) {
+            throw new TooManyRequestsException("Too many pending import jobs");
+        }
+        if (ownerBytes > importLimits.maxPendingUploadBytesPerUser()) {
+            throw new TooManyRequestsException("Pending import upload quota exceeded for this user");
+        }
+        if (globalBytes > importLimits.maxPendingUploadBytesGlobal()) {
+            throw new TooManyRequestsException("Global pending import upload quota exceeded");
+        }
+    }
+
+    private boolean isActiveWriterConflict(DataIntegrityViolationException exception) {
+        Throwable cause = exception.getCause();
+        if (cause instanceof ConstraintViolationException violation) {
+            return "uq_import_jobs_one_writer_per_user".equals(violation.getConstraintName());
+        }
+        return false;
     }
 
     private boolean exceedsQuota(long current, long requested, long limit) {
