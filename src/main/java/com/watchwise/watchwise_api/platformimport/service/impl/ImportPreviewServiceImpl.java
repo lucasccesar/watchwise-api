@@ -146,16 +146,18 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         LinkedHashSet<UUID> requestedIds = collectItemIds(decisions);
         Map<UUID, ImportItem> itemsById = loadAndValidateItems(jobId, generation, requestedIds);
         Set<UUID> changedItemIds = new LinkedHashSet<>();
+        Map<UUID, PreparedTargetResolution> preparedTargets = new LinkedHashMap<>();
         for (ImportResolutionOperation decision : decisions) {
             if (!changedItemIds.add(decision.itemId())) {
                 throw new BadRequestException("Only one resolution per item is allowed in a request");
             }
-            validateOperation(ownerId, decision, itemsById);
+            PreparedTargetResolution preparedTarget = validateOperation(ownerId, decision, itemsById);
+            if (preparedTarget != null) preparedTargets.put(decision.itemId(), preparedTarget);
         }
         validateFixedCategoryConstraints(jobId, generation, decisions, itemsById);
 
         for (ImportResolutionOperation decision : decisions) {
-            applyDecision(ownerId, decision, itemsById);
+            applyDecision(ownerId, decision, itemsById, preparedTargets.get(decision.itemId()));
         }
         importItemRepository.saveAll(changedItems(decisions, itemsById));
 
@@ -269,8 +271,29 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         ArrayNode listIds = selectionNode.putArray("listIds");
         selection.listIds().stream().sorted().forEach(listIds::add);
         if (selection.metadata() == null) selectionNode.putNull("metadata");
-        else selectionNode.set("metadata", selection.metadata().deepCopy());
+        else selectionNode.set("metadata", canonicalizeJson(selection.metadata()));
         return writeJson(root);
+    }
+
+    private JsonNode canonicalizeJson(JsonNode node) {
+        if (node.isObject()) {
+            ObjectNode canonical = objectMapper.createObjectNode();
+            List<Map.Entry<String, JsonNode>> properties = new ArrayList<>();
+            node.properties().forEach(properties::add);
+            properties.sort(Map.Entry.comparingByKey());
+            for (Map.Entry<String, JsonNode> property : properties) {
+                canonical.set(property.getKey(), canonicalizeJson(property.getValue()));
+            }
+            return canonical;
+        }
+        if (node.isArray()) {
+            ArrayNode canonical = objectMapper.createArrayNode();
+            for (int index = 0; index < node.size(); index++) {
+                canonical.add(canonicalizeJson(node.get(index)));
+            }
+            return canonical;
+        }
+        return node.deepCopy();
     }
 
     private long readPlanGeneration(String selectionJson) {
@@ -314,12 +337,11 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         return ids;
     }
 
-    private void validateOperation(UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items) {
+    private PreparedTargetResolution validateOperation(
+            UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items) {
         ImportItem item = requireItem(operation.itemId(), items);
         if (operation instanceof ImportResolutionOperation.ResolveTarget resolveTarget) {
-            ImportTarget target = resolveTarget.target() == null
-                    ? resolveCandidate(item, resolveTarget.candidateId()) : resolveTarget.target();
-            validateTarget(item, target);
+            return prepareTargetResolution(item, resolveTarget);
         } else if (operation instanceof ImportResolutionOperation.EditField editField) {
             validateEditedField(item, editField);
         } else if (operation instanceof ImportResolutionOperation.AssignPass assignPass) {
@@ -362,6 +384,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 && isFixedCategory(item)) {
             throw new BadRequestException("A fixed template category must be removed explicitly");
         }
+        return null;
     }
 
     private void validateEditedField(ImportItem item, ImportResolutionOperation.EditField editField) {
@@ -463,27 +486,133 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         }
     }
 
-    private ImportTarget resolveCandidate(ImportItem item, String candidateId) {
-        if (candidateId == null || candidateId.isBlank() || item.getResolvedTargetJson() == null) {
-            throw new BadRequestException("Candidate is not available for this import item");
-        }
-        try {
-            JsonNode envelope = objectMapper.readTree(item.getResolvedTargetJson());
-            JsonNode candidates = envelope.get("candidates");
-            if (candidates == null || !candidates.isArray()) {
+    private PreparedTargetResolution prepareTargetResolution(
+            ImportItem item, ImportResolutionOperation.ResolveTarget operation) {
+        CandidateEnvelope envelope = candidateEnvelope(item);
+        ImportTarget target;
+        AliasQuery query;
+        if (operation.target() == null) {
+            if (operation.candidateId() == null || operation.candidateId().isBlank() || envelope == null) {
                 throw new BadRequestException("Candidate is not available for this import item");
             }
-            for (JsonNode candidate : candidates) {
-                if (candidateId.equals(candidate.path("candidateId").asString())) {
-                    JsonNode target = candidate.get("target");
-                    if (target == null || target.isNull()) break;
-                    return objectMapper.treeToValue(target, ImportTarget.class);
-                }
-            }
-        } catch (JacksonException exception) {
-            throw new IllegalStateException("Candidate list is invalid", exception);
+            target = envelope.candidates().get(operation.candidateId());
+            if (target == null) throw new BadRequestException("Candidate does not belong to this import item");
+            query = envelope.query();
+        } else {
+            target = operation.target();
+            query = envelope == null ? sourceAliasQuery(item) : envelope.query();
         }
-        throw new BadRequestException("Candidate does not belong to this import item");
+        validateTarget(item, target);
+        validateAliasTarget(query, target);
+        return new PreparedTargetResolution(target, query);
+    }
+
+    private CandidateEnvelope candidateEnvelope(ImportItem item) {
+        String storedJson = item.getResolvedTargetJson();
+        if (storedJson == null || storedJson.isBlank()) return null;
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(storedJson);
+        } catch (JacksonException exception) {
+            throw new BadRequestException("Candidate envelope is invalid");
+        }
+        if (root == null || !root.isObject()) throw new BadRequestException("Candidate envelope is invalid");
+
+        boolean hasEnvelopeField = root.has("schemaVersion") || root.has("query") || root.has("candidates");
+        if (!hasEnvelopeField) {
+            try {
+                ImportTarget storedTarget = objectMapper.treeToValue(root, ImportTarget.class);
+                if (storedTarget != null) return null;
+            } catch (JacksonException | IllegalArgumentException exception) {
+                throw new BadRequestException("Candidate envelope is invalid");
+            }
+            throw new BadRequestException("Candidate envelope is invalid");
+        }
+
+        JsonNode schemaVersion = root.get("schemaVersion");
+        JsonNode candidateNodes = root.get("candidates");
+        if (schemaVersion == null || !schemaVersion.isInt() || schemaVersion.asInt() != 1
+                || candidateNodes == null || !candidateNodes.isArray()) {
+            throw new BadRequestException("Candidate envelope is invalid");
+        }
+        AliasQuery query = parseAliasQuery(root.get("query"), "Candidate envelope is invalid");
+        Map<String, ImportTarget> candidates = new LinkedHashMap<>();
+        for (JsonNode candidate : candidateNodes) {
+            if (candidate == null || !candidate.isObject()) {
+                throw new BadRequestException("Candidate envelope is invalid");
+            }
+            JsonNode candidateId = candidate.get("candidateId");
+            JsonNode targetNode = candidate.get("target");
+            if (candidateId == null || !candidateId.isString() || candidateId.asString().isBlank()
+                    || targetNode == null || !targetNode.isObject()) {
+                throw new BadRequestException("Candidate envelope is invalid");
+            }
+            try {
+                ImportTarget target = objectMapper.treeToValue(targetNode, ImportTarget.class);
+                if (candidates.putIfAbsent(candidateId.asString(), target) != null) {
+                    throw new BadRequestException("Candidate envelope is invalid");
+                }
+                validateTarget(item, target);
+                validateAliasTarget(query, target);
+            } catch (JacksonException | IllegalArgumentException exception) {
+                throw new BadRequestException("Candidate envelope is invalid");
+            }
+        }
+        return new CandidateEnvelope(query, candidates);
+    }
+
+    private AliasQuery sourceAliasQuery(ImportItem item) {
+        JsonNode queryNode;
+        try {
+            queryNode = queryNodeFrom(item.getResolvedTargetJson());
+            if (queryNode == null) queryNode = queryNodeFrom(item.getPayloadJson());
+        } catch (IllegalStateException exception) {
+            throw new BadRequestException("Candidate query is invalid");
+        }
+        if (queryNode == null) throw new BadRequestException("Candidate query is invalid");
+        return parseAliasQuery(queryNode, "Candidate query is invalid");
+    }
+
+    private AliasQuery parseAliasQuery(JsonNode queryNode, String invalidMessage) {
+        if (queryNode == null || !queryNode.isObject()) throw new BadRequestException(invalidMessage);
+        JsonNode kindNode = queryNode.get("kind");
+        JsonNode titleNode = queryNode.get("title");
+        JsonNode yearNode = queryNode.get("year");
+        JsonNode contentTypeNode = queryNode.get("contentType");
+        if (kindNode == null || !kindNode.isString() || titleNode == null || !titleNode.isString()) {
+            throw new BadRequestException(invalidMessage);
+        }
+        try {
+            AliasQuery.Kind kind = AliasQuery.Kind.valueOf(kindNode.asString());
+            Integer year = null;
+            if (yearNode != null && !yearNode.isNull()) {
+                if (!yearNode.isInt()) throw new BadRequestException(invalidMessage);
+                year = yearNode.asInt();
+            }
+            ContentType contentType = null;
+            if (contentTypeNode != null && !contentTypeNode.isNull()) {
+                if (!contentTypeNode.isString()) throw new BadRequestException(invalidMessage);
+                contentType = ContentType.valueOf(contentTypeNode.asString());
+            }
+            return new AliasQuery(kind, titleNode.asString(), year, contentType);
+        } catch (IllegalArgumentException exception) {
+            throw new BadRequestException(invalidMessage);
+        }
+    }
+
+    private void validateAliasTarget(AliasQuery query, ImportTarget target) {
+        if (query.kind() == AliasQuery.Kind.PERSON) {
+            if (!(target instanceof ImportTarget.PersonTarget)) {
+                throw new BadRequestException("Person query requires a person target");
+            }
+            return;
+        }
+        if (!(target instanceof ImportTarget.ContentTarget contentTarget)) {
+            throw new BadRequestException("Content query requires a content target");
+        }
+        if (query.contentType() != null && contentTarget.content().type() != query.contentType()) {
+            throw new BadRequestException("Resolved target type does not match the import query");
+        }
     }
 
     private void validateReviewOrder(ImportItem item, ImportItem beforeItem) {
@@ -555,12 +684,12 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
     private boolean isCategoryOpenedOrRemoved(
             ImportItem category, List<ImportResolutionOperation> decisions) {
-        if (category.getDecision() == ImportDecision.REMOVE_CATEGORY) return true;
         for (ImportResolutionOperation decision : decisions) {
             if (!category.getId().equals(decision.itemId())) continue;
             if (decision instanceof ImportResolutionOperation.RemoveCategory) return true;
-            if (decision instanceof ImportResolutionOperation.SetCategoryOpen setOpen && setOpen.open()) return true;
+            if (decision instanceof ImportResolutionOperation.SetCategoryOpen setOpen) return setOpen.open();
         }
+        if (category.getDecision() == ImportDecision.REMOVE_CATEGORY) return true;
         if (category.getDecision() != ImportDecision.SET_CATEGORY_OPEN) return false;
         JsonNode payload = readPayload(category.getPayloadJson());
         JsonNode setOpen = payload.path("resolution").path("setCategoryOpen");
@@ -568,7 +697,6 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private boolean isFixedCategory(ImportItem category) {
-        if (isCategoryOpenedOrRemoved(category, List.of())) return false;
         JsonNode source = sourcePayload(readPayload(category.getPayloadJson()));
         String optionMode = source.path("optionMode").asString();
         if (optionMode != null && !optionMode.isBlank()) return "FIXED".equalsIgnoreCase(optionMode);
@@ -597,14 +725,18 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         }
     }
 
-    private void applyDecision(UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items) {
+    private void applyDecision(UUID ownerId, ImportResolutionOperation operation, Map<UUID, ImportItem> items,
+                               PreparedTargetResolution preparedTarget) {
         ImportItem item = items.get(operation.itemId());
-        item.setDecision(decisionOf(operation));
-        item.setPayloadJson(appendDecisionOverlay(item, operation));
-        if (operation instanceof ImportResolutionOperation.ResolveTarget resolveTarget) {
-            ImportTarget target = resolveTarget.target() == null
-                    ? resolveCandidate(item, resolveTarget.candidateId()) : resolveTarget.target();
-            rememberConfirmedAlias(ownerId, item, target);
+        ResolutionMetadata metadata = resolutionMetadata(operation);
+        if (operation instanceof ImportResolutionOperation.ResolveTarget) {
+            externalContentAliasService.remember(ownerId, preparedTarget.query(), preparedTarget.target(),
+                    AliasTrust.USER_CONFIRMED);
+        }
+        item.setDecision(metadata.decision());
+        item.setPayloadJson(appendDecisionOverlay(item, operation, metadata.overlayKey()));
+        if (preparedTarget != null) {
+            ImportTarget target = preparedTarget.target();
             item.setResolvedTargetJson(writeJson(objectMapper.valueToTree(target)));
             item.setResolvedContentKey(contentKey(target));
             item.setIssue(null);
@@ -614,41 +746,6 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             item.setResolvedTargetJson(null);
             item.setResolvedContentKey(null);
         }
-    }
-
-    private void rememberConfirmedAlias(UUID ownerId, ImportItem item, ImportTarget target) {
-        JsonNode queryNode = queryNodeFrom(item.getResolvedTargetJson());
-        if (queryNode == null) queryNode = queryNodeFrom(item.getPayloadJson());
-        if (queryNode == null) return;
-        String title = queryNode.path("title").asString();
-        String queryKind = queryNode.path("kind").asString();
-        if (title == null || title.isBlank() || queryKind == null || queryKind.isBlank()) {
-            throw new BadRequestException("Candidate query is invalid");
-        }
-        AliasQuery query;
-        try {
-            AliasQuery.Kind kind = AliasQuery.Kind.valueOf(queryKind);
-            if (kind == AliasQuery.Kind.PERSON) {
-                if (!(target instanceof ImportTarget.PersonTarget)) {
-                    throw new BadRequestException("Person query requires a person target");
-                }
-                query = AliasQuery.person(title);
-            } else {
-                Integer year = queryNode.path("year").isNumber() ? queryNode.path("year").asInt() : null;
-                String type = queryNode.path("contentType").asString();
-                ContentType contentType = type == null || type.isBlank() ? null : ContentType.valueOf(type);
-                if (target instanceof ImportTarget.PersonTarget) {
-                    throw new BadRequestException("Content query requires a content target");
-                }
-                if (contentType != null && ((ImportTarget.ContentTarget) target).content().type() != contentType) {
-                    throw new BadRequestException("Resolved target type does not match the import query");
-                }
-                query = new AliasQuery(title, year, contentType);
-            }
-        } catch (IllegalArgumentException exception) {
-            throw new BadRequestException("Candidate query is invalid");
-        }
-        externalContentAliasService.remember(ownerId, query, target, AliasTrust.USER_CONFIRMED);
     }
 
     private JsonNode queryNodeFrom(String payload) {
@@ -665,7 +762,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         return nestedQuery != null && nestedQuery.isObject() ? nestedQuery : null;
     }
 
-    private String appendDecisionOverlay(ImportItem item, ImportResolutionOperation operation) {
+    private String appendDecisionOverlay(ImportItem item, ImportResolutionOperation operation, String overlayKey) {
         JsonNode original = readPayload(item.getPayloadJson());
         ObjectNode overlay;
         ObjectNode resolution;
@@ -687,22 +784,9 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         if (operation instanceof ImportResolutionOperation.EditField editField) {
             ((ObjectNode) resolution.get("fields")).put(editField.field().name(), editField.value());
         } else {
-            resolution.set(operationName(operation), objectMapper.valueToTree(operation));
+            resolution.set(overlayKey, objectMapper.valueToTree(operation));
         }
         return writeJson(overlay);
-    }
-
-    private String operationName(ImportResolutionOperation operation) {
-        if (operation instanceof ImportResolutionOperation.ResolveTarget) return "resolveTarget";
-        if (operation instanceof ImportResolutionOperation.SkipItem) return "skipItem";
-        if (operation instanceof ImportResolutionOperation.AssignPass) return "assignPass";
-        if (operation instanceof ImportResolutionOperation.ConfirmWatchScope) return "confirmWatchScope";
-        if (operation instanceof ImportResolutionOperation.LinkImportedList) return "linkImportedList";
-        if (operation instanceof ImportResolutionOperation.ResolveReviewOrder) return "resolveReviewOrder";
-        if (operation instanceof ImportResolutionOperation.RemoveNominee) return "removeNominee";
-        if (operation instanceof ImportResolutionOperation.RemoveCategory) return "removeCategory";
-        if (operation instanceof ImportResolutionOperation.SetCategoryOpen) return "setCategoryOpen";
-        throw new BadRequestException("Unsupported import resolution operation");
     }
 
     private JsonNode readPayload(String payload) {
@@ -725,17 +809,37 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         };
     }
 
-    private ImportDecision decisionOf(ImportResolutionOperation operation) {
-        if (operation instanceof ImportResolutionOperation.ResolveTarget) return ImportDecision.RESOLVE_TARGET;
-        if (operation instanceof ImportResolutionOperation.SkipItem) return ImportDecision.SKIP_ITEM;
-        if (operation instanceof ImportResolutionOperation.EditField) return ImportDecision.EDIT_FIELD;
-        if (operation instanceof ImportResolutionOperation.AssignPass) return ImportDecision.ASSIGN_PASS;
-        if (operation instanceof ImportResolutionOperation.ConfirmWatchScope) return ImportDecision.CONFIRM_WATCH_SCOPE;
-        if (operation instanceof ImportResolutionOperation.LinkImportedList) return ImportDecision.LINK_IMPORTED_LIST;
-        if (operation instanceof ImportResolutionOperation.ResolveReviewOrder) return ImportDecision.RESOLVE_REVIEW_ORDER;
-        if (operation instanceof ImportResolutionOperation.RemoveNominee) return ImportDecision.REMOVE_NOMINEE;
-        if (operation instanceof ImportResolutionOperation.RemoveCategory) return ImportDecision.REMOVE_CATEGORY;
-        if (operation instanceof ImportResolutionOperation.SetCategoryOpen) return ImportDecision.SET_CATEGORY_OPEN;
+    private ResolutionMetadata resolutionMetadata(ImportResolutionOperation operation) {
+        if (operation instanceof ImportResolutionOperation.ResolveTarget) {
+            return new ResolutionMetadata(ImportDecision.RESOLVE_TARGET, "resolveTarget");
+        }
+        if (operation instanceof ImportResolutionOperation.SkipItem) {
+            return new ResolutionMetadata(ImportDecision.SKIP_ITEM, "skipItem");
+        }
+        if (operation instanceof ImportResolutionOperation.EditField) {
+            return new ResolutionMetadata(ImportDecision.EDIT_FIELD, "fields");
+        }
+        if (operation instanceof ImportResolutionOperation.AssignPass) {
+            return new ResolutionMetadata(ImportDecision.ASSIGN_PASS, "assignPass");
+        }
+        if (operation instanceof ImportResolutionOperation.ConfirmWatchScope) {
+            return new ResolutionMetadata(ImportDecision.CONFIRM_WATCH_SCOPE, "confirmWatchScope");
+        }
+        if (operation instanceof ImportResolutionOperation.LinkImportedList) {
+            return new ResolutionMetadata(ImportDecision.LINK_IMPORTED_LIST, "linkImportedList");
+        }
+        if (operation instanceof ImportResolutionOperation.ResolveReviewOrder) {
+            return new ResolutionMetadata(ImportDecision.RESOLVE_REVIEW_ORDER, "resolveReviewOrder");
+        }
+        if (operation instanceof ImportResolutionOperation.RemoveNominee) {
+            return new ResolutionMetadata(ImportDecision.REMOVE_NOMINEE, "removeNominee");
+        }
+        if (operation instanceof ImportResolutionOperation.RemoveCategory) {
+            return new ResolutionMetadata(ImportDecision.REMOVE_CATEGORY, "removeCategory");
+        }
+        if (operation instanceof ImportResolutionOperation.SetCategoryOpen) {
+            return new ResolutionMetadata(ImportDecision.SET_CATEGORY_OPEN, "setCategoryOpen");
+        }
         throw new BadRequestException("Unsupported import resolution operation");
     }
 
@@ -795,5 +899,14 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         } catch (JacksonException exception) {
             throw new IllegalStateException("Import plan data could not be serialized", exception);
         }
+    }
+
+    private record CandidateEnvelope(AliasQuery query, Map<String, ImportTarget> candidates) {
+    }
+
+    private record PreparedTargetResolution(ImportTarget target, AliasQuery query) {
+    }
+
+    private record ResolutionMetadata(ImportDecision decision, String overlayKey) {
     }
 }

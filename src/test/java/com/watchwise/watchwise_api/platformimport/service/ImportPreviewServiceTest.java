@@ -40,6 +40,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -62,6 +63,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 
@@ -137,6 +139,43 @@ class ImportPreviewServiceTest {
     }
 
     @Test
+    @DisplayName("[select] Should Canonicalize Metadata Objects - When Property Insertion Order Differs")
+    void shouldCanonicalizeMetadataObjectsWhenPropertyInsertionOrderDiffers() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        ImportJob firstJob = job(ownerId, jobId, 4, ImportJobState.AWAITING_SELECTION);
+        ImportJob secondJob = job(ownerId, jobId, 4, ImportJobState.AWAITING_SELECTION);
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId))
+                .thenReturn(Optional.of(firstJob), Optional.of(secondJob));
+        ImportModeKey mode = new ImportModeKey(firstJob.getInputKind(), firstJob.getSourceFormat());
+        when(importModeRegistry.require(mode)).thenReturn(emptyModeHandler(mode));
+
+        ObjectNode firstMetadata = objectMapper.createObjectNode();
+        firstMetadata.put("zeta", 3);
+        ObjectNode firstNested = firstMetadata.putObject("nested");
+        firstNested.put("second", true);
+        firstNested.put("first", "value");
+        firstMetadata.putArray("ordered").add(2).add(1);
+
+        ObjectNode secondMetadata = objectMapper.createObjectNode();
+        secondMetadata.putArray("ordered").add(2).add(1);
+        ObjectNode secondNested = secondMetadata.putObject("nested");
+        secondNested.put("first", "value");
+        secondNested.put("second", true);
+        secondMetadata.put("zeta", 3);
+
+        var firstResult = service.select(ownerId, jobId,
+                new ImportSelection(true, false, Set.of(), firstMetadata), 4);
+        var secondResult = service.select(ownerId, jobId,
+                new ImportSelection(true, false, Set.of(), secondMetadata), 4);
+
+        assertThat(firstJob.getSelectionJson()).isEqualTo(secondJob.getSelectionJson());
+        assertThat(firstJob.getSelectionJson()).contains("\"ordered\":[2,1]");
+        assertThat(firstResult.version()).isEqualTo(secondResult.version());
+        assertThat(firstResult.digest()).isEqualTo(secondResult.digest());
+    }
+
+    @Test
     @DisplayName("[select] Should Leave The Plan Unchanged - When The Expected Version Is Stale")
     void shouldLeaveThePlanUnchangedWhenTheExpectedVersionIsStale() {
         UUID ownerId = UUID.randomUUID();
@@ -165,7 +204,9 @@ class ImportPreviewServiceTest {
         ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
         setPlanGeneration(job, 4);
         ImportItem item = item(itemId, jobId, 4, ImportRecordKind.DIARY_EVENT,
-                "{\"title\":\"Original title\",\"score\":7}", 1);
+                "{\"title\":\"Original title\",\"score\":7,\"sourceQuery\":{"
+                        + "\"kind\":\"CONTENT\",\"title\":\"Original title\",\"year\":2001,"
+                        + "\"contentType\":\"MOVIE\"}}", 1);
         ImportTarget target = new ImportTarget.ContentTarget(MediaReference.movie("123"));
         when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
         when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
@@ -275,6 +316,125 @@ class ImportPreviewServiceTest {
         assertThat(item.getResolvedTargetJson()).isNull();
         assertThat(job.getPreviewVersion()).isEqualTo(4);
         assertThat(job.isWorkPending()).isFalse();
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Typed Target - When Its Source Query Is Missing")
+    void shouldRejectATypedTargetWhenItsSourceQueryIsMissing() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 1);
+        ImportTarget target = new ImportTarget.ContentTarget(MediaReference.movie("123"));
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.ResolveTarget(itemId, target)), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Candidate query is invalid");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(item.getResolvedTargetJson()).isNull();
+        assertThat(item.getPayloadJson()).isEqualTo("{}");
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+        assertThat(job.isWorkPending()).isFalse();
+        verify(importItemRepository, never()).saveAll(anyCollection());
+        verifyNoInteractions(externalContentAliasService);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Candidate Envelope - When Its Schema Version Is Unsupported")
+    void shouldRejectACandidateEnvelopeWhenItsSchemaVersionIsUnsupported() {
+        assertRejectedTypedResolution("{\"schemaVersion\":2,\"query\":{"
+                + "\"kind\":\"CONTENT\",\"title\":\"Example Movie\",\"year\":2001,"
+                + "\"contentType\":\"MOVIE\"},\"candidates\":[]}");
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Candidate Envelope - When Its Query Is Missing And Candidates Are Empty")
+    void shouldRejectACandidateEnvelopeWhenItsQueryIsMissingAndCandidatesAreEmpty() {
+        assertRejectedTypedResolution("{\"schemaVersion\":1,\"candidates\":[]}");
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Candidate Envelope - When Its Query Is Not Typed")
+    void shouldRejectACandidateEnvelopeWhenItsQueryIsNotTyped() {
+        assertRejectedTypedResolution("{\"schemaVersion\":1,\"query\":{"
+                + "\"kind\":\"ALIEN\",\"title\":\"Example Movie\"},\"candidates\":[]}");
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Candidate Envelope - When An Entry Has No Typed Target")
+    void shouldRejectACandidateEnvelopeWhenAnEntryHasNoTypedTarget() {
+        assertRejectedTypedResolution("{\"schemaVersion\":1,\"query\":{"
+                + "\"kind\":\"CONTENT\",\"title\":\"Example Movie\",\"year\":2001,"
+                + "\"contentType\":\"MOVIE\"},\"candidates\":[{\"candidateId\":\"candidate-1\"}]}");
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject A Candidate Envelope - When An Entry Has No Candidate Id")
+    void shouldRejectACandidateEnvelopeWhenAnEntryHasNoCandidateId() {
+        assertRejectedTypedResolution("{\"schemaVersion\":1,\"query\":{"
+                + "\"kind\":\"CONTENT\",\"title\":\"Example Movie\",\"year\":2001,"
+                + "\"contentType\":\"MOVIE\"},\"candidates\":[{\"target\":{"
+                + "\"kind\":\"CONTENT\",\"content\":{\"type\":\"MOVIE\",\"tmdbId\":\"123\"}}}]}");
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject An Arbitrary Candidate Id - When It Is Not In The Stored Envelope")
+    void shouldRejectAnArbitraryCandidateIdWhenItIsNotInTheStoredEnvelope() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 1);
+        item.setResolvedTargetJson("{\"schemaVersion\":1,\"query\":{"
+                + "\"kind\":\"CONTENT\",\"title\":\"Example Movie\",\"year\":2001,"
+                + "\"contentType\":\"MOVIE\"},\"candidates\":[{\"candidateId\":\"candidate-1\","
+                + "\"target\":{\"kind\":\"CONTENT\",\"content\":{\"type\":\"MOVIE\","
+                + "\"tmdbId\":\"123\"}}}]}");
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.ResolveTarget(itemId, "arbitrary-id")), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Candidate does not belong to this import item");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+        verify(importItemRepository, never()).saveAll(anyCollection());
+        verifyNoInteractions(externalContentAliasService);
+    }
+
+    private void assertRejectedTypedResolution(String candidateEnvelope) {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 1);
+        item.setResolvedTargetJson(candidateEnvelope);
+        ImportTarget target = new ImportTarget.ContentTarget(MediaReference.movie("123"));
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.ResolveTarget(itemId, target)), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Candidate envelope is invalid");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+        verify(importItemRepository, never()).saveAll(anyCollection());
+        verifyNoInteractions(externalContentAliasService);
     }
 
     @Test
@@ -428,6 +588,167 @@ class ImportPreviewServiceTest {
 
         assertThat(option.getDecision()).isNull();
         assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject Closing An Open Fixed Category - When Its Last Nominee Is Removed")
+    void shouldRejectClosingAnOpenFixedCategoryWhenItsLastNomineeIsRemoved() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+        UUID optionId = UUID.randomUUID();
+        String categorySourceId = "category-source-1";
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem category = ImportItem.builder()
+                .id(categoryId)
+                .jobId(jobId)
+                .planGeneration(4)
+                .normalizedKind(ImportRecordKind.TEMPLATE_CATEGORY)
+                .sourceNamespace("watchwise-template")
+                .objectKind("TEMPLATE_CATEGORY")
+                .sourceId(categorySourceId)
+                .payloadJson("{\"optionMode\":\"FIXED\"}")
+                .ordinal(0)
+                .build();
+        ImportItem option = ImportItem.builder()
+                .id(optionId)
+                .jobId(jobId)
+                .planGeneration(4)
+                .normalizedKind(ImportRecordKind.TEMPLATE_OPTION)
+                .sourceNamespace("watchwise-template")
+                .objectKind("TEMPLATE_OPTION")
+                .sourceId("nominee-1")
+                .parentSourceId(categorySourceId)
+                .payloadJson("{\"name\":\"Nominee\"}")
+                .ordinal(1)
+                .build();
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(category), List.of(category, option));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndSourceIdAndNormalizedKind(
+                jobId, 4, categorySourceId, ImportRecordKind.TEMPLATE_CATEGORY)).thenReturn(List.of(category));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
+                jobId, 4, categorySourceId, ImportRecordKind.TEMPLATE_OPTION)).thenReturn(List.of(option));
+
+        service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.SetCategoryOpen(categoryId, true)), 4);
+
+        assertThat(category.getDecision()).isEqualTo(ImportDecision.SET_CATEGORY_OPEN);
+        assertThat(category.getPayloadJson()).contains("\"open\":true");
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId, List.of(
+                new ImportResolutionOperation.SetCategoryOpen(categoryId, false),
+                new ImportResolutionOperation.RemoveNominee(optionId)), 5))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("A fixed template category must retain at least one nominee or be opened explicitly");
+
+        assertThat(category.getPayloadJson()).contains("\"open\":true");
+        assertThat(option.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Store Every Operation Mapping - When A Mixed Resolution Batch Is Applied")
+    void shouldStoreEveryOperationMappingWhenAMixedResolutionBatchIsApplied() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+
+        ImportItem resolveTarget = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.DIARY_EVENT,
+                "{\"sourceQuery\":{\"kind\":\"CONTENT\",\"title\":\"Mapping Test\","
+                        + "\"contentType\":\"MOVIE\"}}", 1);
+        ImportItem skipItem = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 2);
+        ImportItem editField = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 3);
+        ImportItem assignPass = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 4);
+        ImportItem watchScope = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.WATCHED_SUMMARY, "{}", 5);
+        ImportItem listMetadata = item(UUID.randomUUID(), jobId, 4, ImportRecordKind.LIST_METADATA, "{}", 6);
+        UUID reviewId = UUID.randomUUID();
+        UUID beforeReviewId = UUID.randomUUID();
+        ImportItem review = ImportItem.builder()
+                .id(reviewId).jobId(jobId).planGeneration(4).normalizedKind(ImportRecordKind.REVIEW)
+                .sourceNamespace("trakt").objectKind("REVIEW").sourceId("review-1")
+                .normalizedContentKey("same-content").payloadJson("{}").ordinal(7).build();
+        ImportItem beforeReview = ImportItem.builder()
+                .id(beforeReviewId).jobId(jobId).planGeneration(4).normalizedKind(ImportRecordKind.REVIEW)
+                .sourceNamespace("trakt").objectKind("REVIEW").sourceId("review-2")
+                .normalizedContentKey("same-content").payloadJson("{}").ordinal(8).build();
+        String fixedCategorySourceId = "fixed-category";
+        ImportItem nominee = ImportItem.builder()
+                .id(UUID.randomUUID()).jobId(jobId).planGeneration(4)
+                .normalizedKind(ImportRecordKind.TEMPLATE_OPTION).sourceNamespace("watchwise-template")
+                .objectKind("TEMPLATE_OPTION").sourceId("nominee-1").parentSourceId(fixedCategorySourceId)
+                .payloadJson("{}").ordinal(9).build();
+        ImportItem otherNominee = ImportItem.builder()
+                .id(UUID.randomUUID()).jobId(jobId).planGeneration(4)
+                .normalizedKind(ImportRecordKind.TEMPLATE_OPTION).sourceNamespace("watchwise-template")
+                .objectKind("TEMPLATE_OPTION").sourceId("nominee-2").parentSourceId(fixedCategorySourceId)
+                .payloadJson("{}").ordinal(10).build();
+        ImportItem fixedCategory = ImportItem.builder()
+                .id(UUID.randomUUID()).jobId(jobId).planGeneration(4)
+                .normalizedKind(ImportRecordKind.TEMPLATE_CATEGORY).sourceNamespace("watchwise-template")
+                .objectKind("TEMPLATE_CATEGORY").sourceId(fixedCategorySourceId)
+                .payloadJson("{\"optionMode\":\"FIXED\"}").ordinal(11).build();
+        ImportItem removeCategory = item(UUID.randomUUID(), jobId, 4,
+                ImportRecordKind.TEMPLATE_CATEGORY, "{}", 12);
+        ImportItem setCategoryOpen = item(UUID.randomUUID(), jobId, 4,
+                ImportRecordKind.TEMPLATE_CATEGORY, "{}", 13);
+        List<ImportItem> allItems = List.of(resolveTarget, skipItem, editField, assignPass, watchScope,
+                listMetadata, review, beforeReview, nominee, otherNominee, fixedCategory,
+                removeCategory, setCategoryOpen);
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenAnswer(invocation -> {
+                    Set<?> requestedIds = invocation.getArgument(2);
+                    return allItems.stream().filter(candidate -> requestedIds.contains(candidate.getId())).toList();
+                });
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndSourceIdAndNormalizedKind(
+                jobId, 4, fixedCategorySourceId, ImportRecordKind.TEMPLATE_CATEGORY))
+                .thenReturn(List.of(fixedCategory));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
+                jobId, 4, fixedCategorySourceId, ImportRecordKind.TEMPLATE_OPTION))
+                .thenReturn(List.of(nominee, otherNominee));
+        UUID targetListId = UUID.randomUUID();
+        var listOwner = mock(com.watchwise.watchwise_api.user.entity.User.class);
+        when(listOwner.getId()).thenReturn(ownerId);
+        UserList linkedList = mock(UserList.class);
+        when(linkedList.getUser()).thenReturn(listOwner);
+        when(userListRepository.findById(targetListId)).thenReturn(Optional.of(linkedList));
+
+        List<ImportResolutionOperation> operations = List.of(
+                new ImportResolutionOperation.ResolveTarget(resolveTarget.getId(),
+                        new ImportTarget.ContentTarget(MediaReference.movie("123"))),
+                new ImportResolutionOperation.SkipItem(skipItem.getId()),
+                new ImportResolutionOperation.EditField(editField.getId(),
+                        ImportResolutionOperation.EditableField.TITLE, "Edited"),
+                new ImportResolutionOperation.AssignPass(assignPass.getId(), 2),
+                new ImportResolutionOperation.ConfirmWatchScope(watchScope.getId(),
+                        ImportResolutionOperation.WatchScope.ALL_RELEASED_EPISODES, List.of()),
+                new ImportResolutionOperation.LinkImportedList(listMetadata.getId(), targetListId),
+                new ImportResolutionOperation.ResolveReviewOrder(reviewId, beforeReviewId),
+                new ImportResolutionOperation.RemoveNominee(nominee.getId()),
+                new ImportResolutionOperation.RemoveCategory(removeCategory.getId()),
+                new ImportResolutionOperation.SetCategoryOpen(setCategoryOpen.getId(), true));
+
+        service.resolve(ownerId, jobId, operations, 4);
+
+        assertDecisionOverlay(resolveTarget, ImportDecision.RESOLVE_TARGET, "resolveTarget");
+        assertDecisionOverlay(skipItem, ImportDecision.SKIP_ITEM, "skipItem");
+        assertThat(editField.getDecision()).isEqualTo(ImportDecision.EDIT_FIELD);
+        assertThat(editField.getPayloadJson()).contains("\"fields\":{\"TITLE\":\"Edited\"}");
+        assertDecisionOverlay(assignPass, ImportDecision.ASSIGN_PASS, "assignPass");
+        assertDecisionOverlay(watchScope, ImportDecision.CONFIRM_WATCH_SCOPE, "confirmWatchScope");
+        assertDecisionOverlay(listMetadata, ImportDecision.LINK_IMPORTED_LIST, "linkImportedList");
+        assertDecisionOverlay(review, ImportDecision.RESOLVE_REVIEW_ORDER, "resolveReviewOrder");
+        assertDecisionOverlay(nominee, ImportDecision.REMOVE_NOMINEE, "removeNominee");
+        assertDecisionOverlay(removeCategory, ImportDecision.REMOVE_CATEGORY, "removeCategory");
+        assertDecisionOverlay(setCategoryOpen, ImportDecision.SET_CATEGORY_OPEN, "setCategoryOpen");
+    }
+
+    private void assertDecisionOverlay(ImportItem item, ImportDecision decision, String overlayKey) {
+        assertThat(item.getDecision()).isEqualTo(decision);
+        assertThat(item.getPayloadJson()).contains("\"" + overlayKey + "\":");
     }
 
     @Test
