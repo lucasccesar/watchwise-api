@@ -227,7 +227,7 @@ public class ExternalContentAliasServiceImpl implements ExternalContentAliasServ
         if (lookup instanceof TmdbLookupResult.Unavailable<?>) return new SearchOutcome(List.of(), true, false);
         if (lookup instanceof TmdbLookupResult.NotFound<?>) return SearchOutcome.empty();
         TmdbSearchPage<TmdbMovieSearchResult> page = ((TmdbLookupResult.Found<TmdbSearchPage<TmdbMovieSearchResult>>) lookup).value();
-        if (page == null || page.results() == null) return SearchOutcome.empty();
+        if (page == null || page.results() == null) return new SearchOutcome(List.of(), true, false);
         List<SearchCandidate> candidates = page.results().stream()
                 .filter(result -> present(result.id()) && present(result.title()))
                 .map(result -> new SearchCandidate(
@@ -243,7 +243,7 @@ public class ExternalContentAliasServiceImpl implements ExternalContentAliasServ
         if (lookup instanceof TmdbLookupResult.Unavailable<?>) return new SearchOutcome(List.of(), true, false);
         if (lookup instanceof TmdbLookupResult.NotFound<?>) return SearchOutcome.empty();
         TmdbSearchPage<TmdbTvSearchResult> page = ((TmdbLookupResult.Found<TmdbSearchPage<TmdbTvSearchResult>>) lookup).value();
-        if (page == null || page.results() == null) return SearchOutcome.empty();
+        if (page == null || page.results() == null) return new SearchOutcome(List.of(), true, false);
         List<SearchCandidate> candidates = page.results().stream()
                 .filter(result -> present(result.id()) && present(result.name()))
                 .map(result -> new SearchCandidate(
@@ -259,7 +259,7 @@ public class ExternalContentAliasServiceImpl implements ExternalContentAliasServ
         if (lookup instanceof TmdbLookupResult.Unavailable<?>) return new SearchOutcome(List.of(), true, false);
         if (lookup instanceof TmdbLookupResult.NotFound<?>) return SearchOutcome.empty();
         TmdbSearchPage<TmdbPersonSearchResult> page = ((TmdbLookupResult.Found<TmdbSearchPage<TmdbPersonSearchResult>>) lookup).value();
-        if (page == null || page.results() == null) return SearchOutcome.empty();
+        if (page == null || page.results() == null) return new SearchOutcome(List.of(), true, false);
         List<SearchCandidate> candidates = page.results().stream()
                 .filter(result -> present(result.id()) && present(result.name()))
                 .map(result -> new SearchCandidate(

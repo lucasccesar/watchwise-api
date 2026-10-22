@@ -274,6 +274,87 @@ class ExternalContentAliasServiceTest {
     }
 
     @Test
+    @DisplayName("[resolve] Should Return Unavailable - When Movie Search Page Is Null")
+    void shouldReturnUnavailableWhenMovieSearchPageIsNull() {
+        UUID owner = user("null-movie-page-owner");
+        AliasQuery query = new AliasQuery("Malformed Film", 2001, ContentType.MOVIE);
+        when(tmdbClient.searchMovies("Malformed Film", "en-US", 1)).thenReturn(new TmdbLookupResult.Found<>(null));
+
+        AliasResolution result = aliasService.resolve(owner, query);
+
+        assertThat(result.status()).isEqualTo(AliasResolution.Status.UNAVAILABLE);
+        verify(tmdbClient, times(1)).searchMovies("Malformed Film", "en-US", 1);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Return Unavailable - When Movie Search Results Are Null")
+    void shouldReturnUnavailableWhenMovieSearchResultsAreNull() {
+        UUID owner = user("null-movie-results-owner");
+        AliasQuery query = new AliasQuery("Malformed Film", 2001, ContentType.MOVIE);
+        when(tmdbClient.searchMovies("Malformed Film", "en-US", 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, null, 1, 0)));
+
+        AliasResolution result = aliasService.resolve(owner, query);
+
+        assertThat(result.status()).isEqualTo(AliasResolution.Status.UNAVAILABLE);
+        verify(tmdbClient, times(1)).searchMovies("Malformed Film", "en-US", 1);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Return Unavailable - When TV Search Page Is Null")
+    void shouldReturnUnavailableWhenTvSearchPageIsNull() {
+        UUID owner = user("null-tv-page-owner");
+        AliasQuery query = new AliasQuery("Malformed Series", 2001, ContentType.SERIES);
+        when(tmdbClient.searchTv("Malformed Series", "en-US", 1)).thenReturn(new TmdbLookupResult.Found<>(null));
+
+        AliasResolution result = aliasService.resolve(owner, query);
+
+        assertThat(result.status()).isEqualTo(AliasResolution.Status.UNAVAILABLE);
+        verify(tmdbClient, times(1)).searchTv("Malformed Series", "en-US", 1);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Return Unavailable - When TV Search Results Are Null")
+    void shouldReturnUnavailableWhenTvSearchResultsAreNull() {
+        UUID owner = user("null-tv-results-owner");
+        AliasQuery query = new AliasQuery("Malformed Series", 2001, ContentType.SERIES);
+        when(tmdbClient.searchTv("Malformed Series", "en-US", 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, null, 1, 0)));
+
+        AliasResolution result = aliasService.resolve(owner, query);
+
+        assertThat(result.status()).isEqualTo(AliasResolution.Status.UNAVAILABLE);
+        verify(tmdbClient, times(1)).searchTv("Malformed Series", "en-US", 1);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Return Unavailable - When Person Search Page Is Null")
+    void shouldReturnUnavailableWhenPersonSearchPageIsNull() {
+        UUID owner = user("null-person-page-owner");
+        AliasQuery query = AliasQuery.person("Malformed Person");
+        when(tmdbClient.searchPeople("Malformed Person", "en-US", 1)).thenReturn(new TmdbLookupResult.Found<>(null));
+
+        AliasResolution result = aliasService.resolve(owner, query);
+
+        assertThat(result.status()).isEqualTo(AliasResolution.Status.UNAVAILABLE);
+        verify(tmdbClient, times(1)).searchPeople("Malformed Person", "en-US", 1);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Return Unavailable - When Person Search Results Are Null")
+    void shouldReturnUnavailableWhenPersonSearchResultsAreNull() {
+        UUID owner = user("null-person-results-owner");
+        AliasQuery query = AliasQuery.person("Malformed Person");
+        when(tmdbClient.searchPeople("Malformed Person", "en-US", 1)).thenReturn(new TmdbLookupResult.Found<>(
+                new TmdbSearchPage<>(1, null, 1, 0)));
+
+        AliasResolution result = aliasService.resolve(owner, query);
+
+        assertThat(result.status()).isEqualTo(AliasResolution.Status.UNAVAILABLE);
+        verify(tmdbClient, times(1)).searchPeople("Malformed Person", "en-US", 1);
+    }
+
+    @Test
     @DisplayName("[resolve] Should Search People By Exact Name - When Query Kind Is Person")
     void shouldSearchPeopleByExactNameWhenQueryKindIsPerson() {
         UUID owner = user("person-owner");
