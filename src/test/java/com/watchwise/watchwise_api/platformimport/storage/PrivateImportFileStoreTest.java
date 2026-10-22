@@ -2,7 +2,12 @@ package com.watchwise.watchwise_api.platformimport.storage;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.platformimport.model.StoredImportFile;
+import com.watchwise.watchwise_api.platformimport.parser.SafeImportReader;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,6 +28,25 @@ import static org.assertj.core.api.Assertions.*;
 
 class PrivateImportFileStoreTest {
     @TempDir Path root;
+
+    @Test
+    @DisplayName("[componentScan] Should Start Both Import Reader Components - When Storage Directory Is Absolute And Limits Are Bound")
+    void shouldStartBothImportReaderComponentsWhenStorageDirectoryIsAbsoluteAndLimitsAreBound() {
+        Path storageDirectory = root.resolve("component-scan-store").toAbsolutePath();
+        new ApplicationContextRunner()
+                .withUserConfiguration(ImportReaderTestConfiguration.class)
+                .withPropertyValues(
+                        "app.import.storage-directory=" + storageDirectory,
+                        "app.import.max-upload-bytes=12345",
+                        "app.import.max-concurrent-uploads-per-process=1")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(PrivateImportFileStore.class);
+                    assertThat(context).hasSingleBean(SafeImportReader.class);
+                    assertThat(context.getBean(ImportLimits.class).maxUploadBytes()).isEqualTo(12345L);
+                    assertThat(Files.isDirectory(storageDirectory)).isTrue();
+                });
+    }
 
     @Test
     @DisplayName("[store] Should Persist Generated Key Across Instances - When Store Is Reopened")
@@ -116,4 +140,9 @@ class PrivateImportFileStoreTest {
             executor.shutdownNow();
         }
     }
+
+    @Configuration(proxyBeanMethods = false)
+    @ComponentScan(basePackageClasses = {PrivateImportFileStore.class, SafeImportReader.class})
+    @EnableConfigurationProperties(ImportLimits.class)
+    static class ImportReaderTestConfiguration {}
 }

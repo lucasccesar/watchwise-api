@@ -4,6 +4,7 @@ import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.TooManyRequestsException;
 import com.watchwise.watchwise_api.platformimport.model.StoredImportFile;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +35,7 @@ public class PrivateImportFileStore implements ImportFileStore {
     private final ImportLimits limits;
     private final Semaphore uploadSlots;
 
+    @Autowired
     public PrivateImportFileStore(@Value("${app.import.storage-directory}") String root, ImportLimits limits) throws IOException {
         this(Path.of(root), limits);
     }

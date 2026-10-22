@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.FilterInputStream;
@@ -28,6 +29,7 @@ public class SafeImportReader {
     private final ImportLimits limits;
     private final String storageKey;
 
+    @Autowired
     public SafeImportReader(PrivateImportFileStore store, ImportLimits limits) {
         this(store, limits, null);
     }

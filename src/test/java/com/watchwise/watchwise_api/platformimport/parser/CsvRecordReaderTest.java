@@ -5,7 +5,9 @@ import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.io.StringReader;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -54,6 +56,16 @@ class CsvRecordReaderTest {
         ImportLimits tiny = new ImportLimits(1024, 4096, 2048, 20, 1, 1024, 32, 3, 1024, 4096, 2);
         assertThatThrownBy(() -> new CsvRecordReader(tiny).read(new StringReader("a\r\nb\r\n"), ignored -> {}))
                 .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    @DisplayName("[read] Should Propagate Callback UncheckedIOException - When Consumer Fails")
+    void shouldPropagateCallbackUncheckedIOExceptionWhenConsumerFails() {
+        UncheckedIOException callbackFailure = new UncheckedIOException(new IOException("callback failed"));
+
+        assertThatThrownBy(() -> reader.read(new StringReader("value"), ignored -> {
+            throw callbackFailure;
+        })).isSameAs(callbackFailure);
     }
 
     @Test

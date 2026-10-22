@@ -13,6 +13,7 @@ import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -32,8 +33,16 @@ public class CsvRecordReader {
                     limits.maxFieldBytes(),
                     limits.maxCsvColumnsPerRecord(),
                     limits.maxCsvRecordBytes()))) {
+                Iterator<CSVRecord> records = parser.iterator();
                 long count = 0;
-                for (CSVRecord record : parser) {
+                while (true) {
+                    CSVRecord record;
+                    try {
+                        if (!records.hasNext()) break;
+                        record = records.next();
+                    } catch (UncheckedIOException ex) {
+                        throw new BadRequestException("Malformed CSV input");
+                    }
                     if (++count > limits.maxRecords()) throw new BadRequestException("CSV record limit exceeded");
                     if (record.size() > limits.maxCsvColumnsPerRecord()) {
                         throw new BadRequestException("CSV record has too many columns");
@@ -48,7 +57,7 @@ public class CsvRecordReader {
                     consumer.accept(List.copyOf(cells));
                 }
             }
-        } catch (IOException | UncheckedIOException ex) {
+        } catch (IOException ex) {
             throw new BadRequestException("Malformed CSV input");
         }
     }

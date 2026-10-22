@@ -35,6 +35,37 @@ class SafeImportReaderTest {
         return bytes.toByteArray();
     }
 
+    private int findSignature(byte[] archive, int first, int second, int third, int fourth) {
+        for (int i = 0; i <= archive.length - 4; i++) {
+            if ((archive[i] & 0xff) == first && (archive[i + 1] & 0xff) == second
+                    && (archive[i + 2] & 0xff) == third && (archive[i + 3] & 0xff) == fourth) {
+                return i;
+            }
+        }
+        throw new AssertionError("ZIP signature was not found");
+    }
+
+    private void writeLittleEndianShort(byte[] archive, int offset, int value) {
+        archive[offset] = (byte) value;
+        archive[offset + 1] = (byte) (value >>> 8);
+    }
+
+    private void writeLittleEndianInt(byte[] archive, int offset, int value) {
+        archive[offset] = (byte) value;
+        archive[offset + 1] = (byte) (value >>> 8);
+        archive[offset + 2] = (byte) (value >>> 16);
+        archive[offset + 3] = (byte) (value >>> 24);
+    }
+
+    private void assertUnsupportedEntryRejected(byte[] archive) throws Exception {
+        List<String> seen = new ArrayList<>();
+        SafeImportReader reader = reader(archive, new ImportLimits(), seen);
+
+        assertThatThrownBy(() -> reader.forEachEntry(reader.storageKey(), (name, input) -> seen.add(name)))
+                .isInstanceOf(BadRequestException.class);
+        assertThat(seen).isEmpty();
+    }
+
     private SafeImportReader reader(byte[] bytes, ImportLimits limits, List<String> names) throws Exception {
         PrivateImportFileStore store = new PrivateImportFileStore(root, limits);
         StoredImportFile stored = store.store(new ByteArrayInputStream(bytes), limits.maxUploadBytes());
@@ -137,6 +168,41 @@ class SafeImportReaderTest {
         assertThatThrownBy(() -> reader.forEachEntry(stored.key(), (name, input) -> seen.add(name)))
                 .isInstanceOf(BadRequestException.class);
         assertThat(seen).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[forEachEntry] Should Reject Unix Symlink Metadata - When Archive Marks An Entry As A Link")
+    void shouldRejectUnixSymlinkMetadataBeforeCallingConsumer() throws Exception {
+        byte[] archive = zip(new String[]{"link.csv"}, new byte[][]{{1}});
+        int centralDirectory = findSignature(archive, 0x50, 0x4b, 0x01, 0x02);
+        archive[centralDirectory + 5] = 3;
+        writeLittleEndianInt(archive, centralDirectory + 38, (0120000 | 0777) << 16);
+
+        assertUnsupportedEntryRejected(archive);
+    }
+
+    @Test
+    @DisplayName("[forEachEntry] Should Reject Encrypted Entry Metadata - When Archive Marks An Entry As Encrypted")
+    void shouldRejectEncryptedEntryMetadataBeforeCallingConsumer() throws Exception {
+        byte[] archive = zip(new String[]{"encrypted.csv"}, new byte[][]{{1}});
+        int localHeader = findSignature(archive, 0x50, 0x4b, 0x03, 0x04);
+        int centralDirectory = findSignature(archive, 0x50, 0x4b, 0x01, 0x02);
+        archive[localHeader + 6] |= 1;
+        archive[centralDirectory + 8] |= 1;
+
+        assertUnsupportedEntryRejected(archive);
+    }
+
+    @Test
+    @DisplayName("[forEachEntry] Should Reject Unsupported Compression Method - When Archive Uses BZIP2")
+    void shouldRejectUnsupportedCompressionMethodBeforeCallingConsumer() throws Exception {
+        byte[] archive = zip(new String[]{"unsupported.csv"}, new byte[][]{{1}});
+        int localHeader = findSignature(archive, 0x50, 0x4b, 0x03, 0x04);
+        int centralDirectory = findSignature(archive, 0x50, 0x4b, 0x01, 0x02);
+        writeLittleEndianShort(archive, localHeader + 8, 12);
+        writeLittleEndianShort(archive, centralDirectory + 10, 12);
+
+        assertUnsupportedEntryRejected(archive);
     }
 
     @Test
