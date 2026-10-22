@@ -16,6 +16,7 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepositor
 import com.watchwise.watchwise_api.platformimport.service.ExternalContentAliasService;
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
 import com.watchwise.watchwise_api.platformimport.service.ImportIdentityNormalizer;
+import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,12 +84,14 @@ public class ImportWorker {
     private final ImportIdentityNormalizer identityNormalizer;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ImportLimits importLimits;
     private final boolean enabled;
 
     public ImportWorker(JdbcTemplate jdbc, PlatformTransactionManager transactionManager,
                         ImportItemRepository itemRepository, ImportUnitTransaction unitTransaction,
                         ImportModeRegistry modeRegistry, ExternalContentAliasService aliasService,
                         ImportIdentityNormalizer identityNormalizer, ObjectMapper objectMapper, Clock clock,
+                        ImportLimits importLimits,
                         @Value("${app.import.worker.enabled:true}") boolean enabled) {
         this.jdbc = jdbc;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
@@ -99,6 +102,7 @@ public class ImportWorker {
         this.identityNormalizer = identityNormalizer;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.importLimits = importLimits;
         this.enabled = enabled;
     }
 
@@ -124,6 +128,9 @@ public class ImportWorker {
                 process(job, context);
             } catch (ImportUnitTransaction.WaitForOtherJobException exception) {
                 unitTransaction.scheduleRetry(context, FAILURE_BACKOFF, false);
+            } catch (RecordLimitExceededException exception) {
+                unitTransaction.failDeterministically(context);
+                log.warn("Import job {} exceeded its deterministic record limit", job.id());
             } catch (RuntimeException exception) {
                 boolean terminal = !"RESOLVE".equals(job.workPhase());
                 unitTransaction.scheduleRetry(context, FAILURE_BACKOFF, terminal);
@@ -182,9 +189,21 @@ public class ImportWorker {
     private void normalize(ClaimedJob job, ImportExecutionContext context) {
         ImportSelection selection = selection(job.selectionJson());
         AtomicLong lastOrdinal = new AtomicLong(normalizeCheckpoint(job.checkpoint()));
+        AtomicLong acceptedCount = new AtomicLong(itemRepository.countByJobId(job.id()));
         List<NormalizedImportRecord> batch = new ArrayList<>(MAX_BATCH_SIZE);
         modeRegistry.normalize(modeKey(job), readContext(job), selection, record -> {
             if (record.ordinal() <= lastOrdinal.get()) return;
+            if (!context.sourceNamespace().equals(record.sourceKey().namespace())) {
+                throw new IllegalStateException("Normalized import source namespace does not match its job");
+            }
+            if (acceptedCount.get() >= importLimits.maxRecords()) {
+                if (!batch.isEmpty()) {
+                    persistNormalized(context, batch, lastOrdinal);
+                    batch.clear();
+                }
+                throw new RecordLimitExceededException();
+            }
+            acceptedCount.incrementAndGet();
             batch.add(record);
             if (batch.size() == MAX_BATCH_SIZE) {
                 persistNormalized(context, batch, lastOrdinal);
@@ -223,8 +242,9 @@ public class ImportWorker {
                 }
                 AliasQuery query = queryFor(item);
                 if (query == null) {
-                    directUpdates.add(new ImportUnitTransaction.ResolutionUpdate(item.getId(),
-                            item.getResolvedTargetJson() == null ? "RESOLVED" : "MATCHED",
+                    if (item.getResolvedTargetJson() == null) throw new IllegalStateException(
+                            "Import item has neither a resolved target nor an alias query");
+                    directUpdates.add(new ImportUnitTransaction.ResolutionUpdate(item.getId(), "MATCHED",
                             item.getResolvedTargetJson(), item.getNormalizedContentKey(), null));
                     continue;
                 }
@@ -466,6 +486,8 @@ public class ImportWorker {
     private record QueryKey(AliasQuery.Kind kind, String normalizedTitle, Integer year, ContentType type) { }
 
     private record StageResult(String outcome, String resolvedTargetJson, String issue) { }
+
+    private static final class RecordLimitExceededException extends RuntimeException { }
 
     private static final class StaleImportExecutionException extends RuntimeException { }
 }

@@ -118,6 +118,8 @@ class ImportPreviewServiceTest {
         UUID ownerId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
         ImportJob job = job(ownerId, jobId, 4, ImportJobState.AWAITING_SELECTION);
+        job.setLeaseToken(UUID.randomUUID());
+        job.setLeaseUntil(LocalDateTime.now(clock).plusMinutes(2));
         when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
         when(importModeRegistry.require(new ImportModeKey(job.getInputKind(), job.getSourceFormat())))
                 .thenReturn(emptyModeHandler(new ImportModeKey(job.getInputKind(), job.getSourceFormat())));
@@ -132,6 +134,8 @@ class ImportPreviewServiceTest {
         assertThat(job.isWorkPending()).isTrue();
         assertThat(job.getState()).isEqualTo(ImportJobState.ANALYZING);
         assertThat(job.getNextRunAt()).isEqualTo(LocalDateTime.now(clock));
+        assertThat(job.getLeaseToken()).isNull();
+        assertThat(job.getLeaseUntil()).isNull();
         assertThat(result.version()).isEqualTo(5);
         assertThat(result.digest()).isEqualTo(expectedDigest(jobId, 5, selectionJson));
         verify(importJobRepository).findOwnedByIdForUpdate(jobId, ownerId);
@@ -202,6 +206,8 @@ class ImportPreviewServiceTest {
         UUID jobId = UUID.randomUUID();
         UUID itemId = UUID.randomUUID();
         ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        job.setLeaseToken(UUID.randomUUID());
+        job.setLeaseUntil(LocalDateTime.now(clock).plusMinutes(2));
         setPlanGeneration(job, 4);
         ImportItem item = item(itemId, jobId, 4, ImportRecordKind.DIARY_EVENT,
                 "{\"title\":\"Original title\",\"score\":7,\"sourceQuery\":{"
@@ -218,6 +224,8 @@ class ImportPreviewServiceTest {
         assertThat(job.getPreviewVersion()).isEqualTo(5);
         assertThat(job.getState()).isEqualTo(ImportJobState.RESOLVING);
         assertThat(job.isWorkPending()).isTrue();
+        assertThat(job.getLeaseToken()).isNull();
+        assertThat(job.getLeaseUntil()).isNull();
         assertThat(item.getDecision()).isEqualTo(ImportDecision.RESOLVE_TARGET);
         assertThat(item.getResolvedTargetJson()).contains("123");
         assertThat(item.getPayloadJson()).contains("Original title");
@@ -509,8 +517,7 @@ class ImportPreviewServiceTest {
 
         assertThat(result.getContent()).containsExactly(
                 new com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO(
-                        itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null,
-                        objectMapper.createObjectNode(), null));
+                        itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null, null));
         assertThat(result.getTotalElements()).isEqualTo(1);
     }
 

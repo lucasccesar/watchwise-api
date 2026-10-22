@@ -225,6 +225,19 @@ public class ImportUnitTransaction {
         return true;
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean failDeterministically(ImportExecutionContext context) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.ANALYZING);
+        if (job == null || !"NORMALIZE".equals(job.getWorkPhase())) return false;
+        job.setState(ImportJobState.FAILED);
+        job.setWorkPhase(null);
+        job.setWorkPending(false);
+        job.setNextRunAt(null);
+        job.setUpdatedAt(now());
+        releaseLease(job);
+        return true;
+    }
+
     private ImportJob lockRunnableJob(ImportExecutionContext context, ImportJobState expectedState) {
         ImportJob job = jobRepository.findByIdForUpdate(context.jobId()).orElse(null);
         LocalDateTime now = now();
@@ -254,7 +267,7 @@ public class ImportUnitTransaction {
                 .sourceEventKey(record.sourceKey().sourceId())
                 .parentSourceId(record.parentSourceId())
                 .payloadJson(writeJson(record.payload()))
-                .resolvedTargetJson(writeJson(record.target()))
+                .resolvedTargetJson(record.target() == null ? null : writeJson(record.target()))
                 .ordinal(record.ordinal())
                 .build();
         return item;

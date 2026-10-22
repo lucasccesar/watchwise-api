@@ -80,7 +80,10 @@ public class ImportUploadQuotaServiceImpl implements ImportUploadQuotaService {
         if (ownerId == null || inputKind == null || sourceFormat == null || storageKey == null) {
             throw new IllegalArgumentException("Import reservation data is incomplete");
         }
-        if (uploadBytes < 1 || uploadBytes > importLimits.maxUploadBytes()) {
+        long effectiveLimit = inputKind == ImportInputKind.PICKS_TEMPLATE
+                ? Math.min(importLimits.maxUploadBytes(), importLimits.maxTemplateUploadBytes())
+                : importLimits.maxUploadBytes();
+        if (uploadBytes < 1 || uploadBytes > effectiveLimit) {
             throw new IllegalArgumentException("Import reservation size is invalid");
         }
         lockQuota(ownerId);

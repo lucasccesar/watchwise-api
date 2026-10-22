@@ -1,12 +1,14 @@
 package com.watchwise.watchwise_api.platformimport.entity;
 import jakarta.persistence.*;
+import org.springframework.data.domain.Persistable;
 import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportDecision;
 import lombok.*;
 import java.util.UUID;
 @Entity @Table(name="import_items") @Getter @Builder @NoArgsConstructor(access=AccessLevel.PROTECTED) @AllArgsConstructor
-public class ImportItem {
- @Id @GeneratedValue(strategy=GenerationType.UUID) @Setter private UUID id;
+public class ImportItem implements Persistable<UUID> {
+ @Id @Setter private UUID id;
+ @Transient @Builder.Default private boolean newEntity = true;
  @Column(name="job_id", nullable=false) private UUID jobId;
  @Column(name="plan_generation", nullable=false) private long planGeneration;
  @Column(name="source_path", length=1000) private String sourcePath;
@@ -26,4 +28,8 @@ public class ImportItem {
  @Column(length=40) @Setter private String outcome;
  @Column(columnDefinition="TEXT") @Setter private String issue;
  @Column(nullable=false) private long ordinal;
+
+ @Override public boolean isNew() { return newEntity; }
+ @PrePersist private void assignId() { if (id == null) id = UUID.randomUUID(); }
+ @PostPersist @PostLoad private void markNotNew() { newEntity = false; }
 }

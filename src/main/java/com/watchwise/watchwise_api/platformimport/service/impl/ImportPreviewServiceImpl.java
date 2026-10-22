@@ -122,6 +122,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         job.setWorkPending(true);
         job.setNextRunAt(now);
         job.setUpdatedAt(now);
+        job.setLeaseToken(null);
+        job.setLeaseUntil(null);
         return version(job, nextVersion);
     }
 
@@ -170,6 +172,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         job.setWorkPending(true);
         job.setNextRunAt(now);
         job.setUpdatedAt(now);
+        job.setLeaseToken(null);
+        job.setLeaseUntil(null);
         return version(job, nextVersion);
     }
 
@@ -882,7 +886,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     private ImportPreviewItemDTO toPreviewItem(ImportItem item) {
         return new ImportPreviewItemDTO(
                 item.getId(), item.getOrdinal(), item.getNormalizedKind(),
-                item.getDecision(), item.getOutcome(), item.getIssue(), optionalJson(item.getPayloadJson()),
+                item.getDecision(), item.getOutcome(), item.getIssue(),
                 optionalJson(item.getResolvedTargetJson()));
     }
 

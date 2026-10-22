@@ -13,10 +13,9 @@ public record ImportPreviewItemDTO(
         ImportDecision decision,
         String outcome,
         String issue,
-        JsonNode payload,
         JsonNode resolvedTarget
 ) {
     public ImportPreviewItemDTO(UUID itemId, ImportRecordKind kind, ImportDecision decision, String outcome) {
-        this(itemId, 0, kind, decision, outcome, null, null, null);
+        this(itemId, 0, kind, decision, outcome, null, null);
     }
 }

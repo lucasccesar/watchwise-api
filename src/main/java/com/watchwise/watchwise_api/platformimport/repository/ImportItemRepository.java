@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.UUID;
 
 public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
+    long countByJobId(UUID jobId);
+    long countByJobIdAndPlanGeneration(UUID jobId, long planGeneration);
     List<ImportItem> findAllByJobIdAndPlanGenerationAndIdIn(
             UUID jobId, long planGeneration, Collection<UUID> ids);
 

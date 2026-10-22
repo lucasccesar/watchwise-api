@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.platformimport.service;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.platformimport.dto.ImportJobDTO;
 import com.watchwise.watchwise_api.platformimport.model.ImportInputKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
@@ -127,10 +128,15 @@ class ImportWorkerIntegrationTest {
     @Autowired private UserService userService;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private Clock clock;
+    @Autowired private com.watchwise.watchwise_api.platformimport.service.ImportLimits importLimits;
     @Autowired private TestImportUnitApplier testApplier;
     @Autowired private TestAliasService testAliasService;
 
     private final Set<String> storageKeys = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final AtomicInteger NORMALIZE_EMISSION_COUNT = new AtomicInteger();
+    private static final AtomicInteger NORMALIZE_HANDLER_EMISSIONS = new AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicBoolean EMIT_UNRESOLVED = new java.util.concurrent.atomic.AtomicBoolean();
+    private static final AtomicReference<String> NORMALIZE_NAMESPACE_OVERRIDE = new AtomicReference<>();
 
     @BeforeEach
     void setUp() {
@@ -139,6 +145,11 @@ class ImportWorkerIntegrationTest {
         jdbc.execute("TRUNCATE import_items, external_import_links, external_content_aliases, imported_watch_assertions, import_deferred_records, letterboxd_seed_loads, import_file_cleanup_tasks, import_jobs CASCADE");
         testApplier.reset();
         testAliasService.reset();
+        NORMALIZE_EMISSION_COUNT.set(0);
+        NORMALIZE_HANDLER_EMISSIONS.set(0);
+        EMIT_UNRESOLVED.set(false);
+        NORMALIZE_NAMESPACE_OVERRIDE.set(null);
+        importLimits.setMaxRecords(500000);
         for (String storageKey : storageKeys) {
             try {
                 fileStore.delete(storageKey);
@@ -146,6 +157,100 @@ class ImportWorkerIntegrationTest {
             }
         }
         storageKeys.clear();
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Reject Handler Namespace Changes - When Normalizing A Record")
+    void shouldRejectHandlerNamespaceChangesWhenNormalizingARecord() {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        job.setState(ImportJobState.ANALYZING);
+        job.setWorkPhase("NORMALIZE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{\"history\":true,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}");
+        job.setWorkPending(true);
+        job.setNextRunAt(LocalDateTime.now(clock).minusSeconds(1));
+        jobRepository.saveAndFlush(job);
+        NORMALIZE_EMISSION_COUNT.set(1);
+        NORMALIZE_NAMESPACE_OVERRIDE.set("handler-controlled-namespace");
+
+        worker.runAvailable(1);
+
+        assertThat(itemRepository.countByJobIdAndPlanGeneration(job.getId(), 1)).isZero();
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.FAILED);
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Resolve An Unresolved Normalized Record - When Its Alias Query Matches")
+    void shouldResolveAnUnresolvedNormalizedRecordWhenItsAliasQueryMatches() throws Exception {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        job.setState(ImportJobState.ANALYZING);
+        job.setWorkPhase("NORMALIZE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{\"history\":true,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}");
+        job.setWorkPending(true);
+        job.setNextRunAt(LocalDateTime.now(clock).minusSeconds(1));
+        jobRepository.saveAndFlush(job);
+        NORMALIZE_EMISSION_COUNT.set(1);
+        EMIT_UNRESOLVED.set(true);
+        assertThat(NORMALIZE_EMISSION_COUNT.get()).isEqualTo(1);
+
+        worker.runAvailable(1);
+        assertThat(NORMALIZE_HANDLER_EMISSIONS.get()).isEqualTo(1);
+        ImportJob afterNormalize = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(afterNormalize.getWorkPhase()).isEqualTo("RESOLVE");
+        assertThat(afterNormalize.getState()).isEqualTo(ImportJobState.RESOLVING);
+        ImportItem staged = itemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                job.getId(), 1, org.springframework.data.domain.PageRequest.of(0, 1)).getContent().getFirst();
+        assertThat(staged.getResolvedTargetJson()).isNull();
+        jdbc.update("UPDATE import_jobs SET next_run_at = ? WHERE id = ?",
+                LocalDateTime.now(clock).minusSeconds(1), job.getId());
+        worker.runAvailable(1);
+
+        ImportItem resolved = itemRepository.findById(staged.getId()).orElseThrow();
+        assertThat(resolved.getOutcome()).isEqualTo("MATCHED");
+        assertThat(resolved.getResolvedTargetJson()).contains("\"kind\":\"CONTENT\"");
+        assertThat(testAliasService.batchSizes()).containsExactly(1);
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Persist At Most The Generation Limit - When Normalization Exceeds The Cap")
+    void shouldPersistAtMostTheGenerationLimitWhenNormalizationExceedsTheCap() {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        job.setState(ImportJobState.ANALYZING);
+        job.setWorkPhase("NORMALIZE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{\"history\":true,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}");
+        job.setWorkPending(true);
+        job.setNextRunAt(LocalDateTime.now(clock).minusSeconds(1));
+        jobRepository.saveAndFlush(job);
+        itemRepository.saveAndFlush(ImportItem.builder()
+                .jobId(job.getId())
+                .planGeneration(0)
+                .normalizedKind(ImportRecordKind.DIARY_EVENT)
+                .sourceNamespace(job.getSourceNamespace())
+                .objectKind("diary_event")
+                .sourceId("older-staged-item")
+                .payloadJson("{}")
+                .ordinal(0)
+                .build());
+        NORMALIZE_EMISSION_COUNT.set(200);
+        importLimits.setMaxRecords(200);
+        assertThat(NORMALIZE_EMISSION_COUNT.get()).isEqualTo(200);
+
+        worker.runAvailable(1);
+
+        assertThat(NORMALIZE_HANDLER_EMISSIONS.get()).isEqualTo(200);
+        assertThat(itemRepository.countByJobId(job.getId())).isEqualTo(200);
+        assertThat(itemRepository.countByJobIdAndPlanGeneration(job.getId(), 1)).isEqualTo(199);
+        ImportJob failed = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(failed.getState()).isEqualTo(ImportJobState.FAILED);
+        assertThat(failed.isWorkPending()).isFalse();
+        assertThat(failed.getWorkPhase()).isNull();
+        assertThat(failed.getNextRunAt()).isNull();
+        assertThat(failed.getLeaseToken()).isNull();
+        assertThatThrownBy(() -> jobService.retry(owner.getId(), job.getId()))
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("The import source file is no longer available");
     }
 
     @Test
@@ -662,6 +767,21 @@ class ImportWorkerIntegrationTest {
                 @Override
                 public void normalize(ImportReadContext context, ImportSelection selection,
                                       Consumer<NormalizedImportRecord> sink) {
+                    for (int i = 0; i < NORMALIZE_EMISSION_COUNT.get(); i++) {
+                        NORMALIZE_HANDLER_EMISSIONS.incrementAndGet();
+                        var payload = new tools.jackson.databind.ObjectMapper().createObjectNode();
+                        String sourceNamespace = NORMALIZE_NAMESPACE_OVERRIDE.get() == null
+                                ? context.sourceNamespace() : NORMALIZE_NAMESPACE_OVERRIDE.get();
+                        ImportTarget target = new ImportTarget.ContentTarget(MediaReference.movie("603"));
+                        if (EMIT_UNRESOLVED.get()) {
+                            payload.putObject("sourceQuery").put("kind", "CONTENT").put("title", "Arrival")
+                                    .put("contentType", "MOVIE");
+                            target = null;
+                        }
+                        sink.accept(new NormalizedImportRecord("generated-" + i, ImportRecordKind.DIARY_EVENT,
+                                new ImportSourceKey(sourceNamespace, "diary_event", "generated-" + i),
+                                null, target, payload, i));
+                    }
                 }
             };
         }

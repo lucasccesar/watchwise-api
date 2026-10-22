@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.import")
 public class ImportLimits {
     private long maxUploadBytes = 50L * 1024 * 1024;
+    private long maxTemplateUploadBytes = 5L * 1024 * 1024;
     private long maxExpandedBytes = 512L * 1024 * 1024;
     private long maxEntryBytes = 64L * 1024 * 1024;
     private int maxEntries = 2000;
@@ -41,6 +42,7 @@ public class ImportLimits {
     }
 
     public long maxUploadBytes() { return maxUploadBytes; }
+    public long maxTemplateUploadBytes() { return maxTemplateUploadBytes; }
     public long maxExpandedBytes() { return maxExpandedBytes; }
     public long maxEntryBytes() { return maxEntryBytes; }
     public int maxEntries() { return maxEntries; }
@@ -56,6 +58,7 @@ public class ImportLimits {
     public int maxConcurrentTmdbSearchesPerProcess() { return maxConcurrentTmdbSearchesPerProcess; }
 
     public void setMaxUploadBytes(long value) { maxUploadBytes = value; }
+    public void setMaxTemplateUploadBytes(long value) { maxTemplateUploadBytes = value; }
     public void setMaxExpandedBytes(long value) { maxExpandedBytes = value; }
     public void setMaxEntryBytes(long value) { maxEntryBytes = value; }
     public void setMaxEntries(int value) { maxEntries = value; }
@@ -71,6 +74,7 @@ public class ImportLimits {
     public void setMaxConcurrentTmdbSearchesPerProcess(int value) { maxConcurrentTmdbSearchesPerProcess = value; }
 
     public long getMaxUploadBytes() { return maxUploadBytes; }
+    public long getMaxTemplateUploadBytes() { return maxTemplateUploadBytes; }
     public long getMaxExpandedBytes() { return maxExpandedBytes; }
     public long getMaxEntryBytes() { return maxEntryBytes; }
     public int getMaxEntries() { return maxEntries; }

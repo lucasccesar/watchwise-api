@@ -296,7 +296,7 @@ class ImportControllerIntegrationTest {
         mockMvc.perform(get("/imports/{importId}/preview", jobId)
                         .cookie(owner.accessToken(), owner.csrfToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].payload.title").value("Arrival"))
+                .andExpect(jsonPath("$.items[0].payload").doesNotExist())
                 .andExpect(jsonPath("$.items[0].sourcePath").doesNotExist())
                 .andExpect(jsonPath("$.items[0].recordLocator").doesNotExist());
     }

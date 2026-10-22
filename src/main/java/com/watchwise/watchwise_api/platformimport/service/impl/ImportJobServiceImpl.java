@@ -82,7 +82,7 @@ public class ImportJobServiceImpl implements ImportJobService {
         if (ownerId == null) throw new BadRequestException("Authenticated import owner is required");
         validateMode(inputKind, sourceFormat, platform);
         importModeRegistry.require(new ImportModeKey(inputKind, sourceFormat));
-        validateFile(file, sourceFormat);
+        validateFile(file, sourceFormat, inputKind);
         validateSourceAccountId(sourceAccountId);
         validateTimeZone(timeZone);
 
@@ -91,7 +91,7 @@ public class ImportJobServiceImpl implements ImportJobService {
                 sourceAccountId, timeZone, storageKey, file.getSize());
         StoredImportFile storedFile = null;
         try (InputStream input = file.getInputStream()) {
-            storedFile = importFileStore.store(input, importLimits.maxUploadBytes(), storageKey);
+            storedFile = importFileStore.store(input, effectiveUploadLimit(inputKind), storageKey);
             if (storedFile.bytes() != file.getSize()) {
                 throw new IOException("Stored import size differs from the uploaded size");
             }
@@ -280,10 +280,11 @@ public class ImportJobServiceImpl implements ImportJobService {
         if (!compatible) throw new BadRequestException("Import kind, source format and platform are incompatible");
     }
 
-    private void validateFile(MultipartFile file, ImportSourceFormat sourceFormat) {
+    private void validateFile(MultipartFile file, ImportSourceFormat sourceFormat, ImportInputKind inputKind) {
         if (file == null || file.isEmpty()) throw new BadRequestException("An import file is required");
-        if (file.getSize() > importLimits.maxUploadBytes()) {
-            throw new MaxUploadSizeExceededException(importLimits.maxUploadBytes());
+        long effectiveLimit = effectiveUploadLimit(inputKind);
+        if (file.getSize() > effectiveLimit) {
+            throw new MaxUploadSizeExceededException(effectiveLimit);
         }
         String name = StringUtils.getFilename(file.getOriginalFilename());
         String extension = name == null || name.lastIndexOf('.') < 0
@@ -295,6 +296,12 @@ public class ImportJobServiceImpl implements ImportJobService {
         };
         if (!expectedExtension.equals(extension)) throw new BadRequestException("File extension does not match the selected import format");
         validateMediaType(file.getContentType(), sourceFormat);
+    }
+
+    private long effectiveUploadLimit(ImportInputKind inputKind) {
+        return inputKind == ImportInputKind.PICKS_TEMPLATE
+                ? Math.min(importLimits.maxUploadBytes(), importLimits.maxTemplateUploadBytes())
+                : importLimits.maxUploadBytes();
     }
 
     private void validateMediaType(String contentType, ImportSourceFormat sourceFormat) {
