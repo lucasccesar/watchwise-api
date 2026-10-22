@@ -41,14 +41,19 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     @Query("""
             SELECT item FROM ImportItem item
             WHERE item.jobId = :jobId AND item.planGeneration = :generation
-              AND item.normalizedContentKey = :contentKey AND item.outcome IN :outcomes
-            ORDER BY item.ordinal ASC, item.id ASC
+              AND item.normalizedContentKey IN :contentKeys AND item.outcome IN :outcomes
+              AND NOT EXISTS (
+                  SELECT earlier.id FROM ImportItem earlier
+                  WHERE earlier.jobId = item.jobId AND earlier.planGeneration = item.planGeneration
+                    AND earlier.normalizedContentKey = item.normalizedContentKey
+                    AND earlier.outcome IN :outcomes
+                    AND (earlier.ordinal < item.ordinal OR (earlier.ordinal = item.ordinal AND earlier.id < item.id))
+              )
             """)
-    List<ImportItem> findStagedResolution(@Param("jobId") UUID jobId,
-                                          @Param("generation") long generation,
-                                          @Param("contentKey") String contentKey,
-                                          @Param("outcomes") Collection<String> outcomes,
-                                          Pageable pageable);
+    List<ImportItem> findStagedResolutions(@Param("jobId") UUID jobId,
+                                           @Param("generation") long generation,
+                                           @Param("contentKeys") Collection<String> contentKeys,
+                                           @Param("outcomes") Collection<String> outcomes);
 
     List<ImportItem> findByJobIdAndPlanGenerationAndOutcomeInOrderByOrdinalAscIdAsc(
             UUID jobId, long planGeneration, Collection<String> outcomes, Pageable pageable);
@@ -70,11 +75,28 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     boolean existsApplyPending(@Param("jobId") UUID jobId, @Param("generation") long generation);
 
     @Modifying
+    @Query(value = """
+            WITH batch AS (
+                SELECT id FROM import_items
+                WHERE job_id = :jobId AND plan_generation = :generation
+                  AND outcome IN ('APPLIED', 'SKIPPED')
+                  AND (payload_json IS NOT NULL OR resolved_target_json IS NOT NULL OR resolved_content_key IS NOT NULL)
+                ORDER BY ordinal ASC, id ASC
+                LIMIT :batchSize
+                FOR UPDATE
+            )
+            UPDATE import_items item SET payload_json = null, resolved_target_json = null,
+                resolved_content_key = null
+            WHERE item.id IN (SELECT id FROM batch)
+            """, nativeQuery = true)
+    int compactAppliedPayloads(@Param("jobId") UUID jobId, @Param("generation") long generation,
+                               @Param("batchSize") int batchSize);
+
     @Query("""
-            UPDATE ImportItem item SET item.payloadJson = null, item.resolvedTargetJson = null,
-                item.resolvedContentKey = null
+            SELECT CASE WHEN COUNT(item) > 0 THEN true ELSE false END FROM ImportItem item
             WHERE item.jobId = :jobId AND item.planGeneration = :generation
               AND item.outcome IN ('APPLIED', 'SKIPPED')
+              AND (item.payloadJson IS NOT NULL OR item.resolvedTargetJson IS NOT NULL OR item.resolvedContentKey IS NOT NULL)
             """)
-    int compactAppliedPayloads(@Param("jobId") UUID jobId, @Param("generation") long generation);
+    boolean existsAppliedPayloads(@Param("jobId") UUID jobId, @Param("generation") long generation);
 }

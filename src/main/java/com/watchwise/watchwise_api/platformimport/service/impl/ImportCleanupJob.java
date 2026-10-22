@@ -131,6 +131,13 @@ public class ImportCleanupJob {
     }
 
     private void processTask(CleanupTask task, LocalDateTime now) {
+        boolean eligible = transactionTemplate.execute(status -> jobRepository.findByStorageKey(task.storageKey())
+                .map(ImportCleanupJob::isIrreversiblyTerminal)
+                .orElse(true));
+        if (!eligible) {
+            deferTask(task, now);
+            return;
+        }
         try {
             fileStore.validateKey(task.storageKey());
             fileStore.delete(task.storageKey());
@@ -151,6 +158,14 @@ public class ImportCleanupJob {
             deferTask(task, now);
             log.warn("Could not remove private import file for cleanup task {}", task.id(), exception);
         }
+    }
+
+    private static boolean isIrreversiblyTerminal(ImportJob job) {
+        return switch (job.getState()) {
+            case CANCELLED, EXPIRED, COMPLETED, COMPLETED_WITH_WARNINGS -> true;
+            case FAILED -> job.getWorkPhase() == null;
+            default -> false;
+        };
     }
 
     private void enqueueRetry(String storageKey, LocalDateTime now) {

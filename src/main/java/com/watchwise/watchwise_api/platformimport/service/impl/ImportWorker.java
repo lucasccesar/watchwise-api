@@ -238,21 +238,23 @@ public class ImportWorker {
                     contentKeys.putIfAbsent(key, normalizedKey);
                 }
             }
-            persistResolutionUpdates(context, directUpdates);
-
             List<Map.Entry<QueryKey, List<ImportItem>>> remote = new ArrayList<>();
+            Map<String, ImportItem> stagedByContentKey = new LinkedHashMap<>();
+            if (!contentKeys.isEmpty()) {
+                for (ImportItem staged : itemRepository.findStagedResolutions(job.id(), context.planGeneration(),
+                        contentKeys.values(), List.of("MATCHED", "AMBIGUOUS", "NOT_FOUND"))) {
+                    stagedByContentKey.putIfAbsent(staged.getNormalizedContentKey(), staged);
+                }
+            }
             for (Map.Entry<QueryKey, List<ImportItem>> entry : groups.entrySet()) {
-                List<ImportItem> staged = itemRepository.findStagedResolution(job.id(), context.planGeneration(),
-                        contentKeys.get(entry.getKey()), List.of("MATCHED", "AMBIGUOUS", "NOT_FOUND"),
-                        PageRequest.of(0, 1));
-                if (staged.isEmpty()) {
+                ImportItem stagedItem = stagedByContentKey.get(contentKeys.get(entry.getKey()));
+                if (stagedItem == null) {
                     remote.add(entry);
                     continue;
                 }
-                ImportItem stagedItem = staged.getFirst();
                 StageResult cached = new StageResult(stagedItem.getOutcome(), stagedItem.getResolvedTargetJson(),
                         stagedItem.getIssue());
-                persistGroup(context, entry.getValue(), cached, contentKeys.get(entry.getKey()));
+                appendGroupUpdates(directUpdates, entry.getValue(), cached, contentKeys.get(entry.getKey()));
             }
 
             List<AliasQuery> queries = remote.stream()
@@ -265,10 +267,11 @@ public class ImportWorker {
                 for (int index = 0; index < remote.size(); index++) {
                     Map.Entry<QueryKey, List<ImportItem>> entry = remote.get(index);
                     StageResult result = stage(queries.get(index), resolutions.get(index));
-                    persistGroup(context, entry.getValue(), result, contentKeys.get(entry.getKey()));
+                    appendGroupUpdates(directUpdates, entry.getValue(), result, contentKeys.get(entry.getKey()));
                     unavailable |= "UNAVAILABLE".equals(result.outcome());
                 }
             }
+            persistResolutionUpdates(context, directUpdates);
             if (unavailable) break;
         }
 
@@ -297,22 +300,17 @@ public class ImportWorker {
         }
     }
 
-    private void persistGroup(ImportExecutionContext context, List<ImportItem> items, StageResult result,
-                              String normalizedContentKey) {
-        List<ImportUnitTransaction.ResolutionUpdate> updates = new ArrayList<>(items.size());
+    private void appendGroupUpdates(List<ImportUnitTransaction.ResolutionUpdate> updates,
+                                    List<ImportItem> items, StageResult result, String normalizedContentKey) {
         for (ImportItem item : items) {
             updates.add(new ImportUnitTransaction.ResolutionUpdate(item.getId(), result.outcome(),
                     result.resolvedTargetJson(), normalizedContentKey, result.issue()));
-            if (updates.size() == MAX_BATCH_SIZE) {
-                persistResolutionUpdates(context, updates);
-                updates.clear();
-            }
         }
-        if (!updates.isEmpty()) persistResolutionUpdates(context, updates);
     }
 
     private void persistResolutionUpdates(ImportExecutionContext context,
                                           List<ImportUnitTransaction.ResolutionUpdate> updates) {
+        if (updates.isEmpty()) return;
         if (!unitTransaction.saveResolution(context, List.copyOf(updates))) {
             throw new StaleImportExecutionException();
         }

@@ -38,6 +38,7 @@ import java.util.UUID;
 public class ImportUnitTransaction {
     private static final Duration LEASE_DURATION = Duration.ofMinutes(2);
     private static final int NORMALIZE_BATCH_SIZE = 200;
+    private static final int COMPACTION_BATCH_SIZE = 200;
 
     private final ImportJobRepository jobRepository;
     private final ImportItemRepository itemRepository;
@@ -142,16 +143,18 @@ public class ImportUnitTransaction {
     public boolean saveResolution(ImportExecutionContext context, List<ResolutionUpdate> updates) {
         ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
         if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
-        List<ImportItem> changedItems = new java.util.ArrayList<>(updates.size());
+        java.util.Map<UUID, ResolutionUpdate> updatesById = new java.util.LinkedHashMap<>();
         for (ResolutionUpdate update : updates) {
-            ImportItem item = itemRepository.findById(update.itemId()).orElse(null);
-            if (item == null || !item.getJobId().equals(context.jobId())
-                    || item.getPlanGeneration() != context.planGeneration()) continue;
+            updatesById.put(update.itemId(), update);
+        }
+        List<ImportItem> changedItems = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
+                context.jobId(), context.planGeneration(), updatesById.keySet());
+        for (ImportItem item : changedItems) {
+            ResolutionUpdate update = updatesById.get(item.getId());
             item.setOutcome(update.outcome());
             item.setResolvedTargetJson(update.resolvedTargetJson());
             item.setNormalizedContentKey(update.normalizedContentKey());
             item.setIssue(update.issue());
-            changedItems.add(item);
         }
         itemRepository.saveAll(changedItems);
         renew(job);
@@ -191,7 +194,13 @@ public class ImportUnitTransaction {
             releaseLease(job);
             return true;
         }
-        itemRepository.compactAppliedPayloads(context.jobId(), context.planGeneration());
+        itemRepository.compactAppliedPayloads(context.jobId(), context.planGeneration(), COMPACTION_BATCH_SIZE);
+        if (itemRepository.existsAppliedPayloads(context.jobId(), context.planGeneration())) {
+            job.setWorkPending(true);
+            job.setNextRunAt(now());
+            releaseLease(job);
+            return true;
+        }
         job.setState(ImportJobState.COMPLETED);
         job.setWorkPending(false);
         job.setNextRunAt(null);

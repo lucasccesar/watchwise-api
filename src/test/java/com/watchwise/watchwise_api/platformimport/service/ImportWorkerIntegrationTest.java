@@ -27,9 +27,9 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository
 import com.watchwise.watchwise_api.platformimport.service.ImportJobService;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
+import com.watchwise.watchwise_api.platformimport.service.impl.ImportUnitTransaction;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
-import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.user.dto.DeleteAccountDTO;
@@ -49,8 +49,6 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -82,10 +80,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest(properties = {
         "spring.docker.compose.enabled=false",
@@ -123,6 +120,8 @@ class ImportWorkerIntegrationTest {
     @Autowired private ImportLedger ledger;
     @Autowired private com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService uploadQuotaService;
     @Autowired private ImportWorker worker;
+    @MockitoSpyBean private ImportUnitTransaction unitTransaction;
+    @MockitoSpyBean private ImportItemRepository itemRepositorySpy;
     @Autowired private ImportCleanupJob cleanupJob;
     @Autowired private ImportJobService jobService;
     @Autowired private UserService userService;
@@ -286,6 +285,14 @@ class ImportWorkerIntegrationTest {
         assertThat(itemRepository.findById(savedItems.get(200).getId()).orElseThrow().getOutcome()).isEqualTo("MATCHED");
         assertThat(itemRepository.findById(savedItems.get(200).getId()).orElseThrow().getNormalizedContentKey())
                 .isEqualTo(itemRepository.findById(savedItems.get(0).getId()).orElseThrow().getNormalizedContentKey());
+        verify(unitTransaction).saveResolution(any(),
+                argThat(updates -> updates.size() == 200));
+        verify(unitTransaction).saveResolution(any(),
+                argThat(updates -> updates.size() == 1));
+        verify(itemRepositorySpy).findStagedResolutions(any(), anyLong(),
+                argThat(keys -> keys.size() == 200), any());
+        verify(itemRepositorySpy).findStagedResolutions(any(), anyLong(),
+                argThat(keys -> keys.size() == 1), any());
     }
 
     @Test
@@ -323,6 +330,68 @@ class ImportWorkerIntegrationTest {
 
         assertThat(cleanupTaskRepository.count()).isZero();
         assertFileMissing(storageKey);
+    }
+
+    @Test
+    @DisplayName("[ImportCleanupJob] Should Preserve Private File - While Its Job Is Nonterminal")
+    void shouldPreservePrivateFileWhileItsJobIsNonterminal() throws Exception {
+        User owner = createUser();
+        String storageKey = storeFile("active-import-source");
+        ImportJob job = createStoredJob(owner.getId(), storageKey, 20, LocalDateTime.now(clock).plusDays(1));
+
+        uploadQuotaService.enqueueCleanup(storageKey);
+        cleanupJob.runOnce(Instant.now(clock));
+
+        assertThatCode(() -> assertFileExists(storageKey)).doesNotThrowAnyException();
+        assertThat(cleanupTaskRepository.existsByStorageKey(storageKey)).isTrue();
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.READY);
+    }
+
+    @Test
+    @DisplayName("[ImportCleanupJob] Should Preserve Private File - When A Failed Job Can Be Retried")
+    void shouldPreservePrivateFileWhenFailedJobCanBeRetried() throws Exception {
+        User owner = createUser();
+        String storageKey = storeFile("retryable-import-source");
+        ImportJob job = createStoredJob(owner.getId(), storageKey, 20, LocalDateTime.now(clock).plusDays(1));
+        job.setState(ImportJobState.FAILED);
+        job.setWorkPhase("APPLY");
+        jobRepository.saveAndFlush(job);
+
+        uploadQuotaService.enqueueCleanup(storageKey);
+        cleanupJob.runOnce(Instant.now(clock));
+
+        assertThatCode(() -> assertFileExists(storageKey)).doesNotThrowAnyException();
+        assertThat(cleanupTaskRepository.existsByStorageKey(storageKey)).isTrue();
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.FAILED);
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Compact Applied Payloads In Bounded Chunks - When The Job Completes")
+    void shouldCompactAppliedPayloadsInBoundedChunksWhenJobCompletes() {
+        User owner = createUser();
+        ImportJob job = createRunnableJob(owner.getId(), 201);
+        createItems(job, 201, "compact");
+
+        assertThat(worker.runAvailable(1)).isEqualTo(1);
+        assertThat(worker.runAvailable(1)).isEqualTo(1);
+
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.IMPORTING);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM import_items
+                WHERE job_id = ? AND plan_generation = 1 AND outcome = 'APPLIED' AND payload_json IS NULL
+                """, Long.class, job.getId())).isEqualTo(200);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM import_items
+                WHERE job_id = ? AND plan_generation = 1 AND outcome = 'APPLIED' AND payload_json IS NOT NULL
+                """, Long.class, job.getId())).isEqualTo(1);
+
+        assertThat(worker.runAvailable(1)).isEqualTo(1);
+
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getState()).isEqualTo(ImportJobState.COMPLETED);
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM import_items
+                WHERE job_id = ? AND plan_generation = 1 AND outcome = 'APPLIED' AND payload_json IS NULL
+                """, Long.class, job.getId())).isEqualTo(201);
     }
 
     @Test
