@@ -124,7 +124,8 @@ class ContentRatingServiceTest {
                 .updatedAt(LocalDateTime.now())
                 .build();
         HistoricalViewingEvidenceVerifier.Verification verification =
-                new HistoricalViewingEvidenceVerifier.Verification(3L, 4L, true, Set.of(eventId));
+                new HistoricalViewingEvidenceVerifier.Verification(
+                        3L, 4L, Instant.now().plusSeconds(3600), true, Set.of(eventId));
         when(contentRepository.findByTmdbIdAndType("tv-123", ContentType.SERIES)).thenReturn(Optional.of(content));
         when(historicalEvidenceVerifier.verify(eq(ownerId), eq(content), eq(evidence), eq(true), any(Instant.class)))
                 .thenReturn(verification);

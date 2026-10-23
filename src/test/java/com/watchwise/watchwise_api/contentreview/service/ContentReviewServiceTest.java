@@ -128,9 +128,11 @@ class ContentReviewServiceTest {
                 reference, 2, "Imported review", null, publishedAt, null, "{\"source\":\"history\"}");
         HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
                 reference, 2, "historical-scope", Set.of(eventId));
+        Instant validUntil = Instant.parse("2027-01-01T00:00:00Z");
         when(contentRepository.findByTmdbIdAndType("tv-1", ContentType.SERIES)).thenReturn(Optional.of(content));
         when(evidenceVerifier.verify(eq(ownerId), eq(content), eq(evidence), eq(false), any(Instant.class)))
-                .thenReturn(new HistoricalViewingEvidenceVerifier.Verification(3L, 0L, false, Set.of(eventId)));
+                .thenReturn(new HistoricalViewingEvidenceVerifier.Verification(
+                        3L, 0L, validUntil, false, Set.of(eventId)));
         when(reviewRepository.saveAndFlush(any(ContentReview.class)))
                 .thenReturn(ContentReview.builder().id(reviewId).build());
 
@@ -144,7 +146,7 @@ class ContentReviewServiceTest {
         assertThat(saved.getValue().getSourcePublishedAt()).isEqualTo(publishedAt);
         assertThat(saved.getValue().getSourcePublishedOn()).isNull();
         verify(evidenceVerifier).revalidate(ownerId, content, evidence,
-                new HistoricalViewingEvidenceVerifier.Verification(3L, 0L, false, Set.of(eventId)));
+                new HistoricalViewingEvidenceVerifier.Verification(3L, 0L, validUntil, false, Set.of(eventId)));
     }
 
     private ContentReview review(Instant publishedAt, LocalDate publishedOn, int score) {

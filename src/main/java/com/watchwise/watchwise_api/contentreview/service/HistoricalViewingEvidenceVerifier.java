@@ -69,13 +69,15 @@ public class HistoricalViewingEvidenceVerifier {
             uniqueCoordinates &= eventCoordinates.add(coordinate);
         }
         boolean completeScope = versionedScope.scope().releaseComplete()
+                && versionedScope.validUntil().isAfter(now)
                 && versionedScope.scope().episodes().equals(eventCoordinates)
                 && uniqueCoordinates
                 && evidence.scopeHash().equals(versionedScope.scheduleVersion());
         if (requireCompleteScope && !completeScope) {
             throw new BadRequestException("Historical viewing evidence does not prove a complete pass");
         }
-        return new Verification(revisionAfter, scheduleVersion, completeScope, evidence.eventIds());
+        return new Verification(
+                revisionAfter, scheduleVersion, versionedScope.validUntil(), completeScope, evidence.eventIds());
     }
 
     public void revalidate(UUID ownerId, Content content, HistoricalViewingEvidence evidence, Verification verified) {
@@ -91,6 +93,9 @@ public class HistoricalViewingEvidenceVerifier {
                 .orElseThrow(() -> new NotFoundException("User not found"));
         if (scheduleVersion(content, owner) != verified.scheduleVersion()) {
             throw new ConflictException("Diary completion schedule changed while the historical opinion was being saved");
+        }
+        if (verified.completionScopeProven() && !Instant.now().isBefore(verified.validUntil())) {
+            throw new ConflictException("Diary completion scope expired while the historical opinion was being saved");
         }
     }
 
@@ -158,10 +163,12 @@ public class HistoricalViewingEvidenceVerifier {
     public record Verification(
             long historyRevision,
             long scheduleVersion,
+            Instant validUntil,
             boolean completionScopeProven,
             Set<UUID> eventIds) {
 
         public Verification {
+            Objects.requireNonNull(validUntil, "validUntil is required");
             eventIds = Set.copyOf(eventIds);
         }
     }

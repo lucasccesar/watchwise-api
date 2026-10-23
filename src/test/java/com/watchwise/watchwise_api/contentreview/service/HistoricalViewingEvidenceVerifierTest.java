@@ -113,6 +113,59 @@ class HistoricalViewingEvidenceVerifierTest {
     }
 
     @Test
+    void rejectsExpiredScopeWhenCompleteProofIsRequired() {
+        UUID ownerId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        MediaReference reference = MediaReference.series("tv-1");
+        Content content = series("tv-1");
+        HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
+                reference, 2, "scope-hash", Set.of(eventId));
+        Instant now = Instant.now();
+        stubCompletePass(ownerId, eventId, reference, now.minusSeconds(1));
+
+        assertThatThrownBy(() -> verifier.verify(ownerId, content, evidence, true, now))
+                .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void expiredScopeIsUnprovenWhenCompletionIsOptional() {
+        UUID ownerId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        MediaReference reference = MediaReference.series("tv-1");
+        Content content = series("tv-1");
+        HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
+                reference, 2, "scope-hash", Set.of(eventId));
+        Instant now = Instant.now();
+        Instant validUntil = now.minusSeconds(1);
+        stubCompletePass(ownerId, eventId, reference, validUntil);
+
+        HistoricalViewingEvidenceVerifier.Verification verification =
+                verifier.verify(ownerId, content, evidence, false, now);
+
+        assertThat(verification.completionScopeProven()).isFalse();
+        assertThat(verification.validUntil()).isEqualTo(validUntil);
+    }
+
+    @Test
+    void revalidationRejectsAProvenScopeThatExpiredAfterVerification() {
+        UUID ownerId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        MediaReference reference = MediaReference.series("tv-1");
+        Content content = series("tv-1");
+        HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
+                reference, 2, "scope-hash", Set.of(eventId));
+        Instant verificationTime = Instant.now().minusSeconds(60);
+        Instant validUntil = Instant.now().minusSeconds(30);
+        stubCompletePass(ownerId, eventId, reference, validUntil);
+        HistoricalViewingEvidenceVerifier.Verification verification =
+                verifier.verify(ownerId, content, evidence, true, verificationTime);
+        assertThat(verification.completionScopeProven()).isTrue();
+
+        assertThatThrownBy(() -> verifier.revalidate(ownerId, content, evidence, verification))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
     void rejectsHistoricalEvidenceWhenDiaryRevisionChangesBeforeSave() {
         UUID ownerId = UUID.randomUUID();
         UUID eventId = UUID.randomUUID();
@@ -121,7 +174,8 @@ class HistoricalViewingEvidenceVerifierTest {
         HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
                 reference, 2, "scope-hash", Set.of(eventId));
         HistoricalViewingEvidenceVerifier.Verification captured =
-                new HistoricalViewingEvidenceVerifier.Verification(1L, 0L, true, Set.of(eventId));
+                new HistoricalViewingEvidenceVerifier.Verification(
+                        1L, 0L, Instant.now().plusSeconds(3600), true, Set.of(eventId));
         when(historyStateRepository.findById(new UserSeriesHistoryState.Key(ownerId, "tv-1")))
                 .thenReturn(Optional.of(UserSeriesHistoryState.builder()
                         .id(new UserSeriesHistoryState.Key(ownerId, "tv-1"))
@@ -143,9 +197,26 @@ class HistoricalViewingEvidenceVerifierTest {
     }
 
     private VersionedCompletionScope scope(MediaReference reference) {
+        return scope(reference, Instant.now().plusSeconds(3600));
+    }
+
+    private void stubCompletePass(UUID ownerId, UUID eventId, MediaReference reference, Instant validUntil) {
+        DiaryEntryRepository.EpisodeCompletionWatch event = mock(DiaryEntryRepository.EpisodeCompletionWatch.class);
+        when(event.getSeriesTmdbId()).thenReturn("tv-1");
+        when(event.getSeasonNumber()).thenReturn(1);
+        when(event.getEpisodeNumber()).thenReturn(1);
+        when(event.getWatchNumber()).thenReturn(2);
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(user(ownerId)));
+        when(scopeLoader.load(eq(reference), eq("US"), eq("en-US"), any(Instant.class)))
+                .thenReturn(scope(reference, validUntil));
+        when(diaryEntryRepository.findEpisodeCompletionWatchesByUserIdAndDiaryEntryIdIn(ownerId, Set.of(eventId)))
+                .thenReturn(List.of(event));
+    }
+
+    private VersionedCompletionScope scope(MediaReference reference, Instant validUntil) {
         return new VersionedCompletionScope(
                 new CompletionScope(reference, Set.of(new EpisodeCoordinate(1, 1)), true),
                 "scope-hash",
-                Instant.now().plusSeconds(3600));
+                validUntil);
     }
 }
