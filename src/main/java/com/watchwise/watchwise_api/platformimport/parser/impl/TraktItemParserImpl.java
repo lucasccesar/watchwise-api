@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.TraktItemParser;
 import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
@@ -26,6 +27,7 @@ public class TraktItemParserImpl implements TraktItemParser {
     private final ObjectMapper mapper;
     private final ImportLimits limits;
     public TraktItemParserImpl(ObjectMapper mapper) { this(mapper, new ImportLimits()); }
+    @Autowired
     public TraktItemParserImpl(ObjectMapper mapper, ImportLimits limits) { this.mapper = mapper; this.limits = limits; }
 
     @Override

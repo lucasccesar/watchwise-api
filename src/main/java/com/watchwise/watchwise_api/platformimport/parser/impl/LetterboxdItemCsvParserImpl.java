@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.CsvRecordReader;
 import com.watchwise.watchwise_api.platformimport.parser.LetterboxdItemCsvParser;
 import com.watchwise.watchwise_api.platformimport.parser.ParsedListMetadata;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,6 +28,7 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
     private final ObjectMapper mapper;
 
     public LetterboxdItemCsvParserImpl(CsvRecordReader csv) { this(csv, new ObjectMapper()); }
+    @Autowired
     public LetterboxdItemCsvParserImpl(CsvRecordReader csv, ObjectMapper mapper) { this.csv = csv; this.mapper = mapper; }
 
     @Override
