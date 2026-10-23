@@ -35,12 +35,14 @@ class LetterboxdExportParserTest {
         parse("LetterboxdHistoryCsvParser", "reviews.csv", ImportRecordKind.REVIEW, records);
 
         assertThat(records).hasSize(3);
-        assertThat(records).extracting(record -> record.sourceKey().sourceId())
-                .containsExactly("https://letterboxd.com/user/film/one/", "https://letterboxd.com/user/film/two/",
-                        "https://letterboxd.com/user/film/one/");
-        assertThat(records.get(2).payload().path("review").asString()).isEqualTo("A quoted,\nmultiline review.");
-        assertThat(records.get(0).payload().path("sourceRecordedOn").asString()).isEqualTo("2025-06-01");
-        assertThat(records.get(0).payload().path("watchedOn").asString()).isEqualTo("2025-05-30");
+        if (records.size() == 3) {
+            assertThat(records).extracting(record -> record.sourceKey().sourceId())
+                    .containsExactly("https://letterboxd.com/user/film/one/", "https://letterboxd.com/user/film/two/",
+                            "https://letterboxd.com/user/film/one/");
+            assertThat(records.get(2).payload().path("review").asString()).isEqualTo("A quoted,\nmultiline review.");
+            assertThat(records.get(0).payload().path("sourceRecordedOn").asString()).isEqualTo("2025-06-01");
+            assertThat(records.get(0).payload().path("watchedOn").asString()).isEqualTo("2025-05-30");
+        }
     }
 
     @Test
@@ -49,8 +51,11 @@ class LetterboxdExportParserTest {
         List<NormalizedImportRecord> records = new ArrayList<>();
         parse("LetterboxdHistoryCsvParser", "diary.csv", ImportRecordKind.DIARY_EVENT, records);
 
-        assertThat(records.getFirst().payload().path("sourceRecordedOn").asString()).isEqualTo("2025-06-01");
-        assertThat(records.getFirst().payload().path("watchedOn").asString()).isEqualTo("2025-05-30");
+        assertThat(records).hasSize(2);
+        if (!records.isEmpty()) {
+            assertThat(records.getFirst().payload().path("sourceRecordedOn").asString()).isEqualTo("2025-06-01");
+            assertThat(records.getFirst().payload().path("watchedOn").asString()).isEqualTo("2025-05-30");
+        }
     }
 
     @Test
@@ -80,7 +85,7 @@ class LetterboxdExportParserTest {
         parse("LetterboxdItemCsvParserImpl", "watchlist.csv", ImportRecordKind.WATCHLIST_ITEM, records);
 
         assertThat(records).hasSize(2);
-        assertThat(records).extracting(NormalizedImportRecord::ordinal).containsExactly(0, 1);
+        if (records.size() == 2) assertThat(records).extracting(NormalizedImportRecord::ordinal).containsExactly(0, 1);
         assertThat(records).allSatisfy(record -> assertThat(record.sourceKey().sourceId())
                 .startsWith("https://letterboxd.com/film/"));
     }
@@ -110,13 +115,14 @@ class LetterboxdExportParserTest {
         var metadata = parser.parseList(new java.io.InputStreamReader(resource("list-v7.csv"), StandardCharsets.UTF_8),
                 CONTEXT, "lists/list-v7.csv", records::add);
 
-        assertThat(metadata).singleElement().satisfies(list -> {
-            assertThat(list.name()).isEqualTo("Synthetic List");
-            assertThat(list.description()).isEqualTo("A list, with commas");
-        });
+        assertThat(metadata).hasSize(1);
+        if (!metadata.isEmpty()) assertThat(metadata.getFirst()).satisfies(list -> {
+                assertThat(list.name()).isEqualTo("Synthetic List");
+                assertThat(list.description()).isEqualTo("A list, with commas");
+            });
         assertThat(records).extracting(NormalizedImportRecord::kind)
                 .containsExactly(ImportRecordKind.LIST_METADATA, ImportRecordKind.LIST_ITEM);
-        assertThat(records.get(1).payload().path("title").asString()).isEqualTo("Listed Film");
+        if (records.size() == 2) assertThat(records.get(1).payload().path("title").asString()).isEqualTo("Listed Film");
     }
 
     @Test
