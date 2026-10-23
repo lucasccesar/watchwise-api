@@ -7,6 +7,7 @@ import lombok.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
@@ -42,6 +43,10 @@ public class DiaryEntry {
     @Column(name = "watched_date")
     @Setter
     private LocalDate watchedDate;
+
+    @Column(name = "watched_at")
+    @Setter
+    private Instant watchedAt;
 
     @Column(name = "watch_number", nullable = false)
     @Setter
