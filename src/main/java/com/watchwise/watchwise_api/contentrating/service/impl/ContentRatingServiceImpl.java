@@ -117,18 +117,19 @@ public class ContentRatingServiceImpl implements ContentRatingService {
                 ownerId, content, evidence, true, now);
 
         userContentMutationLock.lock(ownerId);
-        historicalEvidenceVerifier.revalidate(ownerId, content, evidence, verified);
         if (ratingRepository.findByUserIdAndContentId(ownerId, content.getId()).isPresent()) {
             return Optional.empty();
         }
-        ContentRating rating = ratingRepository.saveAndFlush(ContentRating.builder()
+        ContentRating rating = ContentRating.builder()
                 .userId(ownerId)
                 .contentId(content.getId())
                 .contentType(content.getType())
                 .score(score)
                 .createdAt(now)
                 .updatedAt(now)
-                .build());
+                .build();
+        historicalEvidenceVerifier.revalidate(ownerId, content, evidence, verified);
+        rating = ratingRepository.saveAndFlush(rating);
         return Optional.of(rating.getId());
     }
 

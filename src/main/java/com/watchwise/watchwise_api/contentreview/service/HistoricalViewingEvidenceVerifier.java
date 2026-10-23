@@ -20,6 +20,7 @@ import com.watchwise.watchwise_api.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -38,6 +39,7 @@ public class HistoricalViewingEvidenceVerifier {
     private final UserSeriesHistoryStateRepository historyStateRepository;
     private final CalendarScheduleCompletenessRepository completenessRepository;
     private final CompletionScopeLoader scopeLoader;
+    private final Clock clock;
 
     public Verification verify(
             UUID ownerId,
@@ -94,7 +96,7 @@ public class HistoricalViewingEvidenceVerifier {
         if (scheduleVersion(content, owner) != verified.scheduleVersion()) {
             throw new ConflictException("Diary completion schedule changed while the historical opinion was being saved");
         }
-        if (verified.completionScopeProven() && !Instant.now().isBefore(verified.validUntil())) {
+        if (verified.completionScopeProven() && !verified.validUntil().isAfter(clock.instant())) {
             throw new ConflictException("Diary completion scope expired while the historical opinion was being saved");
         }
     }

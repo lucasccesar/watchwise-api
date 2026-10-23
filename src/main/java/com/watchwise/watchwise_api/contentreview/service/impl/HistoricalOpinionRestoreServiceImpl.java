@@ -67,7 +67,6 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
         HistoricalViewingEvidenceVerifier.Verification verification = evidenceVerifier.verify(
                 ownerId, content, evidence, false, now);
         userContentMutationLock.lock(ownerId);
-        evidenceVerifier.revalidate(ownerId, content, evidence, verification);
         if (content.getType() == ContentType.SEASON
                 && reviewRepository.existsByUserIdAndContentIdAndWatchNumberAndPublicationKind(
                 ownerId, content.getId(), opinion.watchNumber(), ReviewPublicationKind.WRITTEN_REVIEW)) {
@@ -96,11 +95,16 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
         List<ContentReview> existingBoundary = opinion.scoreAtPublication() == null
                 ? List.of()
                 : publicationBoundary(ownerId, content.getId());
+        boolean updateCurrentRating = opinion.scoreAtPublication() != null
+                && publicationOrder.isNewLatest(review, existingBoundary);
+        ContentRating currentRating = updateCurrentRating
+                ? findCurrentRating(ownerId, content.getId())
+                : null;
+        evidenceVerifier.revalidate(ownerId, content, evidence, verification);
         try {
             review = reviewRepository.saveAndFlush(review);
-            if (opinion.scoreAtPublication() != null
-                    && publicationOrder.isNewLatest(review, existingBoundary)) {
-                updateCurrentRating(ownerId, content, opinion.scoreAtPublication(), now);
+            if (updateCurrentRating) {
+                updateCurrentRating(ownerId, content, currentRating, opinion.scoreAtPublication(), now);
             }
         } catch (DataIntegrityViolationException conflict) {
             throw conflict.getCause() instanceof ConstraintViolationException violation
@@ -141,8 +145,18 @@ public class HistoricalOpinionRestoreServiceImpl implements HistoricalOpinionRes
         return boundary;
     }
 
-    private void updateCurrentRating(UUID ownerId, Content content, Integer score, Instant now) {
-        ContentRating rating = ratingRepository.findByUserIdAndContentId(ownerId, content.getId()).orElse(null);
+    private ContentRating findCurrentRating(UUID ownerId, UUID contentId) {
+        try {
+            return ratingRepository.findByUserIdAndContentId(ownerId, contentId).orElse(null);
+        } catch (DataIntegrityViolationException conflict) {
+            throw new ConflictException("Historical review could not be restored due to a conflict");
+        } catch (OptimisticLockingFailureException conflict) {
+            throw new ConflictException("Rating or review changed while historical opinion was restored");
+        }
+    }
+
+    private void updateCurrentRating(
+            UUID ownerId, Content content, ContentRating rating, Integer score, Instant now) {
         if (rating == null) {
             rating = ContentRating.builder()
                     .userId(ownerId)

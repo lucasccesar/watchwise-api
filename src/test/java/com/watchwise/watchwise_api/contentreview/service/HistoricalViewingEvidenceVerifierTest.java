@@ -22,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -54,6 +56,9 @@ class HistoricalViewingEvidenceVerifierTest {
 
     @Mock
     private CompletionScopeLoader scopeLoader;
+
+    @Mock
+    private Clock clock;
 
     @InjectMocks
     private HistoricalViewingEvidenceVerifier verifier;
@@ -147,22 +152,38 @@ class HistoricalViewingEvidenceVerifierTest {
     }
 
     @Test
-    void revalidationRejectsAProvenScopeThatExpiredAfterVerification() {
+    void revalidationChecksInjectedClockAfterLoadingPersistedEvidence() {
         UUID ownerId = UUID.randomUUID();
         UUID eventId = UUID.randomUUID();
         MediaReference reference = MediaReference.series("tv-1");
         Content content = series("tv-1");
         HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
                 reference, 2, "scope-hash", Set.of(eventId));
-        Instant verificationTime = Instant.now().minusSeconds(60);
-        Instant validUntil = Instant.now().minusSeconds(30);
-        stubCompletePass(ownerId, eventId, reference, validUntil);
+        DiaryEntryRepository.EpisodeCompletionWatch event = mock(DiaryEntryRepository.EpisodeCompletionWatch.class);
+        when(event.getSeriesTmdbId()).thenReturn("tv-1");
+        when(event.getSeasonNumber()).thenReturn(1);
+        when(event.getEpisodeNumber()).thenReturn(1);
+        when(event.getWatchNumber()).thenReturn(2);
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(user(ownerId)));
+        when(diaryEntryRepository.findEpisodeCompletionWatchesByUserIdAndDiaryEntryIdIn(ownerId, Set.of(eventId)))
+                .thenReturn(List.of(event));
+        Instant validUntil = Instant.parse("2030-01-01T00:00:00Z");
+        when(clock.instant()).thenReturn(validUntil.plusNanos(1));
         HistoricalViewingEvidenceVerifier.Verification verification =
-                verifier.verify(ownerId, content, evidence, true, verificationTime);
-        assertThat(verification.completionScopeProven()).isTrue();
+                new HistoricalViewingEvidenceVerifier.Verification(0L, 0L, validUntil, true, Set.of(eventId));
 
         assertThatThrownBy(() -> verifier.revalidate(ownerId, content, evidence, verification))
                 .isInstanceOf(ConflictException.class);
+
+        var order = inOrder(historyStateRepository, diaryEntryRepository, userRepository, completenessRepository, clock);
+        order.verify(historyStateRepository).findById(new UserSeriesHistoryState.Key(ownerId, "tv-1"));
+        order.verify(diaryEntryRepository)
+                .findEpisodeCompletionWatchesByUserIdAndDiaryEntryIdIn(ownerId, Set.of(eventId));
+        order.verify(userRepository).findById(ownerId);
+        order.verify(completenessRepository).findByGroupTypeAndSeriesTmdbIdAndSeasonNumberAndRegionAndLanguage(
+                        com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness.GroupType.SERIES,
+                        "tv-1", null, "US", "en-US");
+        order.verify(clock).instant();
     }
 
     @Test

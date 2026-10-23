@@ -3,6 +3,7 @@ package com.watchwise.watchwise_api.contentreview.service;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
 import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.contentreview.service.impl.ContentReviewServiceImpl;
@@ -11,6 +12,7 @@ import com.watchwise.watchwise_api.contentreview.service.HistoricalOpinion;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidence;
 import com.watchwise.watchwise_api.contentreview.service.HistoricalViewingEvidenceVerifier;
 import com.watchwise.watchwise_api.common.transaction.UserContentMutationLock;
+import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
@@ -29,12 +31,18 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import org.mockito.ArgumentCaptor;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 @ExtendWith(MockitoExtension.class)
 class ContentReviewServiceTest {
@@ -147,6 +155,66 @@ class ContentReviewServiceTest {
         assertThat(saved.getValue().getSourcePublishedOn()).isNull();
         verify(evidenceVerifier).revalidate(ownerId, content, evidence,
                 new HistoricalViewingEvidenceVerifier.Verification(3L, 0L, validUntil, false, Set.of(eventId)));
+    }
+
+    @Test
+    void historicalRestoreRejectsExpiryDuringPostVerificationReadsBeforeWriting() {
+        UUID ownerId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        UUID contentId = UUID.randomUUID();
+        MediaReference reference = MediaReference.season("tv-expiry", 1);
+        Content content = Content.builder()
+                .id(contentId)
+                .seriesTmdbId("tv-expiry")
+                .seasonNumber(1)
+                .type(ContentType.SEASON)
+                .build();
+        HistoricalOpinion opinion = new HistoricalOpinion(
+                reference, 2, "Imported season review", 7, Instant.parse("2024-01-01T12:00:00Z"), null, null);
+        HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
+                reference, 2, "historical-scope", Set.of(eventId));
+        Instant validUntil = Instant.parse("2030-01-01T00:00:00Z");
+        AtomicReference<Instant> currentTime = new AtomicReference<>(validUntil.minusSeconds(1));
+        HistoricalViewingEvidenceVerifier.Verification verification =
+                new HistoricalViewingEvidenceVerifier.Verification(3L, 0L, validUntil, true, Set.of(eventId));
+        when(contentRepository.findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
+                ContentType.SEASON, "tv-expiry", List.of(1))).thenReturn(List.of(content));
+        when(evidenceVerifier.verify(eq(ownerId), eq(content), eq(evidence), eq(false), any(Instant.class)))
+                .thenReturn(verification);
+        when(publicationOrderBean.isNewLatest(any(ContentReview.class), any())).thenReturn(true);
+        when(reviewRepository.findLatestScoredPublicationBoundary(ownerId, contentId)).thenAnswer(invocation -> {
+            currentTime.set(validUntil.plusNanos(1));
+            return List.of();
+        });
+        when(reviewRepository
+                .existsByUserIdAndContentIdAndScoreAtPublicationIsNotNullAndSourcePublishedAtIsNullAndSourcePublishedOnIsNull(
+                        ownerId, contentId))
+                .thenReturn(false);
+        when(ratingRepository.findByUserIdAndContentId(ownerId, contentId)).thenAnswer(invocation -> {
+            currentTime.set(validUntil.plusNanos(1));
+            return Optional.empty();
+        });
+        doAnswer(invocation -> {
+            if (currentTime.get().isAfter(verification.validUntil())) {
+                throw new ConflictException("Diary completion scope expired");
+            }
+            return null;
+        }).when(evidenceVerifier).revalidate(ownerId, content, evidence, verification);
+
+        assertThatThrownBy(() -> historicalOpinionRestoreService.restore(ownerId, opinion, evidence))
+                .isInstanceOf(ConflictException.class);
+
+        var order = inOrder(reviewRepository, ratingRepository, evidenceVerifier);
+        order.verify(reviewRepository).existsByUserIdAndContentIdAndWatchNumberAndPublicationKind(
+                        ownerId, contentId, 2, ReviewPublicationKind.WRITTEN_REVIEW);
+        order.verify(reviewRepository).findLatestScoredPublicationBoundary(ownerId, contentId);
+        order.verify(reviewRepository)
+                .existsByUserIdAndContentIdAndScoreAtPublicationIsNotNullAndSourcePublishedAtIsNullAndSourcePublishedOnIsNull(
+                        ownerId, contentId);
+        order.verify(ratingRepository).findByUserIdAndContentId(ownerId, contentId);
+        order.verify(evidenceVerifier).revalidate(ownerId, content, evidence, verification);
+        verify(reviewRepository, never()).saveAndFlush(any(ContentReview.class));
+        verify(ratingRepository, never()).saveAndFlush(any(ContentRating.class));
     }
 
     private ContentReview review(Instant publishedAt, LocalDate publishedOn, int score) {

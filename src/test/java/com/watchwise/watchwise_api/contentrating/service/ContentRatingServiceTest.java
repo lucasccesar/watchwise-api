@@ -21,6 +21,7 @@ import org.mockito.ArgumentMatchers;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -30,6 +31,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -139,5 +142,46 @@ class ContentRatingServiceTest {
         verify(historicalEvidenceVerifier).revalidate(ownerId, content, evidence, verification);
         verify(ratingRepository).saveAndFlush(ArgumentMatchers.argThat(rating ->
                 rating.getScore() == 7 && rating.getContentId().equals(contentId)));
+    }
+
+    @Test
+    void restoreInitialRejectsExpiryDuringRatingReadBeforeWriting() {
+        UUID ownerId = UUID.randomUUID();
+        UUID contentId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        MediaReference reference = MediaReference.series("tv-expiry");
+        HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
+                reference, 1, "scope-hash", Set.of(eventId));
+        Content content = Content.builder()
+                .id(contentId)
+                .tmdbId("tv-expiry")
+                .type(ContentType.SERIES)
+                .build();
+        Instant validUntil = Instant.parse("2030-01-01T00:00:00Z");
+        AtomicReference<Instant> currentTime = new AtomicReference<>(validUntil.minusSeconds(1));
+        HistoricalViewingEvidenceVerifier.Verification verification =
+                new HistoricalViewingEvidenceVerifier.Verification(3L, 4L, validUntil, true, Set.of(eventId));
+        when(contentRepository.findByTmdbIdAndType("tv-expiry", ContentType.SERIES))
+                .thenReturn(Optional.of(content));
+        when(historicalEvidenceVerifier.verify(eq(ownerId), eq(content), eq(evidence), eq(true), any(Instant.class)))
+                .thenReturn(verification);
+        when(ratingRepository.findByUserIdAndContentId(ownerId, contentId)).thenAnswer(invocation -> {
+            currentTime.set(validUntil.plusNanos(1));
+            return Optional.empty();
+        });
+        doAnswer(invocation -> {
+            if (currentTime.get().isAfter(verification.validUntil())) {
+                throw new ConflictException("Diary completion scope expired");
+            }
+            return null;
+        }).when(historicalEvidenceVerifier).revalidate(ownerId, content, evidence, verification);
+
+        assertThatThrownBy(() -> ratingService.restoreInitial(ownerId, reference, 7, evidence))
+                .isInstanceOf(ConflictException.class);
+
+        var order = inOrder(ratingRepository, historicalEvidenceVerifier);
+        order.verify(ratingRepository).findByUserIdAndContentId(ownerId, contentId);
+        order.verify(historicalEvidenceVerifier).revalidate(ownerId, content, evidence, verification);
+        verify(ratingRepository, never()).saveAndFlush(any(ContentRating.class));
     }
 }
