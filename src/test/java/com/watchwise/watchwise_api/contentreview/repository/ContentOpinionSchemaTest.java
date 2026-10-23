@@ -1,5 +1,7 @@
 package com.watchwise.watchwise_api.contentreview.repository;
 
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -32,6 +34,8 @@ class ContentOpinionSchemaTest {
     }
 
     @Autowired JdbcTemplate jdbc;
+    @Autowired ContentReviewRepository reviews;
+    @Autowired EntityManager entityManager;
 
     @Test void rejectsWrongTypeAndOutOfRangeScore() {
         assertTableExists("content_ratings");
@@ -54,6 +58,36 @@ class ContentOpinionSchemaTest {
         review(owner, season, "SEASON", 1, "one");
         assertThatThrownBy(() -> review(owner, season, "SEASON", 1, "two")).isInstanceOf(DataIntegrityViolationException.class);
         assertThat(jdbc.queryForObject("select count(*) from content_reviews where user_id = ?", Integer.class, owner)).isEqualTo(3);
+    }
+
+    @Test void rejectsWrittenReviewWithoutPassButAllowsLegacyActivityWithoutPass() {
+        UUID owner = user();
+        UUID series = content("SERIES");
+        assertThatThrownBy(() -> jdbc.update("insert into content_reviews(id,user_id,content_id,content_type,publication_kind,context_kind,comment) values (?,?,?,'SERIES','WRITTEN_REVIEW','UNKNOWN','written')", UUID.randomUUID(), owner, series))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        jdbc.update("insert into content_reviews(id,user_id,content_id,content_type,publication_kind,context_kind) values (?,?,?,'SERIES','LEGACY_ACTIVITY','LEGACY')", UUID.randomUUID(), owner, series);
+        assertThat(jdbc.queryForObject("select count(*) from content_reviews where user_id = ?", Integer.class, owner)).isEqualTo(1);
+    }
+
+    @Test void editingCommentCannotRewriteScoreSnapshotThroughRepositorySave() {
+        UUID owner = user();
+        UUID series = content("SERIES");
+        UUID reviewId = UUID.randomUUID();
+        jdbc.update("insert into content_reviews(id,user_id,content_id,content_type,publication_kind,context_kind,watch_number,comment,score_at_publication) values (?,?,?,'SERIES','WRITTEN_REVIEW','UNKNOWN',1,'before',7)", reviewId, owner, series);
+        ContentReview original = reviews.findById(reviewId).orElseThrow();
+        ContentReview rebuilt = ContentReview.builder()
+                .id(original.getId()).userId(original.getUserId()).contentId(original.getContentId())
+                .contentType(original.getContentType()).publicationKind(original.getPublicationKind())
+                .contextKind(original.getContextKind()).contextJson(original.getContextJson())
+                .comment("after").scoreAtPublication(9).watchNumber(original.getWatchNumber())
+                .sourcePublishedAt(original.getSourcePublishedAt()).sourcePublishedOn(original.getSourcePublishedOn())
+                .version(original.getVersion()).createdAt(original.getCreatedAt()).updatedAt(original.getUpdatedAt())
+                .build();
+        reviews.saveAndFlush(rebuilt);
+        entityManager.clear();
+        ContentReview persisted = reviews.findById(reviewId).orElseThrow();
+        assertThat(persisted.getComment()).isEqualTo("after");
+        assertThat(persisted.getScoreAtPublication()).isEqualTo(7);
     }
 
     private UUID user() {

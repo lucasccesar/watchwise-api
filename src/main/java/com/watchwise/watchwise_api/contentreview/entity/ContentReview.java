@@ -19,7 +19,7 @@ public class ContentReview {
     @Enumerated(EnumType.STRING) @Column(name = "context_kind", nullable = false) private ReviewContextKind contextKind;
     @Column(name = "context_json", columnDefinition = "TEXT") private String contextJson;
     @Setter @Column(columnDefinition = "TEXT") private String comment;
-    @Column(name = "score_at_publication") private Integer scoreAtPublication;
+    @Column(name = "score_at_publication", updatable = false) private Integer scoreAtPublication;
     @Column(name = "watch_number") private Integer watchNumber;
     @Column(name = "source_published_at") private Instant sourcePublishedAt;
     @Column(name = "source_published_on") private LocalDate sourcePublishedOn;

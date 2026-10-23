@@ -32,7 +32,8 @@ CREATE TABLE content_reviews (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_content_reviews_content_type FOREIGN KEY (content_id, content_type) REFERENCES contents(id, type),
-    CONSTRAINT ck_content_reviews_written_text CHECK (publication_kind <> 'WRITTEN_REVIEW' OR (comment IS NOT NULL AND btrim(comment) <> ''))
+    CONSTRAINT ck_content_reviews_written_text CHECK (publication_kind <> 'WRITTEN_REVIEW' OR (comment IS NOT NULL AND btrim(comment) <> '')),
+    CONSTRAINT ck_content_reviews_written_watch_number CHECK (publication_kind <> 'WRITTEN_REVIEW' OR watch_number IS NOT NULL)
 );
 CREATE UNIQUE INDEX uq_content_reviews_season_pass ON content_reviews(user_id, content_id, watch_number)
     WHERE publication_kind = 'WRITTEN_REVIEW' AND content_type = 'SEASON';
