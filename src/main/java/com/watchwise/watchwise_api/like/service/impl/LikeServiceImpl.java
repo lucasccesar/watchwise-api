@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.transaction.NewTransactionExecutor;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.service.ContentReviewSocialTargetReader;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -53,6 +55,7 @@ public class LikeServiceImpl implements LikeService {
     private final NewTransactionExecutor newTransactionExecutor;
     private final SocialNotificationService socialNotificationService;
     private final UserBlockAccessService userBlockAccessService;
+    private final ContentReviewSocialTargetReader contentReviewTargetReader;
 
     @Override
     public void likeComment(UUID userId, UUID commentId) {
@@ -132,6 +135,39 @@ public class LikeServiceImpl implements LikeService {
         if (likeRepository.deleteByUserIdAndDiaryEntryId(userId, diaryEntryId) > 0) {
             diaryEntryRepository.decrementLikesCount(diaryEntryId);
         }
+    }
+
+    @Override
+    public void likeContentReview(UUID userId, UUID reviewId) {
+        ContentReview initialReview = contentReviewTargetReader.findWritable(userId, reviewId);
+        try {
+            newTransactionExecutor.runInNewTransaction(() -> {
+                userBlockAccessService.lockAndAssertInteractionAllowed(userId, initialReview.getUserId());
+                ContentReview review = contentReviewTargetReader.findWritable(userId, reviewId);
+                if (likeRepository.existsByUserIdAndContentReviewId(userId, reviewId)) {
+                    return null;
+                }
+                Like like = Like.builder()
+                        .user(userRepository.getReferenceById(userId))
+                        .contentReview(review)
+                        .createdAt(LocalDateTime.now())
+                        .build();
+                Like saved = likeRepository.saveAndFlush(like);
+                socialNotificationService.notifyLikeReceived(
+                        userId, review.getUserId(), NotificationTargetType.CONTENT_REVIEW, reviewId);
+                return saved;
+            });
+        } catch (DataIntegrityViolationException e) {
+            if (!likeRepository.existsByUserIdAndContentReviewId(userId, reviewId)) {
+                throw e;
+            }
+        }
+    }
+
+    @Override
+    @Transactional
+    public void unlikeContentReview(UUID userId, UUID reviewId) {
+        likeRepository.deleteByUserIdAndContentReviewId(userId, reviewId);
     }
 
     @Override
@@ -384,6 +420,11 @@ public class LikeServiceImpl implements LikeService {
             return;
         }
 
+        if (comment.getContentReview() != null) {
+            contentReviewTargetReader.findVisible(viewerId, comment.getContentReview().getId());
+            return;
+        }
+
         assertDiaryEntryIsVisibleTo(viewerId, comment.getDiaryEntry());
     }
 
@@ -396,6 +437,8 @@ public class LikeServiceImpl implements LikeService {
             counterpartIds.add(comment.getDiaryEntry().getUser().getId());
         } else if (comment.getDroppedEntry() != null) {
             counterpartIds.add(comment.getDroppedEntry().getUser().getId());
+        } else if (comment.getContentReview() != null) {
+            counterpartIds.add(comment.getContentReview().getUserId());
         } else if (comment.getPick() != null) {
             counterpartIds.add(comment.getPick().getUser().getId());
             if (comment.getPick().getPicksTemplate().getCreator() != null) {

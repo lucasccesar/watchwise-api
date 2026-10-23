@@ -7,12 +7,17 @@ import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.diarycompletion.entity.LegacyDiaryMigrationMap;
+import com.watchwise.watchwise_api.diarycompletion.repository.LegacyDiaryMigrationMapRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.notification.dto.NotificationTargetPreviewDTO;
@@ -59,6 +64,15 @@ class NotificationTargetPreviewReaderTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Mock
+    private ContentReviewRepository contentReviewRepository;
+
+    @Mock
+    private LegacyDiaryMigrationMapRepository migrationMapRepository;
+
+    @Mock
+    private ContentRepository contentRepository;
+
+    @Mock
     private DroppedEntryRepository droppedEntryRepository;
 
     @Mock
@@ -81,12 +95,53 @@ class NotificationTargetPreviewReaderTest {
         reader = new NotificationTargetPreviewReader(
                 commentRepository,
                 diaryEntryRepository,
+                contentReviewRepository,
+                migrationMapRepository,
+                contentRepository,
                 droppedEntryRepository,
                 userListRepository,
                 pickRepository,
                 picksTemplateRepository,
                 contentCardAssembler);
         context = new ContentCardContext("en-US", "US", null, null);
+    }
+
+    @Test
+    void shouldResolveTypedContentReviewsAndMappedLegacyDiaryLinksWithoutGuessingByUuid() {
+        UUID legacyDiaryId = UUID.randomUUID();
+        UUID reviewId = UUID.randomUUID();
+        Content content = content(UUID.randomUUID(), "series-42");
+        ContentReview review = ContentReview.builder()
+                .id(reviewId)
+                .contentId(content.getId())
+                .comment("Mapped review text")
+                .scoreAtPublication(8)
+                .build();
+        LegacyDiaryMigrationMap mapping = LegacyDiaryMigrationMap.builder()
+                .oldDiaryEntryId(legacyDiaryId)
+                .destinationKind("CONTENT_REVIEW")
+                .destinationId(reviewId)
+                .build();
+        ContentCardDTO card = card(content, ContentPreviewStatus.AVAILABLE);
+        when(diaryEntryRepository.findByIdInWithContentAndUser(anyCollection())).thenReturn(List.of());
+        when(migrationMapRepository.findByOldDiaryEntryIdIn(anyCollection())).thenReturn(List.of(mapping));
+        when(contentReviewRepository.findAllById(any())).thenReturn(List.of(review));
+        when(contentRepository.findAllById(any())).thenReturn(List.of(content));
+        when(contentCardAssembler.assemble(anyCollection(), eq(context), eq(ContentCardFieldSet.BASIC_METADATA)))
+                .thenReturn(Map.of(ContentCoordinate.from(content), card));
+
+        Map<NotificationTargetKey, NotificationTargetPreviewDTO> result = reader.read(List.of(
+                key(NotificationTargetType.DIARY_ENTRY, legacyDiaryId),
+                key(NotificationTargetType.CONTENT_REVIEW, reviewId)), context);
+
+        assertThat(result.get(key(NotificationTargetType.DIARY_ENTRY, legacyDiaryId)))
+                .extracting(NotificationTargetPreviewDTO::targetType, NotificationTargetPreviewDTO::targetId,
+                        NotificationTargetPreviewDTO::excerpt, NotificationTargetPreviewDTO::score)
+                .containsExactly(NotificationTargetType.DIARY_ENTRY, legacyDiaryId, "Mapped review text", 8);
+        assertThat(result.get(key(NotificationTargetType.CONTENT_REVIEW, reviewId)))
+                .extracting(NotificationTargetPreviewDTO::targetType, NotificationTargetPreviewDTO::targetId,
+                        NotificationTargetPreviewDTO::excerpt, NotificationTargetPreviewDTO::score)
+                .containsExactly(NotificationTargetType.CONTENT_REVIEW, reviewId, "Mapped review text", 8);
     }
 
     @Test

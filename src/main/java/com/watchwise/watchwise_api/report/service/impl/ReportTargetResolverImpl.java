@@ -5,6 +5,10 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.diarycompletion.entity.LegacyDiaryMigrationMap;
+import com.watchwise.watchwise_api.diarycompletion.repository.LegacyDiaryMigrationMapRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -47,6 +51,8 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
     private final UserRepository userRepository;
     private final CommentRepository commentRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final ContentReviewRepository contentReviewRepository;
+    private final LegacyDiaryMigrationMapRepository migrationMapRepository;
     private final UserListRepository userListRepository;
     private final PickRepository pickRepository;
     private final PickSelectionRepository pickSelectionRepository;
@@ -67,6 +73,7 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
             case USER -> resolveUser(reporterId, targetId);
             case COMMENT -> resolveComment(reporterId, targetId);
             case REVIEW -> resolveReview(reporterId, targetId);
+            case CONTENT_REVIEW -> resolveContentReview(reporterId, targetId, ReportTargetType.CONTENT_REVIEW, targetId);
             case USER_LIST -> resolveList(reporterId, targetId);
             case PICK -> resolvePick(reporterId, targetId);
             case PICKS_TEMPLATE -> resolveTemplate(reporterId, targetId);
@@ -106,6 +113,7 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
         }
         add(evidence, "listId", comment.getList() == null ? null : comment.getList().getId());
         add(evidence, "diaryEntryId", comment.getDiaryEntry() == null ? null : comment.getDiaryEntry().getId());
+        add(evidence, "contentReviewId", comment.getContentReview() == null ? null : comment.getContentReview().getId());
         add(evidence, "droppedEntryId", comment.getDroppedEntry() == null ? null : comment.getDroppedEntry().getId());
         add(evidence, "pickId", comment.getPick() == null ? null : comment.getPick().getId());
         add(evidence, "picksTemplateId", comment.getPicksTemplate() == null ? null : comment.getPicksTemplate().getId());
@@ -114,6 +122,10 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
     }
 
     private ResolvedReportTarget resolveReview(UUID reporterId, UUID targetId) {
+        LegacyDiaryMigrationMap mapping = migrationMapRepository.findByOldDiaryEntryId(targetId).orElse(null);
+        if (mapping != null && "CONTENT_REVIEW".equals(mapping.getDestinationKind())) {
+            return resolveContentReview(reporterId, mapping.getDestinationId(), ReportTargetType.REVIEW, targetId);
+        }
         DiaryEntry review = diaryEntryRepository.findByIdWithContentAndUser(targetId)
                 .filter(entry -> entry.getComment() != null)
                 .orElseThrow(() -> new NotFoundException("Report target not found"));
@@ -127,6 +139,27 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
         evidence.put("contentId", review.getContent().getId());
         evidence.put("createdAt", timestamp(review.getCreatedAt()));
         return snapshot(ReportTargetType.REVIEW, review.getId(), author, evidence);
+    }
+
+    private ResolvedReportTarget resolveContentReview(
+            UUID reporterId, UUID contentReviewId, ReportTargetType snapshotType, UUID snapshotId) {
+        ContentReview review = contentReviewRepository.findById(contentReviewId)
+                .filter(candidate -> candidate.getComment() != null && !candidate.getComment().isBlank())
+                .orElseThrow(() -> new NotFoundException("Report target not found"));
+        User author = userRepository.findById(review.getUserId())
+                .orElseThrow(() -> new NotFoundException("Report target not found"));
+        rejectSelfReport(reporterId, author.getId());
+        assertProfileTargetVisible(reporterId, author.getId());
+
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("text", review.getComment());
+        add(evidence, "score", review.getScoreAtPublication());
+        evidence.put("contentId", review.getContentId());
+        evidence.put("createdAt", review.getCreatedAt() == null ? null : review.getCreatedAt().toString());
+        if (snapshotType == ReportTargetType.REVIEW) {
+            evidence.put("contentReviewId", review.getId());
+        }
+        return snapshot(snapshotType, snapshotId, author, evidence);
     }
 
     private ResolvedReportTarget resolveList(UUID reporterId, UUID targetId) {
@@ -217,6 +250,10 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
         }
         if (comment.getDiaryEntry() != null) {
             assertProfileContainerVisible(reporterId, comment.getDiaryEntry().getUser().getId());
+            return;
+        }
+        if (comment.getContentReview() != null) {
+            assertProfileContainerVisible(reporterId, comment.getContentReview().getUserId());
             return;
         }
         if (comment.getDroppedEntry() != null) {

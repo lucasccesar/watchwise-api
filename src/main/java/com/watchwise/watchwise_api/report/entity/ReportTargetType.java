@@ -4,6 +4,7 @@ public enum ReportTargetType {
     USER,
     COMMENT,
     REVIEW,
+    CONTENT_REVIEW,
     USER_LIST,
     PICK,
     PICKS_TEMPLATE,

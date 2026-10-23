@@ -35,6 +35,8 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
 
     long countByContentId(UUID contentId);
 
+    long countByContentReviewId(UUID reviewId);
+
     @Query("SELECT c.content.id AS contentId, COUNT(c) AS count FROM Comment c WHERE c.content.id IN :contentIds GROUP BY c.content.id")
     List<ContentCommentCount> countByContentIdIn(@Param("contentIds") Collection<UUID> contentIds);
 
@@ -50,6 +52,18 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
         UUID getDiaryEntryId();
         long getCount();
     }
+
+    @Query("SELECT c.contentReview.id AS contentReviewId, COUNT(c) AS count FROM Comment c WHERE c.contentReview.id IN :reviewIds GROUP BY c.contentReview.id")
+    List<ContentReviewCommentCount> countByContentReviewIdIn(@Param("reviewIds") Collection<UUID> reviewIds);
+
+    interface ContentReviewCommentCount {
+        UUID getContentReviewId();
+        long getCount();
+    }
+
+    @Query("SELECT c.contentReview.id AS contentReviewId, COUNT(c) AS count FROM Comment c WHERE c.contentReview.id IN :reviewIds AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE (b.blocker.id = :viewerId AND b.blocked.id = c.user.id) OR (b.blocker.id = c.user.id AND b.blocked.id = :viewerId)) GROUP BY c.contentReview.id")
+    List<ContentReviewCommentCount> countVisibleContentReviewComments(
+            @Param("viewerId") UUID viewerId, @Param("reviewIds") Collection<UUID> reviewIds);
 
     @Query("SELECT c.diaryEntry.id AS diaryEntryId, COUNT(c) AS count FROM Comment c WHERE c.diaryEntry.id IN :diaryEntryIds AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE (b.blocker.id = :viewerId AND b.blocked.id = c.user.id) OR (b.blocker.id = c.user.id AND b.blocked.id = :viewerId)) GROUP BY c.diaryEntry.id")
     List<DiaryCommentCount> countVisibleDiaryComments(@Param("viewerId") UUID viewerId,
@@ -202,6 +216,49 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             SELECT ranked.id
             FROM (
                 SELECT c.*, ROW_NUMBER() OVER (
+                    PARTITION BY c.content_review_id ORDER BY c.created_at DESC, c.id DESC
+                ) AS row_number
+                FROM comments c
+                WHERE c.content_review_id IN (:reviewIds)
+            ) ranked
+            WHERE ranked.row_number <= 3
+            ORDER BY ranked.content_review_id ASC, ranked.created_at DESC, ranked.id DESC
+            """, nativeQuery = true)
+    List<UUID> findRecentIdsByContentReviewIdIn(@Param("reviewIds") Collection<UUID> reviewIds);
+
+    @Query(value = """
+            SELECT ranked.id
+            FROM (
+                SELECT c.id, c.content_review_id, c.created_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY c.content_review_id ORDER BY c.created_at DESC, c.id DESC
+                       ) AS row_number
+                FROM comments c
+                WHERE c.content_review_id IN (:reviewIds)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM user_blocks b
+                      WHERE (b.blocker_id = :viewerId AND b.blocked_id = c.user_id)
+                         OR (b.blocker_id = c.user_id AND b.blocked_id = :viewerId)
+                  )
+            ) ranked
+            WHERE ranked.row_number <= 3
+            ORDER BY ranked.content_review_id ASC, ranked.created_at DESC, ranked.id DESC
+            """, nativeQuery = true)
+    List<UUID> findRecentVisibleContentReviewCommentIds(
+            @Param("viewerId") UUID viewerId, @Param("reviewIds") Collection<UUID> reviewIds);
+
+    default List<Comment> findRecentByContentReviewIds(Collection<UUID> reviewIds) {
+        return findRecentCommentsByIds(findRecentIdsByContentReviewIdIn(reviewIds));
+    }
+
+    default List<Comment> findRecentVisibleByContentReviewIds(UUID viewerId, Collection<UUID> reviewIds) {
+        return findRecentCommentsByIds(findRecentVisibleContentReviewCommentIds(viewerId, reviewIds));
+    }
+
+    @Query(value = """
+            SELECT ranked.id
+            FROM (
+                SELECT c.*, ROW_NUMBER() OVER (
                     PARTITION BY c.dropped_entry_id
                     ORDER BY c.created_at DESC, c.id DESC
                 ) AS row_number
@@ -289,6 +346,11 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
            countQuery = "SELECT COUNT(c) FROM Comment c WHERE c.diaryEntry.id = :targetId AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE (b.blocker.id = :viewerId AND b.blocked.id = c.user.id) OR (b.blocker.id = c.user.id AND b.blocked.id = :viewerId))")
     Page<Comment> findVisibleByDiaryEntryId(@Param("viewerId") UUID viewerId, @Param("targetId") UUID targetId, Pageable pageable);
 
+    @Query(value = "SELECT c FROM Comment c JOIN FETCH c.user WHERE c.contentReview.id = :targetId AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE (b.blocker.id = :viewerId AND b.blocked.id = c.user.id) OR (b.blocker.id = c.user.id AND b.blocked.id = :viewerId)) ORDER BY c.createdAt ASC, c.id ASC",
+           countQuery = "SELECT COUNT(c) FROM Comment c WHERE c.contentReview.id = :targetId AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE (b.blocker.id = :viewerId AND b.blocked.id = c.user.id) OR (b.blocker.id = c.user.id AND b.blocked.id = :viewerId))")
+    Page<Comment> findVisibleByContentReviewId(
+            @Param("viewerId") UUID viewerId, @Param("targetId") UUID targetId, Pageable pageable);
+
     @Query(value = "SELECT c FROM Comment c JOIN FETCH c.user WHERE c.droppedEntry.id = :targetId AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE (b.blocker.id = :viewerId AND b.blocked.id = c.user.id) OR (b.blocker.id = c.user.id AND b.blocked.id = :viewerId)) ORDER BY c.createdAt ASC, c.id ASC",
            countQuery = "SELECT COUNT(c) FROM Comment c WHERE c.droppedEntry.id = :targetId AND NOT EXISTS (SELECT b.id FROM UserBlock b WHERE (b.blocker.id = :viewerId AND b.blocked.id = c.user.id) OR (b.blocker.id = c.user.id AND b.blocked.id = :viewerId))")
     Page<Comment> findVisibleByDroppedEntryId(@Param("viewerId") UUID viewerId, @Param("targetId") UUID targetId, Pageable pageable);
@@ -323,6 +385,7 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             SELECT c FROM Comment c JOIN FETCH c.user
             LEFT JOIN FETCH c.list l LEFT JOIN FETCH l.user
             LEFT JOIN FETCH c.diaryEntry d LEFT JOIN FETCH d.user
+            LEFT JOIN FETCH c.contentReview
             LEFT JOIN FETCH c.droppedEntry de LEFT JOIN FETCH de.user
             LEFT JOIN FETCH c.pick p LEFT JOIN FETCH p.user
             LEFT JOIN FETCH p.picksTemplate pickTemplate LEFT JOIN FETCH pickTemplate.creator

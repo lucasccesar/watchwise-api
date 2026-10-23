@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.diarycompletion.repository.LegacyDiaryMigrationMapRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -50,6 +52,8 @@ class ReportTargetResolverImplTest {
     @Mock UserRepository userRepository;
     @Mock CommentRepository commentRepository;
     @Mock DiaryEntryRepository diaryEntryRepository;
+    @Mock ContentReviewRepository contentReviewRepository;
+    @Mock LegacyDiaryMigrationMapRepository migrationMapRepository;
     @Mock UserListRepository userListRepository;
     @Mock PickRepository pickRepository;
     @Mock PickSelectionRepository pickSelectionRepository;

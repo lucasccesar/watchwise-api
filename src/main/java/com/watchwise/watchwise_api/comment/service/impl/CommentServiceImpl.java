@@ -13,6 +13,8 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.service.ContentReviewSocialTargetReader;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -50,6 +52,7 @@ public class CommentServiceImpl implements CommentService {
     private final CommentRepository commentRepository;
     private final UserRepository userRepository;
     private final ContentRepository contentRepository;
+    private final ContentReviewSocialTargetReader contentReviewTargetReader;
     private final UserListRepository userListRepository;
     private final DiaryEntryRepository diaryEntryRepository;
     private final DroppedEntryRepository droppedEntryRepository;
@@ -99,6 +102,15 @@ public class CommentServiceImpl implements CommentService {
         PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
 
         Page<Comment> comments = commentRepository.findVisibleByDiaryEntryId(viewerId, diaryEntryId, pageRequest);
+        return mapToResponseDtos(comments, viewerId);
+    }
+
+    @Override
+    public Page<CommentResponseDTO> getCommentsForContentReview(
+            UUID viewerId, UUID reviewId, Integer pageNumber, Integer pageSize) {
+        contentReviewTargetReader.findVisible(viewerId, reviewId);
+        Page<Comment> comments = commentRepository.findVisibleByContentReviewId(
+                viewerId, reviewId, pageRequestFactory.build(pageNumber, pageSize));
         return mapToResponseDtos(comments, viewerId);
     }
 
@@ -200,6 +212,23 @@ public class CommentServiceImpl implements CommentService {
 
         Comment savedComment = commentRepository.save(comment);
         notifyCommentReceived(userId, diaryEntry.getUser().getId(), NotificationTargetType.DIARY_ENTRY, diaryEntryId);
+        return commentMapper.commentToResponseDto(savedComment, false);
+    }
+
+    @Override
+    @Transactional
+    public CommentResponseDTO createCommentOnContentReview(
+            UUID userId, UUID reviewId, CommentCreationDTO commentCreationDTO) {
+        ContentReview review = contentReviewTargetReader.findWritable(userId, reviewId);
+        Comment parentComment = resolveParentCommentOnContentReview(
+                userId, commentCreationDTO.parentCommentId(), reviewId);
+        assertInteractionsAllowed(userId, review.getUserId(), parentComment);
+
+        Comment comment = baseCommentBuilder(userId, commentCreationDTO, parentComment)
+                .contentReview(review)
+                .build();
+        Comment savedComment = commentRepository.save(comment);
+        notifyCommentReceived(userId, review.getUserId(), NotificationTargetType.CONTENT_REVIEW, reviewId);
         return commentMapper.commentToResponseDto(savedComment, false);
     }
 
@@ -353,6 +382,17 @@ public class CommentServiceImpl implements CommentService {
             throw new BadRequestException("Parent comment must target the same diary entry");
         }
 
+        return parent;
+    }
+
+    private Comment resolveParentCommentOnContentReview(UUID userId, UUID parentCommentId, UUID reviewId) {
+        if (parentCommentId == null) {
+            return null;
+        }
+        Comment parent = findParentComment(userId, parentCommentId);
+        if (parent.getContentReview() == null || !parent.getContentReview().getId().equals(reviewId)) {
+            throw new BadRequestException("Parent comment must target the same review");
+        }
         return parent;
     }
 

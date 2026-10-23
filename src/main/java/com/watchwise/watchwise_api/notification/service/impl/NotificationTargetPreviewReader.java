@@ -6,12 +6,17 @@ import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.diarycompletion.entity.LegacyDiaryMigrationMap;
+import com.watchwise.watchwise_api.diarycompletion.repository.LegacyDiaryMigrationMapRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.notification.dto.NotificationTargetPreviewDTO;
@@ -42,6 +47,9 @@ public class NotificationTargetPreviewReader {
 
     private final CommentRepository commentRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final ContentReviewRepository contentReviewRepository;
+    private final LegacyDiaryMigrationMapRepository migrationMapRepository;
+    private final ContentRepository contentRepository;
     private final DroppedEntryRepository droppedEntryRepository;
     private final UserListRepository userListRepository;
     private final PickRepository pickRepository;
@@ -51,6 +59,9 @@ public class NotificationTargetPreviewReader {
     public NotificationTargetPreviewReader(
             CommentRepository commentRepository,
             DiaryEntryRepository diaryEntryRepository,
+            ContentReviewRepository contentReviewRepository,
+            LegacyDiaryMigrationMapRepository migrationMapRepository,
+            ContentRepository contentRepository,
             DroppedEntryRepository droppedEntryRepository,
             UserListRepository userListRepository,
             PickRepository pickRepository,
@@ -58,6 +69,9 @@ public class NotificationTargetPreviewReader {
             ContentCardAssembler contentCardAssembler) {
         this.commentRepository = commentRepository;
         this.diaryEntryRepository = diaryEntryRepository;
+        this.contentReviewRepository = contentReviewRepository;
+        this.migrationMapRepository = migrationMapRepository;
+        this.contentRepository = contentRepository;
         this.droppedEntryRepository = droppedEntryRepository;
         this.userListRepository = userListRepository;
         this.pickRepository = pickRepository;
@@ -77,16 +91,23 @@ public class NotificationTargetPreviewReader {
         Map<NotificationTargetType, Set<UUID>> idsByType = idsByType(distinctKeys.keySet());
         Map<UUID, Comment> comments = loadComments(idsByType.get(NotificationTargetType.COMMENT));
         Map<UUID, DiaryEntry> diaryEntries = loadDiaryEntries(idsByType.get(NotificationTargetType.DIARY_ENTRY));
+        Map<UUID, ContentReview> contentReviews = loadContentReviews(
+                idsByType.get(NotificationTargetType.CONTENT_REVIEW));
+        Map<UUID, ContentReview> mappedLegacyReviews = loadMappedLegacyReviews(
+                idsByType.get(NotificationTargetType.DIARY_ENTRY), diaryEntries);
         Map<UUID, DroppedEntry> droppedEntries = loadDroppedEntries(idsByType.get(NotificationTargetType.DROPPED_ENTRY));
         Map<UUID, UserList> lists = loadLists(idsByType.get(NotificationTargetType.USER_LIST));
         Map<UUID, Pick> picks = loadPicks(idsByType.get(NotificationTargetType.PICK));
         Map<UUID, PicksTemplate> templates = loadTemplates(idsByType.get(NotificationTargetType.PICKS_TEMPLATE));
+        Map<UUID, Content> reviewContents = loadReviewContents(contentReviews.values(), mappedLegacyReviews.values());
         Map<ContentCoordinate, ContentCardDTO> cards = assembleContentCards(
-                diaryEntries.values(), droppedEntries.values(), context);
+                diaryEntries.values(), droppedEntries.values(),
+                reviewContents.values(), context);
 
         Map<NotificationTargetKey, NotificationTargetPreviewDTO> previews = new LinkedHashMap<>();
         for (NotificationTargetKey key : distinctKeys.keySet()) {
-            previews.put(key, preview(key, comments, diaryEntries, droppedEntries, lists, picks, templates, cards));
+            previews.put(key, preview(key, comments, diaryEntries, contentReviews, mappedLegacyReviews,
+                    droppedEntries, lists, picks, templates, reviewContents, cards));
         }
         return Collections.unmodifiableMap(previews);
     }
@@ -126,6 +147,44 @@ public class NotificationTargetPreviewReader {
         return byId(diaryEntryRepository.findByIdInWithContentAndUser(ids), DiaryEntry::getId);
     }
 
+    private Map<UUID, ContentReview> loadContentReviews(Collection<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        return byId(contentReviewRepository.findAllById(ids), ContentReview::getId);
+    }
+
+    private Map<UUID, ContentReview> loadMappedLegacyReviews(
+            Collection<UUID> legacyIds, Map<UUID, DiaryEntry> diaryEntries) {
+        if (legacyIds == null || legacyIds.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> missingDiaryIds = legacyIds.stream()
+                .filter(id -> !diaryEntries.containsKey(id))
+                .toList();
+        if (missingDiaryIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, UUID> destinationByLegacyId = new LinkedHashMap<>();
+        for (LegacyDiaryMigrationMap mapping : migrationMapRepository.findByOldDiaryEntryIdIn(missingDiaryIds)) {
+            if ("CONTENT_REVIEW".equals(mapping.getDestinationKind())) {
+                destinationByLegacyId.put(mapping.getOldDiaryEntryId(), mapping.getDestinationId());
+            }
+        }
+        if (destinationByLegacyId.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, ContentReview> reviewsById = loadContentReviews(destinationByLegacyId.values());
+        Map<UUID, ContentReview> reviewsByLegacyId = new LinkedHashMap<>();
+        destinationByLegacyId.forEach((legacyId, reviewId) -> {
+            ContentReview review = reviewsById.get(reviewId);
+            if (review != null) {
+                reviewsByLegacyId.put(legacyId, review);
+            }
+        });
+        return reviewsByLegacyId;
+    }
+
     private Map<UUID, DroppedEntry> loadDroppedEntries(Collection<UUID> ids) {
         if (ids == null || ids.isEmpty()) {
             return Map.of();
@@ -157,10 +216,14 @@ public class NotificationTargetPreviewReader {
     private Map<ContentCoordinate, ContentCardDTO> assembleContentCards(
             Collection<DiaryEntry> diaryEntries,
             Collection<DroppedEntry> droppedEntries,
+            Collection<Content> reviewContents,
             ContentCardContext context) {
         Map<ContentCoordinate, Content> contentByCoordinate = new LinkedHashMap<>();
         addContents(diaryEntries, DiaryEntry::getContent, contentByCoordinate);
         addContents(droppedEntries, DroppedEntry::getContent, contentByCoordinate);
+        for (Content content : reviewContents) {
+            contentByCoordinate.putIfAbsent(ContentCoordinate.from(content), content);
+        }
         if (contentByCoordinate.isEmpty()) {
             return Map.of();
         }
@@ -189,10 +252,13 @@ public class NotificationTargetPreviewReader {
             NotificationTargetKey key,
             Map<UUID, Comment> comments,
             Map<UUID, DiaryEntry> diaryEntries,
+            Map<UUID, ContentReview> contentReviews,
+            Map<UUID, ContentReview> mappedLegacyReviews,
             Map<UUID, DroppedEntry> droppedEntries,
             Map<UUID, UserList> lists,
             Map<UUID, Pick> picks,
             Map<UUID, PicksTemplate> templates,
+            Map<UUID, Content> reviewContents,
             Map<ContentCoordinate, ContentCardDTO> cards) {
         if (key.targetType() == null || key.targetId() == null) {
             return unavailable(key);
@@ -202,7 +268,11 @@ public class NotificationTargetPreviewReader {
                     ? new NotificationTargetPreviewDTO(key.targetType(), key.targetId(), "Comment",
                     comments.get(key.targetId()).getText(), null, null, null, ContentPreviewStatus.AVAILABLE)
                     : unavailable(key);
-            case DIARY_ENTRY -> diaryPreview(key, diaryEntries.get(key.targetId()), cards);
+            case DIARY_ENTRY -> diaryEntries.containsKey(key.targetId())
+                    ? diaryPreview(key, diaryEntries.get(key.targetId()), cards)
+                    : contentReviewPreview(key, mappedLegacyReviews.get(key.targetId()), reviewContents, cards);
+            case CONTENT_REVIEW -> contentReviewPreview(
+                    key, contentReviews.get(key.targetId()), reviewContents, cards);
             case DROPPED_ENTRY -> droppedPreview(key, droppedEntries.get(key.targetId()), cards);
             case USER_LIST -> lists.containsKey(key.targetId())
                     ? new NotificationTargetPreviewDTO(key.targetType(), key.targetId(),
@@ -227,6 +297,31 @@ public class NotificationTargetPreviewReader {
         ContentCardDTO card = contentCard(diaryEntry.getContent(), cards);
         return new NotificationTargetPreviewDTO(key.targetType(), key.targetId(), "Review", diaryEntry.getComment(),
                 diaryEntry.getScore(), null, card, status(card));
+    }
+
+    private NotificationTargetPreviewDTO contentReviewPreview(
+            NotificationTargetKey key,
+            ContentReview review,
+            Map<UUID, Content> reviewContents,
+            Map<ContentCoordinate, ContentCardDTO> cards) {
+        if (review == null) {
+            return unavailable(key);
+        }
+        Content content = reviewContents.get(review.getContentId());
+        ContentCardDTO card = content == null ? null : contentCard(content, cards);
+        return new NotificationTargetPreviewDTO(key.targetType(), key.targetId(), "Review", review.getComment(),
+                review.getScoreAtPublication(), null, card, status(card));
+    }
+
+    private Map<UUID, Content> loadReviewContents(
+            Collection<ContentReview> contentReviews, Collection<ContentReview> mappedLegacyReviews) {
+        Set<UUID> contentIds = new LinkedHashSet<>();
+        contentReviews.forEach(review -> contentIds.add(review.getContentId()));
+        mappedLegacyReviews.forEach(review -> contentIds.add(review.getContentId()));
+        if (contentIds.isEmpty()) {
+            return Map.of();
+        }
+        return byId(contentRepository.findAllById(contentIds), Content::getId);
     }
 
     private NotificationTargetPreviewDTO droppedPreview(

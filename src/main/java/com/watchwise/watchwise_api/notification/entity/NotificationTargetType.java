@@ -6,6 +6,7 @@ import lombok.Getter;
 public enum NotificationTargetType {
     COMMENT("comment"),
     DIARY_ENTRY("review"),
+    CONTENT_REVIEW("review"),
     DROPPED_ENTRY("review"),
     USER_LIST("list"),
     PICK("Pick"),

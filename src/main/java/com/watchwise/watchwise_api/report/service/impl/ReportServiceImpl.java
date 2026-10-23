@@ -85,7 +85,8 @@ public class ReportServiceImpl implements ReportService {
     private void validateReason(ReportTargetType targetType, ReportReason reason) {
         if (reason == ReportReason.UNMARKED_SPOILER
                 && targetType != ReportTargetType.COMMENT
-                && targetType != ReportTargetType.REVIEW) {
+                && targetType != ReportTargetType.REVIEW
+                && targetType != ReportTargetType.CONTENT_REVIEW) {
             throw new BadRequestException("Unmarked spoiler applies only to comments and reviews");
         }
     }

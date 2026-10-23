@@ -24,6 +24,10 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
     int deleteByUserIdAndDiaryEntryId(@Param("userId") UUID userId, @Param("diaryEntryId") UUID diaryEntryId);
 
     @Modifying
+    @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.contentReview.id = :reviewId")
+    int deleteByUserIdAndContentReviewId(@Param("userId") UUID userId, @Param("reviewId") UUID reviewId);
+
+    @Modifying
     @Query("DELETE FROM Like l WHERE l.user.id = :userId AND l.droppedEntry.id = :droppedEntryId")
     int deleteByUserIdAndDroppedEntryId(@Param("userId") UUID userId, @Param("droppedEntryId") UUID droppedEntryId);
 
@@ -42,6 +46,10 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
     boolean existsByUserIdAndCommentId(UUID userId, UUID commentId);
 
     boolean existsByUserIdAndDiaryEntryId(UUID userId, UUID diaryEntryId);
+
+    boolean existsByUserIdAndContentReviewId(UUID userId, UUID reviewId);
+
+    long countByContentReviewId(UUID reviewId);
 
     boolean existsByUserIdAndDroppedEntryId(UUID userId, UUID droppedEntryId);
 
