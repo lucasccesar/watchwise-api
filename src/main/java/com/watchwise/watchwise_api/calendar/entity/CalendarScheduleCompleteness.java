@@ -59,6 +59,10 @@ public class CalendarScheduleCompleteness {
     @Column(name = "last_discovered_at")
     private LocalDateTime lastDiscoveredAt;
 
+    @Column(name = "scope_version", nullable = false)
+    @Builder.Default
+    private Long scopeVersion = 0L;
+
     public enum GroupType {
         SEASON,
         SERIES

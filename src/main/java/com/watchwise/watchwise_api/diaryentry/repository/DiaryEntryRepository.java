@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -1416,5 +1417,43 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             AND d.content.seriesTmdbId = :seriesTmdbId
             """)
     List<UUID> findUserIdsWatchingSeries(@Param("seriesTmdbId") String seriesTmdbId);
+
+    @Query("""
+            SELECT DISTINCT d.content.seriesTmdbId
+            FROM DiaryEntry d
+            WHERE d.user.id = :userId
+              AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+            """)
+    List<String> findSeriesTmdbIdsForDiaryView(@Param("userId") UUID userId);
+
+    @Query(value = """
+            SELECT d.id AS diaryEntryId,
+                   c.series_tmdb_id AS seriesTmdbId,
+                   c.season_number AS seasonNumber,
+                   c.episode_number AS episodeNumber,
+                   d.watch_number AS watchNumber,
+                   d.watched_date AS watchedDate,
+                   d.watched_at AS watchedAt,
+                   d.created_at AS recordedAt
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+              AND c.type = 'EPISODE'
+              AND c.series_tmdb_id IN :seriesTmdbIds
+            """, nativeQuery = true)
+    List<EpisodeCompletionWatch> findEpisodeCompletionWatches(
+            @Param("userId") UUID userId,
+            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    interface EpisodeCompletionWatch {
+        UUID getDiaryEntryId();
+        String getSeriesTmdbId();
+        Integer getSeasonNumber();
+        Integer getEpisodeNumber();
+        Integer getWatchNumber();
+        LocalDate getWatchedDate();
+        Instant getWatchedAt();
+        Instant getRecordedAt();
+    }
 
 }

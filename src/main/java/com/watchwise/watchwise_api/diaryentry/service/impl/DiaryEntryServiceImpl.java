@@ -56,6 +56,7 @@ import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchedEpisodeCoordinate;
+import com.watchwise.watchwise_api.diarycompletion.service.impl.DiaryProjectionInvalidator;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -133,6 +134,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final SeriesProgressMetadataRefreshService seriesProgressMetadataRefreshService;
     private final SeriesProgressAssembler seriesProgressAssembler;
     private final SeriesProgressPresentationEnricher seriesProgressPresentationEnricher;
+    private final DiaryProjectionInvalidator diaryProjectionInvalidator;
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -839,6 +841,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         removeFromWatchlistAndDropped(userId, contentRef);
 
         CompletionSignal completion = triggerCompletionCascade(userId, content, entry.getWatchedDate(), content.getType());
+        markProjectionChanged(userId, content);
 
         List<UUID> resultIds = Stream.of(entry, completion.completedSeason(), completion.completedSeries())
                 .filter(Objects::nonNull)
@@ -969,6 +972,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                     dto.watchedDate(), cutoff, created, companionIds, language);
         }
         removeSeriesFromWatchlistAndDropped(userId, seriesTmdbId);
+        if (!created.isEmpty()) {
+            diaryProjectionInvalidator.markSeriesChanged(userId, seriesTmdbId);
+        }
 
         List<UUID> createdIds = created.stream().map(DiaryEntry::getId).toList();
         Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = loadWatchedWith(createdIds);
@@ -1036,6 +1042,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         entry.setUpdatedAt(LocalDateTime.now());
 
         DiaryEntry saved = diaryEntryRepository.save(entry);
+        markProjectionChanged(userId, saved.getContent());
         if (diaryEntryUpdateDTO.customPosterUrl() != null) {
             userContentPosterService.upsert(userId, saved.getContent().getId(), diaryEntryUpdateDTO.customPosterUrl());
         }
@@ -1301,6 +1308,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         diaryEntryRepository.deleteAll(allEntries);
         diaryEntryRepository.flush();
+        diaryProjectionInvalidator.markSeriesChanged(userId, seriesTmdbId);
     }
 
     private void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
@@ -1317,6 +1325,17 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             retractSeriesIfIncomplete(userId, content.getSeriesTmdbId(), overrideProtectedEntries, cascadeDeleted);
         } else if (content.getType() == ContentType.SERIES) {
             wipeSeriesHistory(userId, content.getTmdbId(), watchNumber, overrideProtectedEntries, cascadeDeleted);
+        }
+        markProjectionChanged(userId, content);
+    }
+
+    private void markProjectionChanged(UUID userId, Content content) {
+        String seriesTmdbId = content.getType() == ContentType.SERIES
+                ? content.getTmdbId()
+                : content.getSeriesTmdbId();
+        if (seriesTmdbId != null
+                && (participatesInCompletionTracking(content.getType()) || content.getType() == ContentType.SERIES)) {
+            diaryProjectionInvalidator.markSeriesChanged(userId, seriesTmdbId);
         }
     }
 

@@ -17,6 +17,12 @@ public class UserSeriesHistoryState {
     @Column(name = "valid_until") private Instant validUntil;
     @Version private Long version;
 
+    public void markComputed(long revision, long scheduleVersion, Instant validUntil) {
+        this.computedRevision = revision;
+        this.scheduleVersion = scheduleVersion;
+        this.validUntil = validUntil;
+    }
+
     @Embeddable
     @Getter @NoArgsConstructor(access = AccessLevel.PROTECTED) @AllArgsConstructor
     @EqualsAndHashCode

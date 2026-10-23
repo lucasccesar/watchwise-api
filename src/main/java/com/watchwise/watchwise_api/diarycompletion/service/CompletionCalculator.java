@@ -18,7 +18,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import org.springframework.stereotype.Component;
 
+@Component
 public class CompletionCalculator {
 
     private static final Comparator<EpisodeWatch> ACTIVITY_ORDER = Comparator

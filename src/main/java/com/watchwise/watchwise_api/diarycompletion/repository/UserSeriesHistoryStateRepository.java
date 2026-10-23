@@ -4,9 +4,12 @@ import com.watchwise.watchwise_api.diarycompletion.entity.UserSeriesHistoryState
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.UUID;
+import java.util.Collection;
+import java.util.List;
 
 public interface UserSeriesHistoryStateRepository extends JpaRepository<UserSeriesHistoryState, UserSeriesHistoryState.Key> {
     @Modifying
@@ -19,4 +22,13 @@ public interface UserSeriesHistoryStateRepository extends JpaRepository<UserSeri
               version = user_series_history_states.version + 1
             """, nativeQuery = true)
     void incrementHistoryRevision(UUID userId, String seriesTmdbId);
+
+    @Query("""
+            SELECT state FROM UserSeriesHistoryState state
+            WHERE state.id.userId = :userId
+              AND state.id.seriesTmdbId IN :seriesTmdbIds
+            """)
+    List<UserSeriesHistoryState> findByUserIdAndSeriesTmdbIdIn(
+            @Param("userId") UUID userId,
+            @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 }

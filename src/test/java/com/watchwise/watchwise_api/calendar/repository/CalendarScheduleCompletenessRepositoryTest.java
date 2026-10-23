@@ -211,6 +211,64 @@ class CalendarScheduleCompletenessRepositoryTest {
                 CalendarScheduleSnapshot.EventType.EPISODE, "1396", 2, "BR", "pt-BR")).isEmpty();
     }
 
+    @Test
+    @DisplayName("[reconcileSeason] Should Bump Scope Version Only When Schedule Facts Change")
+    void shouldBumpScopeVersionOnlyWhenScheduleFactsChange() {
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
+                snapshotRepository, repository, newTransactionExecutor, scheduleLock);
+        Instant firstCheckedAt = Instant.parse("2026-09-12T10:00:00Z");
+        CalendarSeasonSchedule initial = new CalendarSeasonSchedule(
+                "1396", 1, "BR", "pt-BR", "Series", null, null,
+                List.of(new CalendarEpisodeSchedule(1, "Episode", LocalDate.of(2026, 9, 12), null,
+                        firstCheckedAt, null)));
+
+        store.reconcileSeason(initial, firstCheckedAt);
+        long firstVersion = repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")
+                .orElseThrow().getScopeVersion();
+
+        store.reconcileSeason(initial, firstCheckedAt.plusSeconds(3600));
+        long checkedAtOnlyVersion = repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")
+                .orElseThrow().getScopeVersion();
+
+        CalendarSeasonSchedule changed = new CalendarSeasonSchedule(
+                "1396", 1, "BR", "pt-BR", "Series", null, null,
+                List.of(new CalendarEpisodeSchedule(1, "Episode", LocalDate.of(2026, 9, 13), null,
+                        firstCheckedAt.plusSeconds(7200), null)));
+        store.reconcileSeason(changed, firstCheckedAt.plusSeconds(7200));
+        long changedVersion = repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")
+                .orElseThrow().getScopeVersion();
+
+        assertThat(firstVersion).isEqualTo(1L);
+        assertThat(checkedAtOnlyVersion).isEqualTo(firstVersion);
+        assertThat(changedVersion).isEqualTo(firstVersion + 1);
+    }
+
+    @Test
+    @DisplayName("[reconcileSeries] Should Preserve Marker Version History Across A Full Reconcile")
+    void shouldPreserveMarkerVersionHistoryAcrossAFullReconcile() {
+        CalendarScheduleSnapshotStore store = new CalendarScheduleSnapshotStore(
+                snapshotRepository, repository, newTransactionExecutor, scheduleLock);
+        CalendarScheduleKey key = new CalendarScheduleKey(ContentType.SERIES, "1396", "pt-BR", "BR");
+        CalendarSeriesSchedule first = new CalendarSeriesSchedule(
+                key, List.of(remoteSeason(1, "First title")), Map.of(1, 1), 1, true);
+        CalendarSeriesSchedule second = new CalendarSeriesSchedule(
+                key, List.of(remoteSeason(1, "Second title")), Map.of(1, 1), 1, true);
+        Instant firstCheckedAt = Instant.parse("2026-09-12T10:00:00Z");
+
+        store.reconcileSeries(first, firstCheckedAt);
+        long firstSeasonVersion = repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")
+                .orElseThrow().getScopeVersion();
+        long firstSeriesVersion = repository.findSeriesIdentity("1396", "BR", "pt-BR")
+                .orElseThrow().getScopeVersion();
+
+        store.reconcileSeries(second, firstCheckedAt.plusSeconds(3600));
+
+        assertThat(repository.findSeasonIdentity("1396", 1, "BR", "pt-BR")
+                .orElseThrow().getScopeVersion()).isGreaterThan(firstSeasonVersion);
+        assertThat(repository.findSeriesIdentity("1396", "BR", "pt-BR")
+                .orElseThrow().getScopeVersion()).isGreaterThan(firstSeriesVersion);
+    }
+
     private CalendarSeriesSchedule.Season remoteSeason(int number, String title) {
         return new CalendarSeriesSchedule.Season(new CalendarSeasonSchedule("1396", number, "BR", "pt-BR",
                 "Series", null, List.of(new CalendarEpisodeSchedule(1, title, LocalDate.of(2026, 9, number), null,

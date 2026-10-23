@@ -12,11 +12,14 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryUpdateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiarySeriesOptionDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewFilter;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.service.DiaryEntryService;
+import com.watchwise.watchwise_api.diaryentry.service.DiaryViewService;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +41,7 @@ import java.util.UUID;
 public class DiaryEntryController {
 
     private final DiaryEntryService diaryEntryService;
+    private final DiaryViewService diaryViewService;
     private final RequestThrottler requestThrottler;
 
     @Value("${app.rate-limit.diary-action.max-requests}")
@@ -70,6 +74,24 @@ public class DiaryEntryController {
                 getCurrentUserId(), userId, year, page, size, type, dateFrom, dateTo, hasReview, seriesTmdbId, score,
                 scoreFrom, scoreTo, sortBy);
         return ResponseEntity.ok(PageResponseDTO.of(entries));
+    }
+
+    @GetMapping("/users/{userId}/diary/view")
+    public ResponseEntity<PageResponseDTO<DiaryViewItemDTO>> getDiaryView(
+            @PathVariable UUID userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) ContentType type,
+            @RequestParam(required = false) LocalDate dateStart,
+            @RequestParam(required = false) LocalDate dateEnd,
+            @RequestParam(required = false) Integer scoreMin,
+            @RequestParam(required = false) Integer scoreMax,
+            @RequestParam(required = false) Boolean hasReview) {
+        Page<DiaryViewItemDTO> view = diaryViewService.getView(
+                getCurrentUserId(), userId,
+                new DiaryViewFilter(type, dateStart, dateEnd, scoreMin, scoreMax, hasReview),
+                page, size);
+        return ResponseEntity.ok(PageResponseDTO.of(view));
     }
 
     /**

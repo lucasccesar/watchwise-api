@@ -1,5 +1,7 @@
 ALTER TABLE contents ADD CONSTRAINT uq_contents_id_type UNIQUE (id, type);
 ALTER TABLE diary_entries ADD COLUMN watched_at TIMESTAMPTZ;
+ALTER TABLE calendar_schedule_completeness
+    ADD COLUMN scope_version BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE content_ratings (
     id UUID PRIMARY KEY,

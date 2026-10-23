@@ -34,6 +34,8 @@ public interface ContentRepository extends JpaRepository<Content, UUID>, Content
     List<Content> findByTypeAndSeriesTmdbIdAndSeasonNumberIn(
             ContentType type, String seriesTmdbId, Collection<Integer> seasonNumbers);
 
+    List<Content> findByTypeAndSeriesTmdbIdIn(ContentType type, Collection<String> seriesTmdbIds);
+
     List<Content> findByTypeAndSeriesTmdbIdAndSeasonNumberAndEpisodeNumberIn(
             ContentType type, String seriesTmdbId, Integer seasonNumber, Collection<Integer> episodeNumbers);
 

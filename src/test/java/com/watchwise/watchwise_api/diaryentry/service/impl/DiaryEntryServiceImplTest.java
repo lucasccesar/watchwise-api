@@ -33,6 +33,7 @@ import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
+import com.watchwise.watchwise_api.diarycompletion.service.impl.DiaryProjectionInvalidator;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
@@ -201,6 +202,9 @@ class DiaryEntryServiceImplTest {
 
     @Mock
     private SeriesProgressPresentationEnricher seriesProgressPresentationEnricher;
+
+    @Mock
+    private DiaryProjectionInvalidator diaryProjectionInvalidator;
 
     @Spy
     private SeriesProgressAssembler seriesProgressAssembler = new SeriesProgressAssembler();
@@ -2432,6 +2436,7 @@ class DiaryEntryServiceImplTest {
 
         verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(1);
+        verify(diaryProjectionInvalidator).markSeriesChanged(lucasId, "900");
     }
 
     @Test
