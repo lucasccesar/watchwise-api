@@ -149,7 +149,11 @@ class ContentScheduleReaderImplTest {
                 3572, "Season 2", null, "/season.jpg", "2026-09-01", 2, List.of(
                 episode(1, "Seven Thirty-Seven", "2026-10-01"),
                 episode(2, "Grilled", null)), null, null)));
-        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(series("1396", "Breaking Bad", "Returning Series", null)));
+        when(tmdbClient.getTvFullDetails("1396", "pt-BR")).thenReturn(found(series(
+                "1396", "Breaking Bad", "Returning Series",
+                List.of(
+                        new TmdbSeasonSummary(1, "Season 1", null, null, 2, null),
+                        new TmdbSeasonSummary(2, "Season 2", null, null, 2, null)))));
 
         ContentScheduleLookup result = reader.readSeason("1396", 2, "BR", "pt-BR");
 
@@ -157,6 +161,7 @@ class ContentScheduleReaderImplTest {
             assertThat(found.schedule().key()).isEqualTo(new ContentScheduleKey(ContentType.SEASON, null, "1396", 2));
             assertThat(found.schedule().releaseDate()).isEqualTo(LocalDate.of(2026, 9, 1));
             assertThat(found.schedule().externalStatus()).isEqualTo("Returning Series");
+            assertThat(found.schedule().expectedEpisodeCountsBySeason()).containsEntry(2, 2);
             assertThat(found.schedule().episodes()).extracting(
                             ContentScheduleEpisode::seriesTmdbId,
                             ContentScheduleEpisode::seasonNumber,
@@ -167,6 +172,7 @@ class ContentScheduleReaderImplTest {
                             org.assertj.core.groups.Tuple.tuple("1396", 2, 2, null));
             assertThat(found.schedule().complete()).isTrue();
         });
+        verify(tmdbClient, never()).getSeasonFullDetails("1396", 1, "pt-BR");
         verify(tmdbClient).getSeasonFullDetails("1396", 2, "pt-BR");
         verify(tmdbClient, never()).getCalendarSeasonDetails("1396", 2, "pt-BR");
     }

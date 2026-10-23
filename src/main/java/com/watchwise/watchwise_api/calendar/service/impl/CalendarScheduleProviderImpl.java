@@ -107,7 +107,18 @@ public class CalendarScheduleProviderImpl implements CalendarScheduleProvider {
                 schedule.network(),
                 schedule.episodes().stream().map(this::toCalendarEpisode).toList());
         return new CalendarScheduleLookup.Found(CalendarScheduleBatch.season(
-                new CalendarScheduleKey(ContentType.SERIES, seriesTmdbId, language, region), found.origin(), season));
+                new CalendarScheduleKey(ContentType.SERIES, seriesTmdbId, language, region),
+                found.origin(),
+                season,
+                expectedSeasonEpisodeCount(schedule, seasonNumber)));
+    }
+
+    private Integer expectedSeasonEpisodeCount(ContentSchedule schedule, Integer seasonNumber) {
+        if (!schedule.complete()) {
+            return null;
+        }
+        Integer expectedCount = schedule.expectedEpisodeCountsBySeason().get(seasonNumber);
+        return expectedCount != null && expectedCount >= 0 ? expectedCount : null;
     }
 
     private CalendarScheduleLookup mapSeries(

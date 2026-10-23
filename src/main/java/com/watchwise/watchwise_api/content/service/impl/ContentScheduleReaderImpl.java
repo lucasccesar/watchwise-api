@@ -105,6 +105,10 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
 
         List<TmdbEpisodeSummary> tmdbEpisodes = season.value().episodes();
         List<ContentScheduleEpisode> episodes = toEpisodes(seriesTmdbId, seasonNumber, tmdbEpisodes);
+        Integer expectedEpisodeCount = expectedEpisodeCount(series.value(), seasonNumber);
+        Map<Integer, Integer> expectedCounts = expectedEpisodeCount == null
+                ? Map.of()
+                : Map.of(seasonNumber, expectedEpisodeCount);
         ContentSchedule schedule = new ContentSchedule(
                 ContentScheduleKey.season(seriesTmdbId, seasonNumber),
                 parseDate(season.value().airDate()),
@@ -116,7 +120,7 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
                 series.value().posterPath(),
                 null,
                 networkName(series.value().networks()),
-                Map.of());
+                expectedCounts);
         return new ContentScheduleLookup.Found(
                 schedule,
                 season.origin(),
@@ -207,6 +211,18 @@ public class ContentScheduleReaderImpl implements ContentScheduleReader {
                     }
                 });
         return counts;
+    }
+
+    private Integer expectedEpisodeCount(TmdbTvFullDetails series, Integer seasonNumber) {
+        List<TmdbSeasonSummary> matchingSeasons = Optional.ofNullable(series.seasons()).orElseGet(List::of).stream()
+                .filter(Objects::nonNull)
+                .filter(summary -> Objects.equals(summary.seasonNumber(), seasonNumber))
+                .toList();
+        if (matchingSeasons.size() != 1) {
+            return null;
+        }
+        Integer expectedCount = matchingSeasons.getFirst().episodeCount();
+        return expectedCount != null && expectedCount >= 0 ? expectedCount : null;
     }
 
     private boolean regularSeasonSummariesAreTrustworthy(TmdbTvFullDetails series) {

@@ -142,6 +142,27 @@ class CompletionCalculatorTest {
     }
 
     @Test
+    @DisplayName("[calculate] Should Leave Completion Date Unknown - When The Final Necessary Episode Is Undated")
+    void shouldLeaveCompletionDateUnknownWhenTheFinalNecessaryEpisodeIsUndated() {
+        var datedEpisode = new EpisodeCoordinate(1, 1);
+        var undatedEpisode = new EpisodeCoordinate(1, 3);
+        var undatedEntryId = id(14);
+        var scope = new CompletionScope(
+                MediaReference.season("123", 1), Set.of(datedEpisode, undatedEpisode), true);
+        var watches = List.of(
+                new EpisodeWatch(id(13), datedEpisode, 1, LocalDate.parse("2026-01-01"),
+                        Instant.parse("2026-01-03T12:00:00Z"), null),
+                new EpisodeWatch(undatedEntryId, undatedEpisode, 1, null,
+                        Instant.parse("2026-01-04T12:00:00Z"), null));
+
+        assertThat(calculator.calculate(scope, watches)).singleElement().satisfies(pass -> {
+            assertThat(pass.anchorDiaryEntryId()).isEqualTo(undatedEntryId);
+            assertThat(pass.completedOn()).isNull();
+            assertThat(pass.orderedAt()).isEqualTo(Instant.parse("2026-01-04T12:00:00Z"));
+        });
+    }
+
+    @Test
     @DisplayName("[calculate] Should Keep The First Necessary Event - When A Coordinate Has A Later Duplicate")
     void shouldKeepTheFirstNecessaryEventWhenACoordinateHasALaterDuplicate() {
         var one = new EpisodeCoordinate(1, 1);

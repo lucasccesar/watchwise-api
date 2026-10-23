@@ -108,7 +108,7 @@ class CalendarScheduleProviderTest {
                 false,
                 "Breaking Bad",
                 "/breaking-bad.jpg",
-                Map.of());
+                Map.of(2, 2));
         when(scheduleReader.readCalendarSeason("1396", 2, "BR", "pt-BR"))
                 .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.CACHE));
 
@@ -116,6 +116,7 @@ class CalendarScheduleProviderTest {
 
         assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.Found.class, found -> {
             assertThat(found.batch().origin()).isEqualTo(TmdbLookupOrigin.CACHE);
+            assertThat(found.batch().expectedEpisodeCount()).isEqualTo(2);
             assertThat(found.batch().season().seriesTitle()).isEqualTo("Breaking Bad");
             assertThat(found.batch().season().episodes()).extracting("episodeNumber", "title", "releaseDate", "stillPath")
                     .containsExactly(
@@ -123,6 +124,40 @@ class CalendarScheduleProviderTest {
                             org.assertj.core.groups.Tuple.tuple(2, "Grilled", null, "/two.jpg"));
         });
         verify(scheduleReader).readCalendarSeason("1396", 2, "BR", "pt-BR");
+    }
+
+    @Test
+    @DisplayName("[loadSeason] Should Preserve Not Found - When The Target Season Is Missing")
+    void shouldPreserveNotFoundWhenTheTargetSeasonIsMissing() {
+        when(scheduleReader.readCalendarSeason("1396", 2, "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.NotFound(2));
+
+        CalendarScheduleLookup result = provider.loadSeason("1396", 2, "BR", "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.NotFound.class,
+                notFound -> assertThat(notFound.seasonNumber()).isEqualTo(2));
+    }
+
+    @Test
+    @DisplayName("[loadSeason] Should Not Expose A Count As Proof - When The Episode List Is Incomplete")
+    void shouldNotExposeACountAsProofWhenTheEpisodeListIsIncomplete() {
+        ContentSchedule schedule = new ContentSchedule(
+                ContentScheduleKey.season("1396", 2),
+                LocalDate.of(2026, 9, 1),
+                "Returning Series",
+                List.of(new ContentScheduleEpisode("1396", 2, 1, LocalDate.of(2026, 10, 1), "Episode", null)),
+                false,
+                false,
+                "Breaking Bad",
+                "/breaking-bad.jpg",
+                Map.of(2, 2));
+        when(scheduleReader.readCalendarSeason("1396", 2, "BR", "pt-BR"))
+                .thenReturn(new ContentScheduleLookup.Found(schedule, TmdbLookupOrigin.REMOTE));
+
+        CalendarScheduleLookup result = provider.loadSeason("1396", 2, "BR", "pt-BR");
+
+        assertThat(result).isInstanceOfSatisfying(CalendarScheduleLookup.Found.class,
+                found -> assertThat(found.batch().expectedEpisodeCount()).isNull());
     }
 
     @Test

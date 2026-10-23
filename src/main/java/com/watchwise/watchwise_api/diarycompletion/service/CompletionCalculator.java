@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 public class CompletionCalculator {
 
     private static final Comparator<EpisodeWatch> ACTIVITY_ORDER = Comparator
-            .comparing(CompletionCalculator::knownWatchTime, Comparator.nullsFirst(Comparator.naturalOrder()))
+            .comparing(CompletionCalculator::knownWatchTime, Comparator.nullsLast(Comparator.naturalOrder()))
             .thenComparing(EpisodeWatch::recordedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
             .thenComparing(EpisodeWatch::diaryEntryId);
 

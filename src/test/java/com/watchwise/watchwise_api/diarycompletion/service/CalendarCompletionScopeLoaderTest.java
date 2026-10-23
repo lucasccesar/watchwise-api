@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.diarycompletion.service;
 
 import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleCadence;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleBatch;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
@@ -34,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -120,99 +122,220 @@ class CalendarCompletionScopeLoaderTest {
     }
 
     @Test
-    @DisplayName("[load] Should Use Expected Episode Count - When Loading A Season Reference")
-    void shouldUseExpectedEpisodeCountWhenLoadingASeasonReference() {
+    @DisplayName("[load] Should Use The Target Count Without Loading Sibling Seasons")
+    void shouldUseTheTargetCountWithoutLoadingSiblingSeasons() {
         CalendarSeasonSchedule directSeason = seasonSchedule(1,
                 episode(3, LocalDate.parse("2026-10-22")),
                 episode(1, LocalDate.parse("2026-10-01")));
-        CalendarSeriesSchedule series = seriesSchedule(true,
-                season(1, 2,
-                        episode(1, LocalDate.parse("2026-10-01")),
-                        episode(3, LocalDate.parse("2026-10-22"))));
         when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
-                .thenReturn(foundSeason(directSeason));
-        when(scheduleProvider.loadSeries(SERIES_ID, REGION, LANGUAGE))
-                .thenReturn(new CalendarScheduleLookup.FoundSeries(series));
+                .thenReturn(foundSeason(directSeason, 2));
+        VersionedCompletionScope[] result = new VersionedCompletionScope[1];
 
-        VersionedCompletionScope result = loader.load(MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+        assertThatCode(() -> result[0] = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW))
+                .doesNotThrowAnyException();
 
-        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
+        assertThat(result[0].scope().episodes()).containsExactlyInAnyOrder(
                 new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 3));
-        assertThat(result.scope().releaseComplete()).isTrue();
+        assertThat(result[0].scope().releaseComplete()).isTrue();
         verify(scheduleProvider).loadSeason(SERIES_ID, 1, REGION, LANGUAGE);
-        verify(scheduleProvider).loadSeries(SERIES_ID, REGION, LANGUAGE);
         verifyNoMoreInteractions(scheduleProvider);
     }
 
     @Test
-    @DisplayName("[load] Should Share Schedule Version And Recheck - Across Series And Season Scopes")
-    void shouldShareScheduleVersionAndRecheckAcrossSeriesAndSeasonScopes() {
+    @DisplayName("[load] Should Produce Stable Finite Target Metadata - When Season Data Is Unchanged")
+    void shouldProduceStableFiniteTargetMetadataWhenSeasonDataIsUnchanged() {
+        CalendarSeasonSchedule directSeason = seasonSchedule(1,
+                episode(1, LocalDate.parse("2026-10-01")),
+                episode(3, LocalDate.parse("2026-10-24")));
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(foundSeason(directSeason, 2));
+
+        VersionedCompletionScope[] results = new VersionedCompletionScope[2];
+        assertThatCode(() -> {
+            results[0] = loader.load(MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+            results[1] = loader.load(MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+        }).doesNotThrowAnyException();
+
+        assertThat(results[0].scheduleVersion()).isEqualTo(results[1].scheduleVersion());
+        assertThat(results[0].validUntil()).isEqualTo(results[1].validUntil()).isAfter(NOW);
+        verify(scheduleProvider, org.mockito.Mockito.times(2))
+                .loadSeason(SERIES_ID, 1, REGION, LANGUAGE);
+        verifyNoMoreInteractions(scheduleProvider);
+    }
+
+    @Test
+    @DisplayName("[load] Should Version The Expected Count - When Target Season Data Changes")
+    void shouldVersionTheExpectedCountWhenTargetSeasonDataChanges() {
         CalendarSeasonSchedule directSeason = seasonSchedule(1,
                 episode(1, LocalDate.parse("2026-10-01")),
                 episode(3, LocalDate.parse("2026-10-08")));
-        CalendarSeriesSchedule schedule = seriesSchedule(true,
-                season(1, 2,
-                        episode(1, LocalDate.parse("2026-10-01")),
-                        episode(3, LocalDate.parse("2026-10-08"))),
-                season(2, 1, episode(1, LocalDate.parse("2026-10-24"))));
-        when(scheduleProvider.loadSeries(SERIES_ID, REGION, LANGUAGE))
-                .thenReturn(new CalendarScheduleLookup.FoundSeries(schedule));
         when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
-                .thenReturn(foundSeason(directSeason));
+                .thenReturn(foundSeason(directSeason, 2))
+                .thenReturn(foundSeason(directSeason, 3));
 
-        VersionedCompletionScope seriesScope = loader.load(
-                MediaReference.series(SERIES_ID), REGION, LANGUAGE, NOW);
-        VersionedCompletionScope seasonScope = loader.load(
+        VersionedCompletionScope first = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+        VersionedCompletionScope second = loader.load(
                 MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
 
-        assertThat(seasonScope.scheduleVersion()).isEqualTo(seriesScope.scheduleVersion());
-        assertThat(seasonScope.validUntil()).isEqualTo(seriesScope.validUntil());
+        assertThat(first.scheduleVersion()).isNotEqualTo(second.scheduleVersion());
+        assertThat(first.scope().releaseComplete()).isTrue();
+        assertThat(second.scope().releaseComplete()).isFalse();
     }
 
     @Test
-    @DisplayName("[load] Should Verify Only The Target Season - When Another Expected Season Is Not Represented")
-    void shouldVerifyOnlyTheTargetSeasonWhenAnotherExpectedSeasonIsNotRepresented() {
+    @DisplayName("[load] Should Use A Finite Target Recheck - When No Future Release Is Announced")
+    void shouldUseAFiniteTargetRecheckWhenNoFutureReleaseIsAnnounced() {
         CalendarSeasonSchedule directSeason = seasonSchedule(1,
                 episode(1, LocalDate.parse("2026-10-01")),
                 episode(3, LocalDate.parse("2026-10-08")));
-        CalendarSeriesSchedule.Season representedSeason = season(1, 2,
-                episode(1, LocalDate.parse("2026-10-01")),
-                episode(3, LocalDate.parse("2026-10-08")));
-        CalendarSeriesSchedule series = new CalendarSeriesSchedule(
-                new CalendarScheduleKey(ContentType.SERIES, SERIES_ID, LANGUAGE, REGION),
-                List.of(representedSeason),
-                Map.of(1, 2, 2, 2),
-                4,
-                false);
         when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
-                .thenReturn(foundSeason(directSeason));
-        when(scheduleProvider.loadSeries(SERIES_ID, REGION, LANGUAGE))
-                .thenReturn(new CalendarScheduleLookup.FoundSeries(series));
+                .thenReturn(foundSeason(directSeason, 2));
 
-        VersionedCompletionScope result = loader.load(MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+        VersionedCompletionScope result = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
 
-        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
-                new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 3));
+        assertThat(result.validUntil()).isEqualTo(
+                CalendarScheduleCadence.nextSeriesCheckAt(LocalDate.parse("2026-10-08"), NOW));
+        assertThat(result.validUntil()).isAfter(NOW);
         assertThat(result.scope().releaseComplete()).isTrue();
+        verify(scheduleProvider).loadSeason(SERIES_ID, 1, REGION, LANGUAGE);
+        verifyNoMoreInteractions(scheduleProvider);
     }
 
     @Test
-    @DisplayName("[load] Should Not Trust A Season Episode List - When Series Count Evidence Is Unavailable")
-    void shouldNotTrustASeasonEpisodeListWhenSeriesCountEvidenceIsUnavailable() {
+    @DisplayName("[load] Should Align Target Eligibility And Validity - At Local Release Midnight")
+    void shouldAlignTargetEligibilityAndValidityAtLocalReleaseMidnight() {
+        LocalDate releaseDate = LocalDate.parse("2026-10-22");
+        Instant localReleaseStart = releaseDate.atStartOfDay(ZoneId.systemDefault()).toInstant();
+        CalendarSeasonSchedule directSeason = seasonSchedule(1,
+                episode(1, LocalDate.parse("2026-10-01")), episode(3, releaseDate));
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(foundSeason(directSeason, 2));
+
+        VersionedCompletionScope beforeRelease = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, localReleaseStart.minusSeconds(1));
+        VersionedCompletionScope atRelease = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, localReleaseStart);
+
+        assertThat(beforeRelease.scope().releaseComplete()).isFalse();
+        assertThat(beforeRelease.validUntil()).isEqualTo(localReleaseStart);
+        assertThat(atRelease.scope().releaseComplete()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[load] Should Keep A Season Incomplete - When Its Expected Count Is Missing")
+    void shouldKeepASeasonIncompleteWhenItsExpectedCountIsMissing() {
         CalendarSeasonSchedule directSeason = seasonSchedule(1,
                 episode(1, LocalDate.parse("2026-10-01")),
                 episode(3, LocalDate.parse("2026-10-22")));
         when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
                 .thenReturn(foundSeason(directSeason));
-        when(scheduleProvider.loadSeries(SERIES_ID, REGION, LANGUAGE))
+
+        VersionedCompletionScope[] result = new VersionedCompletionScope[1];
+        assertThatCode(() -> result[0] = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW))
+                .doesNotThrowAnyException();
+
+        assertThat(result[0].scope().releaseComplete()).isFalse();
+        verify(scheduleProvider).loadSeason(SERIES_ID, 1, REGION, LANGUAGE);
+        verifyNoMoreInteractions(scheduleProvider);
+    }
+
+    @Test
+    @DisplayName("[load] Should Keep A Season Incomplete - When A Required Release Date Is Unknown")
+    void shouldKeepASeasonIncompleteWhenARequiredReleaseDateIsUnknown() {
+        CalendarSeasonSchedule directSeason = seasonSchedule(1,
+                episode(1, LocalDate.parse("2026-10-01")),
+                episode(3, null));
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(foundSeason(directSeason, 2));
+
+        VersionedCompletionScope result = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+
+        assertThat(result.scope().releaseComplete()).isFalse();
+        assertThat(result.scope().episodes()).containsExactlyInAnyOrder(
+                new EpisodeCoordinate(1, 1), new EpisodeCoordinate(1, 3));
+        assertThat(result.validUntil()).isAfter(NOW);
+        verify(scheduleProvider).loadSeason(SERIES_ID, 1, REGION, LANGUAGE);
+        verifyNoMoreInteractions(scheduleProvider);
+    }
+
+    @Test
+    @DisplayName("[load] Should Keep A Season Incomplete - When Episode Coordinates Are Not Unique")
+    void shouldKeepASeasonIncompleteWhenEpisodeCoordinatesAreNotUnique() {
+        CalendarSeasonSchedule directSeason = seasonSchedule(1,
+                episode(1, LocalDate.parse("2026-10-01")),
+                episode(1, LocalDate.parse("2026-10-08")));
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(foundSeason(directSeason, 2));
+
+        VersionedCompletionScope result = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+
+        assertThat(result.scope().releaseComplete()).isFalse();
+        assertThat(result.scope().episodes()).containsExactly(new EpisodeCoordinate(1, 1));
+    }
+
+    @Test
+    @DisplayName("[load] Should Keep A Season Incomplete - When An Episode Coordinate Is Not Positive")
+    void shouldKeepASeasonIncompleteWhenAnEpisodeCoordinateIsNotPositive() {
+        CalendarSeasonSchedule directSeason = seasonSchedule(1,
+                episode(0, LocalDate.parse("2026-10-01")),
+                episode(1, LocalDate.parse("2026-10-08")));
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(foundSeason(directSeason, 2));
+
+        VersionedCompletionScope result = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+
+        assertThat(result.scope().releaseComplete()).isFalse();
+        assertThat(result.scope().episodes()).containsExactly(new EpisodeCoordinate(1, 1));
+    }
+
+    @Test
+    @DisplayName("[load] Should Distinguish Season Not Found - When The Target Season Does Not Exist")
+    void shouldDistinguishSeasonNotFoundWhenTheTargetSeasonDoesNotExist() {
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
+                .thenReturn(new CalendarScheduleLookup.NotFound(1));
+
+        assertThatThrownBy(() -> loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW))
+                .isInstanceOf(NotFoundException.class);
+
+        verify(scheduleProvider).loadSeason(SERIES_ID, 1, REGION, LANGUAGE);
+        verifyNoMoreInteractions(scheduleProvider);
+    }
+
+    @Test
+    @DisplayName("[load] Should Distinguish Season Unavailable - When The Target Calendar Cannot Be Loaded")
+    void shouldDistinguishSeasonUnavailableWhenTheTargetCalendarCannotBeLoaded() {
+        when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
                 .thenReturn(new CalendarScheduleLookup.Unavailable());
 
-        assertThatThrownBy(() -> loader.load(MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW))
+        assertThatThrownBy(() -> loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW))
                 .isInstanceOf(TmdbUnavailableException.class);
 
         verify(scheduleProvider).loadSeason(SERIES_ID, 1, REGION, LANGUAGE);
-        verify(scheduleProvider).loadSeries(SERIES_ID, REGION, LANGUAGE);
         verifyNoMoreInteractions(scheduleProvider);
+    }
+
+    @Test
+    @DisplayName("[load] Should Exclude Special Season Zero - Even When A Schedule Is Returned")
+    void shouldExcludeSpecialSeasonZeroEvenWhenAScheduleIsReturned() {
+        CalendarSeasonSchedule specialSeason = seasonSchedule(0,
+                episode(1, LocalDate.parse("2026-10-01")));
+        when(scheduleProvider.loadSeason(SERIES_ID, 0, REGION, LANGUAGE))
+                .thenReturn(foundSeason(specialSeason, 1));
+
+        VersionedCompletionScope result = loader.load(
+                MediaReference.season(SERIES_ID, 0), REGION, LANGUAGE, NOW);
+
+        assertThat(result.scope().episodes()).isEmpty();
+        assertThat(result.scope().releaseComplete()).isFalse();
     }
 
     @Test
@@ -258,19 +381,16 @@ class CalendarCompletionScopeLoaderTest {
                 episode(1, LocalDate.parse("2026-10-01")),
                 episode(2, LocalDate.parse("2026-10-08")),
                 episode(99, LocalDate.parse("2026-10-15")));
-        CalendarSeriesSchedule series = seriesSchedule(true,
-                season(1, 2,
-                        episode(1, LocalDate.parse("2026-10-01")),
-                        episode(2, LocalDate.parse("2026-10-08"))));
         when(scheduleProvider.loadSeason(SERIES_ID, 1, REGION, LANGUAGE))
-                .thenReturn(foundSeason(directSeason));
-        when(scheduleProvider.loadSeries(SERIES_ID, REGION, LANGUAGE))
-                .thenReturn(new CalendarScheduleLookup.FoundSeries(series));
+                .thenReturn(foundSeason(directSeason, 2));
 
-        VersionedCompletionScope result = loader.load(MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW);
+        VersionedCompletionScope[] result = new VersionedCompletionScope[1];
+        assertThatCode(() -> result[0] = loader.load(
+                MediaReference.season(SERIES_ID, 1), REGION, LANGUAGE, NOW))
+                .doesNotThrowAnyException();
 
-        assertThat(result.scope().releaseComplete()).isFalse();
-        assertThat(result.scope().episodes()).doesNotContain(new EpisodeCoordinate(1, 99));
+        assertThat(result[0].scope().releaseComplete()).isFalse();
+        assertThat(result[0].scope().episodes()).contains(new EpisodeCoordinate(1, 99));
     }
 
     @Test
@@ -433,10 +553,17 @@ class CalendarCompletionScopeLoaderTest {
     }
 
     private static CalendarScheduleLookup.Found foundSeason(CalendarSeasonSchedule schedule) {
+        return foundSeason(schedule, null);
+    }
+
+    private static CalendarScheduleLookup.Found foundSeason(
+            CalendarSeasonSchedule schedule,
+            Integer expectedEpisodeCount) {
         return new CalendarScheduleLookup.Found(CalendarScheduleBatch.season(
                 new CalendarScheduleKey(ContentType.SERIES, SERIES_ID, LANGUAGE, REGION),
                 TmdbLookupOrigin.REMOTE,
-                schedule));
+                schedule,
+                expectedEpisodeCount));
     }
 
     private static CalendarSeriesSchedule seriesSchedule(

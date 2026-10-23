@@ -24,9 +24,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -114,32 +116,18 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
             String region,
             String language,
             Instant now) {
-        CalendarSeasonSchedule directSeason = requireDirectSeason(
+        CalendarScheduleBatch batch = requireDirectSeason(
                 scheduleProvider.loadSeason(reference.seriesTmdbId(), reference.seasonNumber(), region, language),
                 reference, region, language);
-        CalendarSeriesSchedule seriesSchedule = requireSeriesSchedule(
-                scheduleProvider.loadSeries(reference.seriesTmdbId(), region, language),
-                reference.seriesTmdbId(), region, language);
-        CalendarSeriesSchedule.Season season = seriesSchedule.seasons().stream()
-                .filter(candidate -> candidate.schedule().seasonNumber().equals(reference.seasonNumber()))
-                .findFirst()
-                .orElseThrow(() -> new TmdbUnavailableException("Calendar season completeness could not be verified"));
-
+        CalendarSeasonSchedule season = batch.season();
+        Integer expectedEpisodeCount = batch.expectedEpisodeCount();
         LocalDate today = LocalDate.ofInstant(now, ZoneId.systemDefault());
-        boolean expectedCountVerified = seriesSchedule.expectedEpisodeCountsBySeason()
-                .containsKey(reference.seasonNumber())
-                && Objects.equals(seriesSchedule.expectedEpisodeCountsBySeason().get(reference.seasonNumber()),
-                season.expectedEpisodeCount())
-                && season.isFullyRepresented();
-        boolean directSeasonMatches = directSeasonMatches(directSeason, season.schedule());
-        boolean releaseComplete = expectedCountVerified
-                && directSeasonMatches
-                && seasonReleaseComplete(season, today);
+        boolean releaseComplete = seasonReleaseComplete(season, expectedEpisodeCount, today);
 
         return new VersionedCompletionScope(
-                new CompletionScope(reference, toCoordinates(season.schedule()), releaseComplete),
-                scheduleVersion(region, language, seriesSchedule),
-                validUntil(seriesSchedule.seasons(), today, now));
+                new CompletionScope(reference, toCoordinates(season), releaseComplete),
+                scheduleVersion(region, language, season, expectedEpisodeCount),
+                seasonValidUntil(season.episodes(), today, now));
     }
 
     private CalendarSeriesSchedule requireSeriesSchedule(
@@ -173,7 +161,7 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
         return schedule;
     }
 
-    private CalendarSeasonSchedule requireDirectSeason(
+    private CalendarScheduleBatch requireDirectSeason(
             CalendarScheduleLookup lookup,
             MediaReference reference,
             String region,
@@ -205,7 +193,7 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
                 || !Objects.equals(season.language(), language)) {
             throw new TmdbUnavailableException("Calendar season schedule did not match the requested reference");
         }
-        return season;
+        return batch;
     }
 
     private boolean isCompleteSeriesCalendar(CalendarSeriesSchedule schedule) {
@@ -217,31 +205,25 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
                 && schedule.seasons().stream().allMatch(CalendarSeriesSchedule.Season::isFullyRepresented);
     }
 
-    private boolean seasonReleaseComplete(CalendarSeriesSchedule.Season season, LocalDate today) {
-        return season.expectedEpisodeCount() > 0
-                && !season.schedule().episodes().isEmpty()
-                && season.schedule().episodes().stream().allMatch(episode -> episode.releaseDate() != null
-                && !episode.releaseDate().isAfter(today));
-    }
-
-    private boolean directSeasonMatches(
-            CalendarSeasonSchedule directSeason,
-            CalendarSeasonSchedule seriesSeason) {
-        Map<Integer, LocalDate> directDates = releaseDatesByEpisode(directSeason);
-        Map<Integer, LocalDate> seriesDates = releaseDatesByEpisode(seriesSeason);
-        return directDates != null && directDates.equals(seriesDates);
-    }
-
-    private Map<Integer, LocalDate> releaseDatesByEpisode(CalendarSeasonSchedule season) {
-        Map<Integer, LocalDate> dates = new java.util.TreeMap<>();
+    private boolean seasonReleaseComplete(
+            CalendarSeasonSchedule season,
+            Integer expectedEpisodeCount,
+            LocalDate today) {
+        if (season.seasonNumber() == null || season.seasonNumber() <= 0
+                || expectedEpisodeCount == null || expectedEpisodeCount <= 0
+                || season.episodes().size() != expectedEpisodeCount) {
+            return false;
+        }
+        Set<Integer> episodeNumbers = new HashSet<>();
         for (CalendarEpisodeSchedule episode : season.episodes()) {
             if (episode.episodeNumber() == null || episode.episodeNumber() <= 0
-                    || dates.containsKey(episode.episodeNumber())) {
-                return null;
+                    || !episodeNumbers.add(episode.episodeNumber())
+                    || episode.releaseDate() == null
+                    || episode.releaseDate().isAfter(today)) {
+                return false;
             }
-            dates.put(episode.episodeNumber(), episode.releaseDate());
         }
-        return dates;
+        return true;
     }
 
     private Set<EpisodeCoordinate> toCoordinates(CalendarSeasonSchedule season) {
@@ -269,11 +251,22 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
         return nextRelease == null || nextCheck.isBefore(nextRelease) ? nextCheck : nextRelease;
     }
 
+    private Instant seasonValidUntil(List<CalendarEpisodeSchedule> episodes, LocalDate today, Instant now) {
+        Instant nextRelease = nextEpisodeRelease(episodes, today);
+        Instant nextCheck = nextEpisodeScheduleRecheck(episodes, now);
+        return nextRelease == null || nextCheck.isBefore(nextRelease) ? nextCheck : nextRelease;
+    }
+
     private Instant nextRelease(List<CalendarSeriesSchedule.Season> seasons, LocalDate today) {
-        return seasons.stream()
+        return nextEpisodeRelease(seasons.stream()
                 .filter(season -> season.schedule().seasonNumber() != null
                         && season.schedule().seasonNumber() > 0)
                 .flatMap(season -> season.schedule().episodes().stream())
+                .toList(), today);
+    }
+
+    private Instant nextEpisodeRelease(List<CalendarEpisodeSchedule> episodes, LocalDate today) {
+        return episodes.stream()
                 .map(CalendarEpisodeSchedule::releaseDate)
                 .filter(Objects::nonNull)
                 .filter(date -> date.isAfter(today))
@@ -283,11 +276,14 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
     }
 
     private Instant nextScheduleRecheck(List<CalendarSeriesSchedule.Season> seasons, Instant now) {
-        List<CalendarEpisodeSchedule> episodes = seasons.stream()
+        return nextEpisodeScheduleRecheck(seasons.stream()
                 .filter(season -> season.schedule().seasonNumber() != null
                         && season.schedule().seasonNumber() > 0)
                 .flatMap(season -> season.schedule().episodes().stream())
-                .toList();
+                .toList(), now);
+    }
+
+    private Instant nextEpisodeScheduleRecheck(List<CalendarEpisodeSchedule> episodes, Instant now) {
         Instant nextEpisodeCheck = episodes.stream()
                 .map(episode -> CalendarScheduleCadence.nextCheckAt(episode.releaseDate(), now))
                 .min(Comparator.naturalOrder())
@@ -330,6 +326,37 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
                             .append(episode.releaseDate()).append(':')
                             .append(episode.releaseTime()).append('\n'));
         });
+        return sha256(canonical);
+    }
+
+    private String scheduleVersion(
+            String region,
+            String language,
+            CalendarSeasonSchedule season,
+            Integer expectedEpisodeCount) {
+        StringBuilder canonical = new StringBuilder()
+                .append(season.seriesTmdbId()).append('\n')
+                .append(region).append('\n')
+                .append(language).append('\n')
+                .append("season:").append(season.seasonNumber()).append('\n')
+                .append("expected:").append(expectedEpisodeCount).append('\n')
+                .append("episodeCount:").append(season.episodes().size()).append('\n');
+        season.episodes().stream()
+                .sorted(Comparator.comparing(
+                                CalendarEpisodeSchedule::episodeNumber,
+                                Comparator.nullsFirst(Integer::compareTo))
+                        .thenComparing(CalendarEpisodeSchedule::releaseDate,
+                                Comparator.nullsFirst(LocalDate::compareTo))
+                        .thenComparing(CalendarEpisodeSchedule::releaseTime,
+                                Comparator.nullsFirst(LocalTime::compareTo)))
+                .forEach(episode -> canonical.append("episode:")
+                        .append(episode.episodeNumber()).append(':')
+                        .append(episode.releaseDate()).append(':')
+                        .append(episode.releaseTime()).append('\n'));
+        return sha256(canonical);
+    }
+
+    private String sha256(StringBuilder canonical) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(canonical.toString().getBytes(StandardCharsets.UTF_8));
