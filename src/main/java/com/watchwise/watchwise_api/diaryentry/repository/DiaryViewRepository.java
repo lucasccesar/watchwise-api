@@ -33,6 +33,7 @@ public interface DiaryViewRepository {
             LocalDate watchedDate,
             Instant orderedAt,
             Instant groupSortAt,
-            UUID groupSortId) {
+            UUID groupSortId,
+            Integer score) {
     }
 }

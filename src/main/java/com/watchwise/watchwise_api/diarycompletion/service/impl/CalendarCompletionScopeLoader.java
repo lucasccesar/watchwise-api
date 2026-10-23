@@ -56,7 +56,12 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
 
         return switch (reference.type()) {
             case SERIES -> loadSeries(reference, region, language, now);
-            case SEASON -> loadSeason(reference, region, language, now);
+            case SEASON -> {
+                if (reference.seasonNumber() == null || reference.seasonNumber() <= 0) {
+                    throw new BadRequestException("Completion scopes require a regular season");
+                }
+                yield loadSeason(reference, region, language, now);
+            }
             default -> throw new BadRequestException("Completion scopes require a series or season reference");
         };
     }
@@ -75,6 +80,9 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
         boolean hasLaunchedRegularEpisode = false;
 
         for (CalendarSeriesSchedule.Season season : sortedSeasons(schedule.seasons())) {
+            if (season.schedule().seasonNumber() == null || season.schedule().seasonNumber() <= 0) {
+                continue;
+            }
             List<CalendarEpisodeSchedule> seasonEpisodes = season.schedule().episodes();
             if (!season.isFullyRepresented()) {
                 releaseComplete = false;
@@ -197,12 +205,17 @@ public class CalendarCompletionScopeLoader implements CompletionScopeLoader {
     }
 
     private boolean isCompleteSeriesCalendar(CalendarSeriesSchedule schedule) {
-        Set<Integer> expectedSeasons = schedule.expectedEpisodeCountsBySeason().keySet();
+        Set<Integer> expectedSeasons = schedule.expectedEpisodeCountsBySeason().keySet().stream()
+                .filter(seasonNumber -> seasonNumber != null && seasonNumber > 0)
+                .collect(Collectors.toSet());
         Set<Integer> representedSeasons = schedule.seasons().stream()
                 .map(season -> season.schedule().seasonNumber())
+                .filter(seasonNumber -> seasonNumber != null && seasonNumber > 0)
                 .collect(Collectors.toSet());
         return representedSeasons.equals(expectedSeasons)
-                && schedule.seasons().stream().allMatch(CalendarSeriesSchedule.Season::isFullyRepresented);
+                && schedule.seasons().stream()
+                .filter(season -> season.schedule().seasonNumber() != null && season.schedule().seasonNumber() > 0)
+                .allMatch(CalendarSeriesSchedule.Season::isFullyRepresented);
     }
 
     private boolean seasonReleaseComplete(

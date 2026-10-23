@@ -18,7 +18,7 @@ public record DiaryViewItemDTO(
         Instant orderedAt,
         Integer currentScore,
         Long currentRatingVersion,
-        List<ContentReviewResponseDTO> reviewPreviews,
+        List<DiaryViewReviewPreviewDTO> reviewPreviews,
         long reviewCount) {
 
     public DiaryViewItemDTO {

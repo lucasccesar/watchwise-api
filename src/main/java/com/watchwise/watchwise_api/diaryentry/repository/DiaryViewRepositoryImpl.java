@@ -110,10 +110,19 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                        p.ordered_at,
                        anchor.created_at AS group_sort_at,
                        anchor.id AS group_sort_id,
-                       NULL::integer AS score,
-                       FALSE AS has_review
+                       rating.score AS score,
+                       EXISTS (SELECT 1
+                               FROM content_reviews review
+                               WHERE review.user_id = p.user_id
+                                 AND review.content_id = p.content_id
+                                 AND review.watch_number = p.watch_number
+                                 AND review.comment IS NOT NULL
+                                 AND btrim(review.comment) <> '') AS has_review
                 FROM diary_completion_projections p
                 JOIN contents c ON c.id = p.content_id
+                 LEFT JOIN content_ratings rating
+                   ON rating.user_id = p.user_id
+                  AND rating.content_id = p.content_id
                 JOIN diary_entries anchor ON anchor.id = p.anchor_diary_entry_id
                                            AND anchor.user_id = p.user_id
                 JOIN user_series_history_states state
@@ -159,7 +168,8 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                 resultSet.getObject("watched_date", LocalDate.class),
                 instant(resultSet, "ordered_at"),
                 instant(resultSet, "group_sort_at"),
-                uuid(resultSet, "group_sort_id"));
+                uuid(resultSet, "group_sort_id"),
+                (Integer) resultSet.getObject("score"));
     }
 
     private UUID uuid(ResultSet resultSet, String column) throws SQLException {

@@ -215,6 +215,7 @@ public class DiaryCompletionServiceImpl implements DiaryCompletionService {
         rows.stream()
                 .map(DiaryEntryRepository.EpisodeCompletionWatch::getSeasonNumber)
                 .filter(Objects::nonNull)
+                .filter(season -> season > 0)
                 .distinct()
                 .sorted()
                 .forEach(season -> seasons.put(

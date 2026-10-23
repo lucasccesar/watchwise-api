@@ -8,6 +8,7 @@ import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
 import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
+import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
 import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
@@ -326,16 +327,10 @@ class CalendarCompletionScopeLoaderTest {
     @Test
     @DisplayName("[load] Should Exclude Special Season Zero - Even When A Schedule Is Returned")
     void shouldExcludeSpecialSeasonZeroEvenWhenAScheduleIsReturned() {
-        CalendarSeasonSchedule specialSeason = seasonSchedule(0,
-                episode(1, LocalDate.parse("2026-10-01")));
-        when(scheduleProvider.loadSeason(SERIES_ID, 0, REGION, LANGUAGE))
-                .thenReturn(foundSeason(specialSeason, 1));
-
-        VersionedCompletionScope result = loader.load(
-                MediaReference.season(SERIES_ID, 0), REGION, LANGUAGE, NOW);
-
-        assertThat(result.scope().episodes()).isEmpty();
-        assertThat(result.scope().releaseComplete()).isFalse();
+        assertThatThrownBy(() -> loader.load(
+                MediaReference.season(SERIES_ID, 0), REGION, LANGUAGE, NOW))
+                .isInstanceOf(BadRequestException.class);
+        verifyNoMoreInteractions(scheduleProvider);
     }
 
     @Test
@@ -515,13 +510,8 @@ class CalendarCompletionScopeLoaderTest {
     @Test
     @DisplayName("[load] Should Exclude Special Season Zero - When It Is Requested Directly")
     void shouldExcludeSpecialSeasonZeroWhenItIsRequestedDirectly() {
-        when(scheduleProvider.loadSeason(SERIES_ID, 0, REGION, LANGUAGE))
-                .thenReturn(new CalendarScheduleLookup.NotFound(0));
-
         assertThatThrownBy(() -> loader.load(MediaReference.season(SERIES_ID, 0), REGION, LANGUAGE, NOW))
-                .isInstanceOf(NotFoundException.class);
-
-        verify(scheduleProvider).loadSeason(SERIES_ID, 0, REGION, LANGUAGE);
+                .isInstanceOf(BadRequestException.class);
         verifyNoMoreInteractions(scheduleProvider);
     }
 

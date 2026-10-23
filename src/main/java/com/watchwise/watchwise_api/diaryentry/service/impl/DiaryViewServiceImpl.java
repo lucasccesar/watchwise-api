@@ -7,9 +7,14 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.diarycompletion.service.DiaryCompletionService;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewFilter;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewItemDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewReviewPreviewDTO;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryViewRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -21,6 +26,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -36,6 +43,8 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     private final DiaryViewRepository diaryViewRepository;
     private final ContentRepository contentRepository;
     private final ContentMapper contentMapper;
+    private final ContentRatingRepository contentRatingRepository;
+    private final ContentReviewRepository contentReviewRepository;
     private final PageRequestFactory pageRequestFactory;
 
     @Override
@@ -64,21 +73,79 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
                         keys.getContent().stream().map(DiaryViewRepository.DiaryViewKey::contentId).distinct().toList())
                 .stream()
                 .collect(Collectors.toMap(Content::getId, contentMapper::contentToContentRefDto));
-        return keys.map(key -> new DiaryViewItemDTO(
+        List<UUID> contentIds = keys.getContent().stream()
+                .map(DiaryViewRepository.DiaryViewKey::contentId)
+                .distinct()
+                .toList();
+        Map<UUID, ContentRating> ratingsByContentId = contentRatingRepository
+                .findByUserIdAndContentIdIn(ownerId, contentIds).stream()
+                .collect(Collectors.toMap(ContentRating::getContentId, rating -> rating));
+        Map<UUID, List<ContentReview>> reviewsByContentId = contentReviewRepository
+                .findByUserIdAndContentIdInOrderByCreatedAtDesc(ownerId, contentIds).stream()
+                .collect(Collectors.groupingBy(ContentReview::getContentId));
+        return keys.map(key -> {
+            List<ContentReview> reviews = reviewsForKey(key, reviewsByContentId);
+            return new DiaryViewItemDTO(
                 DiaryViewItemDTO.Kind.valueOf(key.kind()),
                 "PERSISTED_ENTRY".equals(key.kind()) ? key.targetId() : null,
                 "DERIVED_COMPLETION".equals(key.kind())
-                        ? key.contentType() + ":" + key.seriesTmdbId() + ":" + key.seasonNumber()
+                        ? completionKey(key)
                         : null,
                 contentById.get(key.contentId()),
                 key.watchNumber(),
                 key.anchorEntryId(),
                 key.watchedDate(),
                 key.orderedAt(),
-                null,
-                null,
-                java.util.List.of(),
-                0L));
+                key.score() != null ? key.score() : ratingScore(ratingsByContentId.get(key.contentId())),
+                ratingVersion(ratingsByContentId.get(key.contentId())),
+                reviews.stream()
+                        .limit(3)
+                        .map(this::toReviewPreview)
+                        .toList(),
+                reviews.size());
+        });
+    }
+
+    private List<ContentReview> reviewsForKey(
+            DiaryViewRepository.DiaryViewKey key,
+            Map<UUID, List<ContentReview>> reviewsByContentId) {
+        List<ContentReview> reviews = reviewsByContentId.getOrDefault(key.contentId(), List.of());
+        if (!"DERIVED_COMPLETION".equals(key.kind())) {
+            return reviews;
+        }
+        return reviews.stream()
+                .filter(review -> Objects.equals(review.getWatchNumber(), key.watchNumber()))
+                .filter(review -> review.getComment() != null && !review.getComment().isBlank())
+                .toList();
+    }
+
+    private String completionKey(DiaryViewRepository.DiaryViewKey key) {
+        String base = key.contentType() + ":" + key.seriesTmdbId();
+        if (key.seasonNumber() != null) {
+            base += ":" + key.seasonNumber();
+        }
+        return base + ":pass:" + key.watchNumber();
+    }
+
+    private Integer ratingScore(ContentRating rating) {
+        return rating == null ? null : rating.getScore();
+    }
+
+    private Long ratingVersion(ContentRating rating) {
+        return rating == null ? null : rating.getVersion();
+    }
+
+    private DiaryViewReviewPreviewDTO toReviewPreview(ContentReview review) {
+        return new DiaryViewReviewPreviewDTO(
+                review.getId(),
+                review.getPublicationKind(),
+                review.getContextKind(),
+                review.getComment(),
+                review.getScoreAtPublication(),
+                review.getWatchNumber(),
+                review.getSourcePublishedAt(),
+                review.getSourcePublishedOn(),
+                review.getCreatedAt());
     }
 
     private void validate(DiaryViewFilter filter) {
