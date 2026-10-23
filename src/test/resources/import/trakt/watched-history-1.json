@@ -1,0 +1,4 @@
+[
+  {"id":9001,"watched_at":"2025-06-01T03:30:00Z","type":"episode","episode":{"season":1,"number":2,"ids":{"tmdb":9999}},"show":{"title":"Example","year":2020,"ids":{"trakt":42,"tmdb":123}}},
+  {"id":9002,"watched_at":"2025-06-02T03:30:00Z","type":"movie","movie":{"title":"Film","year":2021,"ids":{"trakt":43,"tmdb":456}}}
+]

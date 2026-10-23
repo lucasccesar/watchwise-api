@@ -1,0 +1,8 @@
+[
+  {"name":"List 42","description":"target","item_count":2,"ids":{"trakt":42}},
+  {"name":"List 420","item_count":1,"ids":{"trakt":420}},
+  {"name":"Empty","item_count":0,"ids":{"trakt":43}},
+  {"name":"Four","item_count":1,"ids":{"trakt":44}},
+  {"name":"Five","item_count":1,"ids":{"trakt":45}},
+  {"name":"Six","item_count":1,"ids":{"trakt":46}}
+]
