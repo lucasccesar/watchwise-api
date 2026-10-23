@@ -122,13 +122,22 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
     }
 
     private ResolvedReportTarget resolveReview(UUID reporterId, UUID targetId) {
-        LegacyDiaryMigrationMap mapping = migrationMapRepository.findByOldDiaryEntryId(targetId).orElse(null);
-        if (mapping != null && "CONTENT_REVIEW".equals(mapping.getDestinationKind())) {
-            return resolveContentReview(reporterId, mapping.getDestinationId(), ReportTargetType.REVIEW, targetId);
+        DiaryEntry diaryEntry = diaryEntryRepository.findByIdWithContentAndUser(targetId).orElse(null);
+        if (diaryEntry != null) {
+            if (diaryEntry.getComment() == null) {
+                throw new NotFoundException("Report target not found");
+            }
+            return resolveDiaryReview(reporterId, diaryEntry);
         }
-        DiaryEntry review = diaryEntryRepository.findByIdWithContentAndUser(targetId)
-                .filter(entry -> entry.getComment() != null)
-                .orElseThrow(() -> new NotFoundException("Report target not found"));
+
+        LegacyDiaryMigrationMap mapping = migrationMapRepository.findByOldDiaryEntryId(targetId).orElse(null);
+        if (mapping == null || !"CONTENT_REVIEW".equals(mapping.getDestinationKind())) {
+            throw new NotFoundException("Report target not found");
+        }
+        return resolveContentReview(reporterId, mapping.getDestinationId(), ReportTargetType.REVIEW, targetId);
+    }
+
+    private ResolvedReportTarget resolveDiaryReview(UUID reporterId, DiaryEntry review) {
         User author = review.getUser();
         rejectSelfReport(reporterId, author.getId());
         assertProfileTargetVisible(reporterId, author.getId());
