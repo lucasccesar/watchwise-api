@@ -48,6 +48,17 @@ class ContentOpinionSchemaTest {
         assertThat(jdbc.queryForObject("select count(*) from content_ratings where user_id = ?", Integer.class, owner)).isZero();
     }
 
+    @Test void createsPublicationOrderIndexForScoredReviewBoundaryQueries() {
+        java.util.List<String> indexDefinitions = jdbc.queryForList(
+                "select indexdef from pg_indexes where schemaname = 'public' and indexname = ?",
+                String.class,
+                "idx_content_reviews_publication_order");
+
+        assertThat(indexDefinitions).hasSize(1);
+        assertThat(indexDefinitions.getFirst())
+                .contains("user_id, content_id, source_published_at, source_published_on, id");
+    }
+
     @Test void allowsTwoSeriesReviewsButOnlyOneWrittenSeasonReviewPerPass() {
         assertTableExists("content_reviews");
         UUID owner = user();

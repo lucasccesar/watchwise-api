@@ -1445,6 +1445,25 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             @Param("userId") UUID userId,
             @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
 
+    @Query(value = """
+            SELECT d.id AS diaryEntryId,
+                   c.series_tmdb_id AS seriesTmdbId,
+                   c.season_number AS seasonNumber,
+                   c.episode_number AS episodeNumber,
+                   d.watch_number AS watchNumber,
+                   d.watched_date AS watchedDate,
+                   d.watched_at AS watchedAt,
+                   d.created_at AS recordedAt
+            FROM diary_entries d
+            JOIN contents c ON c.id = d.content_id
+            WHERE d.user_id = :userId
+              AND d.id IN :eventIds
+              AND c.type = 'EPISODE'
+            """, nativeQuery = true)
+    List<EpisodeCompletionWatch> findEpisodeCompletionWatchesByUserIdAndDiaryEntryIdIn(
+            @Param("userId") UUID userId,
+            @Param("eventIds") Collection<UUID> eventIds);
+
     interface EpisodeCompletionWatch {
         UUID getDiaryEntryId();
         String getSeriesTmdbId();
