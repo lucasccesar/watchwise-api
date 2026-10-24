@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.platformimport.model.LinkReservation;
 import com.watchwise.watchwise_api.platformimport.model.ImportTarget;
 import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
 import com.watchwise.watchwise_api.platformimport.model.NormalizedImportRecord;
+import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
@@ -103,11 +104,18 @@ public class ImportUnitTransaction {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public boolean saveNormalized(ImportExecutionContext context, List<NormalizedImportRecord> records) {
+    public boolean saveNormalized(ImportExecutionContext context, List<NormalizedImportRecord> records,
+                                  String parserVersion) {
         if (records == null || records.isEmpty()) return true;
+        if (records.size() > 200) {
+            throw new IllegalArgumentException("Normalized import batches are limited to 200 records");
+        }
+        if (parserVersion == null || parserVersion.isBlank()) {
+            throw new IllegalArgumentException("Import parser version is required");
+        }
         ImportJob job = lockRunnableJob(context, ImportJobState.ANALYZING);
         if (job == null || !"NORMALIZE".equals(job.getWorkPhase())) return false;
-        List<ImportItem> items = records.stream().map(record -> normalizedItem(context, record)).toList();
+        List<ImportItem> items = records.stream().map(record -> normalizedItem(context, record, parserVersion)).toList();
         itemRepository.saveAll(items);
         job.setCheckpoint("NORMALIZE:" + records.getLast().ordinal());
         renew(job);
@@ -141,6 +149,10 @@ public class ImportUnitTransaction {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean saveResolution(ImportExecutionContext context, List<ResolutionUpdate> updates) {
+        if (updates == null || updates.isEmpty()) return true;
+        if (updates.size() > 200 || updates.stream().map(ResolutionUpdate::itemId).distinct().count() != updates.size()) {
+            throw new IllegalArgumentException("Resolution updates must contain at most 200 unique items");
+        }
         ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
         if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
         java.util.Map<UUID, ResolutionUpdate> updatesById = new java.util.LinkedHashMap<>();
@@ -149,11 +161,55 @@ public class ImportUnitTransaction {
         }
         List<ImportItem> changedItems = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
                 context.jobId(), context.planGeneration(), updatesById.keySet());
+        if (changedItems.size() != updates.size()) {
+            throw new IllegalArgumentException("Resolution update item is outside its job generation");
+        }
         for (ImportItem item : changedItems) {
             ResolutionUpdate update = updatesById.get(item.getId());
             item.setOutcome(update.outcome());
             item.setResolvedTargetJson(update.resolvedTargetJson());
             item.setNormalizedContentKey(update.normalizedContentKey());
+            item.setResolvedContentKey(update.resolvedContentKey());
+            item.setIssue(update.issue());
+        }
+        itemRepository.saveAll(changedItems);
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean renewHistoryNormalizationLease(ImportExecutionContext context) {
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+        renew(job);
+        return true;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean saveHistoryNormalization(ImportExecutionContext context,
+                                            List<HistoryNormalizationUpdate> updates) {
+        if (updates == null || updates.isEmpty()) return true;
+        if (updates.size() > 200 || updates.stream().map(HistoryNormalizationUpdate::itemId).distinct().count()
+                != updates.size()) {
+            throw new IllegalArgumentException("History normalization updates must contain at most 200 unique items");
+        }
+        ImportJob job = lockRunnableJob(context, ImportJobState.RESOLVING);
+        if (job == null || !"RESOLVE".equals(job.getWorkPhase())) return false;
+
+        java.util.Map<UUID, HistoryNormalizationUpdate> updatesById = new java.util.LinkedHashMap<>();
+        for (HistoryNormalizationUpdate update : updates) updatesById.put(update.itemId(), update);
+        List<ImportItem> changedItems = itemRepository.findAllByJobIdAndPlanGenerationAndIdIn(
+                context.jobId(), context.planGeneration(), updatesById.keySet());
+        if (changedItems.size() != updates.size()) {
+            throw new IllegalArgumentException("History normalization item is outside its job generation");
+        }
+        for (ImportItem item : changedItems) {
+            HistoryNormalizationUpdate update = updatesById.get(item.getId());
+            item.setNormalizedKind(update.normalizedKind());
+            item.setPayloadJson(update.payloadJson());
+            item.setResolvedTargetJson(update.resolvedTargetJson());
+            item.setResolvedContentKey(update.resolvedContentKey());
+            item.setOutcome(update.outcome());
             item.setIssue(update.issue());
         }
         itemRepository.saveAll(changedItems);
@@ -254,7 +310,8 @@ public class ImportUnitTransaction {
         return job;
     }
 
-    private ImportItem normalizedItem(ImportExecutionContext context, NormalizedImportRecord record) {
+    private ImportItem normalizedItem(ImportExecutionContext context, NormalizedImportRecord record,
+                                     String parserVersion) {
         UUID itemId = uuidForItem(context, record.itemId());
         ImportItem item = ImportItem.builder()
                 .id(itemId)
@@ -266,6 +323,7 @@ public class ImportUnitTransaction {
                 .sourceId(record.sourceKey().sourceId())
                 .sourceEventKey(record.sourceKey().sourceId())
                 .parentSourceId(record.parentSourceId())
+                .parserVersion(parserVersion)
                 .payloadJson(writeJson(record.payload()))
                 .resolvedTargetJson(record.target() == null ? null : writeJson(record.target()))
                 .ordinal(record.ordinal())
@@ -351,7 +409,11 @@ public class ImportUnitTransaction {
     }
 
     public record ResolutionUpdate(UUID itemId, String outcome, String resolvedTargetJson,
-                                   String normalizedContentKey, String issue) { }
+                                   String normalizedContentKey, String resolvedContentKey, String issue) { }
+
+    public record HistoryNormalizationUpdate(UUID itemId, ImportRecordKind normalizedKind, String payloadJson,
+                                             String resolvedTargetJson, String resolvedContentKey,
+                                             String outcome, String issue) { }
 
     public static final class WaitForOtherJobException extends RuntimeException { }
 }

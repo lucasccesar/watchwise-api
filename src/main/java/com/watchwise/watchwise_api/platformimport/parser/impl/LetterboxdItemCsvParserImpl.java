@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.platformimport.parser.impl;
 
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
-import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.platformimport.model.*;
 import com.watchwise.watchwise_api.platformimport.parser.CsvRecordReader;
 import com.watchwise.watchwise_api.platformimport.parser.LetterboxdItemCsvParser;
@@ -148,7 +147,7 @@ public class LetterboxdItemCsvParserImpl implements LetterboxdItemCsvParser {
     }
 
     private tools.jackson.databind.node.ObjectNode contentQuery(String title, Integer year) {
-        var query = mapper.createObjectNode().put("kind", "CONTENT").put("title", title).put("contentType", ContentType.MOVIE.name());
+        var query = mapper.createObjectNode().put("kind", "CONTENT").put("title", title);
         if (year != null) query.put("year", year);
         return query;
     }

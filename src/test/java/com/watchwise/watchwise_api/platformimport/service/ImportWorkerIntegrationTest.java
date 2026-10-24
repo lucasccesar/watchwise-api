@@ -375,7 +375,7 @@ class ImportWorkerIntegrationTest {
         List<ImportItem> items = new ArrayList<>(201);
         for (int ordinal = 0; ordinal < 201; ordinal++) {
             String title = ordinal == 200 ? "Unique Film 0" : "Unique Film " + ordinal;
-            items.add(item(job, ordinal, "letterboxd", "film", "same-query-" + ordinal,
+            items.add(item(job, ordinal, job.getSourceNamespace(), "film", "same-query-" + ordinal,
                     "{\"query\":{\"kind\":\"CONTENT\",\"title\":\"" + title
                             + "\",\"year\":2001,\"contentType\":\"MOVIE\"}}"));
         }
@@ -394,9 +394,9 @@ class ImportWorkerIntegrationTest {
                 argThat(updates -> updates.size() == 200));
         verify(unitTransaction).saveResolution(any(),
                 argThat(updates -> updates.size() == 1));
-        verify(itemRepositorySpy).findStagedResolutions(any(), anyLong(),
+        verify(itemRepositorySpy).findStagedResolutions(any(), any(), anyLong(),
                 argThat(keys -> keys.size() == 200), any());
-        verify(itemRepositorySpy).findStagedResolutions(any(), anyLong(),
+        verify(itemRepositorySpy).findStagedResolutions(any(), any(), anyLong(),
                 argThat(keys -> keys.size() == 1), any());
     }
 
@@ -706,6 +706,8 @@ class ImportWorkerIntegrationTest {
                 .sourceNamespace(namespace)
                 .objectKind(objectKind)
                 .sourceId(sourceId)
+                .sourceEventKey(sourceId)
+                .parserVersion("trakt-history-v1")
                 .payloadJson(payload)
                 .ordinal(ordinal)
                 .build();

@@ -13,7 +13,7 @@ public class ImportItem implements Persistable<UUID> {
  @Column(name="plan_generation", nullable=false) private long planGeneration;
  @Column(name="source_path", length=1000) private String sourcePath;
  @Column(name="record_locator", length=1000) private String recordLocator;
- @Enumerated(EnumType.STRING) @Column(name="normalized_kind", nullable=false, length=40) private ImportRecordKind normalizedKind;
+ @Setter @Enumerated(EnumType.STRING) @Column(name="normalized_kind", nullable=false, length=40) private ImportRecordKind normalizedKind;
  @Column(name="source_namespace", nullable=false, length=255) private String sourceNamespace;
  @Column(name="object_kind", nullable=false, length=255) private String objectKind;
  @Column(name="source_id", nullable=false, length=1000) private String sourceId;
