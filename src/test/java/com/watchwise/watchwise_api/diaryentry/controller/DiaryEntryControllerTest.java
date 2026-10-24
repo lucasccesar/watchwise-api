@@ -8,7 +8,6 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
-import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationResultDTO;
@@ -329,7 +328,7 @@ class DiaryEntryControllerTest {
     void shouldReturnNoContentWhenDeletingDiaryEntry() {
         UUID diaryEntryId = UUID.randomUUID();
 
-        ResponseEntity<Void> result = diaryEntryController.deleteDiaryEntry(diaryEntryId, false);
+        ResponseEntity<Void> result = diaryEntryController.deleteDiaryEntry(diaryEntryId);
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
     }
@@ -339,29 +338,9 @@ class DiaryEntryControllerTest {
     void shouldResolveTheCurrentUserIdFromTheSecurityContextWhenDeletingDiaryEntry() {
         UUID diaryEntryId = UUID.randomUUID();
 
-        diaryEntryController.deleteDiaryEntry(diaryEntryId, false);
+        diaryEntryController.deleteDiaryEntry(diaryEntryId);
 
-        verify(diaryEntryService).deleteDiaryEntry(currentUserId, diaryEntryId, false);
-    }
-
-    @Test
-    @DisplayName("[deleteDiaryEntry] Should Pass OverrideProtectedEntries True To The Service - When The Query Param Is True")
-    void shouldPassOverrideProtectedEntriesTrueToTheServiceWhenTheQueryParamIsTrue() {
-        UUID entryId = UUID.randomUUID();
-
-        diaryEntryController.deleteDiaryEntry(entryId, true);
-
-        verify(diaryEntryService).deleteDiaryEntry(currentUserId, entryId, true);
-    }
-
-    @Test
-    @DisplayName("[deleteDiaryEntry] Should Default OverrideProtectedEntries To False - When The Query Param Is Absent")
-    void shouldDefaultOverrideProtectedEntriesToFalseWhenTheQueryParamIsAbsent() {
-        UUID entryId = UUID.randomUUID();
-
-        diaryEntryController.deleteDiaryEntry(entryId, false);
-
-        verify(diaryEntryService).deleteDiaryEntry(currentUserId, entryId, false);
+        verify(diaryEntryService).deleteDiaryEntry(currentUserId, diaryEntryId);
     }
 
     @Test
@@ -433,7 +412,7 @@ class DiaryEntryControllerTest {
         LocalDateTime now = LocalDateTime.now();
         ContentRefDTO content = new ContentRefDTO(UUID.randomUUID(), "550", ContentType.MOVIE, null, null, null, null, null, now, now);
         return new DiaryEntryResponseDTO(
-                UUID.randomUUID(), currentUserId, content, null, null, null, 1, null, null, false, false, now, now, 0, false);
+                UUID.randomUUID(), currentUserId, content, null, null, null, 1, null, null, false, now, now, 0, false);
     }
 
     private DiaryEntryCreationResultDTO buildCreationResultDto() {
@@ -445,31 +424,4 @@ class DiaryEntryControllerTest {
                 List.of());
     }
 
-    @Test
-    @DisplayName("[getDeletionImpact] Should Return DeletionImpactDTO - When Called With Valid Entry ID")
-    void shouldReturnDeletionImpactDtoWhenCalledWithValidEntryId() {
-        UUID diaryEntryId = UUID.randomUUID();
-        DeletionImpactDTO expectedResult = new DeletionImpactDTO(List.of());
-        when(diaryEntryService.computeDeletionImpact(currentUserId, diaryEntryId, false)).thenReturn(expectedResult);
-
-        ResponseEntity<DeletionImpactDTO> response = diaryEntryController.getDeletionImpact(diaryEntryId, false);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).isEqualTo(expectedResult);
-        verify(diaryEntryService).computeDeletionImpact(currentUserId, diaryEntryId, false);
-    }
-
-    @Test
-    @DisplayName("[getDeletionImpact] Should Forward OverrideProtectedEntries - When The Query Parameter Is True")
-    void shouldForwardOverrideProtectedEntriesWhenTheQueryParameterIsTrue() {
-        UUID diaryEntryId = UUID.randomUUID();
-        DeletionImpactDTO expectedResult = new DeletionImpactDTO(List.of());
-        when(diaryEntryService.computeDeletionImpact(currentUserId, diaryEntryId, true)).thenReturn(expectedResult);
-
-        ResponseEntity<DeletionImpactDTO> response = diaryEntryController.getDeletionImpact(diaryEntryId, true);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).isEqualTo(expectedResult);
-        verify(diaryEntryService).computeDeletionImpact(currentUserId, diaryEntryId, true);
-    }
 }

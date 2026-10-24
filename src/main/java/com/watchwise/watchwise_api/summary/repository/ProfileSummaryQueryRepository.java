@@ -89,6 +89,63 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
             @Param("userId") UUID userId, @Param("contentType") ContentType contentType, Pageable pageable);
 
     @Query(value = """
+            SELECT p.id AS projectionId,
+                   p.content_id AS contentId,
+                   p.watch_number AS watchNumber,
+                   p.ordered_at AS orderedAt,
+                   rating.score AS score,
+                   review.comment AS comment,
+                   COUNT(*) OVER (PARTITION BY p.content_id) AS timesWatched
+            FROM diary_completion_projections p
+            JOIN contents c ON c.id = p.content_id AND c.type = 'SERIES'
+            JOIN users owner ON owner.id = p.user_id
+            JOIN user_series_history_states state
+              ON state.user_id = p.user_id AND state.series_tmdb_id = c.tmdb_id
+            JOIN calendar_schedule_completeness marker
+              ON marker.series_tmdb_id = c.tmdb_id
+             AND marker.group_type = 'SERIES'
+             AND marker.season_number IS NULL
+             AND marker.region = owner.preferred_region
+             AND marker.language = owner.preferred_language
+             AND marker.scope_version = p.schedule_version
+             AND marker.complete = TRUE
+            LEFT JOIN content_ratings rating
+              ON rating.user_id = p.user_id AND rating.content_id = p.content_id
+            LEFT JOIN LATERAL (
+                SELECT candidate.comment
+                FROM content_reviews candidate
+                WHERE candidate.user_id = p.user_id
+                  AND candidate.content_id = p.content_id
+                  AND candidate.watch_number = p.watch_number
+                  AND candidate.publication_kind = 'WRITTEN_REVIEW'
+                  AND candidate.comment IS NOT NULL
+                  AND btrim(candidate.comment) <> ''
+                ORDER BY candidate.created_at DESC, candidate.id DESC
+                LIMIT 1
+            ) review ON TRUE
+            WHERE p.user_id = :userId
+              AND p.content_type = 'SERIES'
+              AND p.history_revision = state.history_revision
+              AND state.computed_revision = state.history_revision
+              AND p.schedule_version = state.schedule_version
+              AND p.valid_until > CURRENT_TIMESTAMP
+              AND state.valid_until > CURRENT_TIMESTAMP
+            ORDER BY p.ordered_at DESC, p.id DESC
+            """, nativeQuery = true)
+    List<SeriesCompletionActivity> findRecentSeriesCompletionActivities(
+            @Param("userId") UUID userId, Pageable pageable);
+
+    interface SeriesCompletionActivity {
+        UUID getProjectionId();
+        UUID getContentId();
+        Integer getWatchNumber();
+        java.time.Instant getOrderedAt();
+        Integer getScore();
+        String getComment();
+        Long getTimesWatched();
+    }
+
+    @Query(value = """
             SELECT genre AS genre, COUNT(DISTINCT c.id) AS count
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id

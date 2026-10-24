@@ -94,38 +94,6 @@ class WatchCompanionRepositoryTest {
     }
 
     @Test
-    @DisplayName("[countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween] Should Exclude Tag On A SEASON Completion Marker - When Filtering By MOVIE")
-    void shouldExcludeTagOnASeasonCompletionMarkerWhenFilteringByMovie() {
-        Content season = contentRepository.save(buildSeason("1399", 1));
-        LocalDate today = LocalDate.now();
-        DiaryEntry seasonEntry = diaryEntryRepository.saveAndFlush(buildEntry(lucas, season, today, 1));
-        watchCompanionRepository.saveAndFlush(buildCompanion(seasonEntry, marina));
-        entityManager.clear();
-
-        List<WatchCompanionRepository.CompanionWatchCount> result = watchCompanionRepository
-                .countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
-                        lucas.getId(), ContentType.MOVIE, today.minusDays(1), today.plusDays(1), PageRequest.of(0, 10));
-
-        assertThat(result).isEmpty();
-    }
-
-    @Test
-    @DisplayName("[countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween] Should Exclude Tag On A SERIES Completion Marker - When Filtering By EPISODE")
-    void shouldExcludeTagOnASeriesCompletionMarkerWhenFilteringByEpisode() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
-        LocalDate today = LocalDate.now();
-        DiaryEntry seriesEntry = diaryEntryRepository.saveAndFlush(buildEntry(lucas, series, today, 1));
-        watchCompanionRepository.saveAndFlush(buildCompanion(seriesEntry, marina));
-        entityManager.clear();
-
-        List<WatchCompanionRepository.CompanionWatchCount> result = watchCompanionRepository
-                .countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween(
-                        lucas.getId(), ContentType.EPISODE, today.minusDays(1), today.plusDays(1), PageRequest.of(0, 10));
-
-        assertThat(result).isEmpty();
-    }
-
-    @Test
     @DisplayName("[countGroupedByCompanionUserIdAndContentTypeAndWatchedDateBetween] Should Exclude Tag Outside The Given Window - When WatchedDate Is Before Start")
     void shouldExcludeTagOutsideTheGivenWindowWhenWatchedDateIsBeforeStart() {
         Content movie = contentRepository.save(buildContent("550", ContentType.MOVIE));
@@ -160,25 +128,6 @@ class WatchCompanionRepositoryTest {
         assertThat(result).hasSize(1);
         assertThat(result.getFirst().getCompanionUserId()).isEqualTo(marina.getId());
         assertThat(result.getFirst().getCount()).isEqualTo(2L);
-    }
-
-    @Test
-    @DisplayName("[countGroupedByCompanionUserIdAndContentTypeIn] Should Exclude Tag On A SEASON Or SERIES Completion Marker - When Filtering By MOVIE And EPISODE")
-    void shouldExcludeTagOnASeasonOrSeriesCompletionMarkerWhenFilteringByMovieAndEpisode() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
-        Content season = contentRepository.save(buildSeason("1396", 1));
-        LocalDate today = LocalDate.now();
-        DiaryEntry seriesEntry = diaryEntryRepository.saveAndFlush(buildEntry(lucas, series, today, 1));
-        DiaryEntry seasonEntry = diaryEntryRepository.saveAndFlush(buildEntry(lucas, season, today, 1));
-        watchCompanionRepository.saveAndFlush(buildCompanion(seriesEntry, marina));
-        watchCompanionRepository.saveAndFlush(buildCompanion(seasonEntry, marina));
-        entityManager.clear();
-
-        List<WatchCompanionRepository.CompanionWatchCount> result = watchCompanionRepository
-                .countGroupedByCompanionUserIdAndContentTypeIn(
-                        lucas.getId(), Set.of(ContentType.MOVIE, ContentType.EPISODE), PageRequest.of(0, 10));
-
-        assertThat(result).isEmpty();
     }
 
     private WatchCompanion buildCompanion(DiaryEntry diaryEntry, User user) {

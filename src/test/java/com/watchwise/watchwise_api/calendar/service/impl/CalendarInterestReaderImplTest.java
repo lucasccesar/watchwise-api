@@ -73,7 +73,7 @@ class CalendarInterestReaderImplTest {
                 .thenReturn(List.of(
                         buildWatchlistEntry("1396", ContentType.SERIES, 1),
                         buildWatchlistEntry("1396", ContentType.SERIES, 2)));
-        when(diaryEntryRepository.findDistinctInProgressSeriesTmdbIdsByUserId(userId))
+        when(diaryEntryRepository.findInProgressSeriesTmdbIds(userId))
                 .thenReturn(List.of("1396", "119051", "119051"));
 
         CalendarInterest result = reader.read(userId);
@@ -97,7 +97,7 @@ class CalendarInterestReaderImplTest {
                 .thenReturn(List.of(buildWatchlistEntry("550", ContentType.MOVIE, 1)));
         when(watchlistEntryRepository.findByUserIdAndTypeOrderByPositionAsc(userId, ContentType.SERIES))
                 .thenReturn(List.of());
-        when(diaryEntryRepository.findDistinctInProgressSeriesTmdbIdsByUserId(userId)).thenReturn(List.of());
+        when(diaryEntryRepository.findInProgressSeriesTmdbIds(userId)).thenReturn(List.of());
 
         CalendarInterest result = reader.read(userId);
         CalendarScheduleKey movieKey = new CalendarScheduleKey(ContentType.MOVIE, "550", "pt-BR", "BR");

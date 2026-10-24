@@ -41,7 +41,7 @@ public class CalendarInterestReaderImpl implements CalendarInterestReader {
         List<String> movieTmdbIds = readWatchlistTmdbIds(userId, ContentType.MOVIE);
         List<String> seriesTmdbIds = readWatchlistTmdbIds(userId, ContentType.SERIES);
         List<String> inProgressSeriesTmdbIds = sortedDistinctInProgressSeriesTmdbIds(
-                diaryEntryRepository.findDistinctInProgressSeriesTmdbIdsByUserId(userId));
+                diaryEntryRepository.findInProgressSeriesTmdbIds(userId));
 
         Map<CalendarScheduleKey, Set<CalendarSource>> sourcesByKey = new LinkedHashMap<>();
         addSources(sourcesByKey, movieTmdbIds, ContentType.MOVIE, user, CalendarSource.WATCHLIST);

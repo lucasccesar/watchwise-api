@@ -10,20 +10,35 @@ import java.util.UUID;
 
 public record ProfileDiaryPreviewDTO(
         UUID id,
+        ProfileDiaryPreviewSource source,
         ContentRefDTO content,
         Integer score,
         LocalDate watchedDate,
+        LocalDate activityDate,
         Integer watchNumber,
         String customPosterUrl,
         List<UserPreviewDTO> watchedWith,
         ContentCardDTO card
 ) {
     public ProfileDiaryPreviewDTO {
+        source = source == null ? ProfileDiaryPreviewSource.DIARY_ENTRY : source;
         watchedWith = watchedWith == null ? List.of() : List.copyOf(watchedWith);
     }
 
     public ProfileDiaryPreviewDTO(UUID id, ContentRefDTO content, Integer score, LocalDate watchedDate,
             Integer watchNumber, String customPosterUrl, List<UserPreviewDTO> watchedWith) {
-        this(id, content, score, watchedDate, watchNumber, customPosterUrl, watchedWith, null);
+        this(id, ProfileDiaryPreviewSource.DIARY_ENTRY, content, score, watchedDate, watchedDate,
+                watchNumber, customPosterUrl, watchedWith, null);
+    }
+
+    public ProfileDiaryPreviewDTO(UUID id, ContentRefDTO content, Integer score, LocalDate watchedDate,
+            Integer watchNumber, String customPosterUrl, List<UserPreviewDTO> watchedWith, ContentCardDTO card) {
+        this(id, ProfileDiaryPreviewSource.DIARY_ENTRY, content, score, watchedDate, watchedDate,
+                watchNumber, customPosterUrl, watchedWith, card);
+    }
+
+    public ProfileDiaryPreviewDTO withCard(ContentCardDTO card) {
+        return new ProfileDiaryPreviewDTO(id, source, content, score, watchedDate, activityDate,
+                watchNumber, customPosterUrl, watchedWith, card);
     }
 }

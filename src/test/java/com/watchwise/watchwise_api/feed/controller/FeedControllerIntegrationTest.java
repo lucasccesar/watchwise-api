@@ -561,8 +561,8 @@ class FeedControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[getFeed] Should Not Include Ignored DiaryEntry Rows - When A Bulk-Logged Episode Is Marked Ignore")
-    void shouldNotIncludeIgnoredDiaryEntryRowsWhenABulkLoggedEpisodeIsMarkedIgnore() throws Exception {
+    @DisplayName("[getFeed] Should Not Include Ignored Episode Events - When A Bulk-Logged Episode Is Marked Ignore")
+    void shouldNotIncludeIgnoredEpisodeEventsWhenABulkLoggedEpisodeIsMarkedIgnore() throws Exception {
         RegisteredUser viewer = registerUser("feedignoreviewer");
         RegisteredUser followed = registerUser("feedignorefollowed");
         persistFollow(viewer.id(), followed.id(), FollowStatus.ACCEPTED);
@@ -573,16 +573,11 @@ class FeedControllerIntegrationTest {
         Content episode = contentRepository.save(Content.builder()
                 .type(ContentType.EPISODE).seriesTmdbId("900").seasonNumber(1).episodeNumber(1)
                 .createdAt(now).updatedAt(now).build());
-        Content season = contentRepository.save(Content.builder()
-                .type(ContentType.SEASON).seriesTmdbId("900").seasonNumber(1)
-                .createdAt(now).updatedAt(now).build());
         persistDiaryEntry(followedEntity, episode, now.minusMinutes(1), true);
-        persistDiaryEntry(followedEntity, season, now, false);
 
         mockMvc.perform(get("/feed").cookie(viewer.accessToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content.length()").value(1))
-                .andExpect(jsonPath("$.content[0].content.type").value("SEASON"));
+                .andExpect(jsonPath("$.content.length()").value(0));
     }
 
     @Test

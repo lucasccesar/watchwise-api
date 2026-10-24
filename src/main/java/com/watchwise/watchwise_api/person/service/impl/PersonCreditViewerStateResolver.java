@@ -11,12 +11,9 @@ import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressMetad
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -35,17 +32,6 @@ public class PersonCreditViewerStateResolver {
         if (viewerId == null || credits.isEmpty()) {
             return common;
         }
-
-        Set<String> tmdbIds = credits.stream().map(PersonFilmographyCredit::tmdbId)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        List<String> idList = new ArrayList<>(tmdbIds);
-        List<DiaryEntryRepository.PersonCreditMedia> activity = diaryEntryRepository
-                .findWatchedMediaForPersonCredits(viewerId, idList);
-        Set<String> seasonActivitySeries = activity.stream()
-                .filter(media -> media.getSourceType() == ContentType.SEASON)
-                .map(DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId)
-                .filter(java.util.Objects::nonNull)
-                .collect(Collectors.toSet());
 
         List<String> seriesIds = credits.stream().filter(credit -> credit.type() == MovieOrSeriesType.SERIES)
                 .map(PersonFilmographyCredit::tmdbId).distinct().toList();
@@ -73,8 +59,7 @@ public class PersonCreditViewerStateResolver {
                 }
                 long watched = watchedCounts.getOrDefault(credit.tmdbId(), 0L);
                 Integer released = releasedCounts.get(credit.tmdbId());
-                boolean hasActivity = watched > 0 || seasonActivitySeries.contains(credit.tmdbId());
-                WatchStatus status = !hasActivity ? WatchStatus.UNWATCHED
+                WatchStatus status = watched == 0 ? WatchStatus.UNWATCHED
                         : released == null ? WatchStatus.UNKNOWN
                         : watched >= released ? WatchStatus.WATCHED : WatchStatus.PARTIALLY_WATCHED;
                 Integer watchedEpisodeCount = released == null ? null : Math.toIntExact(watched);

@@ -75,13 +75,8 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                  OR (:hasReview = TRUE AND d.comment IS NOT NULL)
                  OR (:hasReview = FALSE AND d.comment IS NULL))
             AND (:seriesTmdbId IS NULL OR (
-                (d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-                    AND d.content.tmdbId = :seriesTmdbId)
-                OR (d.content.type IN (
-                    com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
-                    com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
-                    AND d.content.seriesTmdbId = :seriesTmdbId)
-            ))
+                d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+                AND d.content.seriesTmdbId = :seriesTmdbId))
             AND (:score IS NULL OR d.score = :score)
             ORDER BY d.createdAt DESC, d.id DESC
             """)
@@ -111,15 +106,15 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     }
 
     @Query(value = """
-            SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS seriesTmdbId,
+            SELECT c.series_tmdb_id AS seriesTmdbId,
                    COUNT(d.id) AS entriesCount
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             WHERE d.user_id = :userId
-            AND c.type IN ('SERIES', 'SEASON', 'EPISODE')
-            GROUP BY CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END
+            AND c.type = 'EPISODE'
+            GROUP BY c.series_tmdb_id
             ORDER BY COUNT(d.id) DESC,
-                     CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END ASC
+                     c.series_tmdb_id ASC
             """, nativeQuery = true)
     List<DiarySeriesCount> findSeriesEntryCountsByUserId(@Param("userId") UUID userId);
 
@@ -304,14 +299,17 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 SELECT 1
                 FROM diary_entries d
                 JOIN contents c ON c.id = d.content_id
-                WHERE d.user_id = :userId AND c.type = :type AND c.tmdb_id = :tmdbId
+                WHERE d.user_id = :userId
+                  AND :type = 'MOVIE'
+                  AND c.type = 'MOVIE'
+                  AND c.tmdb_id = :tmdbId
             ) OR (
                 :type = 'SERIES' AND EXISTS (
                     SELECT 1
                     FROM diary_entries d
                     JOIN contents c ON c.id = d.content_id
                     WHERE d.user_id = :userId
-                      AND c.type IN ('SEASON', 'EPISODE')
+                      AND c.type = 'EPISODE'
                       AND c.series_tmdb_id = :tmdbId
                 )
             )
@@ -389,25 +387,15 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                      THEN com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
                      ELSE com.watchwise.watchwise_api.content.entity.ContentType.SERIES END AS type,
                 CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
-                     THEN d.content.tmdbId
-                     WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-                     THEN d.content.tmdbId
-                     ELSE d.content.seriesTmdbId END AS tmdbId,
+                     THEN d.content.tmdbId ELSE d.content.seriesTmdbId END AS tmdbId,
                 CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
-                     THEN NULL
-                     WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-                     THEN d.content.tmdbId
-                     ELSE d.content.seriesTmdbId END AS seriesTmdbId,
-                d.content.type AS sourceType
+                     THEN NULL ELSE d.content.seriesTmdbId END AS seriesTmdbId
             FROM DiaryEntry d
             WHERE d.user.id = :userId
             AND ((d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
                   AND d.content.tmdbId IN :tmdbIds)
-                 OR (d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.SERIES,
-                                        com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
-                                        com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
-                     AND (CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-                               THEN d.content.tmdbId ELSE d.content.seriesTmdbId END) IN :tmdbIds))
+                 OR (d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+                     AND d.content.seriesTmdbId IN :tmdbIds))
             """)
     List<PersonCreditMedia> findWatchedMediaForPersonCredits(
             @Param("userId") UUID userId, @Param("tmdbIds") Collection<String> tmdbIds);
@@ -416,7 +404,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
         ContentType getType();
         String getTmdbId();
         String getSeriesTmdbId();
-        ContentType getSourceType();
     }
 
     @Query("""
@@ -443,56 +430,10 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             @Param("seriesTmdbId") String seriesTmdbId,
             @Param("seasonNumber") Integer seasonNumber);
 
-    @Query("""
-            SELECT de.content.seasonNumber AS seasonNumber, MAX(de.watchNumber) AS maxWatchNumber FROM DiaryEntry de
-            WHERE de.user.id = :userId
-            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SEASON
-            AND de.content.seriesTmdbId = :seriesTmdbId
-            GROUP BY de.content.seasonNumber
-            """)
-    List<SeasonWatchMax> maxWatchNumberBySeasonInSeries(
-            @Param("userId") UUID userId,
-            @Param("seriesTmdbId") String seriesTmdbId);
-
     interface EpisodeWatchCount {
         Integer getEpisodeNumber();
         Long getCount();
     }
-
-    interface SeasonWatchMax {
-        Integer getSeasonNumber();
-        Integer getMaxWatchNumber();
-    }
-
-    @Query("""
-            SELECT de FROM DiaryEntry de
-            WHERE de.user.id = :userId
-            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
-            AND de.content.seriesTmdbId = :seriesTmdbId
-            AND de.watchNumber = :watchNumber
-            """)
-    List<DiaryEntry> findEpisodeEntriesInSeriesByWatchNumber(
-            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId, @Param("watchNumber") Integer watchNumber);
-
-    @Query("""
-            SELECT de FROM DiaryEntry de
-            WHERE de.user.id = :userId
-            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SEASON
-            AND de.content.seriesTmdbId = :seriesTmdbId
-            AND de.watchNumber = :watchNumber
-            """)
-    List<DiaryEntry> findSeasonEntriesInSeriesByWatchNumber(
-            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId, @Param("watchNumber") Integer watchNumber);
-
-    @Query("""
-            SELECT de FROM DiaryEntry de
-            WHERE de.user.id = :userId
-            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-            AND de.content.tmdbId = :seriesTmdbId
-            AND de.watchNumber = :watchNumber
-            """)
-    List<DiaryEntry> findSeriesEntriesByWatchNumber(
-            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId, @Param("watchNumber") Integer watchNumber);
 
     @Query("""
             SELECT COALESCE(SUM(d.content.runtimeMinutes), 0) FROM DiaryEntry d
@@ -559,11 +500,30 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             FROM series_agg sa
             JOIN max_episode me ON me.series_tmdb_id = sa.series_tmdb_id
             WHERE NOT EXISTS (
-                SELECT 1 FROM diary_entries d2
-                JOIN contents c2 ON c2.id = d2.content_id
-                WHERE d2.user_id = :userId
-                AND c2.type = 'SERIES'
-                AND c2.tmdb_id = sa.series_tmdb_id
+                SELECT 1
+                FROM diary_completion_projections projection
+                JOIN contents completed_series ON completed_series.id = projection.content_id
+                JOIN user_series_history_states history
+                  ON history.user_id = projection.user_id
+                 AND history.series_tmdb_id = sa.series_tmdb_id
+                JOIN users owner ON owner.id = projection.user_id
+                JOIN calendar_schedule_completeness marker
+                  ON marker.series_tmdb_id = sa.series_tmdb_id
+                 AND marker.group_type = 'SERIES'
+                 AND marker.season_number IS NULL
+                 AND marker.region = owner.preferred_region
+                 AND marker.language = owner.preferred_language
+                 AND marker.scope_version = projection.schedule_version
+                 AND marker.complete = TRUE
+                WHERE projection.user_id = :userId
+                  AND projection.content_type = 'SERIES'
+                  AND completed_series.type = 'SERIES'
+                  AND completed_series.tmdb_id = sa.series_tmdb_id
+                  AND projection.history_revision = history.history_revision
+                  AND history.computed_revision = history.history_revision
+                  AND projection.schedule_version = history.schedule_version
+                  AND projection.valid_until > CURRENT_TIMESTAMP
+                  AND history.valid_until > CURRENT_TIMESTAMP
             )
             AND NOT EXISTS (
                 SELECT 1 FROM dropped_entries de
@@ -591,11 +551,30 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             SELECT COUNT(*)
             FROM series_agg sa
             WHERE NOT EXISTS (
-                SELECT 1 FROM diary_entries d2
-                JOIN contents c2 ON c2.id = d2.content_id
-                WHERE d2.user_id = :userId
-                AND c2.type = 'SERIES'
-                AND c2.tmdb_id = sa.series_tmdb_id
+                SELECT 1
+                FROM diary_completion_projections projection
+                JOIN contents completed_series ON completed_series.id = projection.content_id
+                JOIN user_series_history_states history
+                  ON history.user_id = projection.user_id
+                 AND history.series_tmdb_id = sa.series_tmdb_id
+                JOIN users owner ON owner.id = projection.user_id
+                JOIN calendar_schedule_completeness marker
+                  ON marker.series_tmdb_id = sa.series_tmdb_id
+                 AND marker.group_type = 'SERIES'
+                 AND marker.season_number IS NULL
+                 AND marker.region = owner.preferred_region
+                 AND marker.language = owner.preferred_language
+                 AND marker.scope_version = projection.schedule_version
+                 AND marker.complete = TRUE
+                WHERE projection.user_id = :userId
+                  AND projection.content_type = 'SERIES'
+                  AND completed_series.type = 'SERIES'
+                  AND completed_series.tmdb_id = sa.series_tmdb_id
+                  AND projection.history_revision = history.history_revision
+                  AND history.computed_revision = history.history_revision
+                  AND projection.schedule_version = history.schedule_version
+                  AND projection.valid_until > CURRENT_TIMESTAMP
+                  AND history.valid_until > CURRENT_TIMESTAMP
             )
             AND NOT EXISTS (
                 SELECT 1 FROM dropped_entries de
@@ -888,16 +867,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.MOVIE
             """)
     long countDistinctMoviesByUserId(@Param("userId") UUID userId);
-
-    @Query("""
-            SELECT COUNT(DISTINCT CASE WHEN d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-                    THEN d.content.tmdbId ELSE d.content.seriesTmdbId END)
-            FROM DiaryEntry d
-            WHERE d.user.id = :userId
-            AND d.content.type IN (com.watchwise.watchwise_api.content.entity.ContentType.SERIES,
-                                   com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
-            """)
-    long countDistinctSeriesByUserId(@Param("userId") UUID userId);
 
     @Query("""
             SELECT MIN(d.watchedDate) FROM DiaryEntry d
@@ -1291,27 +1260,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
         Long getScoreCount();
     }
 
-    // --- Delete all diary entries for a series, every watchNumber (DELETE /diary/series/{seriesTmdbId}) ---
-    // Episode side reuses findEpisodeEntriesBySeriesForUser above (same filter, already unscoped by watchNumber).
-
-    @Query("""
-            SELECT de FROM DiaryEntry de
-            WHERE de.user.id = :userId
-            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SEASON
-            AND de.content.seriesTmdbId = :seriesTmdbId
-            """)
-    List<DiaryEntry> findAllSeasonEntriesInSeries(
-            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
-
-    @Query("""
-            SELECT de FROM DiaryEntry de
-            WHERE de.user.id = :userId
-            AND de.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-            AND de.content.tmdbId = :seriesTmdbId
-            """)
-    List<DiaryEntry> findAllSeriesEntriesInSeries(
-            @Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
-
     // --- Content stats (aggregated across all users, GET /contents/{contentId}/stats) ---
 
     @Query("""
@@ -1389,18 +1337,40 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
 
     // --- Content tracking job (daily TMDB change detection) ---
 
-    @Query("""
-            SELECT DISTINCT d.content.seriesTmdbId FROM DiaryEntry d
-            WHERE d.user.id = :userId
-            AND d.content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
-            AND NOT EXISTS (
-                SELECT 1 FROM DiaryEntry completion
-                WHERE completion.user.id = d.user.id
-                AND completion.content.type = com.watchwise.watchwise_api.content.entity.ContentType.SERIES
-                AND completion.content.tmdbId = d.content.seriesTmdbId
-            )
-            """)
-    List<String> findDistinctInProgressSeriesTmdbIdsByUserId(@Param("userId") UUID userId);
+    @Query(value = """
+            SELECT DISTINCT episode_content.series_tmdb_id
+            FROM diary_entries episode_entry
+            JOIN contents episode_content ON episode_content.id = episode_entry.content_id
+            JOIN users owner ON owner.id = episode_entry.user_id
+            WHERE episode_content.type = 'EPISODE'
+              AND (:userId IS NULL OR episode_entry.user_id = :userId)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM diary_completion_projections projection
+                  JOIN contents completed_series ON completed_series.id = projection.content_id
+                  JOIN user_series_history_states history
+                    ON history.user_id = episode_entry.user_id
+                   AND history.series_tmdb_id = episode_content.series_tmdb_id
+                  JOIN calendar_schedule_completeness marker
+                    ON marker.series_tmdb_id = episode_content.series_tmdb_id
+                   AND marker.group_type = 'SERIES'
+                   AND marker.season_number IS NULL
+                   AND marker.region = owner.preferred_region
+                   AND marker.language = owner.preferred_language
+                   AND marker.scope_version = projection.schedule_version
+                   AND marker.complete = TRUE
+                  WHERE projection.user_id = episode_entry.user_id
+                    AND projection.content_type = 'SERIES'
+                    AND completed_series.type = 'SERIES'
+                    AND completed_series.tmdb_id = episode_content.series_tmdb_id
+                    AND projection.history_revision = history.history_revision
+                    AND history.computed_revision = history.history_revision
+                    AND projection.schedule_version = history.schedule_version
+                    AND projection.valid_until > CURRENT_TIMESTAMP
+                    AND history.valid_until > CURRENT_TIMESTAMP
+              )
+            """, nativeQuery = true)
+    List<String> findInProgressSeriesTmdbIds(@Param("userId") UUID userId);
 
     default Set<WatchedCalendarKey> findWatchedCalendarKeys(
             UUID userId, Collection<WatchedCalendarKey> requestedKeys) {
@@ -1460,21 +1430,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             @Param("seriesTmdbIds") Collection<String> seriesTmdbIds,
             @Param("seasonNumbers") Collection<Integer> seasonNumbers,
             @Param("episodeNumbers") Collection<Integer> episodeNumbers);
-
-    @Query(value = """
-            SELECT DISTINCT c.series_tmdb_id
-            FROM contents c
-            JOIN diary_entries d ON d.content_id = c.id
-            WHERE c.type = 'EPISODE'
-            AND NOT EXISTS (
-                SELECT 1 FROM diary_entries d2
-                JOIN contents c2 ON c2.id = d2.content_id
-                WHERE d2.user_id = d.user_id
-                AND c2.type = 'SERIES'
-                AND c2.tmdb_id = c.series_tmdb_id
-            )
-            """, nativeQuery = true)
-    List<String> findDistinctInProgressSeriesTmdbIds();
 
     @Query("""
             SELECT DISTINCT d.user.id FROM DiaryEntry d

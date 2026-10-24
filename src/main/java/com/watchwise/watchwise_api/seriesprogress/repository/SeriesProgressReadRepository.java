@@ -56,14 +56,28 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                     JOIN user_series_history_states state
                       ON state.user_id = completion.user_id
                      AND state.series_tmdb_id = ee.series_tmdb_id
+                    JOIN users completion_user ON completion_user.id = completion.user_id
                     LEFT JOIN series_progress_metadata released
                       ON released.series_tmdb_id = ee.series_tmdb_id
                     WHERE completion.user_id = :userId
                     AND completed_series.type = 'SERIES'
                     AND completed_series.tmdb_id = ee.series_tmdb_id
                     AND completion.history_revision = state.history_revision
+                    AND completion.history_revision = state.computed_revision
                     AND completion.schedule_version = state.schedule_version
-                    AND (completion.valid_until IS NULL OR completion.valid_until > CURRENT_TIMESTAMP)
+                    AND completion.valid_until > CURRENT_TIMESTAMP
+                    AND state.valid_until > CURRENT_TIMESTAMP
+                    AND EXISTS (
+                        SELECT 1
+                        FROM calendar_schedule_completeness marker
+                        WHERE marker.group_type = 'SERIES'
+                          AND marker.series_tmdb_id = ee.series_tmdb_id
+                          AND marker.season_number IS NULL
+                          AND marker.region = completion_user.preferred_region
+                          AND marker.language = completion_user.preferred_language
+                          AND marker.scope_version = completion.schedule_version
+                          AND marker.complete = TRUE
+                    )
                     AND (released.regular_released_episode_count IS NULL OR
                          released.regular_released_episode_count <= (
                              SELECT COUNT(DISTINCT (watched_content.season_number, watched_content.episode_number))
@@ -207,14 +221,28 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                     JOIN user_series_history_states state
                       ON state.user_id = completion.user_id
                      AND state.series_tmdb_id = ee.series_tmdb_id
+                    JOIN users completion_user ON completion_user.id = completion.user_id
                     LEFT JOIN series_progress_metadata released
                       ON released.series_tmdb_id = ee.series_tmdb_id
                     WHERE completion.user_id = :userId
                     AND completed_series.type = 'SERIES'
                     AND completed_series.tmdb_id = ee.series_tmdb_id
                     AND completion.history_revision = state.history_revision
+                    AND completion.history_revision = state.computed_revision
                     AND completion.schedule_version = state.schedule_version
-                    AND (completion.valid_until IS NULL OR completion.valid_until > CURRENT_TIMESTAMP)
+                    AND completion.valid_until > CURRENT_TIMESTAMP
+                    AND state.valid_until > CURRENT_TIMESTAMP
+                    AND EXISTS (
+                        SELECT 1
+                        FROM calendar_schedule_completeness marker
+                        WHERE marker.group_type = 'SERIES'
+                          AND marker.series_tmdb_id = ee.series_tmdb_id
+                          AND marker.season_number IS NULL
+                          AND marker.region = completion_user.preferred_region
+                          AND marker.language = completion_user.preferred_language
+                          AND marker.scope_version = completion.schedule_version
+                          AND marker.complete = TRUE
+                    )
                     AND (released.regular_released_episode_count IS NULL OR
                          released.regular_released_episode_count <= (
                              SELECT COUNT(DISTINCT (watched_content.season_number, watched_content.episode_number))
@@ -403,14 +431,28 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                     JOIN user_series_history_states state
                       ON state.user_id = completion.user_id
                      AND state.series_tmdb_id = ee.series_tmdb_id
+                    JOIN users completion_user ON completion_user.id = completion.user_id
                     LEFT JOIN series_progress_metadata released
                       ON released.series_tmdb_id = ee.series_tmdb_id
                     WHERE completion.user_id = :userId
                     AND completed_series.type = 'SERIES'
                     AND completed_series.tmdb_id = ee.series_tmdb_id
                     AND completion.history_revision = state.history_revision
+                    AND completion.history_revision = state.computed_revision
                     AND completion.schedule_version = state.schedule_version
-                    AND (completion.valid_until IS NULL OR completion.valid_until > CURRENT_TIMESTAMP)
+                    AND completion.valid_until > CURRENT_TIMESTAMP
+                    AND state.valid_until > CURRENT_TIMESTAMP
+                    AND EXISTS (
+                        SELECT 1
+                        FROM calendar_schedule_completeness marker
+                        WHERE marker.group_type = 'SERIES'
+                          AND marker.series_tmdb_id = ee.series_tmdb_id
+                          AND marker.season_number IS NULL
+                          AND marker.region = completion_user.preferred_region
+                          AND marker.language = completion_user.preferred_language
+                          AND marker.scope_version = completion.schedule_version
+                          AND marker.complete = TRUE
+                    )
                     AND (released.regular_released_episode_count IS NULL OR
                          released.regular_released_episode_count <= (
                              SELECT COUNT(DISTINCT (watched_content.season_number, watched_content.episode_number))

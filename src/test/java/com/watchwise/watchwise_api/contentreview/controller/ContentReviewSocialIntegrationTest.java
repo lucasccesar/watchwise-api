@@ -302,8 +302,8 @@ class ContentReviewSocialIntegrationTest {
         jdbc.update("""
                 insert into diary_entries
                     (id, user_id, content_id, watch_number, watched_date, comment,
-                     auto_generated, ignore, created_at, updated_at, likes_count)
-                values (?, ?, ?, 1, current_date, 'diary review text', false, false, ?, ?, 0)
+                     ignore, created_at, updated_at, likes_count)
+                values (?, ?, ?, 1, current_date, 'diary review text', false, ?, ?, 0)
                 """, sharedId, owner.id(), movie.getId(), now, now);
 
         mockMvc.perform(postReport(reporter, "REVIEW", sharedId)).andExpect(status().isCreated());

@@ -101,8 +101,9 @@ public class ProfileSummaryReaderImpl implements ProfileSummaryReader {
         return previews.stream()
                 .map(preview -> {
                     ContentCardDTO card = cardFor(preview.content(), cards);
-                    return new ProfileDiaryPreviewDTO(preview.id(), preview.content(), preview.score(),
-                            preview.watchedDate(), preview.watchNumber(),
+                    return new ProfileDiaryPreviewDTO(
+                            preview.id(), preview.source(), preview.content(), preview.score(),
+                            preview.watchedDate(), preview.activityDate(), preview.watchNumber(),
                             card == null ? preview.customPosterUrl() : card.customPosterUrl(),
                             preview.watchedWith(), card);
                 })

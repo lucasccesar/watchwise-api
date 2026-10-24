@@ -85,7 +85,7 @@ class ContentTrackingServiceImplTest {
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
         lenient().when(userRepository.getReferenceById(watchingUserId))
                 .thenReturn(User.builder().id(watchingUserId).build());
-        lenient().when(diaryEntryRepository.findDistinctInProgressSeriesTmdbIds()).thenReturn(List.of());
+        lenient().when(diaryEntryRepository.findInProgressSeriesTmdbIds(null)).thenReturn(List.of());
     }
 
     @Test
@@ -163,7 +163,7 @@ class ContentTrackingServiceImplTest {
         Content series = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(series));
-        when(diaryEntryRepository.findDistinctInProgressSeriesTmdbIds()).thenReturn(List.of("1399"));
+        when(diaryEntryRepository.findInProgressSeriesTmdbIds(null)).thenReturn(List.of("1399"));
         ContentRefDTO contentRef = new ContentRefDTO(series.getId(), "1399", ContentType.SERIES,
                 null, null, null, null, null, null, null);
         when(contentService.getOrCreateReference(any())).thenReturn(contentRef);
@@ -220,7 +220,7 @@ class ContentTrackingServiceImplTest {
     @DisplayName("[trackContentChanges] Should Track And Create A SERIES Content Row - When A Series Only Has EPISODE Diary Entries")
     void shouldTrackAndCreateASeriesContentRowWhenASeriesOnlyHasEpisodeDiaryEntries() {
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of());
-        when(diaryEntryRepository.findDistinctInProgressSeriesTmdbIds()).thenReturn(List.of("1399"));
+        when(diaryEntryRepository.findInProgressSeriesTmdbIds(null)).thenReturn(List.of("1399"));
         Content seriesContent = Content.builder().id(UUID.randomUUID()).tmdbId("1399").type(ContentType.SERIES)
                 .createdAt(LocalDateTime.now()).updatedAt(LocalDateTime.now()).build();
         ContentRefDTO contentRef = new ContentRefDTO(seriesContent.getId(), "1399", ContentType.SERIES,
@@ -663,7 +663,7 @@ class ContentTrackingServiceImplTest {
     @DisplayName("[trackContentChanges] Should Continue Processing Other Content - When Resolving A Diary-Derived Series Reference Fails")
     void shouldContinueProcessingOtherContentWhenResolvingADiaryDerivedSeriesReferenceFails() {
         when(watchlistEntryRepository.findDistinctTrackedContent()).thenReturn(List.of(movie));
-        when(diaryEntryRepository.findDistinctInProgressSeriesTmdbIds()).thenReturn(List.of("1399"));
+        when(diaryEntryRepository.findInProgressSeriesTmdbIds(null)).thenReturn(List.of("1399"));
         when(contentService.getOrCreateReference(any())).thenThrow(new RuntimeException("TMDB unavailable"));
         when(trackedContentStateRepository.findByContentId(movie.getId())).thenReturn(Optional.empty());
         when(tmdbClient.getMovieDetails("603")).thenReturn(Optional.of(new TmdbMovieDetails("603", "", "Planned")));

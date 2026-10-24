@@ -1,7 +1,6 @@
 package com.watchwise.watchwise_api.diaryentry.service;
 
 import com.watchwise.watchwise_api.content.entity.ContentType;
-import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryDaySummaryDTO;
@@ -71,9 +70,7 @@ public interface DiaryEntryService {
 
     DiaryEntryResponseDTO updateDiaryEntry(UUID userId, UUID diaryEntryId, DiaryEntryUpdateDTO diaryEntryUpdateDTO);
 
-    void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries);
-
-    DeletionImpactDTO computeDeletionImpact(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries);
+    void deleteDiaryEntry(UUID userId, UUID diaryEntryId);
 
     void deleteAllDiaryEntriesForSeries(UUID userId, String seriesTmdbId);
 

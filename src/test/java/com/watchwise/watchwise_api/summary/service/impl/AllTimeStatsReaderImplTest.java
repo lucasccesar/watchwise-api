@@ -169,7 +169,7 @@ class AllTimeStatsReaderImplTest {
                 null, null, null, null, null, movie.getCreatedAt(), movie.getUpdatedAt());
         DiaryEntryResponseDTO diaryResponse = new DiaryEntryResponseDTO(
                 entry.getId(), userId, contentRef, null, 9, null, 1, false, null,
-                false, false, entry.getCreatedAt(), entry.getUpdatedAt(), 0, false);
+                false, entry.getCreatedAt(), entry.getUpdatedAt(), 0, false);
         ContentCardDTO card = new ContentCardDTO(movie.getId(), ContentType.MOVIE, "550", null,
                 null, null, "Fight Club", "/fight-club.jpg", null, null, null, 139,
                 null, null, null, null, null, null, ContentPreviewStatus.AVAILABLE);

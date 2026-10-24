@@ -21,6 +21,8 @@ class ProfileSummaryContractTest {
         ProfileDiaryPreviewDTO preview = new ProfileDiaryPreviewDTO(
                 UUID.randomUUID(), content, 9, LocalDate.of(2026, 10, 5), 2, null, List.of());
 
+        assertThat(preview.source()).isEqualTo(ProfileDiaryPreviewSource.DIARY_ENTRY);
+        assertThat(preview.activityDate()).isEqualTo(preview.watchedDate());
         assertThat(List.of(ProfileDiaryPreviewDTO.class.getRecordComponents()))
                 .extracting(component -> component.getName())
                 .doesNotContain("comment", "likesCount", "commentsCount");

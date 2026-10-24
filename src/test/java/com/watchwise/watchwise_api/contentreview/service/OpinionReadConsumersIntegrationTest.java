@@ -77,7 +77,6 @@ class OpinionReadConsumersIntegrationTest {
         UUID series = content("SERIES", "33003", null, null, 300);
         UUID episode = content("EPISODE", null, "33003", 1, 40);
         watched(owner, movie);
-        watched(owner, series);
         watched(owner, episode);
 
         assertThat(profileQueries.sumRuntimeMinutesByUserIdAndContentType(owner, ContentType.MOVIE)).isEqualTo(120);

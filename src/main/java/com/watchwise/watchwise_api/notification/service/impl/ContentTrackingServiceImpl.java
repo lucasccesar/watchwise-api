@@ -61,7 +61,7 @@ public class ContentTrackingServiceImpl implements ContentTrackingService {
         Map<UUID, Content> distinctTracked = new LinkedHashMap<>();
         watchlistEntryRepository.findDistinctTrackedContent()
                 .forEach(content -> distinctTracked.put(content.getId(), content));
-        diaryEntryRepository.findDistinctInProgressSeriesTmdbIds()
+        diaryEntryRepository.findInProgressSeriesTmdbIds(null)
                 .forEach(seriesTmdbId -> resolveSeriesContent(seriesTmdbId)
                         .ifPresent(content -> distinctTracked.put(content.getId(), content)));
 

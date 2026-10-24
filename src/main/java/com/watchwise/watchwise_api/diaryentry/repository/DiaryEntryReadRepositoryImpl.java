@@ -105,13 +105,9 @@ public class DiaryEntryReadRepositoryImpl implements DiaryEntryReadRepository {
                     : builder.isNull(root.get("comment")));
         }
         if (criteria.seriesTmdbId() != null) {
-            predicates.add(builder.or(
-                    builder.and(
-                            builder.equal(content.get("type"), ContentType.SERIES),
-                            builder.equal(content.get("tmdbId"), criteria.seriesTmdbId())),
-                    builder.and(
-                            content.get("type").in(ContentType.SEASON, ContentType.EPISODE),
-                            builder.equal(content.get("seriesTmdbId"), criteria.seriesTmdbId()))));
+            predicates.add(builder.and(
+                    builder.equal(content.get("type"), ContentType.EPISODE),
+                    builder.equal(content.get("seriesTmdbId"), criteria.seriesTmdbId())));
         }
         if (criteria.score() != null) {
             predicates.add(builder.equal(root.get("score"), criteria.score()));

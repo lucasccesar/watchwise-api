@@ -245,10 +245,10 @@ class PersonServiceImplTest {
     }
 
     @Test
-    void shouldMapSeasonAndEpisodeStatesToTheirParentSeries() {
+    void shouldMapEpisodeEventStateToItsParentSeries() {
         stubAggregate(List.of(credit("2", "tv", null, "Series", null, "2020-01-01", null, null)), List.of());
         when(diaryEntryRepository.findWatchedMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of(
-                media(DiaryEntryRepository.PersonCreditMedia.class, ContentType.SEASON, null, "2")));
+                media(DiaryEntryRepository.PersonCreditMedia.class, ContentType.SERIES, "2", "2")));
         when(userListItemRepository.findViewerMediaForPersonCredits(eq(viewerId), any())).thenReturn(List.of(
                 media(UserListItemRepository.PersonCreditMedia.class, ContentType.EPISODE, null, "2")));
 

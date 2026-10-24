@@ -1,9 +1,18 @@
 package com.watchwise.watchwise_api.diaryentry.repository;
 
 import com.watchwise.watchwise_api.calendar.service.WatchedCalendarKey;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
+import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.diarycompletion.entity.DiaryCompletionProjection;
+import com.watchwise.watchwise_api.diarycompletion.entity.UserSeriesHistoryState;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -35,6 +44,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -78,6 +88,12 @@ class DiaryEntryRepositoryTest {
     @Autowired
     private DroppedEntryRepository droppedEntryRepository;
 
+    @Autowired
+    private ContentRatingRepository contentRatingRepository;
+
+    @Autowired
+    private ContentReviewRepository contentReviewRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -88,7 +104,12 @@ class DiaryEntryRepositoryTest {
 
     @BeforeEach
     void setUp() {
+        entityManager.createQuery("DELETE FROM DiaryCompletionProjection").executeUpdate();
+        entityManager.createQuery("DELETE FROM UserSeriesHistoryState").executeUpdate();
+        entityManager.createQuery("DELETE FROM CalendarScheduleCompleteness").executeUpdate();
         diaryEntryRepository.deleteAll();
+        contentReviewRepository.deleteAll();
+        contentRatingRepository.deleteAll();
         droppedEntryRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
@@ -153,14 +174,10 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findWatchedMediaForPersonCredits] Should Return Viewer Movie And Started Series Keys - When Diary Contains Movie, Season, And Episode Entries")
+    @DisplayName("[findWatchedMediaForPersonCredits] Should Return Viewer Movie And Started Series Keys - When Diary Contains Movie And Episode Events")
     void shouldFindWatchedMoviesAndStartedSeriesForPersonCredits() {
-        Content season = contentRepository.save(buildSeason("1399", 1));
         Content episode = contentRepository.save(buildEpisode("1396", 1, 1));
-        Content seriesEntry = contentRepository.save(buildContent("1399", ContentType.SERIES));
         diaryEntryRepository.save(buildEntry(lucas, fightClub));
-        diaryEntryRepository.save(buildEntry(lucas, seriesEntry));
-        diaryEntryRepository.save(buildEntry(lucas, season));
         diaryEntryRepository.save(buildEntry(lucas, episode));
         diaryEntryRepository.saveAndFlush(buildEntry(marina, pulpFiction));
         entityManager.clear();
@@ -171,13 +188,10 @@ class DiaryEntryRepositoryTest {
         assertThat(result)
                 .extracting(DiaryEntryRepository.PersonCreditMedia::getType,
                         DiaryEntryRepository.PersonCreditMedia::getTmdbId,
-                        DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId,
-                        DiaryEntryRepository.PersonCreditMedia::getSourceType)
+                        DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId)
                 .containsExactlyInAnyOrder(
-                        tuple(ContentType.MOVIE, "550", null, ContentType.MOVIE),
-                        tuple(ContentType.SERIES, "1396", "1396", ContentType.EPISODE),
-                        tuple(ContentType.SERIES, "1399", "1399", ContentType.SERIES),
-                        tuple(ContentType.SERIES, "1399", "1399", ContentType.SEASON));
+                        tuple(ContentType.MOVIE, "550", null),
+                        tuple(ContentType.SERIES, "1396", "1396"));
     }
 
     @Test
@@ -222,15 +236,13 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findSeriesEntryCountsByUserId] Should Count Every Related Entry And Rewatch")
-    void shouldCountEveryRelatedEntryAndRewatch() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
-        Content season = contentRepository.save(buildSeason("1399", 1));
+    @DisplayName("[findSeriesEntryCountsByUserId] Should Count Episode Events And Rewatches")
+    void shouldCountEpisodeEventsAndRewatches() {
+        contentRepository.save(buildContent("1399", ContentType.SERIES));
+        contentRepository.save(buildSeason("1399", 1));
         Content episode = contentRepository.save(buildEpisode("1399", 1, 1));
         Content otherEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
 
-        diaryEntryRepository.save(buildEntry(lucas, series));
-        diaryEntryRepository.save(buildEntry(lucas, season));
         diaryEntryRepository.save(buildEntry(lucas, episode, 1));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode, 2));
         diaryEntryRepository.save(buildEntry(lucas, otherEpisode));
@@ -242,7 +254,7 @@ class DiaryEntryRepositoryTest {
         assertThat(result)
                 .extracting(DiaryEntryRepository.DiarySeriesCount::getSeriesTmdbId,
                         DiaryEntryRepository.DiarySeriesCount::getEntriesCount)
-                .containsExactly(tuple("1399", 4L), tuple("1396", 1L));
+                .containsExactly(tuple("1399", 2L), tuple("1396", 1L));
     }
 
     @Test
@@ -498,10 +510,8 @@ class DiaryEntryRepositoryTest {
     void shouldSumOnlyMovieAndEpisodeEntriesWhenSummingRuntimeMinutes() {
         Content movieWithRuntime = contentRepository.save(buildContent("9001", ContentType.MOVIE, 139, null));
         Content episodeWithRuntime = contentRepository.save(buildEpisode("1399", 1, 1, 55));
-        Content season = contentRepository.save(buildSeason("1399", 1));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, movieWithRuntime));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, episodeWithRuntime));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, season));
 
         long result = diaryEntryRepository.sumRuntimeMinutesByUserId(lucas.getId());
 
@@ -552,6 +562,29 @@ class DiaryEntryRepositoryTest {
         assertThat(row.getSeriesTmdbId()).isEqualTo("1399");
         assertThat(row.getMaxSeasonNumber()).isEqualTo(1);
         assertThat(row.getMaxEpisodeNumber()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("[findSeriesInProgressByUserId] Should Exclude Only Current Completion Projections - When Reading In-Progress Series")
+    void shouldExcludeOnlyCurrentCompletionProjectionsWhenReadingInProgressSeries() {
+        Content currentSeries = contentRepository.save(buildContent("1399", ContentType.SERIES));
+        Content currentEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
+        Content staleSeries = contentRepository.save(buildContent("1396", ContentType.SERIES));
+        Content staleEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
+        DiaryEntry currentAnchor = diaryEntryRepository.saveAndFlush(buildEntry(lucas, currentEpisode));
+        DiaryEntry staleAnchor = diaryEntryRepository.saveAndFlush(buildEntry(lucas, staleEpisode));
+        persistSeriesMarker("1399", 3L);
+        persistCurrentSeriesCompletion(lucas, currentSeries, currentAnchor, 3L);
+        persistSeriesMarker("1396", 4L);
+        persistCurrentSeriesCompletion(lucas, staleSeries, staleAnchor, 3L);
+        entityManager.flush();
+        entityManager.clear();
+
+        Page<DiaryEntryRepository.SeriesInProgress> result = diaryEntryRepository
+                .findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(result.getContent()).extracting(DiaryEntryRepository.SeriesInProgress::getSeriesTmdbId)
+                .containsExactly("1396");
     }
 
     @Test
@@ -621,13 +654,11 @@ class DiaryEntryRepositoryTest {
         Content secondEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
         Content specialEpisode = contentRepository.save(buildEpisode("1399", 0, 1));
         Content completedSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
-        Content completedSeries = contentRepository.save(buildContent("1399", ContentType.SERIES));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 1));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, firstEpisode, 2));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, secondEpisode));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, specialEpisode));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedSeriesEpisode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedSeries));
 
         List<DiaryEntryRepository.SeriesEpisodeCount> result =
                 diaryEntryRepository.findEpisodeSeriesCountsByUserId(lucas.getId());
@@ -661,20 +692,106 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[findDistinctInProgressSeriesTmdbIdsByUserId] Should Return Only The User's Uncompleted Episode Series")
+    @DisplayName("[findInProgressSeriesTmdbIds] Should Filter Current Series Completions Per User And Globally")
     void shouldReturnOnlyUsersUncompletedEpisodeSeries() {
         Content lucasEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
         Content marinaEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
-        Content completedEpisode = contentRepository.save(buildEpisode("1400", 1, 1));
+        Content completedEpisodeLucas = contentRepository.save(buildEpisode("1400", 1, 1));
+        Content completedEpisodeMarina = contentRepository.save(buildEpisode("1400", 1, 2));
         Content completedSeries = contentRepository.save(buildContent("1400", ContentType.SERIES));
+        Content staleEpisode = contentRepository.save(buildEpisode("1401", 1, 1));
+        Content staleSeries = contentRepository.save(buildContent("1401", ContentType.SERIES));
+        Content fullyCompletedEpisodeLucas = contentRepository.save(buildEpisode("1402", 1, 1));
+        Content fullyCompletedEpisodeMarina = contentRepository.save(buildEpisode("1402", 1, 2));
+        Content fullyCompletedSeries = contentRepository.save(buildContent("1402", ContentType.SERIES));
+        DiaryEntry lucasCompletedEvent = buildEntry(lucas, completedEpisodeLucas);
+        DiaryEntry marinaIncompleteEvent = buildEntry(marina, completedEpisodeMarina);
+        DiaryEntry staleEvent = buildEntry(lucas, staleEpisode);
+        DiaryEntry lucasFullyCompletedEvent = buildEntry(lucas, fullyCompletedEpisodeLucas);
+        DiaryEntry marinaFullyCompletedEvent = buildEntry(marina, fullyCompletedEpisodeMarina);
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, lucasEpisode));
         diaryEntryRepository.saveAndFlush(buildEntry(marina, marinaEpisode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedEpisode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, completedSeries));
+        diaryEntryRepository.saveAllAndFlush(List.of(lucasCompletedEvent, marinaIncompleteEvent, staleEvent,
+                lucasFullyCompletedEvent, marinaFullyCompletedEvent));
+        persistSeriesMarker("1400", 5L);
+        persistCurrentSeriesCompletion(lucas, completedSeries, lucasCompletedEvent, 5L);
+        persistSeriesMarker("1401", 2L);
+        persistCurrentSeriesCompletion(lucas, staleSeries, staleEvent, 1L);
+        persistSeriesMarker("1402", 6L);
+        persistCurrentSeriesCompletion(lucas, fullyCompletedSeries, lucasFullyCompletedEvent, 6L);
+        persistCurrentSeriesCompletion(marina, fullyCompletedSeries, marinaFullyCompletedEvent, 6L);
+        entityManager.flush();
+        entityManager.clear();
 
-        List<String> result = diaryEntryRepository.findDistinctInProgressSeriesTmdbIdsByUserId(lucas.getId());
+        List<String> result = diaryEntryRepository.findInProgressSeriesTmdbIds(lucas.getId());
+        List<String> global = diaryEntryRepository.findInProgressSeriesTmdbIds(null);
 
-        assertThat(result).containsExactly("1399");
+        assertThat(result).containsExactlyInAnyOrder("1399", "1401");
+        assertThat(global).containsExactlyInAnyOrder("1399", "1396", "1400", "1401");
+    }
+
+    @Test
+    @DisplayName("[findRecentSeriesCompletionActivities] Should Include Only Current Completions With Current Opinion - When Reading Profile Activity")
+    void shouldIncludeOnlyCurrentSeriesCompletionsWithCurrentOpinion() {
+        Content currentSeries = contentRepository.save(buildContent("1500", ContentType.SERIES));
+        Content currentEpisode = contentRepository.save(buildEpisode("1500", 1, 1));
+        Content staleSeries = contentRepository.save(buildContent("1501", ContentType.SERIES));
+        Content staleEpisode = contentRepository.save(buildEpisode("1501", 1, 1));
+        DiaryEntry currentAnchor = diaryEntryRepository.saveAndFlush(buildEntry(lucas, currentEpisode));
+        DiaryEntry staleAnchor = diaryEntryRepository.saveAndFlush(buildEntry(lucas, staleEpisode));
+        persistSeriesMarker("1500", 3L);
+        persistCurrentSeriesCompletion(lucas, currentSeries, currentAnchor, 3L);
+        persistSeriesMarker("1501", 4L);
+        persistCurrentSeriesCompletion(lucas, staleSeries, staleAnchor, 3L);
+        var now = java.time.Instant.now();
+        contentRatingRepository.saveAndFlush(ContentRating.builder()
+                .userId(lucas.getId()).contentId(currentSeries.getId()).contentType(ContentType.SERIES)
+                .score(8).createdAt(now).updatedAt(now).build());
+        contentReviewRepository.saveAndFlush(ContentReview.builder()
+                .userId(lucas.getId()).contentId(currentSeries.getId()).contentType(ContentType.SERIES)
+                .publicationKind(ReviewPublicationKind.WRITTEN_REVIEW).contextKind(ReviewContextKind.COMPLETION)
+                .comment("series review").watchNumber(1).createdAt(now).updatedAt(now).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        List<ProfileSummaryQueryRepository.SeriesCompletionActivity> activities =
+                profileSummaryQueryRepository.findRecentSeriesCompletionActivities(
+                        lucas.getId(), PageRequest.of(0, 10));
+
+        assertThat(activities).singleElement().satisfies(activity -> {
+            assertThat(activity.getContentId()).isEqualTo(currentSeries.getId());
+            assertThat(activity.getWatchNumber()).isEqualTo(1);
+            assertThat(activity.getScore()).isEqualTo(8);
+            assertThat(activity.getComment()).isEqualTo("series review");
+            assertThat(activity.getTimesWatched()).isEqualTo(1L);
+        });
+    }
+
+    @Test
+    @DisplayName("[findRecentWrittenReviewsByUserIdAndContentTypeIn] Should Order Imported SERIES/SEASON Reviews By Publication Time")
+    void shouldOrderRecentSeriesAndSeasonReviewsByPublicationTime() {
+        Content series = contentRepository.save(buildContent("1502", ContentType.SERIES));
+        LocalDateTime now = LocalDateTime.now();
+        Content season = contentRepository.saveAndFlush(Content.builder()
+                .seriesTmdbId("1502").seasonNumber(1).type(ContentType.SEASON)
+                .createdAt(now).updatedAt(now).build());
+        Instant earlierPublication = Instant.parse("2026-02-01T00:00:00Z");
+        Instant latestPublication = Instant.parse("2026-03-01T00:00:00Z");
+        ContentReview earlier = contentReviewRepository.saveAndFlush(ContentReview.builder()
+                .userId(lucas.getId()).contentId(season.getId()).contentType(ContentType.SEASON)
+                .publicationKind(ReviewPublicationKind.WRITTEN_REVIEW).contextKind(ReviewContextKind.COMPLETION)
+                .comment("season review").watchNumber(1).sourcePublishedAt(earlierPublication)
+                .createdAt(Instant.parse("2026-04-01T00:00:00Z")).updatedAt(Instant.now()).build());
+        ContentReview latest = contentReviewRepository.saveAndFlush(ContentReview.builder()
+                .userId(lucas.getId()).contentId(series.getId()).contentType(ContentType.SERIES)
+                .publicationKind(ReviewPublicationKind.WRITTEN_REVIEW).contextKind(ReviewContextKind.COMPLETION)
+                .comment("series review").watchNumber(1).sourcePublishedAt(latestPublication)
+                .createdAt(Instant.parse("2026-01-01T00:00:00Z")).updatedAt(Instant.now()).build());
+
+        List<ContentReview> result = contentReviewRepository.findRecentWrittenReviewsByUserIdAndContentTypeIn(
+                lucas.getId(), List.of(ContentType.SERIES.name(), ContentType.SEASON.name()), PageRequest.of(0, 10));
+
+        assertThat(result).extracting(ContentReview::getId).containsExactly(latest.getId(), earlier.getId());
     }
 
     @Test
@@ -707,20 +824,6 @@ class DiaryEntryRepositoryTest {
 
         assertThat(diaryEntryRepository.findWatchedCalendarKeys(
                 lucas.getId(), Set.of(WatchedCalendarKey.movie("680")))).isEmpty();
-    }
-
-    @Test
-    @DisplayName("[findSeriesInProgressByUserId] Should Exclude Series - When User Already Has A SERIES Completion Entry For It")
-    void shouldExcludeSeriesWhenUserAlreadyHasASeriesCompletionEntryForIt() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
-        Content episode = contentRepository.save(buildEpisode("1399", 1, 3));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
-
-        Page<DiaryEntryRepository.SeriesInProgress> result =
-                diaryEntryRepository.findSeriesInProgressByUserId(lucas.getId(), PageRequest.of(0, 10));
-
-        assertThat(result.getContent()).isEmpty();
     }
 
     @Test
@@ -882,25 +985,12 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Count Series Once - When Logged Directly As SERIES Type Without Any Episode Entries")
-    void shouldCountSeriesOnceWhenLoggedDirectlyAsSeriesTypeWithoutAnyEpisodeEntriesForSummary() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(lucas.getId());
-
-        assertThat(result).hasSize(1);
-        assertThat(result.get(0).getGenre()).isEqualTo("Drama");
-        assertThat(result.get(0).getCount()).isEqualTo(1L);
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Not Double Count - When The Same Series Has Both A Direct SERIES Entry And Episode Entries")
-    void shouldNotDoubleCountWhenTheSameSeriesHasBothADirectSeriesEntryAndEpisodeEntries() {
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeries] Should Count A Series Once - When Multiple Episode Events Exist")
+    void shouldCountASeriesOnceWhenMultipleEpisodeEventsExist() {
+        contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
         Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
+        diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode, 2));
 
         List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository.countDistinctTitlesByGenreAndUserIdForSeries(lucas.getId());
 
@@ -1000,13 +1090,11 @@ class DiaryEntryRepositoryTest {
     @DisplayName("[findTopByUserIdAndContentTypeOrderByCreatedAtDesc] Should Return Only Entries Of The Given Type Most Recently Created First")
     void shouldReturnOnlyEntriesOfTheGivenTypeMostRecentlyCreatedFirst() {
         Content movie = contentRepository.save(buildContent("9001", ContentType.MOVIE));
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES));
         DiaryEntry olderMovie = buildEntry(lucas, movie);
         olderMovie.setCreatedAt(LocalDateTime.now().minusDays(1));
         diaryEntryRepository.saveAndFlush(olderMovie);
         DiaryEntry newerMovie = buildEntry(lucas, movie, 2);
         diaryEntryRepository.saveAndFlush(newerMovie);
-        diaryEntryRepository.saveAndFlush(buildEntry(lucas, series));
 
         List<DiaryEntry> result = diaryEntryRepository.findTopByUserIdAndContentTypeOrderByCreatedAtDesc(
                 lucas.getId(), ContentType.MOVIE, PageRequest.of(0, 10));
@@ -1102,30 +1190,14 @@ class DiaryEntryRepositoryTest {
     }
 
     @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween] Should Count A Directly Logged SERIES Entry - When No Episode Entries Exist In Range")
-    void shouldCountADirectlyLoggedSeriesEntryInDateRangeWhenNoEpisodeEntriesExist() {
+    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween] Should Count A Series Once - When Multiple Episode Events Exist In Range")
+    void shouldCountASeriesOnceInDateRangeWhenMultipleEpisodeEventsExist() {
         contentRepository.deleteAll();
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
-        LocalDate today = LocalDate.now();
-        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, series), today));
-
-        List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository
-                .countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(lucas.getId(), today.minusDays(1), today.plusDays(1));
-
-        assertThat(result).hasSize(1);
-        assertThat(result.getFirst().getGenre()).isEqualTo("Drama");
-        assertThat(result.getFirst().getCount()).isEqualTo(1L);
-    }
-
-    @Test
-    @DisplayName("[countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween] Should Not Double Count - When The Same Series Has Both A Direct SERIES Entry And Episode Entries In Range")
-    void shouldNotDoubleCountInDateRangeWhenTheSameSeriesHasBothADirectSeriesEntryAndEpisodeEntries() {
-        contentRepository.deleteAll();
-        Content series = contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
+        contentRepository.save(buildContent("1399", ContentType.SERIES, null, List.of("Drama")));
         Content episode = contentRepository.save(buildEpisode("1399", 1, 1, 55));
         LocalDate today = LocalDate.now();
         diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, episode), today));
-        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, series), today));
+        diaryEntryRepository.save(withWatchedDate(buildEntry(lucas, episode, 2), today));
 
         List<DiaryEntryRepository.GenreCount> result = diaryEntryRepository
                 .countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(lucas.getId(), today.minusDays(1), today.plusDays(1));
@@ -1287,7 +1359,6 @@ class DiaryEntryRepositoryTest {
         marina.setIsProfilePublic(false);
         Content publicScoredEpisode = contentRepository.save(buildEpisode("100", 1, 1));
         Content otherSeriesEpisode = contentRepository.save(buildEpisode("200", 1, 1));
-        Content season = contentRepository.save(buildSeason("100", 1));
 
         DiaryEntry publicScoredEntry = buildEntry(lucas, publicScoredEpisode);
         publicScoredEntry.setScore(8);
@@ -1298,14 +1369,11 @@ class DiaryEntryRepositoryTest {
         DiaryEntry publicUnscoredEntry = buildEntry(lucas, publicScoredEpisode, 3);
         DiaryEntry otherSeriesEntry = buildEntry(lucas, otherSeriesEpisode);
         otherSeriesEntry.setScore(10);
-        DiaryEntry seasonEntry = buildEntry(lucas, season);
-        seasonEntry.setScore(10);
         diaryEntryRepository.save(publicScoredEntry);
         diaryEntryRepository.save(publicRewatchEntry);
         diaryEntryRepository.save(privateScoredEntry);
         diaryEntryRepository.save(publicUnscoredEntry);
         diaryEntryRepository.save(otherSeriesEntry);
-        diaryEntryRepository.save(seasonEntry);
         diaryEntryRepository.flush();
         entityManager.clear();
 
@@ -1353,16 +1421,14 @@ class DiaryEntryRepositoryTest {
         Content episode = contentRepository.save(buildEpisode("1399", 1, 1));
 
         diaryEntryRepository.save(buildEntry(lucas, fightClub));
-        diaryEntryRepository.save(buildEntry(lucas, series));
-        diaryEntryRepository.save(buildEntry(lucas, season));
         diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode));
         diaryEntryRepository.saveAndFlush(buildEntry(marina, pulpFiction));
         entityManager.clear();
 
         Set<UUID> result = diaryEntryRepository.findWatchedDirectContentIds(
-                lucas.getId(), List.of(fightClub.getId(), series.getId(), pulpFiction.getId()));
+                lucas.getId(), List.of(fightClub.getId(), series.getId(), season.getId(), episode.getId(), pulpFiction.getId()));
 
-        assertThat(result).containsExactlyInAnyOrder(fightClub.getId(), series.getId());
+        assertThat(result).containsExactlyInAnyOrder(fightClub.getId(), episode.getId());
     }
 
     @Test
@@ -1424,14 +1490,10 @@ class DiaryEntryRepositoryTest {
     void shouldReturnDistinctEpisodesOfRequestedSeriesWatchedByUser() {
         Content targetEpisode = contentRepository.save(buildEpisode("1399", 1, 1));
         Content secondTargetEpisode = contentRepository.save(buildEpisode("1399", 1, 2));
-        Content targetSeason = contentRepository.save(buildSeason("1399", 1));
-        Content targetSeries = contentRepository.save(buildContent("1399", ContentType.SERIES));
         Content otherSeriesEpisode = contentRepository.save(buildEpisode("1396", 1, 1));
         Content marinaOnlyEpisode = contentRepository.save(buildEpisode("1399", 2, 1));
 
         diaryEntryRepository.save(buildEntry(lucas, fightClub));
-        diaryEntryRepository.save(buildEntry(lucas, targetSeason));
-        diaryEntryRepository.save(buildEntry(lucas, targetSeries));
         diaryEntryRepository.save(buildEntry(lucas, targetEpisode, 1));
         diaryEntryRepository.save(buildEntry(lucas, targetEpisode, 2));
         diaryEntryRepository.save(buildEntry(lucas, secondTargetEpisode));
@@ -1487,6 +1549,42 @@ class DiaryEntryRepositoryTest {
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
+    }
+
+    private void persistSeriesMarker(String seriesTmdbId, long scopeVersion) {
+        entityManager.persist(CalendarScheduleCompleteness.builder()
+                .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                .seriesTmdbId(seriesTmdbId)
+                .region("US")
+                .language("en-US")
+                .expectedEpisodeCount(1)
+                .complete(true)
+                .lastCheckedAt(LocalDateTime.now())
+                .scopeVersion(scopeVersion)
+                .build());
+    }
+
+    private void persistCurrentSeriesCompletion(User user, Content series, DiaryEntry anchor, long scopeVersion) {
+        Instant validUntil = Instant.parse("2099-01-01T00:00:00Z");
+        entityManager.persist(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(user.getId(), series.getTmdbId()))
+                .historyRevision(1L)
+                .computedRevision(1L)
+                .scheduleVersion(scopeVersion)
+                .validUntil(validUntil)
+                .build());
+        entityManager.persist(DiaryCompletionProjection.builder()
+                .userId(user.getId())
+                .contentId(series.getId())
+                .contentType(ContentType.SERIES)
+                .watchNumber(anchor.getWatchNumber())
+                .anchorDiaryEntryId(anchor.getId())
+                .completedOn(LocalDate.of(2026, 1, 1))
+                .orderedAt(Instant.parse("2026-01-01T00:00:00Z"))
+                .historyRevision(1L)
+                .scheduleVersion(scopeVersion)
+                .validUntil(validUntil)
+                .build());
     }
 
     private Content buildContent(String tmdbId, ContentType type) {

@@ -38,8 +38,6 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
-import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
-import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewSource;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
@@ -89,7 +87,6 @@ import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
 import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
-import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.PersistenceContext;
@@ -101,10 +98,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.interceptor.TransactionAspectSupport;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -131,11 +125,13 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
 public class DiaryEntryServiceImpl implements DiaryEntryService {
+
+    private static final String RAW_DIARY_TYPE_ERROR =
+            "Raw diary filters only support MOVIE or EPISODE; use /diary/view for derived SERIES and SEASON completions";
 
     private final DiaryEntryRepository diaryEntryRepository;
     private final ContentReviewRepository contentReviewRepository;
@@ -153,7 +149,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
     private final DiaryEntryMapper diaryEntryMapper;
     private final UserMapper userMapper;
     private final UserContentMutationLock userContentMutationLock;
-    private final WatchlistEntryService watchlistEntryService;
     private final DroppedEntryRepository droppedEntryRepository;
     private final LikeService likeService;
     private final CommentPreviewAssembler commentPreviewAssembler;
@@ -183,6 +178,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .orElseThrow(() -> new NotFoundException("User not found"));
 
         assertCanViewDiary(viewerId, userId, target);
+        validateRawDiaryType(type);
 
         String normalizedSeriesTmdbId = seriesTmdbId == null ? null : seriesTmdbId.trim();
         if (seriesTmdbId != null && normalizedSeriesTmdbId.isEmpty()) {
@@ -226,6 +222,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanViewDiary(viewerId, userId, target);
+        validateRawDiaryType(type);
 
         String normalizedSeriesTmdbId = seriesTmdbId == null ? null : seriesTmdbId.trim();
         if (seriesTmdbId != null && normalizedSeriesTmdbId.isEmpty()) {
@@ -256,6 +253,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
         if (scoreFrom != null && scoreTo != null && scoreFrom > scoreTo) {
             throw new BadRequestException("scoreFrom cannot be greater than scoreTo");
+        }
+    }
+
+    private void validateRawDiaryType(ContentType type) {
+        if (type == ContentType.SERIES || type == ContentType.SEASON) {
+            throw new BadRequestException(RAW_DIARY_TYPE_ERROR);
         }
     }
 
@@ -312,6 +315,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         User target = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
         assertCanViewDiary(viewerId, userId, target);
+        validateRawDiaryType(type);
         validateScoreRange(score, scoreFrom, scoreTo);
 
         String normalizedSeriesTmdbId = seriesTmdbId == null ? null : seriesTmdbId.trim();
@@ -778,7 +782,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 entry.getId(), ContentReviewSource.DROPPED, entry.getUser().getId(),
                 userMapper.userToUserPreviewDto(entry.getUser()),
                 contentMapper.contentToContentRefDto(entry.getContent()), entry.getComment(), null, null, null, null,
-                null, null, null, entry.getCreatedAt(), entry.getUpdatedAt(), entry.getLikesCount(),
+                null, null, entry.getCreatedAt(), entry.getUpdatedAt(), entry.getLikesCount(),
                 commentCountsByDroppedId.getOrDefault(entry.getId(), 0L),
                 likedDroppedIds.contains(entry.getId()), List.of(), null);
     }
@@ -913,30 +917,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return new DiaryEntryCreationResultDTO(events.getFirst().entry(), events, List.of());
     }
 
-    private void removeFromWatchlistAndDropped(UUID userId, ContentRefDTO loggedContent) {
-        if (loggedContent.type() == ContentType.MOVIE) {
-            removeContentFromWatchlistAndDropped(userId, ContentType.MOVIE, loggedContent.id());
-            return;
-        }
-        if (loggedContent.type() == ContentType.SERIES) {
-            removeContentFromWatchlistAndDropped(userId, ContentType.SERIES, loggedContent.id());
-            return;
-        }
-
-        removeSeriesFromWatchlistAndDropped(userId, loggedContent.seriesTmdbId());
-    }
-
-    private void removeSeriesFromWatchlistAndDropped(UUID userId, String seriesTmdbId) {
-        contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES)
-                .ifPresent(series -> removeContentFromWatchlistAndDropped(userId, ContentType.SERIES, series.getId()));
-    }
-
-    private void removeContentFromWatchlistAndDropped(UUID userId, ContentType type, UUID contentId) {
-        watchlistEntryService.removeEntryIfPresent(userId, type, contentId);
-        droppedEntryRepository.findByUserIdAndTypeAndContentId(userId, type, contentId)
-                .ifPresent(droppedEntryRepository::delete);
-    }
-
     private ConflictException mapWatchNumberConflict(DataIntegrityViolationException e) {
         Throwable cause = e.getCause();
         if (cause instanceof org.hibernate.exception.ConstraintViolationException cve
@@ -944,47 +924,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             return new ConflictException("This watch was already logged by a concurrent request");
         }
         return new ConflictException("Diary entry could not be saved due to a conflict");
-    }
-
-    private DiaryEntry persistDiaryEntry(User user, Content content, String comment, Integer score,
-            LocalDate watchedDate, Boolean requestedIsRewatch, Boolean watchedInTheater,
-            String customPosterUrl, boolean autoGenerated, boolean ignore) {
-        return persistDiaryEntry(user, content, comment, score, watchedDate, requestedIsRewatch, watchedInTheater,
-                customPosterUrl, autoGenerated, ignore, null);
-    }
-
-    private DiaryEntry persistDiaryEntry(User user, Content content, String comment, Integer score,
-            LocalDate watchedDate, Boolean requestedIsRewatch, Boolean watchedInTheater,
-            String customPosterUrl, boolean autoGenerated, boolean ignore, Integer requestedWatchNumber) {
-        assertWatchedInTheaterAllowed(content.getType(), watchedInTheater);
-
-        int watchNumber;
-        if (requestedWatchNumber != null) {
-            watchNumber = requestedWatchNumber;
-        } else {
-            int maxWatchNumber = diaryEntryRepository.findMaxWatchNumber(user.getId(), content.getId());
-            boolean honorRewatchFlag = Boolean.TRUE.equals(requestedIsRewatch)
-                    && !(maxWatchNumber == 0 && participatesInCompletionTracking(content.getType()));
-            watchNumber = Math.max(maxWatchNumber + 1, honorRewatchFlag ? 2 : 1);
-        }
-
-        LocalDateTime now = LocalDateTime.now();
-
-        DiaryEntry entry = DiaryEntry.builder()
-                .user(user)
-                .content(content)
-                .comment(comment)
-                .score(score)
-                .watchedDate(watchedDate)
-                .watchNumber(watchNumber)
-                .watchedInTheater(watchedInTheater)
-                .autoGenerated(autoGenerated)
-                .ignore(ignore)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-
-        return diaryEntryRepository.saveAndFlush(entry);
     }
 
     @Override
@@ -1246,7 +1185,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             saveCompanions(entry, companionIds);
         }
 
-        entry.setAutoGenerated(false);
         entry.setIgnore(false);
         entry.setUpdatedAt(LocalDateTime.now());
 
@@ -1489,27 +1427,22 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                         Collectors.mapping(wc -> userMapper.userToUserPreviewDto(wc.getUser()), Collectors.toList())));
     }
 
-    private boolean participatesInCompletionTracking(ContentType contentType) {
-        return contentType == ContentType.EPISODE || contentType == ContentType.SEASON;
-    }
-
     @Override
     @Transactional
-    public void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries) {
+    public void deleteDiaryEntry(UUID userId, UUID diaryEntryId) {
         userContentMutationLock.lock(userId);
-        deleteDiaryEntry(userId, diaryEntryId, overrideProtectedEntries, new ArrayList<>());
+        DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
+        diaryEntryRepository.delete(entry);
+        diaryEntryRepository.flush();
+        importLedger.markDeletedByTarget(userId, "DIARY_ENTRY", entry.getId());
+        markProjectionChanged(userId, entry.getContent());
     }
 
     @Override
     @Transactional
     public void deleteAllDiaryEntriesForSeries(UUID userId, String seriesTmdbId) {
         userContentMutationLock.lock(userId);
-        List<DiaryEntry> allEntries = Stream.of(
-                        diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId),
-                        diaryEntryRepository.findAllSeasonEntriesInSeries(userId, seriesTmdbId),
-                        diaryEntryRepository.findAllSeriesEntriesInSeries(userId, seriesTmdbId))
-                .flatMap(List::stream)
-                .toList();
+        List<DiaryEntry> allEntries = diaryEntryRepository.findEpisodeEntriesBySeriesForUser(userId, seriesTmdbId);
         List<ImportedWatchAssertion> assertions = importedWatchAssertionRepository
                 .findByUserIdAndSeriesTmdbId(userId, seriesTmdbId);
 
@@ -1531,109 +1464,10 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         }
     }
 
-    private void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
-        DiaryEntry entry = findOwnedEntry(userId, diaryEntryId);
-        Content content = entry.getContent();
-        int watchNumber = entry.getWatchNumber();
-
-        diaryEntryRepository.delete(entry);
-        diaryEntryRepository.flush();
-
-        if (content.getType() == ContentType.EPISODE) {
-            retractSeasonIfIncomplete(userId, content.getSeriesTmdbId(), content.getSeasonNumber(), overrideProtectedEntries, cascadeDeleted);
-        } else if (content.getType() == ContentType.SEASON) {
-            retractSeriesIfIncomplete(userId, content.getSeriesTmdbId(), overrideProtectedEntries, cascadeDeleted);
-        } else if (content.getType() == ContentType.SERIES) {
-            wipeSeriesHistory(userId, content.getTmdbId(), watchNumber, overrideProtectedEntries, cascadeDeleted);
-        }
-        markProjectionChanged(userId, content);
-    }
-
     private void markProjectionChanged(UUID userId, Content content) {
-        String seriesTmdbId = content.getType() == ContentType.SERIES
-                ? content.getTmdbId()
-                : content.getSeriesTmdbId();
-        if (seriesTmdbId != null
-                && (participatesInCompletionTracking(content.getType()) || content.getType() == ContentType.SERIES)) {
-            diaryProjectionInvalidator.markSeriesChanged(userId, seriesTmdbId);
+        if (content.getType() == ContentType.EPISODE && content.getSeriesTmdbId() != null) {
+            diaryProjectionInvalidator.markSeriesChanged(userId, content.getSeriesTmdbId());
         }
-    }
-
-    private boolean deleteRespectingProtection(List<DiaryEntry> candidates, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
-        List<DiaryEntry> toDelete = candidates.stream()
-                .filter(candidate -> overrideProtectedEntries || Boolean.TRUE.equals(candidate.getAutoGenerated()))
-                .toList();
-
-        if (toDelete.isEmpty()) {
-            return false;
-        }
-
-        diaryEntryRepository.deleteAll(toDelete);
-        diaryEntryRepository.flush();
-        cascadeDeleted.addAll(toDelete);
-        return true;
-    }
-
-    private void wipeSeriesHistory(UUID userId, String seriesTmdbId, int watchNumber, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
-        deleteRespectingProtection(computeSeriesWipeCandidates(userId, seriesTmdbId, watchNumber), overrideProtectedEntries, cascadeDeleted);
-    }
-
-    private void retractSeasonIfIncomplete(UUID userId, String seriesTmdbId, Integer seasonNumber, boolean overrideProtectedEntries,
-            List<DiaryEntry> cascadeDeleted) {
-        List<DiaryEntry> candidates = computeSeasonRetractionCandidates(userId, seriesTmdbId, seasonNumber);
-        if (!deleteRespectingProtection(candidates, overrideProtectedEntries, cascadeDeleted)) {
-            return;
-        }
-
-        retractSeriesIfIncomplete(userId, seriesTmdbId, overrideProtectedEntries, cascadeDeleted);
-    }
-
-    private List<DiaryEntry> computeSeasonRetractionCandidates(UUID userId, String seriesTmdbId, Integer seasonNumber) {
-        Optional<Content> seasonFinaleEpisode = contentRepository
-                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
-        if (seasonFinaleEpisode.isEmpty()) {
-            return List.of();
-        }
-
-        int minCount = minEpisodeWatchCount(userId, seriesTmdbId, seasonNumber, seasonFinaleEpisode.get().getEpisodeNumber());
-
-        Optional<Content> seasonContent = contentRepository
-                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(seriesTmdbId, seasonNumber, null, ContentType.SEASON);
-        if (seasonContent.isEmpty()) {
-            return List.of();
-        }
-
-        return diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(userId, seasonContent.get().getId(), minCount);
-    }
-
-    private void retractSeriesIfIncomplete(UUID userId, String seriesTmdbId, boolean overrideProtectedEntries, List<DiaryEntry> cascadeDeleted) {
-        deleteRespectingProtection(computeSeriesRetractionCandidates(userId, seriesTmdbId), overrideProtectedEntries, cascadeDeleted);
-    }
-
-    private List<DiaryEntry> computeSeriesRetractionCandidates(UUID userId, String seriesTmdbId) {
-        Optional<Content> seriesFinaleSeason = contentRepository
-                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON);
-        if (seriesFinaleSeason.isEmpty()) {
-            return List.of();
-        }
-
-        int minMax = minSeasonWatchMax(userId, seriesTmdbId, seriesFinaleSeason.get().getSeasonNumber());
-
-        Optional<Content> seriesContent = contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES);
-        if (seriesContent.isEmpty()) {
-            return List.of();
-        }
-
-        return diaryEntryRepository.findByUserIdAndContentIdAndWatchNumberGreaterThan(userId, seriesContent.get().getId(), minMax);
-    }
-
-    private List<DiaryEntry> computeSeriesWipeCandidates(UUID userId, String seriesTmdbId, int watchNumber) {
-        return Stream.of(
-                        diaryEntryRepository.findEpisodeEntriesInSeriesByWatchNumber(userId, seriesTmdbId, watchNumber),
-                        diaryEntryRepository.findSeasonEntriesInSeriesByWatchNumber(userId, seriesTmdbId, watchNumber),
-                        diaryEntryRepository.findSeriesEntriesByWatchNumber(userId, seriesTmdbId, watchNumber))
-                .flatMap(List::stream)
-                .toList();
     }
 
     static final int MAX_BULK_EPISODES = 2000;
@@ -1648,13 +1482,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
         private boolean needsEpisode(EpisodeKey key) {
             return !existingTargetEpisodes.contains(key);
-        }
-    }
-
-    private record BulkCompletionBoundary(List<Integer> eligibleEpisodes, Integer seriesFinaleSeasonNumber,
-            int targetWatchNumber) {
-        private BulkCompletionBoundary {
-            eligibleEpisodes = List.copyOf(eligibleEpisodes);
         }
     }
 
@@ -2146,10 +1973,6 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return entry;
     }
 
-    private record CompletionSignal(DiaryEntry completedSeason, DiaryEntry completedSeries) {
-        static final CompletionSignal NONE = new CompletionSignal(null, null);
-    }
-
     private static final Map<ContentType, Integer> HIERARCHY_LEVEL = Map.of(
             ContentType.EPISODE, 0,
             ContentType.SEASON, 1,
@@ -2164,258 +1987,4 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
         return entryLevel < requestedLevel;
     }
 
-    private CompletionSignal triggerCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate, ContentType requestedType) {
-        if (loggedContent.getType() == ContentType.EPISODE) {
-            DiaryEntry completedSeason = maybeCompleteSeason(userId, loggedContent.getSeriesTmdbId(), loggedContent.getSeasonNumber(), watchedDate, requestedType);
-            if (completedSeason == null) {
-                return CompletionSignal.NONE;
-            }
-            CompletionSignal seriesSignal = triggerCompletionCascade(userId, completedSeason.getContent(), completedSeason.getWatchedDate(), requestedType);
-            return new CompletionSignal(completedSeason, seriesSignal.completedSeries());
-        }
-        if (loggedContent.getType() == ContentType.SEASON) {
-            return new CompletionSignal(null, maybeCompleteSeries(userId, loggedContent.getSeriesTmdbId(), watchedDate, requestedType));
-        }
-        return CompletionSignal.NONE;
-    }
-
-    private CompletionSignal triggerBulkCompletionCascade(UUID userId, Content loggedContent, LocalDate watchedDate,
-            ContentType requestedType, BulkCompletionBoundary boundary) {
-        if (loggedContent.getType() != ContentType.EPISODE) {
-            return CompletionSignal.NONE;
-        }
-        String seriesTmdbId = loggedContent.getSeriesTmdbId();
-        List<DiaryEntry> episodeHistory = diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(
-                userId, seriesTmdbId, loggedContent.getSeasonNumber());
-        DiaryEntry completedSeason = completeSeasonPass(userId, seriesTmdbId, loggedContent.getSeasonNumber(),
-                boundary.eligibleEpisodes(), boundary.targetWatchNumber(), watchedDate,
-                requestedType, episodeHistory);
-        if (boundary.seriesFinaleSeasonNumber() == null) {
-            DiaryEntry completedSeries = completedSeason == null ? null
-                    : maybeCompleteSeries(userId, seriesTmdbId, watchedDate, requestedType);
-            return new CompletionSignal(completedSeason, completedSeries);
-        }
-        List<DiaryEntry> seasonHistory = diaryEntryRepository.findAllSeasonEntriesInSeries(userId, seriesTmdbId);
-        DiaryEntry completedSeries = completeSeriesPass(userId, seriesTmdbId, boundary.seriesFinaleSeasonNumber(),
-                boundary.targetWatchNumber(), watchedDate, requestedType, seasonHistory);
-        return new CompletionSignal(completedSeason, completedSeries);
-    }
-
-    private DiaryEntry persistAutoGeneratedEntry(User user, Content content, LocalDate watchedDate,
-            int expectedWatchNumber, boolean ignore, List<UUID> unanimousCompanionIds) {
-        DiaryEntry entry = persistDiaryEntry(user, content, null, null, watchedDate, null, null, null, true, ignore,
-                expectedWatchNumber);
-        saveCompanions(entry, unanimousCompanionIds);
-        return entry;
-    }
-
-    private List<UUID> computeUnanimousCompanions(List<UUID> childEntryIds) {
-        if (childEntryIds.isEmpty()) {
-            return List.of();
-        }
-
-        Map<UUID, Set<UUID>> companionsByEntry = watchCompanionRepository.findByDiaryEntryIdIn(childEntryIds).stream()
-                .collect(Collectors.groupingBy(wc -> wc.getDiaryEntry().getId(),
-                        Collectors.mapping(wc -> wc.getUser().getId(), Collectors.toSet())));
-
-        Set<UUID> unanimous = null;
-        for (UUID childEntryId : childEntryIds) {
-            Set<UUID> companions = companionsByEntry.getOrDefault(childEntryId, Set.of());
-            if (companions.isEmpty()) {
-                return List.of();
-            }
-            if (unanimous == null) {
-                unanimous = companions;
-            } else if (!unanimous.equals(companions)) {
-                return List.of();
-            }
-        }
-        return List.copyOf(unanimous);
-    }
-
-    private DiaryEntry maybeCompleteSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, LocalDate watchedDate, ContentType requestedType) {
-        Optional<Content> seasonFinaleEpisode = contentRepository
-                .findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue(seriesTmdbId, seasonNumber, ContentType.EPISODE);
-        if (seasonFinaleEpisode.isEmpty()) {
-            return null;
-        }
-        int finaleEpisodeNumber = seasonFinaleEpisode.get().getEpisodeNumber();
-        List<Integer> eligibleEpisodes = IntStream.rangeClosed(1, finaleEpisodeNumber).boxed().toList();
-        List<DiaryEntry> history = diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(
-                userId, seriesTmdbId, seasonNumber);
-        DiaryEntry lastCreated = null;
-        for (int pass : positiveWatchNumbers(history)) {
-            DiaryEntry created = completeSeasonPass(userId, seriesTmdbId, seasonNumber, eligibleEpisodes, pass,
-                    watchedDate, requestedType, history);
-            if (created != null) {
-                lastCreated = created;
-            }
-        }
-        return lastCreated;
-    }
-
-    private DiaryEntry maybeCompleteSeason(UUID userId, String seriesTmdbId, Integer seasonNumber, int finaleEpisodeNumber,
-            LocalDate watchedDate, ContentType requestedType) {
-        List<Integer> eligibleEpisodes = IntStream.rangeClosed(1, finaleEpisodeNumber).boxed().toList();
-        List<DiaryEntry> history = diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(
-                userId, seriesTmdbId, seasonNumber);
-        DiaryEntry lastCreated = null;
-        for (int pass : positiveWatchNumbers(history)) {
-            DiaryEntry created = completeSeasonPass(userId, seriesTmdbId, seasonNumber, eligibleEpisodes, pass,
-                    watchedDate, requestedType, history);
-            if (created != null) {
-                lastCreated = created;
-            }
-        }
-        return lastCreated;
-    }
-
-    private List<Integer> positiveWatchNumbers(List<DiaryEntry> entries) {
-        return entries.stream().map(DiaryEntry::getWatchNumber).filter(number -> number != null && number > 0)
-                .distinct().sorted().toList();
-    }
-
-    private DiaryEntry completeSeasonPass(UUID userId, String seriesTmdbId, int seasonNumber,
-            List<Integer> eligibleEpisodes, int pass, LocalDate watchedDate,
-            ContentType requestedType, List<DiaryEntry> history) {
-        Set<Integer> eligible = Set.copyOf(eligibleEpisodes);
-        List<DiaryEntry> children = history.stream()
-                .filter(entry -> Objects.equals(entry.getWatchNumber(), pass))
-                .filter(entry -> eligible.contains(entry.getContent().getEpisodeNumber()))
-                .toList();
-        Set<Integer> present = children.stream().map(entry -> entry.getContent().getEpisodeNumber()).collect(Collectors.toSet());
-        if (!present.containsAll(eligible)) {
-            return null;
-        }
-        Content seasonContent = contentRepository
-                .findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
-                        seriesTmdbId, seasonNumber, null, ContentType.SEASON)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Season completion reference was not prepared before acquiring the content-state lock"));
-        if (diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(
-                userId, seasonContent.getId(), pass).isPresent()) {
-            return null;
-        }
-        User user = userRepository.getReferenceById(userId);
-        return persistAutoGeneratedEntry(user, seasonContent, watchedDate, pass,
-                isBelowRequestedLevel(ContentType.SEASON, requestedType),
-                computeUnanimousCompanions(children.stream().map(DiaryEntry::getId).toList()));
-    }
-
-    private int minEpisodeWatchCount(UUID userId, String seriesTmdbId, Integer seasonNumber, int finaleEpisodeNumber) {
-        if (finaleEpisodeNumber < 1) {
-            return 0;
-        }
-
-        Map<Integer, Long> countsByEpisode = diaryEntryRepository
-                .countEntriesByEpisodeNumberInSeason(userId, seriesTmdbId, seasonNumber).stream()
-                .collect(Collectors.toMap(DiaryEntryRepository.EpisodeWatchCount::getEpisodeNumber, DiaryEntryRepository.EpisodeWatchCount::getCount));
-
-        int minCount = Integer.MAX_VALUE;
-        for (int episode = 1; episode <= finaleEpisodeNumber; episode++) {
-            minCount = Math.min(minCount, countsByEpisode.getOrDefault(episode, 0L).intValue());
-            if (minCount == 0) {
-                break;
-            }
-        }
-        return minCount;
-    }
-
-    private DiaryEntry maybeCompleteSeries(UUID userId, String seriesTmdbId, LocalDate watchedDate, ContentType requestedType) {
-        Optional<Content> seriesFinaleSeason = contentRepository
-                .findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue(seriesTmdbId, ContentType.SEASON);
-        if (seriesFinaleSeason.isEmpty()) {
-            return null;
-        }
-        return completeSeriesPasses(userId, seriesTmdbId, seriesFinaleSeason.get().getSeasonNumber(), watchedDate, requestedType);
-    }
-
-    private DiaryEntry maybeCompleteSeries(UUID userId, String seriesTmdbId, int finaleSeasonNumber,
-            LocalDate watchedDate, ContentType requestedType) {
-        return completeSeriesPasses(userId, seriesTmdbId, finaleSeasonNumber, watchedDate, requestedType);
-    }
-
-    private DiaryEntry completeSeriesPasses(UUID userId, String seriesTmdbId, int finaleSeasonNumber,
-            LocalDate watchedDate, ContentType requestedType) {
-        List<DiaryEntry> history = diaryEntryRepository.findAllSeasonEntriesInSeries(userId, seriesTmdbId);
-        DiaryEntry lastCreated = null;
-        for (int pass : positiveWatchNumbers(history)) {
-            DiaryEntry created = completeSeriesPass(userId, seriesTmdbId, finaleSeasonNumber, pass,
-                    watchedDate, requestedType, history);
-            if (created != null) {
-                lastCreated = created;
-            }
-        }
-        return lastCreated;
-    }
-
-    private DiaryEntry completeSeriesPass(UUID userId, String seriesTmdbId, int finaleSeasonNumber, int pass,
-            LocalDate watchedDate, ContentType requestedType, List<DiaryEntry> history) {
-        List<DiaryEntry> children = history.stream()
-                .filter(entry -> Objects.equals(entry.getWatchNumber(), pass))
-                .filter(entry -> entry.getContent().getSeasonNumber() >= 1
-                        && entry.getContent().getSeasonNumber() <= finaleSeasonNumber)
-                .toList();
-        Set<Integer> present = children.stream().map(entry -> entry.getContent().getSeasonNumber()).collect(Collectors.toSet());
-        if (present.size() != finaleSeasonNumber) {
-            return null;
-        }
-        Content seriesContent = contentRepository.findByTmdbIdAndType(seriesTmdbId, ContentType.SERIES)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Series completion reference was not prepared before acquiring the content-state lock"));
-        if (diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(
-                userId, seriesContent.getId(), pass).isPresent()) {
-            return null;
-        }
-        User user = userRepository.getReferenceById(userId);
-        return persistAutoGeneratedEntry(user, seriesContent, watchedDate, pass,
-                isBelowRequestedLevel(ContentType.SERIES, requestedType),
-                computeUnanimousCompanions(children.stream().map(DiaryEntry::getId).toList()));
-    }
-
-    private int minSeasonWatchMax(UUID userId, String seriesTmdbId, int finaleSeasonNumber) {
-        if (finaleSeasonNumber < 1) {
-            return 0;
-        }
-
-        Map<Integer, Integer> maxBySeason = diaryEntryRepository
-                .maxWatchNumberBySeasonInSeries(userId, seriesTmdbId).stream()
-                .collect(Collectors.toMap(DiaryEntryRepository.SeasonWatchMax::getSeasonNumber, DiaryEntryRepository.SeasonWatchMax::getMaxWatchNumber));
-
-        int minMax = Integer.MAX_VALUE;
-        for (int season = 1; season <= finaleSeasonNumber; season++) {
-            minMax = Math.min(minMax, maxBySeason.getOrDefault(season, 0));
-            if (minMax == 0) {
-                break;
-            }
-        }
-        return minMax;
-    }
-
-    @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public DeletionImpactDTO computeDeletionImpact(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries) {
-        userContentMutationLock.lock(userId);
-        List<DiaryEntry> cascadeDeleted = new ArrayList<>();
-
-        deleteDiaryEntry(userId, diaryEntryId, overrideProtectedEntries, cascadeDeleted);
-
-        markCurrentTransactionRollbackOnly();
-
-        return new DeletionImpactDTO(cascadeDeleted.stream()
-                .map(candidate -> new DeletionImpactItemDTO(
-                        candidate.getId(),
-                        candidate.getContent().getType(),
-                        candidate.getWatchedDate(),
-                        candidate.getWatchNumber(),
-                        Boolean.TRUE.equals(candidate.getAutoGenerated()),
-                        candidate.getComment() != null || candidate.getScore() != null))
-                .toList());
-    }
-
-    private void markCurrentTransactionRollbackOnly() {
-        if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-        }
-    }
 }

@@ -3,7 +3,6 @@ package com.watchwise.watchwise_api.diaryentry.controller;
 import com.watchwise.watchwise_api.common.dto.PageResponseDTO;
 import com.watchwise.watchwise_api.common.security.RequestThrottler;
 import com.watchwise.watchwise_api.content.entity.ContentType;
-import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryBulkCreationDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryCreationDTO;
@@ -212,13 +211,10 @@ public class DiaryEntryController {
     }
 
     @DeleteMapping("/diary/{diaryEntryId}")
-    public ResponseEntity<Void> deleteDiaryEntry(
-            @PathVariable UUID diaryEntryId,
-            @RequestParam(required = false, defaultValue = "false") boolean overrideProtectedEntries
-    ) {
+    public ResponseEntity<Void> deleteDiaryEntry(@PathVariable UUID diaryEntryId) {
         requestThrottler.checkAllowed(diaryActionKey(), diaryActionMaxRequests, Duration.ofMinutes(diaryActionWindowMinutes));
 
-        diaryEntryService.deleteDiaryEntry(getCurrentUserId(), diaryEntryId, overrideProtectedEntries);
+        diaryEntryService.deleteDiaryEntry(getCurrentUserId(), diaryEntryId);
         return ResponseEntity.noContent().build();
     }
 
@@ -228,16 +224,6 @@ public class DiaryEntryController {
 
         diaryEntryService.deleteAllDiaryEntriesForSeries(getCurrentUserId(), seriesTmdbId);
         return ResponseEntity.noContent().build();
-    }
-
-    @GetMapping("/diary/{diaryEntryId}/deletion-impact")
-    public ResponseEntity<DeletionImpactDTO> getDeletionImpact(
-            @PathVariable UUID diaryEntryId,
-            @RequestParam(required = false, defaultValue = "false") boolean overrideProtectedEntries
-    ) {
-        requestThrottler.checkAllowed(diaryActionKey(), diaryActionMaxRequests, Duration.ofMinutes(diaryActionWindowMinutes));
-
-        return ResponseEntity.ok(diaryEntryService.computeDeletionImpact(getCurrentUserId(), diaryEntryId, overrideProtectedEntries));
     }
 
     private String diaryActionKey() {

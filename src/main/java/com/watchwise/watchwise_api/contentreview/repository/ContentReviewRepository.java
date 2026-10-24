@@ -61,6 +61,24 @@ public interface ContentReviewRepository extends JpaRepository<ContentReview, UU
             UUID userId, Collection<UUID> contentIds);
 
     @Query(value = """
+            SELECT review.*
+            FROM content_reviews review
+            WHERE review.user_id = :userId
+              AND review.content_type IN (:contentTypes)
+              AND review.publication_kind = 'WRITTEN_REVIEW'
+              AND review.comment IS NOT NULL
+              AND btrim(review.comment) <> ''
+            ORDER BY COALESCE(review.source_published_at,
+                              review.source_published_on::timestamp AT TIME ZONE 'UTC',
+                              review.created_at) DESC,
+                     review.id DESC
+            """, nativeQuery = true)
+    List<ContentReview> findRecentWrittenReviewsByUserIdAndContentTypeIn(
+            @Param("userId") UUID userId,
+            @Param("contentTypes") Collection<String> contentTypes,
+            Pageable pageable);
+
+    @Query(value = """
             SELECT r.content_id AS contentId, COUNT(*) AS count
             FROM content_reviews r JOIN users u ON u.id = r.user_id
             WHERE r.content_id IN (:contentIds) AND u.is_profile_public = true
