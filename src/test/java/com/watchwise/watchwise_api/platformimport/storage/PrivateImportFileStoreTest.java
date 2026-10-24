@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.platformimport.service.ImportLimits;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -144,5 +146,10 @@ class PrivateImportFileStoreTest {
     @Configuration(proxyBeanMethods = false)
     @ComponentScan(basePackageClasses = {PrivateImportFileStore.class, SafeImportReader.class})
     @EnableConfigurationProperties(ImportLimits.class)
-    static class ImportReaderTestConfiguration {}
+    static class ImportReaderTestConfiguration {
+        @Bean
+        ObjectMapper objectMapper() {
+            return new ObjectMapper();
+        }
+    }
 }

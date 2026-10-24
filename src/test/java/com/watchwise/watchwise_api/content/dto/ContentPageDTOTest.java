@@ -50,7 +50,8 @@ class ContentPageDTOTest {
         assertThat(fieldNames(json.get("viewerState"))).containsExactlyInAnyOrder(
                 "watchStatus", "myRating", "myReview", "lastWatchedDate", "lastWatchNumber", "watchedInTheater",
                 "playsCount", "latestDiaryEntryId", "inWatchlist", "watchlistEntryId", "dropped", "droppedEntryId",
-                "lists", "watchedEpisodeCount", "releasedEpisodeCount");
+                "lists", "watchedEpisodeCount", "releasedEpisodeCount", "currentRatingVersion", "reviewsCount",
+                "reviewIds");
         assertThat(fieldNames(json.get("navigation"))).containsExactlyInAnyOrder(
                 "seriesTmdbId", "seasonNumber", "episodeNumber", "seasonEpisodeCount", "previousEpisode", "nextEpisode");
         assertThat(fieldNames(json.get("sections"))).containsExactlyInAnyOrder(
@@ -64,6 +65,7 @@ class ContentPageDTOTest {
         assertThat(json.get("metadata").get("crewInherited").asBoolean()).isFalse();
         assertThat(json.get("stats").get("ratingsDistribution")).isEmpty();
         assertThat(json.get("viewerState").get("lists")).isEmpty();
+        assertThat(json.get("viewerState").get("reviewIds")).isEmpty();
         assertThat(json.get("sections").get("episodes")).isEmpty();
         assertThat(json.get("sections").get("recentEpisodes")).isEmpty();
     }

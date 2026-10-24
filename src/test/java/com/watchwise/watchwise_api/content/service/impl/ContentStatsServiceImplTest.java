@@ -3,6 +3,12 @@ package com.watchwise.watchwise_api.content.service.impl;
 import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.BadRequestException;
 import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,6 +36,18 @@ class ContentStatsServiceImplTest {
     @Mock
     private CommentRepository commentRepository;
 
+    @Mock
+    private ContentRepository contentRepository;
+
+    @Mock
+    private ContentRatingRepository ratingRepository;
+
+    @Mock
+    private ContentReviewRepository reviewRepository;
+
+    @Mock
+    private DiaryCompletionProjectionRepository projectionRepository;
+
     @InjectMocks
     private ContentStatsServiceImpl contentStatsService;
 
@@ -38,6 +56,8 @@ class ContentStatsServiceImplTest {
     @BeforeEach
     void setUp() {
         contentId = UUID.randomUUID();
+        lenient().when(contentRepository.findAllById(List.of(contentId)))
+                .thenReturn(List.of(Content.builder().id(contentId).type(ContentType.MOVIE).build()));
         lenient().when(diaryEntryRepository.findContentStatsByContentIdIn(List.of(contentId))).thenReturn(List.of());
         lenient().when(commentRepository.countByContentIdIn(List.of(contentId))).thenReturn(List.of());
     }
@@ -76,7 +96,9 @@ class ContentStatsServiceImplTest {
     void shouldReturnOneEntryPerRequestedIdPreservingOrderWhenOnlySomeIdsHaveData() {
         UUID withData = UUID.randomUUID();
         UUID withoutData = UUID.randomUUID();
-        when(diaryEntryRepository.findContentStatsByContentIdIn(List.of(withData, withoutData)))
+        when(contentRepository.findAllById(List.of(withData, withoutData)))
+                .thenReturn(List.of(Content.builder().id(withData).type(ContentType.MOVIE).build()));
+        when(diaryEntryRepository.findContentStatsByContentIdIn(List.of(withData)))
                 .thenReturn(List.of(contentStats(withData, 6.0, 4, 1)));
         when(commentRepository.countByContentIdIn(List.of(withData, withoutData))).thenReturn(List.of());
 

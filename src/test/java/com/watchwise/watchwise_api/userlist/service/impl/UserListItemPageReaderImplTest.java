@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -72,6 +73,8 @@ class UserListItemPageReaderImplTest {
     @Mock
     private ContentRepository contentRepository;
     @Mock
+    private ContentRatingRepository contentRatingRepository;
+    @Mock
     private UserBlockAccessService userBlockAccessService;
     @Spy
     private PageRequestFactory pageRequestFactory = new PageRequestFactory();
@@ -103,6 +106,7 @@ class UserListItemPageReaderImplTest {
         lenient().when(diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(anyCollection()))
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.findContentStatsByContentIdIn(anyCollection())).thenReturn(List.of());
+        lenient().when(contentRatingRepository.findPublicStatsByContentIdIn(anyCollection())).thenReturn(List.of());
     }
 
     @Test

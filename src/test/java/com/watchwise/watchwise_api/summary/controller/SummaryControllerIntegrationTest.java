@@ -16,6 +16,8 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.dto.ReleaseStatus;
 import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -43,6 +45,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -86,6 +89,9 @@ class SummaryControllerIntegrationTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Autowired
+    private ContentRatingRepository contentRatingRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -103,6 +109,7 @@ class SummaryControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         diaryEntryRepository.deleteAll();
+        contentRatingRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -471,6 +478,14 @@ class SummaryControllerIntegrationTest {
         Content secondEpisode = persistEpisode("1399", 1, 2, 45);
         persistEntry(entity, firstEpisode, 9, false);
         persistEntry(entity, secondEpisode, 8, false);
+        contentRatingRepository.saveAndFlush(ContentRating.builder()
+                .userId(entity.getId())
+                .contentId(series.getId())
+                .contentType(ContentType.SERIES)
+                .score(8)
+                .createdAt(Instant.now())
+                .updatedAt(Instant.now())
+                .build());
 
         mockMvc.perform(get("/users/" + user.id() + "/summary/all-time/edition")
                         .param("type", "SERIES")
@@ -482,9 +497,7 @@ class SummaryControllerIntegrationTest {
                 .andExpect(jsonPath("$.mostLoggedContent[0].content.id").value(series.getId().toString()))
                 .andExpect(jsonPath("$.mostLoggedContent[0].count").value(2))
                 .andExpect(jsonPath("$.ratingsDistribution[0].score").value(8))
-                .andExpect(jsonPath("$.ratingsDistribution[0].count").value(1))
-                .andExpect(jsonPath("$.ratingsDistribution[1].score").value(9))
-                .andExpect(jsonPath("$.ratingsDistribution[1].count").value(1));
+                .andExpect(jsonPath("$.ratingsDistribution[0].count").value(1));
     }
 
     @Test
