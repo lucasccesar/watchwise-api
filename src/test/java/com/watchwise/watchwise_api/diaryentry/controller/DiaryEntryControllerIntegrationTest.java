@@ -1365,8 +1365,8 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Roll Back The Generated Season Entry - When The Outer Diary Transaction Rolls Back")
-    void shouldRollbackGeneratedSeasonEntryWhenTheOuterDiaryTransactionRollsBack() throws Exception {
+    @DisplayName("[createDiaryEntry] Should Roll Back The Episode Event - When The Outer Diary Transaction Rolls Back")
+    void shouldRollbackEpisodeEventWhenTheOuterDiaryTransactionRollsBack() throws Exception {
         RegisteredUser user = registerUser("diarycompletionrollback");
         when(tmdbClient.getSeasonFullDetails(eq("atomic-series"), eq(1), any()))
                 .thenReturn(foundSeason(1, new TmdbEpisodeSummary(1, null, null, "2020-01-01", 45, null, null)));
@@ -1378,10 +1378,11 @@ class DiaryEntryControllerIntegrationTest {
 
         assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
             DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntry(user.id(), request);
-            assertThat(result.completedSeason()).isNotNull();
-            throw new IllegalStateException("force rollback after automatic completion");
+            assertThat(result.events()).hasSize(1);
+            assertThat(result.completions()).isEmpty();
+            throw new IllegalStateException("force rollback after episode event");
         })).isInstanceOf(IllegalStateException.class)
-                .hasMessage("force rollback after automatic completion");
+                .hasMessage("force rollback after episode event");
 
         assertThat(diaryEntryRepository.findAll())
                 .noneMatch(entry -> entry.getUser().getId().equals(user.id()));

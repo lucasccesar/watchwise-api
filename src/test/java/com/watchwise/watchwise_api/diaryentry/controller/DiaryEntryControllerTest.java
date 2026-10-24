@@ -365,17 +365,17 @@ class DiaryEntryControllerTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Return Created With The List From The Service - When Called")
-    void shouldReturnCreatedWithTheListFromTheServiceWhenCalled() {
+    @DisplayName("[createDiaryEntriesInBulk] Should Return Created With The Result From The Service - When Called")
+    void shouldReturnCreatedWithTheResultFromTheServiceWhenCalled() {
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "901", 1, null, null, null);
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null, null);
-        DiaryEntryResponseDTO entryResponseDTO = buildResponseDto();
-        when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto)).thenReturn(List.of(entryResponseDTO));
+        DiaryEntryCreationResultDTO expected = new DiaryEntryCreationResultDTO(null, List.of(), List.of());
+        when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto, "key-1")).thenReturn(expected);
 
-        ResponseEntity<List<DiaryEntryResponseDTO>> result = diaryEntryController.createDiaryEntriesInBulk(dto);
+        ResponseEntity<DiaryEntryCreationResultDTO> result = diaryEntryController.createDiaryEntriesInBulk(dto, "key-1");
 
         assertThat(result.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(result.getBody()).containsExactly(entryResponseDTO);
+        assertThat(result.getBody()).isEqualTo(expected);
     }
 
     @Test
@@ -383,13 +383,14 @@ class DiaryEntryControllerTest {
     void shouldCheckRateLimitBeforeCallingServiceWhenBulkCreateCalled() {
         ContentRefCreationDTO seasonRef = new ContentRefCreationDTO(null, ContentType.SEASON, "901", 1, null, null, null);
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(seasonRef, LocalDate.now(), 3, null, null);
-        when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto)).thenReturn(List.of());
+        when(diaryEntryService.createDiaryEntriesInBulk(currentUserId, dto, "key-2"))
+                .thenReturn(new DiaryEntryCreationResultDTO(null, List.of(), List.of()));
 
-        diaryEntryController.createDiaryEntriesInBulk(dto);
+        diaryEntryController.createDiaryEntriesInBulk(dto, "key-2");
 
         InOrder order = inOrder(requestThrottler, diaryEntryService);
         order.verify(requestThrottler).checkAllowed(any(), anyInt(), any());
-        order.verify(diaryEntryService).createDiaryEntriesInBulk(currentUserId, dto);
+        order.verify(diaryEntryService).createDiaryEntriesInBulk(currentUserId, dto, "key-2");
     }
 
     @Test
@@ -436,7 +437,12 @@ class DiaryEntryControllerTest {
     }
 
     private DiaryEntryCreationResultDTO buildCreationResultDto() {
-        return new DiaryEntryCreationResultDTO(buildResponseDto(), null, null);
+        return new DiaryEntryCreationResultDTO(
+                null,
+                List.of(new DiaryEntryCreationResultDTO.EventResult(
+                        new com.watchwise.watchwise_api.diaryentry.dto.WatchMutationResult(UUID.randomUUID(), true, 0),
+                        buildResponseDto())),
+                List.of());
     }
 
     @Test

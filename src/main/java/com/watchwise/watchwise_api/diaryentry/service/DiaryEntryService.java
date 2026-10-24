@@ -66,6 +66,9 @@ public interface DiaryEntryService {
 
     List<DiaryEntryResponseDTO> createDiaryEntriesInBulk(UUID userId, DiaryEntryBulkCreationDTO diaryEntryBulkCreationDTO);
 
+    DiaryEntryCreationResultDTO createDiaryEntriesInBulk(
+            UUID userId, DiaryEntryBulkCreationDTO diaryEntryBulkCreationDTO, String idempotencyKey);
+
     DiaryEntryResponseDTO updateDiaryEntry(UUID userId, UUID diaryEntryId, DiaryEntryUpdateDTO diaryEntryUpdateDTO);
 
     void deleteDiaryEntry(UUID userId, UUID diaryEntryId, boolean overrideProtectedEntries);

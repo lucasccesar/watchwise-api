@@ -68,6 +68,47 @@ class UserActionExecutorIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from user_action_receipts where user_id = ?", Integer.class, owner)).isZero();
     }
 
+    @Test void replaysSerializedResponsePayloadAndKeepsTheLegacyTwoArgumentResultConstructor() {
+        UUID owner = user();
+        UUID event = UUID.randomUUID();
+        String responseJson = "{\"events\":[{\"diaryEntryId\":\"" + event + "\"}],\"completions\":[]}";
+        UserActionExecutor.ActionResult expected = new UserActionExecutor.ActionResult(List.of(event), 7, responseJson);
+        TransactionTemplate tx = new TransactionTemplate(transactions);
+
+        UserActionExecutor.ActionResult first = tx.execute(s -> executor.execute(
+                owner, UserActionOperation.DIARY_BULK, "bulk-key", "bulk-hash", () -> expected));
+        UserActionExecutor.ActionResult replay = tx.execute(s -> executor.execute(
+                owner, UserActionOperation.DIARY_BULK, "bulk-key", "bulk-hash",
+                () -> new UserActionExecutor.ActionResult(List.of(UUID.randomUUID()), 8, "different")));
+
+        assertThat(first).isEqualTo(expected);
+        assertThat(replay).isEqualTo(expected);
+        UserActionExecutor.ActionResult legacy = new UserActionExecutor.ActionResult(List.of(event), 7);
+        assertThat(legacy.resourceIds()).containsExactly(event);
+        assertThat(legacy.version()).isEqualTo(7);
+        assertThat(legacy.responseJson()).isNull();
+    }
+
+    @Test void replaysLegacyReceiptJsonWithoutAResponsePayload() {
+        UUID owner = user();
+        UUID event = UUID.randomUUID();
+        jdbc.update("""
+                insert into user_action_receipts
+                    (id, user_id, operation, idempotency_key, request_hash, result_json)
+                values (?, ?, 'DIARY_BULK', 'legacy-bulk-key', 'legacy-hash', ?)
+                """, UUID.randomUUID(), owner,
+                "{\"resourceIds\":[\"" + event + "\"],\"version\":7}");
+        TransactionTemplate tx = new TransactionTemplate(transactions);
+
+        UserActionExecutor.ActionResult replay = tx.execute(s -> executor.execute(
+                owner, UserActionOperation.DIARY_BULK, "legacy-bulk-key", "legacy-hash",
+                () -> { throw new AssertionError("A legacy receipt must replay without re-running the action"); }));
+
+        assertThat(replay.resourceIds()).containsExactly(event);
+        assertThat(replay.version()).isEqualTo(7);
+        assertThat(replay.responseJson()).isNull();
+    }
+
     private UUID user() {
         UUID id = UUID.randomUUID();
         jdbc.update("insert into users(id, username, email, password, profile_picture, name) values (?, ?, ?, 'hash', 'picture', 'Test')", id, id.toString(), id + "@example.com");

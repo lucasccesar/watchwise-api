@@ -7,5 +7,9 @@ import java.util.function.Supplier;
 public interface UserActionExecutor {
     ActionResult execute(UUID userId, UserActionOperation operation, String key, String requestHash, Supplier<ActionResult> action);
 
-    record ActionResult(List<UUID> resourceIds, long version) {}
+    record ActionResult(List<UUID> resourceIds, long version, String responseJson) {
+        public ActionResult(List<UUID> resourceIds, long version) {
+            this(resourceIds, version, null);
+        }
+    }
 }

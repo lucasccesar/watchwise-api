@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.UUID;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface UserSeriesHistoryStateRepository extends JpaRepository<UserSeriesHistoryState, UserSeriesHistoryState.Key> {
     @Modifying
@@ -31,4 +32,8 @@ public interface UserSeriesHistoryStateRepository extends JpaRepository<UserSeri
     List<UserSeriesHistoryState> findByUserIdAndSeriesTmdbIdIn(
             @Param("userId") UUID userId,
             @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    @Query(value = "SELECT history_revision FROM user_series_history_states WHERE user_id = :userId AND series_tmdb_id = :seriesTmdbId",
+            nativeQuery = true)
+    Optional<Long> findHistoryRevision(@Param("userId") UUID userId, @Param("seriesTmdbId") String seriesTmdbId);
 }

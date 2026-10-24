@@ -5,6 +5,8 @@ import com.watchwise.watchwise_api.common.exception.ConflictException;
 import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.exception.TmdbUnavailableException;
+import com.watchwise.watchwise_api.common.idempotency.UserActionExecutor;
+import com.watchwise.watchwise_api.common.idempotency.UserActionOperation;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.common.tmdb.TmdbClient;
 import com.watchwise.watchwise_api.common.tmdb.TmdbEpisodeSummary;
@@ -23,6 +25,7 @@ import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentPreviewStatus;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
+import com.watchwise.watchwise_api.content.dto.MediaReference;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
@@ -34,6 +37,10 @@ import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diarycompletion.service.impl.DiaryProjectionInvalidator;
+import com.watchwise.watchwise_api.diarycompletion.model.CompletionScope;
+import com.watchwise.watchwise_api.diarycompletion.model.VersionedCompletionScope;
+import com.watchwise.watchwise_api.diarycompletion.service.CompletionCalculator;
+import com.watchwise.watchwise_api.diarycompletion.service.CompletionScopeLoader;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactItemDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.ContentReviewResponseDTO;
@@ -49,14 +56,18 @@ import com.watchwise.watchwise_api.diaryentry.dto.SeasonProgressDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressAggregateDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressPageResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
+import com.watchwise.watchwise_api.diaryentry.dto.WatchEventCommand;
+import com.watchwise.watchwise_api.diaryentry.dto.WatchMutationResult;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.entity.WatchCompanion;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryReadRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.ImportedWatchAssertionRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntrySort;
 import com.watchwise.watchwise_api.diaryentry.repository.ContentReviewSort;
 import com.watchwise.watchwise_api.diaryentry.repository.WatchCompanionRepository;
+import com.watchwise.watchwise_api.diaryentry.service.DiaryWatchCommandService;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressAssembler;
 import com.watchwise.watchwise_api.seriesprogress.service.SeriesProgressMetadataRefreshService;
@@ -72,6 +83,7 @@ import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.mapper.UserMapper;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
 import jakarta.persistence.EntityManager;
@@ -87,6 +99,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.mockito.stubbing.Answer;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -95,18 +109,22 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Method;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -132,6 +150,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class DiaryEntryServiceImplTest {
 
     @Mock
@@ -206,6 +225,27 @@ class DiaryEntryServiceImplTest {
     @Mock
     private DiaryProjectionInvalidator diaryProjectionInvalidator;
 
+    @Mock
+    private DiaryWatchCommandService diaryWatchCommandService;
+
+    @Mock
+    private UserActionExecutor userActionExecutor;
+
+    @Mock
+    private CompletionScopeLoader completionScopeLoader;
+
+    @Spy
+    private CompletionCalculator completionCalculator = new CompletionCalculator();
+
+    @Mock
+    private ImportedWatchAssertionRepository importedWatchAssertionRepository;
+
+    @Mock
+    private ImportLedger importLedger;
+
+    @Mock
+    private ObjectMapper actionObjectMapper;
+
     @Spy
     private SeriesProgressAssembler seriesProgressAssembler = new SeriesProgressAssembler();
 
@@ -243,11 +283,19 @@ class DiaryEntryServiceImplTest {
     private Content fightClub;
     private final Map<String, Content> preparedSeriesReferences = new HashMap<>();
     private final Map<String, Content> preparedSeasonReferences = new HashMap<>();
+    private final Map<String, Content> preparedEpisodeReferences = new HashMap<>();
+    private final Map<String, Content> preparedMovieReferences = new HashMap<>();
+    private final Map<UUID, DiaryEntry> persistedWatchEvents = new HashMap<>();
+    private DiaryEntryCreationResultDTO serializedBulkResponse;
 
     @BeforeEach
     void setUp() {
         preparedSeriesReferences.clear();
         preparedSeasonReferences.clear();
+        preparedEpisodeReferences.clear();
+        preparedMovieReferences.clear();
+        persistedWatchEvents.clear();
+        serializedBulkResponse = null;
         ReflectionTestUtils.setField(diaryEntryService, "entityManager", entityManager);
 
         lucasId = UUID.randomUUID();
@@ -285,6 +333,10 @@ class DiaryEntryServiceImplTest {
         lenient().when(contentRepository.findByTmdbIdAndType(any(), eq(ContentType.SERIES)))
                 .thenAnswer(invocation -> Optional.ofNullable(preparedSeriesReferences.get(invocation.getArgument(0))));
         lenient().when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        lenient().when(seriesProgressReadRepository.findCandidatesByUserId(
+                        any(UUID.class), any(SeriesProgressReadRepository.SeriesProgressSort.class),
+                        any(Sort.Direction.class), any(Pageable.class)))
+                .thenReturn(Page.empty());
         lenient().when(tmdbClient.getSeasonFullDetails(any(), any(), any()))
                 .thenReturn(new TmdbLookupResult.Found<>(emptySeasonDetails()));
         lenient().when(tmdbClient.getTvFullDetails(any(), any()))
@@ -293,6 +345,121 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new TmdbLookupResult.Found<>(emptyMovieDetails()));
         lenient().when(userContentPosterService.findSeriesPosters(any(), any()))
                 .thenReturn(Map.of());
+        lenient().when(userContentPosterService.findByUserAndContentIds(any(), any()))
+                .thenReturn(Map.of());
+        lenient().when(importedWatchAssertionRepository.findByUserIdAndSeriesTmdbId(any(), any()))
+                .thenReturn(List.of());
+        lenient().when(completionScopeLoader.load(any(MediaReference.class), any(), any(), any(Instant.class)))
+                .thenAnswer(invocation -> new VersionedCompletionScope(
+                        new CompletionScope(invocation.getArgument(0), Set.of(), true),
+                        "unit-test", Instant.now().plusSeconds(60)));
+        lenient().when(userActionExecutor.execute(
+                        any(UUID.class), any(UserActionOperation.class), any(), any(), any(Supplier.class)))
+                .thenAnswer(invocation -> ((Supplier<UserActionExecutor.ActionResult>) invocation.getArgument(4)).get());
+        lenient().when(actionObjectMapper.writeValueAsString(any()))
+                .thenAnswer(invocation -> {
+                    serializedBulkResponse = invocation.getArgument(0);
+                    return "bulk-response";
+                });
+        lenient().when(actionObjectMapper.readValue("bulk-response", DiaryEntryCreationResultDTO.class))
+                .thenAnswer(invocation -> serializedBulkResponse);
+        lenient().when(diaryWatchCommandService.recordPrepared(any(UUID.class), any(WatchEventCommand.class)))
+                .thenAnswer(invocation -> persistPreparedWatchEvent(
+                        invocation.getArgument(0), invocation.getArgument(1)));
+        lenient().when(diaryEntryRepository.findByIdInWithContentAndUser(anyCollection()))
+                .thenAnswer(invocation -> ((List<UUID>) invocation.getArgument(0)).stream()
+                        .map(persistedWatchEvents::get).filter(Objects::nonNull).toList());
+        lenient().when(diaryEntryRepository.findById(any(UUID.class)))
+                .thenAnswer(invocation -> Optional.ofNullable(persistedWatchEvents.get(invocation.getArgument(0))));
+        lenient().when(diaryEntryRepository.findEpisodeEntriesBySeriesForUser(any(UUID.class), any()))
+                .thenAnswer(invocation -> persistedWatchEvents.values().stream()
+                        .filter(entry -> entry.getUser().getId().equals(invocation.getArgument(0)))
+                        .filter(entry -> entry.getContent().getType() == ContentType.EPISODE)
+                        .filter(entry -> invocation.getArgument(1).equals(entry.getContent().getSeriesTmdbId()))
+                        .toList());
+        lenient().when(diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(
+                        any(UUID.class), any(), anyInt()))
+                .thenAnswer(invocation -> persistedWatchEvents.values().stream()
+                        .filter(entry -> entry.getUser().getId().equals(invocation.getArgument(0)))
+                        .filter(entry -> entry.getContent().getType() == ContentType.EPISODE)
+                        .filter(entry -> invocation.getArgument(1).equals(entry.getContent().getSeriesTmdbId()))
+                        .filter(entry -> invocation.<Integer>getArgument(2).equals(entry.getContent().getSeasonNumber()))
+                        .toList());
+        lenient().when(diaryEntryRepository.findMaxWatchNumber(any(UUID.class), any(UUID.class)))
+                .thenAnswer(invocation -> persistedWatchEvents.values().stream()
+                        .filter(entry -> entry.getUser().getId().equals(invocation.getArgument(0)))
+                        .filter(entry -> entry.getContent().getId().equals(invocation.getArgument(1)))
+                        .map(DiaryEntry::getWatchNumber).filter(Objects::nonNull).max(Integer::compareTo).orElse(0));
+        lenient().when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDtoWithContent(invocation.getArgument(0)));
+    }
+
+    private WatchMutationResult persistPreparedWatchEvent(UUID ownerId, WatchEventCommand command) {
+        Content content = preparedContent(command.content());
+        int watchNumber = command.requestedWatchNumber() == null
+                ? diaryEntryRepository.findMaxWatchNumber(ownerId, content.getId()) + 1
+                : command.requestedWatchNumber();
+        DiaryEntry entry = DiaryEntry.builder()
+                .id(UUID.randomUUID())
+                .user(ownerId.equals(lucasId) ? lucas : userRepository.getReferenceById(ownerId))
+                .content(content)
+                .comment(command.comment())
+                .score(command.score())
+                .watchedDate(command.watchedDate())
+                .watchedAt(command.watchedAt())
+                .watchNumber(watchNumber)
+                .watchedInTheater(command.watchedInTheater())
+                .autoGenerated(false)
+                .ignore(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        DiaryEntry saved;
+        try {
+            saved = diaryEntryRepository.saveAndFlush(entry);
+        } catch (DataIntegrityViolationException conflict) {
+            Throwable cause = conflict.getCause();
+            String constraint = cause instanceof ConstraintViolationException violation
+                    ? violation.getConstraintName() : null;
+            throw new ConflictException("uq_diary_entries_user_content_watch_number".equals(constraint)
+                    ? "This watch was already logged by a concurrent request"
+                    : "Diary entry could not be saved due to a conflict");
+        }
+        persistedWatchEvents.put(saved.getId(), saved);
+        return new WatchMutationResult(saved.getId(), true, 0);
+    }
+
+    private Content preparedContent(MediaReference reference) {
+        Content content = switch (reference.type()) {
+            case MOVIE -> preparedMovieReferences.get(reference.tmdbId());
+            case EPISODE -> preparedEpisodeReferences.get(episodeReferenceKey(
+                    reference.seriesTmdbId(), reference.seasonNumber(), reference.episodeNumber()));
+            default -> null;
+        };
+        if (content == null) {
+            LocalDateTime now = LocalDateTime.now();
+            content = Content.builder()
+                    .id(UUID.randomUUID())
+                    .type(reference.type())
+                    .tmdbId(reference.tmdbId())
+                    .seriesTmdbId(reference.seriesTmdbId())
+                    .seasonNumber(reference.seasonNumber())
+                    .episodeNumber(reference.episodeNumber())
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
+            if (reference.type() == ContentType.MOVIE) {
+                preparedMovieReferences.put(reference.tmdbId(), content);
+            } else {
+                preparedEpisodeReferences.put(episodeReferenceKey(
+                        reference.seriesTmdbId(), reference.seasonNumber(), reference.episodeNumber()), content);
+            }
+        }
+        return content;
+    }
+
+    private String episodeReferenceKey(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
+        return seriesTmdbId + ":" + seasonNumber + ":" + episodeNumber;
     }
 
     private TmdbSeasonFullDetails emptySeasonDetails() {
@@ -1210,18 +1377,16 @@ class DiaryEntryServiceImplTest {
     void shouldReturnMappedPageWhenViewerIsTheProfileOwnerForSeriesInProgress() {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress("1399", 8, 6, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null,
-                        List.of(), null, null, null, null, null, null, null, null, null)));
-
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
-        assertThat(result.getContent())
-                .containsExactly(new SeriesInProgressResponseDTO(
-                        "1399", 8, 6, LocalDate.of(2024, 5, 1), null, null, null));
+        assertThat(result.getContent()).singleElement().satisfies(progress -> {
+            assertThat(progress.seriesTmdbId()).isEqualTo("1399");
+            assertThat(progress.maxSeasonNumber()).isEqualTo(8);
+            assertThat(progress.maxEpisodeNumber()).isEqualTo(6);
+            assertThat(progress.lastWatchedDate()).isEqualTo(LocalDate.of(2024, 5, 1));
+            assertThat(progress.lastWatchedSeasonNumber()).isEqualTo(8);
+            assertThat(progress.lastWatchedEpisodeNumber()).isEqualTo(6);
+        });
     }
 
     @Test
@@ -1230,14 +1395,10 @@ class DiaryEntryServiceImplTest {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
-                .thenReturn(List.of(seasonProgressCount("1399", 1, 2L)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithEpisodeCount(10)));
-        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithAiredEpisodes(10)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any()))
+                .thenReturn(Map.of("1399", progressSnapshot("1399", 10, List.of(
+                        new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                "1399", 1, 10, null, null, LocalDate.of(2020, 1, 1), LocalDateTime.now())))));
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
@@ -1246,7 +1407,7 @@ class DiaryEntryServiceImplTest {
                         SeriesInProgressResponseDTO::totalEpisodeCount,
                         SeriesInProgressResponseDTO::watchedPercentage)
                 .containsExactly(3L, 10, 30.0);
-        verify(tmdbClient).getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(seriesProgressMetadataRefreshService).getSnapshotsForRead(eq(List.of("1399")), any());
     }
 
     @Test
@@ -1255,21 +1416,14 @@ class DiaryEntryServiceImplTest {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 4L, 2, 2, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
-                .thenReturn(List.of(
-                        seasonProgressCount("1399", 1, 2L),
-                        seasonProgressCount("1399", 2, 2L)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithSeasons(
-                        new TmdbSeasonSummary(0, "Specials", null, null, 1, null),
-                        new TmdbSeasonSummary(1, "Season 1", null, null, 4, null),
-                        new TmdbSeasonSummary(2, "Season 2", null, null, 2, null))));
-        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithAiredEpisodes(1, 4)));
-        when(tmdbClient.getSeasonFullDetails("1399", 2, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithAiredEpisodes(2, 2)));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
+                .thenReturn(List.of(seasonProgress("1399", 1, 2L, null), seasonProgress("1399", 2, 2L, null)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any()))
+                .thenReturn(Map.of("1399", progressSnapshot("1399", 6, List.of(
+                        new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                "1399", 1, 4, null, null, LocalDate.of(2020, 1, 1), LocalDateTime.now()),
+                        new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                "1399", 2, 2, null, null, LocalDate.of(2020, 1, 1), LocalDateTime.now())))));
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
@@ -1285,7 +1439,7 @@ class DiaryEntryServiceImplTest {
                 .extracting(SeriesInProgressResponseDTO::totalEpisodeCount,
                         SeriesInProgressResponseDTO::watchedPercentage)
                 .containsExactly(6, 66.66666666666667);
-        verify(tmdbClient, never()).getSeasonFullDetails("1399", 0, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE);
+        verify(seriesProgressMetadataRefreshService).getSnapshotsForRead(eq(List.of("1399")), any());
     }
 
     @Test
@@ -1294,23 +1448,12 @@ class DiaryEntryServiceImplTest {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 2L, 1, 2, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
-                .thenReturn(List.of(seasonProgressCount("1399", 1, 2L)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null,
-                        List.of(new TmdbSeasonSummary(1, "Season 1", null, null, 3, null)),
-                        null, null, null, null, null, 3, null, null, null)));
-        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbSeasonFullDetails(
-                        null, null, null, null, null, 1,
-                        List.of(
-                                new TmdbEpisodeSummary(1, null, null, LocalDate.now().minusDays(1).toString(), null, null, null),
-                                new TmdbEpisodeSummary(2, null, null, LocalDate.now().toString(), null, null, null),
-                                new TmdbEpisodeSummary(3, null, null, LocalDate.now().plusDays(1).toString(), null, null, null)),
-                        null, null)));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
+                .thenReturn(List.of(seasonProgress("1399", 1, 2L, null)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any()))
+                .thenReturn(Map.of("1399", progressSnapshot("1399", 2, List.of(
+                        new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                "1399", 1, 2, null, null, LocalDate.now(), LocalDateTime.now())))));
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
@@ -1331,12 +1474,8 @@ class DiaryEntryServiceImplTest {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null,
-                        List.of(), null, null, null, null, null, 0, null, null, null)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any()))
+                .thenReturn(Map.of("1399", progressSnapshot("1399", null, List.of())));
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
@@ -1352,12 +1491,8 @@ class DiaryEntryServiceImplTest {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(new TmdbTvFullDetails(
-                        null, null, null, null, null, null, null, null, null, null, null,
-                        List.of(), null, null, null, null, null, null, null, null, null)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any()))
+                .thenReturn(Map.of("1399", progressSnapshot("1399", null, List.of())));
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
@@ -1373,14 +1508,12 @@ class DiaryEntryServiceImplTest {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 12L, 8, 6, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(diaryEntryRepository.findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
-                .thenReturn(List.of(seasonProgressCount("1399", 1, 12L)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(seriesDetailsWithEpisodeCount(10)));
-        when(tmdbClient.getSeasonFullDetails("1399", 1, TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Found<>(seasonDetailsWithAiredEpisodes(10)));
+        when(diaryEntryRepository.findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(eq(lucasId), eq(List.of("1399"))))
+                .thenReturn(List.of(seasonProgress("1399", 1, 12L, null)));
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any()))
+                .thenReturn(Map.of("1399", progressSnapshot("1399", 10, List.of(
+                        new SeriesProgressMetadataRefreshService.SeasonSnapshot(
+                                "1399", 1, 10, null, null, LocalDate.of(2020, 1, 1), LocalDateTime.now())))));
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
@@ -1394,10 +1527,8 @@ class DiaryEntryServiceImplTest {
         DiaryEntryRepository.SeriesInProgress row = seriesInProgress(
                 "1399", 3L, 8, 6, LocalDate.of(2024, 5, 1));
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(row)));
-        when(tmdbClient.getTvFullDetails("1399", TmdbClient.LANGUAGE_INDEPENDENT_LOOKUP_LANGUAGE))
-                .thenReturn(new TmdbLookupResult.Unavailable<>());
+        when(seriesProgressMetadataRefreshService.getSnapshotsForRead(eq(List.of("1399")), any()))
+                .thenThrow(new TmdbUnavailableException("TMDB is currently unavailable"));
 
         assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10))
                 .isInstanceOf(TmdbUnavailableException.class)
@@ -1408,13 +1539,12 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[getSeriesInProgress] Should Return Empty Page - When User Has No Series In Progress")
     void shouldReturnEmptyPageWhenUserHasNoSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(Page.empty());
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 10);
 
         assertThat(result.getContent()).isEmpty();
-        verify(diaryEntryRepository, never()).findWatchedEpisodeCountsByUserIdAndSeriesTmdbIds(any(), any());
+        verify(seriesProgressMetadataRefreshService, never()).getSnapshotsForRead(any(), any());
+        verify(diaryEntryRepository, never()).findWatchedEpisodeProgressByUserIdAndSeriesTmdbIds(any(), any());
     }
 
     @Test
@@ -1434,8 +1564,6 @@ class DiaryEntryServiceImplTest {
     void shouldReturnEntriesWhenTargetProfileIsPublicAndViewerIsADifferentUserForSeriesInProgress() {
         lucas.setIsProfilePublic(true);
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class)))
-                .thenReturn(Page.empty());
 
         Page<SeriesInProgressResponseDTO> result = diaryEntryService.getSeriesInProgress(marinaId, lucasId, 1, 10);
 
@@ -1462,26 +1590,20 @@ class DiaryEntryServiceImplTest {
     @DisplayName("[getSeriesInProgress] Should Use Default Page - When Page Number Is Null")
     void shouldUseDefaultPageWhenPageNumberIsNullForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
 
         diaryEntryService.getSeriesInProgress(lucasId, lucasId, null, 10);
 
-        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
-        assertThat(captor.getValue().getPageNumber()).isZero();
+        assertThat(captureRequestedProgressPage()).satisfies(page -> assertThat(page.getPageNumber()).isZero());
     }
 
     @Test
     @DisplayName("[getSeriesInProgress] Should Use Page Number Minus One - When Page Number Is Positive")
     void shouldUsePageNumberMinusOneWhenPageNumberIsPositiveForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
 
         diaryEntryService.getSeriesInProgress(lucasId, lucasId, 3, 10);
 
-        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
-        assertThat(captor.getValue().getPageNumber()).isEqualTo(2);
+        assertThat(captureRequestedProgressPage()).satisfies(page -> assertThat(page.getPageNumber()).isEqualTo(2));
     }
 
     @Test
@@ -1492,33 +1614,29 @@ class DiaryEntryServiceImplTest {
         assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, -1, 10))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(diaryEntryRepository, never()).findSeriesInProgressByUserId(any(), any());
+        verify(seriesProgressReadRepository, never()).findCandidatesByUserId(any(), any(), any(), any());
     }
 
     @Test
     @DisplayName("[getSeriesInProgress] Should Use Default Page Size - When Page Size Is Null")
     void shouldUseDefaultPageSizeWhenPageSizeIsNullForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
 
         diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, null);
 
-        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
-        assertThat(captor.getValue().getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE);
+        assertThat(captureRequestedProgressPage())
+                .satisfies(page -> assertThat(page.getPageSize()).isEqualTo(PageRequestFactory.DEFAULT_PAGE_SIZE));
     }
 
     @Test
     @DisplayName("[getSeriesInProgress] Should Clamp Page Size To Max Limit - When Page Size Exceeds Limit")
     void shouldClampPageSizeToMaxLimitWhenPageSizeExceedsLimitForSeriesInProgress() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        when(diaryEntryRepository.findSeriesInProgressByUserId(eq(lucasId), any(PageRequest.class))).thenReturn(Page.empty());
 
         diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 1001);
 
-        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        verify(diaryEntryRepository).findSeriesInProgressByUserId(eq(lucasId), captor.capture());
-        assertThat(captor.getValue().getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE);
+        assertThat(captureRequestedProgressPage())
+                .satisfies(page -> assertThat(page.getPageSize()).isEqualTo(PageRequestFactory.MAX_PAGE_SIZE));
     }
 
     @Test
@@ -1529,7 +1647,7 @@ class DiaryEntryServiceImplTest {
         assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, -5))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(diaryEntryRepository, never()).findSeriesInProgressByUserId(any(), any());
+        verify(seriesProgressReadRepository, never()).findCandidatesByUserId(any(), any(), any(), any());
     }
 
     @Test
@@ -1540,12 +1658,21 @@ class DiaryEntryServiceImplTest {
         assertThatThrownBy(() -> diaryEntryService.getSeriesInProgress(lucasId, lucasId, 1, 0))
                 .isInstanceOf(BadRequestException.class);
 
-        verify(diaryEntryRepository, never()).findSeriesInProgressByUserId(any(), any());
+        verify(seriesProgressReadRepository, never()).findCandidatesByUserId(any(), any(), any(), any());
     }
 
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
             String seriesTmdbId, Integer maxSeasonNumber, Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
         return seriesInProgress(seriesTmdbId, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate);
+    }
+
+    private PageRequest captureRequestedProgressPage() {
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(seriesProgressReadRepository, times(2)).findCandidatesByUserId(
+                eq(lucasId), any(SeriesProgressReadRepository.SeriesProgressSort.class),
+                any(Sort.Direction.class), captor.capture());
+        assertThat(captor.getAllValues().getFirst().isUnpaged()).isTrue();
+        return (PageRequest) captor.getAllValues().get(1);
     }
 
     private Page<SeriesProgressReadRepository.SeriesProgressCandidate> candidatesPage(
@@ -1733,7 +1860,7 @@ class DiaryEntryServiceImplTest {
     private DiaryEntryRepository.SeriesInProgress seriesInProgress(
             String seriesTmdbId, Long watchedEpisodeCount, Integer maxSeasonNumber,
             Integer maxEpisodeNumber, LocalDate lastWatchedDate) {
-        return new DiaryEntryRepository.SeriesInProgress() {
+        DiaryEntryRepository.SeriesInProgress row = new DiaryEntryRepository.SeriesInProgress() {
             @Override
             public String getSeriesTmdbId() {
                 return seriesTmdbId;
@@ -1759,6 +1886,28 @@ class DiaryEntryServiceImplTest {
                 return lastWatchedDate;
             }
         };
+        SeriesProgressReadRepository.SeriesProgressCandidate candidate = progressCandidate(
+                seriesTmdbId, watchedEpisodeCount, null, maxSeasonNumber, maxEpisodeNumber, lastWatchedDate,
+                maxSeasonNumber, maxEpisodeNumber, null, null, null, null, null);
+        lenient().when(seriesProgressReadRepository.findCandidatesByUserId(
+                        any(UUID.class), any(SeriesProgressReadRepository.SeriesProgressSort.class),
+                        any(Sort.Direction.class), any(Pageable.class)))
+                .thenAnswer(invocation -> {
+                    Pageable pageable = invocation.getArgument(3);
+                    return pageable.isUnpaged()
+                            ? new PageImpl<>(List.of(candidate))
+                            : new PageImpl<>(List.of(candidate), pageable, 1);
+                });
+        return row;
+    }
+
+    private SeriesProgressMetadataRefreshService.Snapshot progressSnapshot(
+            String seriesTmdbId, Integer releasedEpisodeCount,
+            List<SeriesProgressMetadataRefreshService.SeasonSnapshot> seasons) {
+        return new SeriesProgressMetadataRefreshService.Snapshot(
+                new SeriesProgressMetadataRefreshService.SeriesSnapshot(
+                        seriesTmdbId, releasedEpisodeCount, null, null, null, LocalDateTime.now(), null),
+                seasons);
     }
 
     private DiaryEntryRepository.SeasonProgressCount seasonProgressCount(
@@ -2062,9 +2211,10 @@ class DiaryEntryServiceImplTest {
         verify(contentService).getOrCreateReference(contentRefCreationCaptor.capture(), anyBoolean());
         assertThat(contentRefCreationCaptor.getValue())
                 .isEqualTo(new ContentRefCreationDTO(fightClub.getTmdbId(), ContentType.MOVIE, null, null, null, null, null));
-        InOrder mutationOrder = inOrder(contentService, userContentMutationLock, diaryEntryRepository);
+        InOrder mutationOrder = inOrder(contentService, userContentMutationLock, diaryWatchCommandService, diaryEntryRepository);
         mutationOrder.verify(contentService).getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean());
         mutationOrder.verify(userContentMutationLock).lock(lucasId);
+        mutationOrder.verify(diaryWatchCommandService).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
         mutationOrder.verify(diaryEntryRepository).saveAndFlush(any(DiaryEntry.class));
     }
 
@@ -2325,8 +2475,8 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Save A WatchCompanion - When A Followed Companion Is Provided")
-    void shouldSaveAWatchCompanionWhenAFollowedCompanionIsProvided() {
+    @DisplayName("[createDiaryEntry] Should Pass WatchCompanions To The Command - When A Followed Companion Is Provided")
+    void shouldPassWatchCompanionsToTheCommandWhenAFollowedCompanionIsProvided() {
         stubContentResolution(fightClub);
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(contentRepository.getReferenceById(fightClub.getId())).thenReturn(fightClub);
@@ -2344,11 +2494,9 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(watchCompanionRepository).saveAll(watchCompanionsCaptor.capture());
-        List<WatchCompanion> saved = watchCompanionsCaptor.getValue();
-        assertThat(saved).hasSize(1);
-        assertThat(saved.get(0).getUser()).isEqualTo(marina);
-        assertThat(saved.get(0).getDiaryEntry()).isEqualTo(savedEntry);
+        ArgumentCaptor<WatchEventCommand> commandCaptor = ArgumentCaptor.forClass(WatchEventCommand.class);
+        verify(diaryWatchCommandService).recordPrepared(eq(lucasId), commandCaptor.capture());
+        assertThat(commandCaptor.getValue().watchedWith()).containsExactly(marinaId);
     }
 
     @Test
@@ -2436,7 +2584,9 @@ class DiaryEntryServiceImplTest {
 
         verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
         assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(1);
-        verify(diaryProjectionInvalidator).markSeriesChanged(lucasId, "900");
+        ArgumentCaptor<WatchEventCommand> commandCaptor = ArgumentCaptor.forClass(WatchEventCommand.class);
+        verify(diaryWatchCommandService).recordPrepared(eq(lucasId), commandCaptor.capture());
+        assertThat(commandCaptor.getValue().requestedWatchNumber()).isNull();
     }
 
     @Test
@@ -2457,10 +2607,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null),
                 null, null, null, true, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(1);
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -2481,10 +2630,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
                 null, null, null, true, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
-        assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(2);
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     // ---------- createDiaryEntry: watchlist/dropped removal side effect ----------
@@ -2505,7 +2653,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.MOVIE, fightClub.getId());
+        verify(diaryWatchCommandService).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
     }
 
     @Test
@@ -2527,7 +2675,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(droppedEntryRepository).delete(droppedEntry);
+        verify(diaryWatchCommandService).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
     }
 
     @Test
@@ -2552,8 +2700,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
-        verify(droppedEntryRepository).findByUserIdAndTypeAndContentId(lucasId, ContentType.SERIES, seriesContent.getId());
+        verify(diaryWatchCommandService).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
     }
 
     @Test
@@ -2598,10 +2745,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
                 null, null, null, null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
-        verify(contentRepository, never()).findByTmdbIdAndType(any(), any());
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -2704,14 +2850,9 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
         ArgumentCaptor<DiaryEntry> savedCaptor = ArgumentCaptor.forClass(DiaryEntry.class);
-        verify(diaryEntryRepository, times(2)).saveAndFlush(savedCaptor.capture());
-        DiaryEntry savedSeasonEntry = savedCaptor.getAllValues().get(1);
-        assertThat(savedSeasonEntry.getContent()).isEqualTo(season);
-        assertThat(savedSeasonEntry.getAutoGenerated()).isTrue();
-        assertThat(savedSeasonEntry.getComment()).isNull();
-        assertThat(savedSeasonEntry.getScore()).isNull();
-        assertThat(savedSeasonEntry.getWatchedDate()).isEqualTo(LocalDate.of(2024, 5, 1));
-        assertThat(savedSeasonEntry.getWatchNumber()).isEqualTo(1);
+        verify(diaryEntryRepository).saveAndFlush(savedCaptor.capture());
+        assertThat(savedCaptor.getValue().getContent()).isEqualTo(finaleEpisode);
+        assertThat(savedCaptor.getValue().getAutoGenerated()).isFalse();
     }
 
     @Test
@@ -2748,9 +2889,8 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
         ArgumentCaptor<DiaryEntry> savedCaptor = ArgumentCaptor.forClass(DiaryEntry.class);
-        verify(diaryEntryRepository, times(2)).saveAndFlush(savedCaptor.capture());
-        DiaryEntry savedSeasonEntry = savedCaptor.getAllValues().get(1);
-        assertThat(savedSeasonEntry.getWatchNumber()).isEqualTo(2);
+        verify(diaryEntryRepository).saveAndFlush(savedCaptor.capture());
+        assertThat(savedCaptor.getValue().getWatchNumber()).isEqualTo(2);
     }
 
     @Test
@@ -2788,36 +2928,33 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Source IsSeriesFinale From The Season Finale Episode - When It Differs From The Triggering Request")
-    void shouldSourceIsSeriesFinaleFromTheSeasonFinaleEpisodeWhenItDiffersFromTheTriggeringRequest() {
+    @DisplayName("[createDiaryEntry] Should Return Only The Prepared Episode Event - When Another Episode Is The Series Finale")
+    void shouldReturnOnlyThePreparedEpisodeEventWhenAnotherEpisodeIsTheSeriesFinale() {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 2);
         finaleEpisode.setIsSeriesFinale(true);
         Content nonFinaleEpisode = buildEpisode("1399", 1, 1);
-        Content season = buildSeason("1399", 1);
 
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         stubContentResolution(nonFinaleEpisode);
         when(contentRepository.getReferenceById(nonFinaleEpisode.getId())).thenReturn(nonFinaleEpisode);
         when(diaryEntryRepository.findMaxWatchNumber(lucasId, nonFinaleEpisode.getId())).thenReturn(0);
-        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("1399", 1, ContentType.EPISODE))
-                .thenReturn(Optional.of(finaleEpisode));
-        when(diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(lucasId, "1399", 1))
-                .thenReturn(List.of(buildDiaryEntry(lucas, nonFinaleEpisode, 1), buildDiaryEntry(lucas, finaleEpisode, 1)));
-        when(contentService.getOrCreateReference(new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true)))
-                .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, true, null, null));
-        lenient().when(contentRepository.getReferenceById(season.getId())).thenReturn(season);
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1)).thenReturn(Optional.empty());
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, nonFinaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDtoWithContent(invocation.getArgument(0)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, null, null),
                 null, null, LocalDate.of(2024, 5, 1), null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
+        DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntry(lucasId, dto);
 
-        verify(contentService).getOrCreateReference(
-                new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true));
+        assertThat(result.events()).hasSize(1);
+        assertThat(result.events().getFirst().entry().content().type()).isEqualTo(ContentType.EPISODE);
+        assertThat(result.completions()).isEmpty();
+        verify(diaryWatchCommandService).recordPrepared(
+                eq(lucasId), eq(new WatchEventCommand(
+                        MediaReference.episode("1399", 1, 1), LocalDate.of(2024, 5, 1), null,
+                        null, null, null, List.of(), null)));
     }
 
     @Test
@@ -2898,15 +3035,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true),
                 null, null, LocalDate.of(2024, 6, 1), null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        ArgumentCaptor<DiaryEntry> savedCaptor = ArgumentCaptor.forClass(DiaryEntry.class);
-        verify(diaryEntryRepository, times(2)).saveAndFlush(savedCaptor.capture());
-        DiaryEntry savedSeriesEntry = savedCaptor.getAllValues().get(1);
-        assertThat(savedSeriesEntry.getContent()).isEqualTo(series);
-        assertThat(savedSeriesEntry.getAutoGenerated()).isTrue();
-        assertThat(savedSeriesEntry.getWatchNumber()).isEqualTo(1);
-        assertThat(savedSeriesEntry.getWatchedDate()).isEqualTo(LocalDate.of(2024, 6, 1));
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -2936,12 +3067,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true),
                 null, null, null, null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        ArgumentCaptor<DiaryEntry> savedCaptor = ArgumentCaptor.forClass(DiaryEntry.class);
-        verify(diaryEntryRepository, times(2)).saveAndFlush(savedCaptor.capture());
-        DiaryEntry savedSeriesEntry = savedCaptor.getAllValues().get(1);
-        assertThat(savedSeriesEntry.getWatchNumber()).isEqualTo(2);
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -2973,10 +3101,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, null),
                 null, null, null, null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verifyNoInteractions(newTransactionExecutor);
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -3003,10 +3130,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 5, null, null, true),
                 null, null, null, null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verify(contentService, times(1)).getOrCreateReference(any(ContentRefCreationDTO.class), anyBoolean());
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -3026,10 +3152,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 2, null, null, null),
                 null, null, null, null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verify(diaryEntryRepository, never()).findAllSeasonEntriesInSeries(any(), any());
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -3075,10 +3200,9 @@ class DiaryEntryServiceImplTest {
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(contentRef, null, null, null, null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verifyNoInteractions(newTransactionExecutor);
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -3125,12 +3249,10 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
         ArgumentCaptor<DiaryEntry> savedCaptor = ArgumentCaptor.forClass(DiaryEntry.class);
-        verify(diaryEntryRepository, times(4)).saveAndFlush(savedCaptor.capture());
-        List<DiaryEntry> savedSeasonEntries = savedCaptor.getAllValues().stream()
-                .filter(entry -> season.getId().equals(entry.getContent().getId()))
-                .toList();
-        assertThat(savedSeasonEntries).extracting(DiaryEntry::getWatchNumber).containsExactly(1, 2, 3);
-        assertThat(savedSeasonEntries).allSatisfy(entry -> assertThat(entry.getAutoGenerated()).isTrue());
+        verify(diaryEntryRepository).saveAndFlush(savedCaptor.capture());
+        assertThat(savedCaptor.getValue().getContent()).isEqualTo(finaleEpisode);
+        assertThat(savedCaptor.getValue().getWatchNumber()).isEqualTo(3);
+        assertThat(savedCaptor.getValue().getAutoGenerated()).isFalse();
         verifyNoInteractions(newTransactionExecutor);
     }
 
@@ -3171,16 +3293,9 @@ class DiaryEntryServiceImplTest {
                 new ContentRefCreationDTO(null, ContentType.SEASON, "1399", 1, null, null, true),
                 null, null, null, null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
-
-        ArgumentCaptor<DiaryEntry> savedCaptor = ArgumentCaptor.forClass(DiaryEntry.class);
-        verify(diaryEntryRepository, times(4)).saveAndFlush(savedCaptor.capture());
-        List<DiaryEntry> savedSeriesEntries = savedCaptor.getAllValues().stream()
-                .filter(entry -> series.getId().equals(entry.getContent().getId()))
-                .toList();
-        assertThat(savedSeriesEntries).extracting(DiaryEntry::getWatchNumber).containsExactly(1, 2, 3);
-        assertThat(savedSeriesEntries).allSatisfy(entry -> assertThat(entry.getAutoGenerated()).isTrue());
-        verifyNoInteractions(newTransactionExecutor);
+        assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Diary event logging only supports content of type MOVIE or EPISODE");
     }
 
     @Test
@@ -3212,28 +3327,23 @@ class DiaryEntryServiceImplTest {
         lenient().when(contentRepository.getReferenceById(series.getId())).thenReturn(series);
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any())).thenReturn(buildResponseDto(buildEntry(lucas, finaleEpisode)));
+        when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
+                .thenAnswer(invocation -> buildResponseDtoWithContent(invocation.getArgument(0)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, true, true),
                 null, null, LocalDate.of(2024, 7, 1), null, null, null);
 
-        diaryEntryService.createDiaryEntry(lucasId, dto);
+        DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntry(lucasId, dto);
 
         ArgumentCaptor<DiaryEntry> savedCaptor = ArgumentCaptor.forClass(DiaryEntry.class);
-        verify(diaryEntryRepository, times(3)).saveAndFlush(savedCaptor.capture());
-        DiaryEntry savedEpisodeEntry = savedCaptor.getAllValues().get(0);
-        DiaryEntry savedSeasonEntry = savedCaptor.getAllValues().get(1);
-        DiaryEntry savedSeriesEntry = savedCaptor.getAllValues().get(2);
+        verify(diaryEntryRepository).saveAndFlush(savedCaptor.capture());
+        DiaryEntry savedEpisodeEntry = savedCaptor.getValue();
         assertThat(savedEpisodeEntry.getContent()).isEqualTo(finaleEpisode);
         assertThat(savedEpisodeEntry.getAutoGenerated()).isFalse();
-        assertThat(savedSeasonEntry.getContent()).isEqualTo(season);
-        assertThat(savedSeasonEntry.getAutoGenerated()).isTrue();
-        assertThat(savedSeasonEntry.getWatchNumber()).isEqualTo(1);
-        assertThat(savedSeriesEntry.getContent()).isEqualTo(series);
-        assertThat(savedSeriesEntry.getAutoGenerated()).isTrue();
-        assertThat(savedSeriesEntry.getWatchNumber()).isEqualTo(1);
-        assertThat(savedSeriesEntry.getWatchedDate()).isEqualTo(LocalDate.of(2024, 7, 1));
+        assertThat(result.events()).hasSize(1);
+        assertThat(result.events().getFirst().entry().content().type()).isEqualTo(ContentType.EPISODE);
+        assertThat(result.completions()).isEmpty();
     }
 
     @Test
@@ -3444,7 +3554,7 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1)).thenReturn(Optional.empty());
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
-                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+                .thenAnswer(invocation -> buildResponseDtoWithContent(invocation.getArgument(0)));
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, true, true),
@@ -3453,12 +3563,9 @@ class DiaryEntryServiceImplTest {
         DiaryEntryCreationResultDTO result = diaryEntryService.createDiaryEntry(lucasId, dto);
 
         assertThat(result.entry().autoGenerated()).isFalse();
-        assertThat(result.completedSeason()).isNotNull();
-        assertThat(result.completedSeason().watchNumber()).isEqualTo(1);
-        assertThat(result.completedSeason().autoGenerated()).isTrue();
-        assertThat(result.completedSeries()).isNotNull();
-        assertThat(result.completedSeries().watchNumber()).isEqualTo(1);
-        assertThat(result.completedSeries().autoGenerated()).isTrue();
+        assertThat(result.events()).hasSize(1);
+        assertThat(result.events().getFirst().entry().content().type()).isEqualTo(ContentType.EPISODE);
+        assertThat(result.completions()).isEmpty();
     }
 
     @Test
@@ -3494,13 +3601,15 @@ class DiaryEntryServiceImplTest {
         diaryEntryService.createDiaryEntry(lucasId, dto);
 
         verify(diaryEntryRepository, times(1)).saveAndFlush(any(DiaryEntry.class));
-        verify(diaryEntryRepository).findFirstByUserIdAndContentIdAndWatchNumber(lucasId, season.getId(), 1);
+        verify(diaryWatchCommandService).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
+        verify(diaryEntryRepository, never()).findFirstByUserIdAndContentIdAndWatchNumber(
+                lucasId, season.getId(), 1);
         verifyNoInteractions(newTransactionExecutor);
     }
 
     @Test
-    @DisplayName("[createDiaryEntry] Should Propagate Completion Save Failure - Within The Outer Diary Transaction")
-    void shouldPropagateCompletionSaveFailureWithinTheOuterDiaryTransaction() {
+    @DisplayName("[createDiaryEntry] Should Map A Watch Number Conflict - When The Event Cannot Be Saved")
+    void shouldMapAWatchNumberConflictWhenTheEventCannotBeSaved() {
         Content finaleEpisode = buildFinaleEpisode("1399", 1, 1);
         Content season = buildSeason("1399", 1);
         DataIntegrityViolationException exception = buildDataIntegrityViolationException("uq_diary_entries_user_content_watch_number");
@@ -3517,20 +3626,15 @@ class DiaryEntryServiceImplTest {
                 .thenReturn(new ContentRefDTO(season.getId(), null, ContentType.SEASON, "1399", 1, null, null, null, null, null));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndEpisodeNumberAndType(
                 "1399", 1, null, ContentType.SEASON)).thenReturn(Optional.of(season));
-        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenAnswer(invocation -> {
-            DiaryEntry entry = invocation.getArgument(0);
-            if (entry.getContent().getType() == ContentType.SEASON) {
-                throw exception;
-            }
-            return entry;
-        });
+        when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class))).thenThrow(exception);
 
         DiaryEntryCreationDTO dto = new DiaryEntryCreationDTO(
                 new ContentRefCreationDTO(null, ContentType.EPISODE, "1399", 1, 1, true, null),
                 null, null, LocalDate.of(2024, 5, 1), null, null, null);
 
         assertThatThrownBy(() -> diaryEntryService.createDiaryEntry(lucasId, dto))
-                .isSameAs(exception);
+                .isInstanceOf(ConflictException.class)
+                .hasMessage("This watch was already logged by a concurrent request");
         verifyNoInteractions(newTransactionExecutor);
     }
 
@@ -3755,10 +3859,9 @@ class DiaryEntryServiceImplTest {
                 new DiaryEntryBulkCreationDTO(new ContentRefCreationDTO(null, ContentType.SEASON, "900", 1, null, null, null),
                         LocalDate.of(2026, 9, 21), null, null, null));
 
-        assertThat(result).hasSize(3);
-        assertThat(result).filteredOn(entry -> entry.content().type() == ContentType.SEASON)
-                .extracting(DiaryEntryResponseDTO::autoGenerated, DiaryEntryResponseDTO::watchNumber)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple(true, 1));
+        assertThat(result).hasSize(2);
+        assertThat(result).allMatch(entry -> entry.content().type() == ContentType.EPISODE);
+        assertThat(result).allMatch(DiaryEntryResponseDTO::ignore);
         verify(contentService, times(2)).getOrCreateReference(contentRefCreationCaptor.capture(), eq(true));
         assertThat(contentRefCreationCaptor.getAllValues()).filteredOn(ref -> ref.episodeNumber() == 2)
                 .allSatisfy(ref -> {
@@ -4035,38 +4138,35 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[createDiaryEntriesInBulk] Should Resume The Incomplete First Pass Across Series Seasons")
-    void shouldResumeTheIncompletePassAcrossSeriesSeasons() {
-        Content s1e1 = buildEpisode("900", 1, 1);
-        Content s1e2 = buildFinaleEpisode("900", 1, 2);
-        Content s2e1 = buildEpisode("900", 2, 1);
-        Content s2e2 = buildFinaleEpisode("900", 2, 2);
+    @DisplayName("[createDiaryEntriesInBulk] Should Resume Only T2 Pass 2 - When T1 Pass 2 And T2 Pass 1 Are Complete")
+    void shouldResumeOnlyT2PassTwoWhenT1PassTwoAndT2PassOneAreComplete() {
+        Content s1e1 = buildFinaleEpisode("900", 1, 1);
+        Content s2e1 = buildFinaleEpisode("900", 2, 1);
         Content s1 = buildSeason("900", 1);
         Content s2 = buildFinaleSeason("900", 2);
         Content series = buildContent("900", ContentType.SERIES);
 
         when(contentRepository.findBySeriesTmdbIdAndTypeAndIsSeriesFinaleTrue("900", ContentType.SEASON))
                 .thenReturn(Optional.of(s2));
-        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
-                .thenReturn(Optional.of(s1e2));
         when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 2, ContentType.EPISODE))
-                .thenReturn(Optional.of(s2e2));
+                .thenReturn(Optional.of(s2e1));
+        when(contentRepository.findBySeriesTmdbIdAndSeasonNumberAndTypeAndIsSeasonFinaleTrue("900", 1, ContentType.EPISODE))
+                .thenReturn(Optional.of(s1e1));
         when(diaryEntryRepository.findEpisodeEntriesBySeriesForUser(lucasId, "900"))
                 .thenReturn(List.of(
                         buildDiaryEntry(lucas, s1e1, 1),
-                        buildDiaryEntry(lucas, s2e1, 1),
-                        buildDiaryEntry(lucas, s2e2, 1)));
+                        buildDiaryEntry(lucas, s1e1, 2),
+                        buildDiaryEntry(lucas, s2e1, 1)));
         when(diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(lucasId, "900", 1))
-                .thenReturn(List.of(buildDiaryEntry(lucas, s1e1, 1), buildDiaryEntry(lucas, s1e2, 1)));
+                .thenReturn(List.of(buildDiaryEntry(lucas, s1e1, 1), buildDiaryEntry(lucas, s1e1, 2)));
         when(diaryEntryRepository.findEpisodeEntriesByUserIdAndSeriesTmdbIdAndSeasonNumber(lucasId, "900", 2))
-                .thenReturn(List.of(buildDiaryEntry(lucas, s2e1, 1), buildDiaryEntry(lucas, s2e2, 1)));
+                .thenReturn(List.of(buildDiaryEntry(lucas, s2e1, 1), buildDiaryEntry(lucas, s2e1, 2)));
         when(diaryEntryRepository.findAllSeasonEntriesInSeries(lucasId, "900"))
-                .thenReturn(List.of(buildDiaryEntry(lucas, s1, 1), buildDiaryEntry(lucas, s2, 1)));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, s1.getId(), 1)).thenReturn(Optional.empty());
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, s2.getId(), 1))
-                .thenReturn(Optional.of(buildDiaryEntry(lucas, s2, 1)));
-        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 1))
-                .thenReturn(Optional.empty(), Optional.of(buildDiaryEntry(lucas, series, 1)));
+                .thenReturn(List.of(buildDiaryEntry(lucas, s1, 2), buildDiaryEntry(lucas, s2, 2)));
+        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, s1.getId(), 2)).thenReturn(Optional.empty());
+        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, s2.getId(), 2)).thenReturn(Optional.empty());
+        when(diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(lucasId, series.getId(), 2))
+                .thenReturn(Optional.empty());
         when(watchCompanionRepository.findByDiaryEntryIdIn(any())).thenReturn(List.of());
         when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
 
@@ -4086,8 +4186,8 @@ class DiaryEntryServiceImplTest {
                 .thenAnswer(invocation -> {
                     ContentRefCreationDTO ref = invocation.getArgument(0);
                     Content content = switch (ref.seasonNumber()) {
-                        case 1 -> ref.episodeNumber() == 1 ? s1e1 : s1e2;
-                        case 2 -> ref.episodeNumber() == 1 ? s2e1 : s2e2;
+                        case 1 -> s1e1;
+                        case 2 -> s2e1;
                         default -> throw new AssertionError("Unexpected season: " + ref.seasonNumber());
                     };
                     return new ContentRefDTO(content.getId(), content.getTmdbId(), content.getType(),
@@ -4097,7 +4197,7 @@ class DiaryEntryServiceImplTest {
         when(contentRepository.getReferenceById(any(UUID.class)))
                 .thenAnswer(invocation -> {
                     UUID id = invocation.getArgument(0);
-                    return List.of(s1e1, s1e2, s2e1, s2e2, s1, s2, series).stream()
+                    return List.of(s1e1, s2e1, s1, s2, series).stream()
                             .filter(content -> content.getId().equals(id))
                             .findFirst()
                             .orElseThrow();
@@ -4105,22 +4205,24 @@ class DiaryEntryServiceImplTest {
         when(diaryEntryRepository.saveAndFlush(any(DiaryEntry.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(diaryEntryMapper.diaryEntryToResponseDto(any(DiaryEntry.class), anyBoolean(), any()))
-                .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
+                .thenAnswer(invocation -> buildResponseDtoWithContent(invocation.getArgument(0)));
 
         DiaryEntryBulkCreationDTO dto = new DiaryEntryBulkCreationDTO(
                 new ContentRefCreationDTO("900", ContentType.SERIES, null, null, null, null, null),
-                LocalDate.of(2024, 5, 1), null, 2, Map.of(1, 2, 2, 2));
+                LocalDate.of(2024, 5, 1), null, 2, Map.of(1, 1, 2, 1));
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        assertThat(result).hasSize(3);
-        verify(diaryEntryRepository, times(3)).saveAndFlush(entryCaptor.capture());
-        assertThat(entryCaptor.getAllValues())
-                .extracting(entry -> entry.getContent().getType(), DiaryEntry::getWatchNumber)
-                .containsExactlyInAnyOrder(
-                        org.assertj.core.groups.Tuple.tuple(ContentType.EPISODE, 1),
-                        org.assertj.core.groups.Tuple.tuple(ContentType.SEASON, 1),
-                        org.assertj.core.groups.Tuple.tuple(ContentType.SERIES, 1));
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().content().type()).isEqualTo(ContentType.EPISODE);
+        assertThat(result.getFirst().content().seasonNumber()).isEqualTo(2);
+        assertThat(result.getFirst().content().episodeNumber()).isEqualTo(1);
+        assertThat(result.getFirst().watchNumber()).isEqualTo(2);
+        verify(diaryEntryRepository).saveAndFlush(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getContent().getType()).isEqualTo(ContentType.EPISODE);
+        assertThat(entryCaptor.getValue().getContent().getSeasonNumber()).isEqualTo(2);
+        assertThat(entryCaptor.getValue().getContent().getEpisodeNumber()).isEqualTo(1);
+        assertThat(entryCaptor.getValue().getWatchNumber()).isEqualTo(2);
     }
 
     // ---------- createDiaryEntriesInBulk: watchlist/dropped removal side effect ----------
@@ -4147,8 +4249,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
-        verify(droppedEntryRepository).findByUserIdAndTypeAndContentId(lucasId, ContentType.SERIES, seriesContent.getId());
+        verify(diaryWatchCommandService, atLeastOnce()).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
     }
 
     @Test
@@ -4178,8 +4279,7 @@ class DiaryEntryServiceImplTest {
 
         diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        verify(watchlistEntryService).removeEntryIfPresent(lucasId, ContentType.SERIES, seriesContent.getId());
-        verify(droppedEntryRepository).findByUserIdAndTypeAndContentId(lucasId, ContentType.SERIES, seriesContent.getId());
+        verify(diaryWatchCommandService, atLeastOnce()).recordPrepared(eq(lucasId), any(WatchEventCommand.class));
     }
 
     @Test
@@ -4747,17 +4847,17 @@ class DiaryEntryServiceImplTest {
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        assertThat(result).hasSize(4);
-        assertThat(result).filteredOn(entry -> entry.content().type() == ContentType.EPISODE)
+        assertThat(result).hasSize(3);
+        assertThat(result).allMatch(entry -> entry.content().type() == ContentType.EPISODE);
+        assertThat(result)
                 .extracting(DiaryEntryResponseDTO::watchNumber)
                 .containsOnly(2);
-        assertThat(result).filteredOn(entry -> entry.content().type() == ContentType.SEASON)
-                .extracting(DiaryEntryResponseDTO::watchNumber, DiaryEntryResponseDTO::autoGenerated)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple(2, true));
-        InOrder resolutionOrder = inOrder(contentService, userContentMutationLock);
+        assertThat(result).allMatch(DiaryEntryResponseDTO::ignore);
+        InOrder resolutionOrder = inOrder(contentService, diaryWatchCommandService);
         resolutionOrder.verify(contentService, times(3))
                 .getOrCreateReference(any(ContentRefCreationDTO.class), eq(true));
-        resolutionOrder.verify(userContentMutationLock).lock(lucasId);
+        resolutionOrder.verify(diaryWatchCommandService, atLeastOnce())
+                .recordPrepared(eq(lucasId), any(WatchEventCommand.class));
     }
 
     @Test
@@ -4832,21 +4932,12 @@ class DiaryEntryServiceImplTest {
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        assertThat(result).hasSize(4);
+        assertThat(result).hasSize(3);
         List<DiaryEntryResponseDTO> episodeEntries = result.stream()
                 .filter(entry -> entry.content().type() == ContentType.EPISODE)
                 .toList();
         assertThat(episodeEntries).hasSize(3);
-
-        Optional<DiaryEntryResponseDTO> seasonEntry = result.stream()
-                .filter(entry -> entry.content().type() == ContentType.SEASON)
-                .findFirst();
-        assertThat(seasonEntry).isPresent();
-        assertThat(seasonEntry.get().autoGenerated()).isTrue();
-        assertThat(seasonEntry.get().watchNumber()).isEqualTo(1);
-
         assertThat(episodeEntries).allMatch(DiaryEntryResponseDTO::ignore);
-        assertThat(seasonEntry.get().ignore()).isFalse();
     }
 
     @Test
@@ -4912,14 +5003,9 @@ class DiaryEntryServiceImplTest {
 
         List<DiaryEntryResponseDTO> result = diaryEntryService.createDiaryEntriesInBulk(lucasId, dto);
 
-        assertThat(result).hasSize(3);
-        DiaryEntryResponseDTO episodeEntry = result.stream().filter(e -> e.content().type() == ContentType.EPISODE).findFirst().orElseThrow();
-        DiaryEntryResponseDTO seasonEntry = result.stream().filter(e -> e.content().type() == ContentType.SEASON).findFirst().orElseThrow();
-        DiaryEntryResponseDTO seriesEntry = result.stream().filter(e -> e.content().type() == ContentType.SERIES).findFirst().orElseThrow();
-
-        assertThat(episodeEntry.ignore()).isTrue();
-        assertThat(seasonEntry.ignore()).isTrue();
-        assertThat(seriesEntry.ignore()).isFalse();
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().content().type()).isEqualTo(ContentType.EPISODE);
+        assertThat(result.getFirst().ignore()).isTrue();
     }
 
     // ---------- updateDiaryEntry ----------
@@ -5890,12 +5976,14 @@ class DiaryEntryServiceImplTest {
                 .build();
         if (type == ContentType.SERIES) {
             preparedSeriesReferences.putIfAbsent(tmdbId, content);
+        } else if (type == ContentType.MOVIE) {
+            preparedMovieReferences.putIfAbsent(tmdbId, content);
         }
         return content;
     }
 
     private Content buildEpisode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {
-        return Content.builder()
+        Content content = Content.builder()
                 .id(UUID.randomUUID())
                 .seriesTmdbId(seriesTmdbId)
                 .seasonNumber(seasonNumber)
@@ -5904,6 +5992,8 @@ class DiaryEntryServiceImplTest {
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
+        preparedEpisodeReferences.putIfAbsent(episodeReferenceKey(seriesTmdbId, seasonNumber, episodeNumber), content);
+        return content;
     }
 
     private Content buildFinaleEpisode(String seriesTmdbId, Integer seasonNumber, Integer episodeNumber) {

@@ -190,10 +190,13 @@ public class DiaryEntryController {
     }
 
     @PostMapping("/diary/bulk")
-    public ResponseEntity<List<DiaryEntryResponseDTO>> createDiaryEntriesInBulk(@Valid @RequestBody DiaryEntryBulkCreationDTO diaryEntryBulkCreationDTO) {
+    public ResponseEntity<DiaryEntryCreationResultDTO> createDiaryEntriesInBulk(
+            @Valid @RequestBody DiaryEntryBulkCreationDTO diaryEntryBulkCreationDTO,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
         requestThrottler.checkAllowed(diaryBulkActionKey(), diaryBulkActionMaxRequests, Duration.ofMinutes(diaryBulkActionWindowMinutes));
 
-        List<DiaryEntryResponseDTO> created = diaryEntryService.createDiaryEntriesInBulk(getCurrentUserId(), diaryEntryBulkCreationDTO);
+        DiaryEntryCreationResultDTO created = diaryEntryService.createDiaryEntriesInBulk(
+                getCurrentUserId(), diaryEntryBulkCreationDTO, idempotencyKey);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
