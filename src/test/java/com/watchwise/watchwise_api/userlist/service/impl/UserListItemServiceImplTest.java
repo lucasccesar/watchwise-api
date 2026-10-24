@@ -491,7 +491,6 @@ class UserListItemServiceImplTest {
 
         assertThat(result).isEqualTo(0.0);
         verify(userListContentStateService).resolve(lucasId, List.of());
-        verify(userListItemRepository, never()).countWatchedContentItemsByUserListIdIn(any(), any());
     }
 
     @Test
@@ -508,7 +507,6 @@ class UserListItemServiceImplTest {
         assertThat(result).isEqualTo(25.0);
         verify(userListContentStateService).resolve(lucasId, List.of(item));
         verify(userListItemRepository, never()).countContentItemsByUserListIdIn(any());
-        verify(userListItemRepository, never()).countWatchedContentItemsByUserListIdIn(any(), any());
     }
 
     @Test

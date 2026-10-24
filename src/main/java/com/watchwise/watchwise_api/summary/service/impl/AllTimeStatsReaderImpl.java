@@ -64,6 +64,7 @@ public class AllTimeStatsReaderImpl implements AllTimeStatsReader {
     private final Top5EntryRepository top5EntryRepository;
     private final UserContentPosterService userContentPosterService;
     private final ContentCardAssembler contentCardAssembler;
+    private final CurrentRatingSummaryReader currentRatingSummaryReader;
 
     @Override
     public AllTimeEditionStatsDTO read(UUID userId, ContentType type) {
@@ -98,7 +99,8 @@ public class AllTimeStatsReaderImpl implements AllTimeStatsReader {
                 .map(row -> new GenreCountDTO(row.getGenre(), row.getCount()))
                 .toList();
         List<RatingCountDTO> ratingsDistribution = profileSummaryQueryRepository
-                .countLatestScoresByUserIdAndContentType(userId, watchedContentType.name()).stream()
+                .countLatestScoresByUserIdAndContentType(userId,
+                        type == ContentType.MOVIE ? ContentType.MOVIE.name() : ContentType.SERIES.name()).stream()
                 .map(row -> new RatingCountDTO(row.getScore(), row.getCount()))
                 .toList();
 
@@ -122,6 +124,9 @@ public class AllTimeStatsReaderImpl implements AllTimeStatsReader {
                 !topRatedRaw.isEmpty() || !bottomRatedRaw.isEmpty());
         List<DiaryEntryResponseDTO> topRated = promoteTop5First(topRatedRaw, userId, type, customPosters, cards);
         List<DiaryEntryResponseDTO> bottomRated = sortBottomRated(bottomRatedRaw, customPosters, cards);
+        CurrentRatingSummaryReader.Ratings currentSeriesRatings = type == ContentType.SERIES
+                ? currentRatingSummaryReader.readSeriesRatings(userId, TOP_LIMIT)
+                : CurrentRatingSummaryReader.Ratings.empty();
         mostLoggedContent = mostLoggedContent.stream()
                 .map(item -> item.withCard(cardFor(item.content(), cards)))
                 .toList();
@@ -133,7 +138,8 @@ public class AllTimeStatsReaderImpl implements AllTimeStatsReader {
         return new AllTimeEditionStatsDTO(type, watchedCount, minutesWatched, totalTheaterVisits,
                 averageMinutesPerDay * AVERAGE_DAYS_PER_MONTH, averageMinutesPerDay * 7,
                 averageMinutesPerDay, watchCountByYear, watchCountByDecade, watchCountByCountry,
-                mostLoggedContent, genreCounts, ratingsDistribution, topRated, bottomRated);
+                mostLoggedContent, genreCounts, ratingsDistribution, topRated, bottomRated,
+                currentSeriesRatings.top(), currentSeriesRatings.bottom());
     }
 
     private List<ContentWatchCountDTO> readMostLoggedContent(UUID userId, ContentType type) {

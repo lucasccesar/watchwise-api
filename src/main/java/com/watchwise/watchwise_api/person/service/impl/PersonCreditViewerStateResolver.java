@@ -41,11 +41,6 @@ public class PersonCreditViewerStateResolver {
         List<String> idList = new ArrayList<>(tmdbIds);
         List<DiaryEntryRepository.PersonCreditMedia> activity = diaryEntryRepository
                 .findWatchedMediaForPersonCredits(viewerId, idList);
-        Set<String> directlyWatchedSeries = activity.stream()
-                .filter(media -> media.getSourceType() == ContentType.SERIES)
-                .map(DiaryEntryRepository.PersonCreditMedia::getTmdbId)
-                .filter(java.util.Objects::nonNull)
-                .collect(Collectors.toSet());
         Set<String> seasonActivitySeries = activity.stream()
                 .filter(media -> media.getSourceType() == ContentType.SEASON)
                 .map(DiaryEntryRepository.PersonCreditMedia::getSeriesTmdbId)
@@ -72,12 +67,14 @@ public class PersonCreditViewerStateResolver {
             ContentViewerStateDTO state = common.statesByCoordinate().get(coordinate);
             if (state == null) state = emptyState();
             if (credit.type() == MovieOrSeriesType.SERIES) {
+                if (state.watchStatus() == WatchStatus.WATCHED && state.lastWatchNumber() != null) {
+                    resolvedStates.put(coordinate, state);
+                    continue;
+                }
                 long watched = watchedCounts.getOrDefault(credit.tmdbId(), 0L);
                 Integer released = releasedCounts.get(credit.tmdbId());
-                boolean direct = directlyWatchedSeries.contains(credit.tmdbId());
                 boolean hasActivity = watched > 0 || seasonActivitySeries.contains(credit.tmdbId());
-                WatchStatus status = direct ? WatchStatus.WATCHED
-                        : !hasActivity ? WatchStatus.UNWATCHED
+                WatchStatus status = !hasActivity ? WatchStatus.UNWATCHED
                         : released == null ? WatchStatus.UNKNOWN
                         : watched >= released ? WatchStatus.WATCHED : WatchStatus.PARTIALLY_WATCHED;
                 Integer watchedEpisodeCount = released == null ? null : Math.toIntExact(watched);
@@ -103,7 +100,7 @@ public class PersonCreditViewerStateResolver {
         return new ContentViewerStateDTO(status, state.myRating(), state.myReview(), state.lastWatchedDate(),
                 state.lastWatchNumber(), state.watchedInTheater(), state.playsCount(), state.latestDiaryEntryId(),
                 state.inWatchlist(), state.watchlistEntryId(), state.dropped(), state.droppedEntryId(), state.lists(),
-                watched, released);
+                watched, released, state.currentRatingVersion(), state.reviewsCount(), state.reviewIds());
     }
 
     private static ContentViewerStateDTO emptyState() {

@@ -13,6 +13,8 @@ import com.watchwise.watchwise_api.common.tmdb.TmdbTvFullDetails;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.entity.Follower;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
@@ -44,6 +46,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -96,6 +99,9 @@ class UserListControllerIntegrationTest {
     private ContentRepository contentRepository;
 
     @Autowired
+    private ContentRatingRepository contentRatingRepository;
+
+    @Autowired
     private FollowerRepository followerRepository;
 
     @Autowired
@@ -115,6 +121,7 @@ class UserListControllerIntegrationTest {
         likeRepository.deleteAll();
         userListItemRepository.deleteAll();
         userListRepository.deleteAll();
+        contentRatingRepository.deleteAll();
         contentRepository.deleteAll();
         followerRepository.deleteAll();
         refreshTokenRepository.deleteAll();
@@ -355,6 +362,36 @@ class UserListControllerIntegrationTest {
                 .userList(list)
                 .content(content)
                 .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private UserListItem persistSeasonItem(UserList list, String seriesTmdbId, int seasonNumber, int position) {
+        LocalDateTime now = LocalDateTime.now();
+        Content content = contentRepository.save(Content.builder()
+                .type(ContentType.SEASON)
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+        return userListItemRepository.save(UserListItem.builder()
+                .userList(list)
+                .content(content)
+                .position(position)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
+    }
+
+    private void persistCurrentRating(RegisteredUser user, Content content, int score) {
+        Instant now = Instant.now();
+        contentRatingRepository.save(ContentRating.builder()
+                .userId(user.id())
+                .contentId(content.getId())
+                .contentType(content.getType())
+                .score(score)
                 .createdAt(now)
                 .updatedAt(now)
                 .build());
@@ -901,8 +938,8 @@ class UserListControllerIntegrationTest {
         RegisteredUser privateRater = registerUser("getbyidglobalepisodeprivate");
         User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
         UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
-        persistContentItem(list, "100", ContentType.SERIES, 1);
-        persistContentItem(list, "200", ContentType.SERIES, 2);
+        Content series100 = persistContentItem(list, "100", ContentType.SERIES, 1).getContent();
+        Content series200 = persistContentItem(list, "200", ContentType.SERIES, 2).getContent();
         persistContentItem(list, "300", ContentType.MOVIE, 3);
         makeProfilePrivate(privateRater);
 
@@ -913,12 +950,12 @@ class UserListControllerIntegrationTest {
         logEpisode(publicRater, "200", 1, 1, 6);
         logEpisode(privateRater, "100", 1, 1, 10);
         logEpisode(privateRater, "200", 1, 1, 2);
-        logContent(owner, "100", ContentType.SERIES, 4);
-        logContent(owner, "200", ContentType.SERIES, 6);
-        logContent(publicRater, "100", ContentType.SERIES, 8);
-        logContent(publicRater, "200", ContentType.SERIES, 10);
-        logContent(privateRater, "100", ContentType.SERIES, 10);
-        logContent(privateRater, "200", ContentType.SERIES, 1);
+        persistCurrentRating(owner, series100, 4);
+        persistCurrentRating(owner, series200, 6);
+        persistCurrentRating(publicRater, series100, 8);
+        persistCurrentRating(publicRater, series200, 10);
+        persistCurrentRating(privateRater, series100, 10);
+        persistCurrentRating(privateRater, series200, 1);
 
         mockMvc.perform(getUserListByIdRequest(owner, list.getId(), "globalEpisodeAvgRating", "asc"))
                 .andExpect(status().isOk())
@@ -969,6 +1006,33 @@ class UserListControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[getUserListById] Should Use Current Ratings For Series And Season Content Averages")
+    void shouldUseCurrentRatingsForSeriesAndSeasonListContentAverages() throws Exception {
+        RegisteredUser owner = registerUser("getbyidopinionavgowner");
+        RegisteredUser publicRater = registerUser("getbyidopinionavgpublic");
+        RegisteredUser privateRater = registerUser("getbyidopinionavgprivate");
+        User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
+        UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
+        Content series = persistContentItem(list, "81001", ContentType.SERIES, 1).getContent();
+        Content season = persistSeasonItem(list, "81001", 1, 2).getContent();
+        makeProfilePrivate(privateRater);
+
+        persistCurrentRating(owner, series, 8);
+        persistCurrentRating(publicRater, series, 6);
+        persistCurrentRating(privateRater, series, 10);
+        persistCurrentRating(owner, season, 4);
+        persistCurrentRating(publicRater, season, 8);
+        persistCurrentRating(privateRater, season, 10);
+
+        mockMvc.perform(getUserListByIdRequest(owner, list.getId(), "contentAvgRating", "desc"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].content.type").value("SERIES"))
+                .andExpect(jsonPath("$.items[0].contentAverageRating").value(7.0))
+                .andExpect(jsonPath("$.items[1].content.type").value("SEASON"))
+                .andExpect(jsonPath("$.items[1].contentAverageRating").value(6.0));
+    }
+
+    @Test
     @DisplayName("[getUserListById] Should Hide Owner Episode Ratings - When Private Owner's Public List Is Read By Another User")
     void shouldHideOwnerEpisodeRatingsWhenPrivateOwnersPublicListIsReadByAnotherUser() throws Exception {
         RegisteredUser owner = registerUser("getbyidprivateepisodeowner");
@@ -976,12 +1040,12 @@ class UserListControllerIntegrationTest {
         RegisteredUser publicRater = registerUser("getbyidprivateepisodepublic");
         User ownerEntity = userRepository.findById(owner.id()).orElseThrow();
         UserList list = persistList(ownerEntity, "Public list", UserListVisibility.PUBLIC);
-        persistContentItem(list, "700", ContentType.SERIES, 1);
+        Content series = persistContentItem(list, "700", ContentType.SERIES, 1).getContent();
         makeProfilePrivate(owner);
         logEpisode(owner, "700", 1, 1, 10);
         logEpisode(publicRater, "700", 1, 1, 7);
-        logContent(owner, "700", ContentType.SERIES, 10);
-        logContent(publicRater, "700", ContentType.SERIES, 6);
+        persistCurrentRating(owner, series, 10);
+        persistCurrentRating(publicRater, series, 6);
 
         mockMvc.perform(getUserListByIdRequest(viewer, list.getId(), "episodeAvgRating", "desc"))
                 .andExpect(status().isForbidden());

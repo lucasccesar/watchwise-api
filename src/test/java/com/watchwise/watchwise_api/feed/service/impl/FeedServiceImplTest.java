@@ -11,6 +11,11 @@ import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
+import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
 import com.watchwise.watchwise_api.content.service.ContentCoordinate;
@@ -37,6 +42,7 @@ import com.watchwise.watchwise_api.feed.dto.FeedTop5PreviewDTO;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickAnsweredCategoryPreviewDTO;
 import com.watchwise.watchwise_api.pick.dto.PickOptionSearchDTO;
@@ -69,6 +75,7 @@ import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -92,6 +99,36 @@ import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 class FeedServiceImplTest {
+
+    @Test
+    void publishedContentReviewIsSeparateFromDiaryActivityAndUsesSourceChronology() {
+        stubFollowedIds();
+        stubEmptySources(21);
+        UUID reviewId = UUID.randomUUID();
+        UUID contentId = UUID.randomUUID();
+        Instant sourceTime = Instant.parse("2024-01-02T12:30:00Z");
+        ContentReview review = ContentReview.builder()
+                .id(reviewId).userId(followedId).contentId(contentId)
+                .contentType(ContentType.SERIES).publicationKind(ReviewPublicationKind.WRITTEN_REVIEW)
+                .contextKind(ReviewContextKind.COMPLETION).comment("A complete season")
+                .scoreAtPublication(8).watchNumber(1).sourcePublishedAt(sourceTime)
+                .createdAt(Instant.parse("2026-01-01T00:00:00Z")).build();
+        when(contentReviewRepository.findFeedCandidates(List.of(followedId), viewerId,
+                null, null, PageRequest.of(0, 21))).thenReturn(List.of(review));
+        when(userRepository.findAllById(List.of(followedId))).thenReturn(List.of(
+                User.builder().id(followedId).build()));
+        when(contentRepository.findAllById(List.of(contentId))).thenReturn(List.of(
+                Content.builder().id(contentId).type(ContentType.SERIES).tmdbId("1399").build()));
+
+        var result = feedService.getFeed(viewerId, null, null);
+
+        assertThat(result.content()).hasSize(1);
+        FeedItemDTO item = result.content().getFirst();
+        assertThat(item.eventType()).isEqualTo(FeedEventType.CONTENT_REVIEW);
+        assertThat(item.id()).isEqualTo(reviewId);
+        assertThat(item.comment()).isEqualTo("A complete season");
+        assertThat(item.createdAt()).isEqualTo(LocalDateTime.of(2024, 1, 2, 12, 30));
+    }
 
     @Test
     @DisplayName("[FeedItemDTO] Should Expose Social Comment Fields - When Feed Item Is Built")
@@ -735,6 +772,15 @@ class FeedServiceImplTest {
 
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
+
+    @Mock
+    private ContentReviewRepository contentReviewRepository;
+
+    @Mock
+    private ContentRepository contentRepository;
+
+    @Mock
+    private LikeRepository likeRepository;
 
     @Mock
     private DroppedEntryRepository droppedEntryRepository;

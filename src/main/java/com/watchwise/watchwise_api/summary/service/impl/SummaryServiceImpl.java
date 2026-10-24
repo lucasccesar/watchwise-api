@@ -134,6 +134,7 @@ public class SummaryServiceImpl implements SummaryService {
     private final ContentCardAssembler contentCardAssembler;
     private final ProfileSummaryReader profileSummaryReader;
     private final AllTimeStatsReader allTimeStatsReader;
+    private final CurrentRatingSummaryReader currentRatingSummaryReader;
     private final UserBlockAccessService userBlockAccessService;
 
     @Override
@@ -564,12 +565,15 @@ public class SummaryServiceImpl implements SummaryService {
                 .toList();
 
         List<WatchCompanionCountDTO> topWatchCompanions = computeTopWatchCompanionsAllTime(userId);
+        CurrentRatingSummaryReader.Ratings currentSeriesRatings =
+                currentRatingSummaryReader.readSeriesRatings(userId, ALL_TIME_TOP_LIMIT);
 
         return new AllTimeStatsResponseDTO(totalMoviesWatched, totalEpisodesWatched, totalMinutesWatchedMovies,
                 totalMinutesWatchedEpisodes, totalTheaterVisits, averageMinutesPerMonth, averageMinutesPerWeek,
                 averageMinutesPerDay,
                 watchCountByYearMovies, watchCountByYearEpisodes, watchCountByDecade, watchCountByCountry,
-                mostLoggedContent, genreCountsMovies, genreCountsSeries, topRated, bottomRated, topWatchCompanions);
+                mostLoggedContent, genreCountsMovies, genreCountsSeries, topRated, bottomRated, topWatchCompanions,
+                currentSeriesRatings.top(), currentSeriesRatings.bottom());
     }
 
     @Override

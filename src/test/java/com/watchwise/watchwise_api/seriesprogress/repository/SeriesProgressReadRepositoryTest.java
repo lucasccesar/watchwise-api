@@ -5,6 +5,10 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diarycompletion.entity.DiaryCompletionProjection;
+import com.watchwise.watchwise_api.diarycompletion.entity.UserSeriesHistoryState;
+import com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository;
+import com.watchwise.watchwise_api.diarycompletion.repository.UserSeriesHistoryStateRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressMetadata;
@@ -30,6 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,6 +74,12 @@ class SeriesProgressReadRepositoryTest {
     @Autowired
     private SeriesProgressMetadataRepository metadataRepository;
 
+    @Autowired
+    private DiaryCompletionProjectionRepository projectionRepository;
+
+    @Autowired
+    private UserSeriesHistoryStateRepository historyStateRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -78,6 +89,8 @@ class SeriesProgressReadRepositoryTest {
     @BeforeEach
     void setUp() {
         diaryEntryRepository.deleteAll();
+        projectionRepository.deleteAll();
+        historyStateRepository.deleteAll();
         droppedEntryRepository.deleteAll();
         metadataRepository.deleteAll();
         contentRepository.deleteAll();
@@ -218,6 +231,25 @@ class SeriesProgressReadRepositoryTest {
     }
 
     @Test
+    @DisplayName("[findCandidatesByUserId] Should Include Started Series With An Old Completion Marker When New Episodes Are Pending")
+    void shouldIncludeStartedSeriesAfterNewEpisodesAreReleased() {
+        Content watched = saveEpisode("1410", 1, 1, 40);
+        Content oldSeriesMarker = saveContent("1410", ContentType.SERIES);
+        saveEntry(watched, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
+        saveEntry(oldSeriesMarker, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 11, 0));
+        saveMetadata("1410", 2, 80, LocalDate.of(2024, 2, 1));
+        saveCompletion(oldSeriesMarker, "1410");
+        entityManager.clear();
+
+        var page = seriesProgressReadRepository.findCandidatesByUserId(
+                lucas.getId(), SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).extracting(SeriesProgressReadRepository.SeriesProgressCandidate::getSeriesTmdbId)
+                .contains("1410");
+        assertThat(page.getTotalElements()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("[findCandidatesByUserId] Should Execute One Data Query And One Count Query")
     void shouldExecuteOneDataQueryAndOneCountQuery() {
         saveProgressSeries("1399", 1, 2, 100, LocalDate.of(2024, 1, 1));
@@ -261,6 +293,8 @@ class SeriesProgressReadRepositoryTest {
         saveEntry(offPageEpisode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
         saveEntry(completedEpisode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
         saveEntry(completedSeries, 1, LocalDate.of(2024, 2, 1), LocalDateTime.of(2024, 2, 1, 10, 0));
+        saveCompletion(completedSeries, "1401");
+        saveMetadata("1401", 1, 30, LocalDate.of(2024, 1, 1));
         saveEntry(droppedEpisode, 1, LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 1, 10, 0));
         LocalDateTime now = LocalDateTime.of(2024, 4, 1, 10, 0);
         droppedEntryRepository.saveAndFlush(DroppedEntry.builder()
@@ -379,6 +413,16 @@ class SeriesProgressReadRepositoryTest {
                 .lastReleasedEpisodeDate(lastRelease)
                 .refreshedAt(LocalDateTime.of(2024, 6, 1, 10, 0))
                 .build());
+    }
+
+    private void saveCompletion(Content series, String seriesTmdbId) {
+        historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(lucas.getId(), seriesTmdbId))
+                .historyRevision(1L).computedRevision(1L).scheduleVersion(1L).build());
+        projectionRepository.saveAndFlush(DiaryCompletionProjection.builder()
+                .userId(lucas.getId()).contentId(series.getId()).contentType(ContentType.SERIES)
+                .watchNumber(1).orderedAt(Instant.parse("2024-01-01T12:00:00Z"))
+                .historyRevision(1L).scheduleVersion(1L).build());
     }
 
     private User buildUser(String username, String email) {

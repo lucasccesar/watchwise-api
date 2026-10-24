@@ -181,20 +181,6 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
     List<UserListCount> countContentItemsByUserListIdIn(@Param("userListIds") Collection<UUID> userListIds);
 
     @Query("""
-            SELECT uli.userList.id AS userListId, COUNT(DISTINCT uli.content.id) AS count FROM UserListItem uli
-            WHERE uli.userList.id IN :userListIds
-            AND uli.content.id IS NOT NULL
-            AND EXISTS (
-                SELECT 1 FROM DiaryEntry de
-                WHERE de.user.id = :ownerId
-                AND de.content.id = uli.content.id
-            )
-            GROUP BY uli.userList.id
-            """)
-    List<UserListCount> countWatchedContentItemsByUserListIdIn(
-            @Param("userListIds") Collection<UUID> userListIds, @Param("ownerId") UUID ownerId);
-
-    @Query("""
             SELECT uli.userList.id AS userListId, COUNT(uli) AS count FROM UserListItem uli
             WHERE uli.userList.id IN :userListIds
             GROUP BY uli.userList.id

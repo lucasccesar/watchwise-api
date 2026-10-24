@@ -258,6 +258,9 @@ class ContentChildCardAssemblerTest {
                 droppedEntryRepository,
                 userListItemRepository,
                 contentRepository,
+                mock(com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository.class),
+                mock(com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository.class),
+                mock(com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository.class),
                 new ContentStateResolver(),
                 Clock.systemUTC());
         ContentChildCardAssembler readOnlyAssembler = new ContentChildCardAssembler(

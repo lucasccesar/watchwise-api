@@ -118,6 +118,15 @@ class ProfileSummaryDataReaderImplTest {
     }
 
     @Test
+    void shouldUseCurrentSeriesRatingsInsteadOfEpisodeDiaryScores() {
+        reader.read(userId, ContentType.SERIES);
+
+        verify(queryRepository).countLatestScoresByUserIdAndContentType(userId, ContentType.SERIES.name());
+        org.mockito.Mockito.verify(queryRepository, org.mockito.Mockito.never())
+                .countLatestScoresByUserIdAndContentType(userId, ContentType.EPISODE.name());
+    }
+
+    @Test
     void shouldLeavePreviewPosterResolutionToTheVisualCardReader() {
         Content episodeContent = Content.builder().id(UUID.randomUUID()).tmdbId(null)
                 .seriesTmdbId("1399").seasonNumber(1).episodeNumber(1).type(ContentType.EPISODE).build();

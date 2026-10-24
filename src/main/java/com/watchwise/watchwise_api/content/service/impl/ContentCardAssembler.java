@@ -346,7 +346,10 @@ public class ContentCardAssembler {
                 includeWatchlistProgress ? state.inWatchlist() : null,
                 includeWatchlistProgress ? state.dropped() : null,
                 includeWatchlistProgress ? state.watchedEpisodeCount() : null,
-                includeWatchlistProgress ? state.releasedEpisodeCount() : null);
+                includeWatchlistProgress ? state.releasedEpisodeCount() : null,
+                includeViewerState ? state.currentRatingVersion() : null,
+                includeViewerState ? state.reviewsCount() : null,
+                includeViewerState ? state.reviewIds() : List.of());
     }
 
     private String metadataValue(TmdbCardMetadata metadata, Function<TmdbCardMetadata, String> getter) {

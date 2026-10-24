@@ -51,6 +51,18 @@ public interface LikeRepository extends JpaRepository<Like, UUID> {
 
     long countByContentReviewId(UUID reviewId);
 
+    @Query("SELECT l.contentReview.id FROM Like l WHERE l.user.id = :userId AND l.contentReview.id IN :reviewIds")
+    Set<UUID> findLikedContentReviewIds(@Param("userId") UUID userId,
+            @Param("reviewIds") Collection<UUID> reviewIds);
+
+    @Query("SELECT l.contentReview.id AS reviewId, COUNT(l) AS count FROM Like l WHERE l.contentReview.id IN :reviewIds GROUP BY l.contentReview.id")
+    java.util.List<ContentReviewLikeCount> countByContentReviewIdIn(@Param("reviewIds") Collection<UUID> reviewIds);
+
+    interface ContentReviewLikeCount {
+        UUID getReviewId();
+        Long getCount();
+    }
+
     boolean existsByUserIdAndDroppedEntryId(UUID userId, UUID droppedEntryId);
 
     boolean existsByUserIdAndListId(UUID userId, UUID listId);

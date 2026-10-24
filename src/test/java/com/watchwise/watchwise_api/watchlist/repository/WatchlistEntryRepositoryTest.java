@@ -6,6 +6,14 @@ import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diarycompletion.entity.DiaryCompletionProjection;
+import com.watchwise.watchwise_api.diarycompletion.entity.UserSeriesHistoryState;
+import com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository;
+import com.watchwise.watchwise_api.diarycompletion.repository.UserSeriesHistoryStateRepository;
+import com.watchwise.watchwise_api.seriesprogress.entity.SeriesProgressMetadata;
+import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressMetadataRepository;
+import java.time.Instant;
+import java.time.LocalDate;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
@@ -61,6 +69,10 @@ class WatchlistEntryRepositoryTest {
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
 
+    @Autowired private DiaryCompletionProjectionRepository projectionRepository;
+    @Autowired private UserSeriesHistoryStateRepository historyStateRepository;
+    @Autowired private SeriesProgressMetadataRepository metadataRepository;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -73,6 +85,9 @@ class WatchlistEntryRepositoryTest {
     @BeforeEach
     void setUp() {
         watchlistEntryRepository.deleteAll();
+        projectionRepository.deleteAll();
+        historyStateRepository.deleteAll();
+        metadataRepository.deleteAll();
         diaryEntryRepository.deleteAll();
         contentRepository.deleteAll();
         userRepository.deleteAll();
@@ -343,11 +358,37 @@ class WatchlistEntryRepositoryTest {
         Content completedSeries = contentRepository.save(buildContent("1400", ContentType.SERIES));
         diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, episode));
         diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, completedSeries));
+        saveCompletion(completedSeries, "1400");
 
         List<CalendarScheduleKey> result = watchlistEntryRepository.findActiveCalendarScheduleKeys();
 
         assertThat(result).doesNotContain(
                 new CalendarScheduleKey(ContentType.SERIES, "1400", "en-US", "US"));
+    }
+
+    @Test
+    void shouldTrackNewEpisodesAfterAnOldSeriesMarker() {
+        Content episode = contentRepository.save(buildEpisode("1401", 1, 1));
+        Content oldMarker = contentRepository.save(buildContent("1401", ContentType.SERIES));
+        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, episode));
+        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, oldMarker));
+        saveCompletion(oldMarker, "1401");
+        metadataRepository.saveAndFlush(SeriesProgressMetadata.builder()
+                .seriesTmdbId("1401").regularReleasedEpisodeCount(2).knownRuntimeEpisodeCount(0)
+                .refreshedAt(LocalDateTime.now()).build());
+
+        assertThat(watchlistEntryRepository.findActiveCalendarScheduleKeys()).contains(
+                new CalendarScheduleKey(ContentType.SERIES, "1401", "en-US", "US"));
+    }
+
+    private void saveCompletion(Content series, String seriesTmdbId) {
+        historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(lucas.getId(), seriesTmdbId))
+                .historyRevision(1L).computedRevision(1L).scheduleVersion(1L).build());
+        projectionRepository.saveAndFlush(DiaryCompletionProjection.builder()
+                .userId(lucas.getId()).contentId(series.getId()).contentType(ContentType.SERIES)
+                .watchNumber(1).orderedAt(Instant.parse("2024-01-01T00:00:00Z"))
+                .historyRevision(1L).scheduleVersion(1L).build());
     }
 
     private WatchlistEntry buildEntry(User user, Content content, ContentType type, Integer position) {

@@ -115,22 +115,33 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
     List<GenreCount> countDistinctEpisodesByGenre(@Param("userId") UUID userId);
 
     @Query(value = """
-            WITH ranked AS (
-                SELECT c.id AS content_id,
-                       d.score,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY c.id
-                           ORDER BY d.watch_number DESC, d.created_at DESC, d.id DESC
-                       ) AS row_number
-                FROM diary_entries d
-                JOIN contents c ON c.id = d.content_id
-                WHERE d.user_id = :userId
-                  AND d.watch_number > 0
-                  AND c.type = :contentType
+            WITH selected_scores AS (
+                SELECT r.score
+                FROM content_ratings r
+                WHERE r.user_id = :userId
+                  AND r.content_type = :contentType
+                  AND :contentType IN ('SERIES', 'SEASON')
+                UNION ALL
+                SELECT ranked.score
+                FROM (
+                    SELECT c.id AS content_id,
+                           d.score,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY c.id
+                               ORDER BY d.watch_number DESC, d.created_at DESC, d.id DESC
+                           ) AS row_number
+                    FROM diary_entries d
+                    JOIN contents c ON c.id = d.content_id
+                    WHERE d.user_id = :userId
+                      AND d.watch_number > 0
+                      AND c.type = :contentType
+                ) ranked
+                WHERE ranked.row_number = 1
+                  AND :contentType NOT IN ('SERIES', 'SEASON')
             )
             SELECT score AS score, COUNT(*) AS count
-            FROM ranked
-            WHERE row_number = 1 AND score IS NOT NULL
+            FROM selected_scores
+            WHERE score IS NOT NULL
             GROUP BY score
             ORDER BY score
             """, nativeQuery = true)
@@ -138,14 +149,31 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
             @Param("userId") UUID userId, @Param("contentType") String contentType);
 
     @Query(value = """
-            SELECT c.id AS contentId, COUNT(d.id) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            WHERE d.user_id = :userId
-              AND d.watch_number > 0
-              AND c.type = :contentType
-              AND c.id IN :contentIds
-            GROUP BY c.id
+            SELECT ranked.content_id AS contentId, COUNT(*) AS count
+            FROM (
+                SELECT p.content_id
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id
+                JOIN user_series_history_states state ON state.user_id = p.user_id
+                  AND state.series_tmdb_id = CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END
+                WHERE p.user_id = :userId
+                  AND p.content_id IN (:contentIds)
+                  AND p.content_type = :contentType
+                  AND :contentType IN ('SERIES', 'SEASON')
+                  AND p.history_revision = state.history_revision
+                  AND (c.type = 'SEASON' OR p.schedule_version = state.schedule_version)
+                  AND (p.valid_until IS NULL OR p.valid_until > CURRENT_TIMESTAMP)
+                UNION ALL
+                SELECT c.id AS content_id
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND d.watch_number > 0
+                  AND c.type = :contentType
+                  AND c.id IN (:contentIds)
+                  AND :contentType NOT IN ('SERIES', 'SEASON')
+            ) ranked
+            GROUP BY ranked.content_id
             """, nativeQuery = true)
     List<ContentWatchCount> countDiaryEntriesByUserIdAndContentIdsAndContentType(
             @Param("userId") UUID userId,
@@ -153,14 +181,30 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
             @Param("contentType") String contentType);
 
     @Query(value = """
-            SELECT c.id AS contentId, COUNT(d.id) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            WHERE d.user_id = :userId
-              AND d.watch_number > 0
-              AND c.type = :contentType
-            GROUP BY c.id
-            ORDER BY count DESC, c.id ASC
+            SELECT ranked.content_id AS contentId, COUNT(*) AS count
+            FROM (
+                SELECT p.content_id
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id
+                JOIN user_series_history_states state ON state.user_id = p.user_id
+                  AND state.series_tmdb_id = CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END
+                WHERE p.user_id = :userId
+                  AND p.content_type = :contentType
+                  AND :contentType IN ('SERIES', 'SEASON')
+                  AND p.history_revision = state.history_revision
+                  AND (c.type = 'SEASON' OR p.schedule_version = state.schedule_version)
+                  AND (p.valid_until IS NULL OR p.valid_until > CURRENT_TIMESTAMP)
+                UNION ALL
+                SELECT c.id AS content_id
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND d.watch_number > 0
+                  AND c.type = :contentType
+                  AND :contentType NOT IN ('SERIES', 'SEASON')
+            ) ranked
+            GROUP BY ranked.content_id
+            ORDER BY count DESC, ranked.content_id ASC
             """, nativeQuery = true)
     List<ContentWatchCount> countDiaryEntriesGroupByContentType(
             @Param("userId") UUID userId,
@@ -168,23 +212,34 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
             Pageable pageable);
 
     @Query(value = """
-            WITH ranked AS (
-                SELECT c.id AS content_id,
-                       d.score,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY c.id
-                           ORDER BY d.watch_number DESC, d.created_at DESC, d.id DESC
-                       ) AS row_number
-                FROM diary_entries d
-                JOIN contents c ON c.id = d.content_id
-                WHERE d.user_id = :userId
-                  AND d.watch_number > 0
-                  AND c.type = :contentType
-                  AND c.id IN :contentIds
+            WITH selected_scores AS (
+                SELECT r.content_id, r.score
+                FROM content_ratings r
+                WHERE r.user_id = :userId
+                  AND r.content_id IN (:contentIds)
+                  AND r.content_type = :contentType
+                  AND :contentType IN ('SERIES', 'SEASON')
+                UNION ALL
+                SELECT ranked.content_id, ranked.score
+                FROM (
+                    SELECT c.id AS content_id,
+                           d.score,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY c.id
+                               ORDER BY d.watch_number DESC, d.created_at DESC, d.id DESC
+                           ) AS row_number
+                    FROM diary_entries d
+                    JOIN contents c ON c.id = d.content_id
+                    WHERE d.user_id = :userId
+                      AND d.watch_number > 0
+                      AND c.type = :contentType
+                      AND c.id IN (:contentIds)
+                ) ranked
+                WHERE ranked.row_number = 1
+                  AND :contentType NOT IN ('SERIES', 'SEASON')
             )
             SELECT content_id AS contentId, score AS score
-            FROM ranked
-            WHERE row_number = 1
+            FROM selected_scores
             """, nativeQuery = true)
     List<LatestContentScore> findLatestScoresByUserIdAndContentIdsAndContentType(
             @Param("userId") UUID userId,

@@ -9,6 +9,10 @@ import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentCardFieldSet;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.service.ContentCardContext;
 import com.watchwise.watchwise_api.content.service.ContentCardSpec;
@@ -37,6 +41,7 @@ import com.watchwise.watchwise_api.feed.service.FeedService;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.like.service.LikeService;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.pick.dto.PickPreviewDTO;
 import com.watchwise.watchwise_api.pick.entity.Pick;
 import com.watchwise.watchwise_api.pick.repository.PickRepository;
@@ -60,6 +65,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -86,6 +92,9 @@ public class FeedServiceImpl implements FeedService {
 
     private final FollowerRepository followerRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final ContentReviewRepository contentReviewRepository;
+    private final ContentRepository contentRepository;
+    private final LikeRepository likeRepository;
     private final DroppedEntryRepository droppedEntryRepository;
     private final Top5EntryRepository top5EntryRepository;
     private final UserDailyGameResultRepository dailyGameResultRepository;
@@ -109,7 +118,7 @@ public class FeedServiceImpl implements FeedService {
     public CursorPageResponseDTO<FeedItemDTO> getFeed(UUID userId, String cursor, Integer size) {
         List<UUID> followedIds = followerRepository.findVisibleFollowedIdsByFollowerId(userId);
         followedIds = followedIds == null ? List.of() : followedIds;
-        return readFeed(userId, cursor, size, followedIds);
+        return enrichSelectedPage(userId, selectRawFeedPage(userId, cursor, size, followedIds));
     }
 
     @Override
@@ -127,126 +136,6 @@ public class FeedServiceImpl implements FeedService {
                 followedIds.size(), loadFollowedUserPreviews(followedIds));
     }
 
-    private CursorPageResponseDTO<FeedItemDTO> readFeed(
-            UUID userId, String cursor, Integer size, List<UUID> followedIds) {
-        int effectiveSize = resolveSize(size);
-        FeedCursor decodedCursor = decodeCursor(cursor);
-        LocalDateTime cursorCreatedAt = decodedCursor == null ? null : decodedCursor.createdAt();
-        UUID cursorId = decodedCursor == null ? null : decodedCursor.id();
-
-        if (followedIds == null || followedIds.isEmpty()) {
-            return new CursorPageResponseDTO<>(List.of(), effectiveSize, null, false);
-        }
-
-        PageRequest fetchLimit = PageRequest.of(0, effectiveSize + 1);
-
-        List<DiaryEntry> diaryRaw = diaryEntryRepository.findFeedCandidates(followedIds, cursorCreatedAt, cursorId, fetchLimit);
-        List<DroppedEntry> droppedRaw = droppedEntryRepository.findFeedCandidates(followedIds, cursorCreatedAt, cursorId, fetchLimit);
-        List<Top5Entry> top5Raw = top5EntryRepository.findFeedCandidates(followedIds, cursorCreatedAt, cursorId, fetchLimit);
-        List<Pick> pickRaw = pickRepository.findFeedCandidates(followedIds, userId, cursorCreatedAt, cursorId, fetchLimit);
-        List<PicksTemplate> picksTemplateRaw = picksTemplateRepository.findFeedCandidates(
-                followedIds, cursorCreatedAt, cursorId, fetchLimit);
-        List<UserDailyGameResult> dailyGameRaw = dailyGameResultRepository.findFeedCandidates(
-                followedIds, cursorCreatedAt, cursorId, fetchLimit);
-
-        boolean diaryHasMore = diaryRaw.size() > effectiveSize;
-        boolean droppedHasMore = droppedRaw.size() > effectiveSize;
-        boolean top5HasMore = top5Raw.size() > effectiveSize;
-        boolean pickHasMore = pickRaw.size() > effectiveSize;
-        boolean picksTemplateHasMore = picksTemplateRaw.size() > effectiveSize;
-        boolean dailyGameHasMore = dailyGameRaw.size() > effectiveSize;
-
-        List<DiaryEntry> diaryEntries = trim(diaryRaw, effectiveSize);
-        List<DroppedEntry> droppedEntries = trim(droppedRaw, effectiveSize);
-        List<Top5Entry> top5Entries = trim(top5Raw, effectiveSize);
-        List<Pick> pickEntries = trim(pickRaw, effectiveSize);
-        List<PicksTemplate> picksTemplateEntries = trim(picksTemplateRaw, effectiveSize);
-        Map<Top5Key, List<Top5EntryResponseDTO>> currentTop5ByKey = loadCurrentTop5Previews(top5Entries);
-        List<UserDailyGameResult> dailyGameEntries = trim(dailyGameRaw, effectiveSize);
-
-        Set<UUID> likedDiaryEntryIds = likeService.getLikedDiaryEntryIds(
-                userId, diaryEntries.stream().map(DiaryEntry::getId).toList());
-        Set<UUID> likedDroppedEntryIds = likeService.getLikedDroppedEntryIds(
-                userId, droppedEntries.stream().map(DroppedEntry::getId).toList());
-        Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId = watchCompanionRepository
-                .findByDiaryEntryIdIn(diaryEntries.stream().map(DiaryEntry::getId).toList()).stream()
-                .collect(Collectors.groupingBy(wc -> wc.getDiaryEntry().getId(),
-                        Collectors.mapping(wc -> userMapper.userToUserPreviewDto(wc.getUser()), Collectors.toList())));
-        Map<UUID, CommentPreviewData> diaryCommentPreviews = commentPreviewAssembler.assembleDiaryEntryPreviews(
-                diaryEntries.stream().map(DiaryEntry::getId).toList(), userId);
-        Map<UUID, CommentPreviewData> droppedCommentPreviews = commentPreviewAssembler.assembleDroppedEntryPreviews(
-                droppedEntries.stream().map(DroppedEntry::getId).toList(), userId);
-        Map<UUID, PickPreviewDTO> pickPreviews = pickPreviewAssembler.assembleForFeed(pickEntries, userId);
-        Map<UUID, PicksTemplate> templatesById = new LinkedHashMap<>();
-        pickEntries.forEach(pick -> templatesById.put(pick.getPicksTemplate().getId(), pick.getPicksTemplate()));
-        picksTemplateEntries.forEach(template -> templatesById.put(template.getId(), template));
-        Map<UUID, PicksTemplatePreviewDTO> picksTemplatePreviews = picksTemplatePreviewAssembler
-                .assembleForFeed(templatesById.values(), userId);
-
-        List<FeedCandidate> candidates = new ArrayList<>();
-        for (DiaryEntry entry : diaryEntries) {
-            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
-                    toDiaryFeedItem(entry, likedDiaryEntryIds.contains(entry.getId()),
-                            watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
-                            diaryCommentPreviews.get(entry.getId()))));
-        }
-        for (DroppedEntry entry : droppedEntries) {
-            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
-                    toDroppedFeedItem(entry, likedDroppedEntryIds.contains(entry.getId()),
-                            droppedCommentPreviews.get(entry.getId()))));
-        }
-        for (Top5Entry entry : top5Entries) {
-            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
-                    toTop5FeedItem(entry, currentTop5ByKey.getOrDefault(top5Key(entry), List.of()))));
-        }
-        for (Pick entry : pickEntries) {
-            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
-                    toPickFeedItem(entry, pickPreviews.get(entry.getId()),
-                            picksTemplatePreviews.get(entry.getPicksTemplate().getId()))));
-        }
-        for (PicksTemplate entry : picksTemplateEntries) {
-            candidates.add(new FeedCandidate(entry.getCreatedAt(), entry.getId(),
-                    toPicksTemplateFeedItem(entry, picksTemplatePreviews.get(entry.getId()))));
-        }
-        for (UserDailyGameResult entry : dailyGameEntries) {
-            candidates.add(new FeedCandidate(entry.getSharedAt(), entry.getId(), toDailyGameFeedItem(entry, false)));
-        }
-
-        candidates.sort(Comparator.comparing(FeedCandidate::createdAt).reversed()
-                .thenComparing(c -> c.id().toString(), Comparator.reverseOrder()));
-
-        boolean hasMoreBeyondPage = candidates.size() > effectiveSize;
-        List<FeedCandidate> page = hasMoreBeyondPage ? candidates.subList(0, effectiveSize) : candidates;
-        boolean hasNext = hasMoreBeyondPage || diaryHasMore || droppedHasMore || top5HasMore
-                || pickHasMore || picksTemplateHasMore || dailyGameHasMore;
-
-        Set<UUID> selectedDailyGameResultIds = page.stream()
-                .filter(candidate -> candidate.item().eventType() == FeedEventType.DAILY_GAME_RESULT)
-                .map(FeedCandidate::id)
-                .collect(Collectors.toSet());
-        List<UserDailyGameResult> selectedDailyGameEntries = dailyGameEntries.stream()
-                .filter(entry -> selectedDailyGameResultIds.contains(entry.getId()))
-                .toList();
-        Set<UUID> viewerTerminalDailyChallengeIds = loadViewerTerminalDailyChallengeIds(
-                userId, selectedDailyGameEntries);
-        Map<UUID, UserDailyGameResult> selectedDailyGameEntriesById = new LinkedHashMap<>();
-        selectedDailyGameEntries.forEach(entry -> selectedDailyGameEntriesById.put(entry.getId(), entry));
-
-        String nextCursor = hasNext && !page.isEmpty() ? encodeCursor(page.get(page.size() - 1)) : null;
-        List<FeedItemDTO> content = page.stream()
-                .map(candidate -> {
-                    if (candidate.item().eventType() != FeedEventType.DAILY_GAME_RESULT) {
-                        return candidate.item();
-                    }
-                    UserDailyGameResult entry = selectedDailyGameEntriesById.get(candidate.id());
-                    return toDailyGameFeedItem(entry,
-                            viewerTerminalDailyChallengeIds.contains(entry.getDailyChallenge().getId()));
-                })
-                .toList();
-
-        return new CursorPageResponseDTO<>(content, effectiveSize, nextCursor, hasNext);
-    }
-
     private RawFeedPage selectRawFeedPage(UUID userId, String cursor, Integer size, List<UUID> followedIds) {
         int effectiveSize = resolveSize(size);
         FeedCursor decodedCursor = decodeCursor(cursor);
@@ -260,6 +149,8 @@ public class FeedServiceImpl implements FeedService {
         PageRequest fetchLimit = PageRequest.of(0, effectiveSize + 1);
         List<DiaryEntry> diaryRaw = diaryEntryRepository.findFeedCandidates(
                 followedIds, cursorCreatedAt, cursorId, fetchLimit);
+        List<ContentReview> reviewRaw = contentReviewRepository.findFeedCandidates(
+                followedIds, userId, cursorCreatedAt, cursorId, fetchLimit);
         List<DroppedEntry> droppedRaw = droppedEntryRepository.findFeedCandidates(
                 followedIds, cursorCreatedAt, cursorId, fetchLimit);
         List<Top5Entry> top5Raw = top5EntryRepository.findFeedCandidates(
@@ -272,6 +163,7 @@ public class FeedServiceImpl implements FeedService {
                 followedIds, cursorCreatedAt, cursorId, fetchLimit);
 
         boolean diaryHasMore = diaryRaw.size() > effectiveSize;
+        boolean reviewHasMore = reviewRaw.size() > effectiveSize;
         boolean droppedHasMore = droppedRaw.size() > effectiveSize;
         boolean top5HasMore = top5Raw.size() > effectiveSize;
         boolean pickHasMore = pickRaw.size() > effectiveSize;
@@ -281,6 +173,8 @@ public class FeedServiceImpl implements FeedService {
         List<RawFeedCandidate> candidates = new ArrayList<>();
         trim(diaryRaw, effectiveSize).forEach(entry -> candidates.add(new RawFeedCandidate(
                 entry.getCreatedAt(), entry.getId(), FeedEventType.DIARY_ENTRY, entry)));
+        trim(reviewRaw, effectiveSize).forEach(entry -> candidates.add(new RawFeedCandidate(
+                reviewPublicationTime(entry), entry.getId(), FeedEventType.CONTENT_REVIEW, entry)));
         trim(droppedRaw, effectiveSize).forEach(entry -> candidates.add(new RawFeedCandidate(
                 entry.getCreatedAt(), entry.getId(), FeedEventType.DROPPED, entry)));
         trim(top5Raw, effectiveSize).forEach(entry -> candidates.add(new RawFeedCandidate(
@@ -298,7 +192,7 @@ public class FeedServiceImpl implements FeedService {
         boolean hasMoreBeyondPage = candidates.size() > effectiveSize;
         List<RawFeedCandidate> page = hasMoreBeyondPage
                 ? candidates.subList(0, effectiveSize) : candidates;
-        boolean hasNext = hasMoreBeyondPage || diaryHasMore || droppedHasMore || top5HasMore
+        boolean hasNext = hasMoreBeyondPage || diaryHasMore || reviewHasMore || droppedHasMore || top5HasMore
                 || pickHasMore || picksTemplateHasMore || dailyGameHasMore;
         String nextCursor = hasNext && !page.isEmpty()
                 ? encodeCursor(page.get(page.size() - 1).createdAt(), page.get(page.size() - 1).id()) : null;
@@ -310,6 +204,7 @@ public class FeedServiceImpl implements FeedService {
             return new CursorPageResponseDTO<>(List.of(), rawPage.size(), rawPage.nextCursor(), rawPage.hasNext());
         }
         List<DiaryEntry> diaryEntries = sources(rawPage.candidates(), FeedEventType.DIARY_ENTRY, DiaryEntry.class);
+        List<ContentReview> reviewEntries = sources(rawPage.candidates(), FeedEventType.CONTENT_REVIEW, ContentReview.class);
         List<DroppedEntry> droppedEntries = sources(rawPage.candidates(), FeedEventType.DROPPED, DroppedEntry.class);
         List<Top5Entry> top5Entries = sources(rawPage.candidates(), FeedEventType.TOP5_UPDATE, Top5Entry.class);
         List<Pick> pickEntries = sources(rawPage.candidates(), FeedEventType.PICK_CREATED, Pick.class);
@@ -331,6 +226,7 @@ public class FeedServiceImpl implements FeedService {
         Map<UUID, CommentPreviewData> diaryCommentPreviews = diaryEntries.isEmpty() ? Map.of()
                 : commentPreviewAssembler.assembleDiaryEntryPreviews(
                         diaryEntries.stream().map(DiaryEntry::getId).toList(), userId);
+        ReviewFeedContext reviewContext = loadReviewFeedContext(userId, reviewEntries);
         Map<UUID, CommentPreviewData> droppedCommentPreviews = droppedEntries.isEmpty() ? Map.of()
                 : commentPreviewAssembler.assembleDroppedEntryPreviews(
                         droppedEntries.stream().map(DroppedEntry::getId).toList(), userId);
@@ -343,7 +239,8 @@ public class FeedServiceImpl implements FeedService {
                 ? Map.of() : picksTemplatePreviewAssembler.assembleForFeed(templatesById.values(), userId);
 
         List<FeedItemDTO> content = rawPage.candidates().stream()
-                .map(candidate -> toEnrichedFeedItem(candidate, likedDiaryEntryIds, likedDroppedEntryIds,
+                .map(candidate -> toEnrichedFeedItem(candidate, reviewContext,
+                        likedDiaryEntryIds, likedDroppedEntryIds,
                         watchedWithByEntryId, diaryCommentPreviews, droppedCommentPreviews, currentTop5ByKey,
                         pickPreviews, picksTemplatePreviews, viewerTerminalDailyChallengeIds))
                 .toList();
@@ -358,8 +255,36 @@ public class FeedServiceImpl implements FeedService {
                 .toList();
     }
 
+    private ReviewFeedContext loadReviewFeedContext(UUID viewerId, List<ContentReview> reviews) {
+        if (reviews.isEmpty()) {
+            return new ReviewFeedContext(Map.of(), Map.of(), Map.of(), Set.of(), Map.of());
+        }
+        List<UUID> reviewIds = reviews.stream().map(ContentReview::getId).toList();
+        Map<UUID, User> users = userRepository.findAllById(
+                        reviews.stream().map(ContentReview::getUserId).distinct().toList()).stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
+        Map<UUID, Content> contents = contentRepository.findAllById(
+                        reviews.stream().map(ContentReview::getContentId).distinct().toList()).stream()
+                .collect(Collectors.toMap(Content::getId, content -> content));
+        Map<UUID, Long> likes = likeRepository.countByContentReviewIdIn(reviewIds).stream()
+                .collect(Collectors.toMap(LikeRepository.ContentReviewLikeCount::getReviewId,
+                        LikeRepository.ContentReviewLikeCount::getCount));
+        Set<UUID> liked = likeRepository.findLikedContentReviewIds(viewerId, reviewIds);
+        Map<UUID, CommentPreviewData> comments = commentPreviewAssembler.assembleContentReviewPreviews(
+                reviewIds, viewerId);
+        return new ReviewFeedContext(users, contents, likes, liked, comments);
+    }
+
+    private LocalDateTime reviewPublicationTime(ContentReview review) {
+        if (review.getSourcePublishedAt() != null) {
+            return LocalDateTime.ofInstant(review.getSourcePublishedAt(), ZoneOffset.UTC);
+        }
+        return review.getSourcePublishedOn().atStartOfDay();
+    }
+
     private FeedItemDTO toEnrichedFeedItem(
             RawFeedCandidate candidate,
+            ReviewFeedContext reviewContext,
             Set<UUID> likedDiaryEntryIds,
             Set<UUID> likedDroppedEntryIds,
             Map<UUID, List<UserPreviewDTO>> watchedWithByEntryId,
@@ -370,6 +295,7 @@ public class FeedServiceImpl implements FeedService {
             Map<UUID, PicksTemplatePreviewDTO> picksTemplatePreviews,
             Set<UUID> viewerTerminalDailyChallengeIds) {
         return switch (candidate.eventType()) {
+            case CONTENT_REVIEW -> toReviewFeedItem((ContentReview) candidate.source(), reviewContext);
             case DIARY_ENTRY -> {
                 DiaryEntry entry = (DiaryEntry) candidate.source();
                 yield toDiaryFeedItem(entry, likedDiaryEntryIds.contains(entry.getId()),
@@ -548,6 +474,19 @@ public class FeedServiceImpl implements FeedService {
                 null,
                 entry.getCreatedAt(),
                 null);
+    }
+
+    private FeedItemDTO toReviewFeedItem(ContentReview review, ReviewFeedContext context) {
+        CommentPreviewData comments = context.comments().get(review.getId());
+        return new FeedItemDTO(
+                FeedEventType.CONTENT_REVIEW, review.getId(),
+                userMapper.userToUserPreviewDto(context.users().get(review.getUserId())),
+                contentMapper.contentToContentRefDto(context.contents().get(review.getContentId())),
+                null, review.getScoreAtPublication(), review.getComment(),
+                Math.toIntExact(context.likes().getOrDefault(review.getId(), 0L)),
+                context.liked().contains(review.getId()),
+                commentsCount(comments), recentComments(comments), List.of(),
+                null, null, null, reviewPublicationTime(review), null);
     }
 
     private FeedItemDTO toDroppedFeedItem(DroppedEntry entry, boolean likedByMe, CommentPreviewData commentPreview) {
@@ -774,5 +713,13 @@ public class FeedServiceImpl implements FeedService {
             UUID id,
             FeedEventType eventType,
             Object source) {
+    }
+
+    private record ReviewFeedContext(
+            Map<UUID, User> users,
+            Map<UUID, Content> contents,
+            Map<UUID, Long> likes,
+            Set<UUID> liked,
+            Map<UUID, CommentPreviewData> comments) {
     }
 }

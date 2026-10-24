@@ -47,14 +47,23 @@ public interface AllTimeStatsQueryRepository extends Repository<DiaryEntry, UUID
     List<DecadeCount> countDistinctMoviesByDecade(@Param("userId") UUID userId);
 
     @Query(value = """
-            SELECT ((sc.release_year / 10) * 10) AS decade,
-                   COUNT(DISTINCT c.series_tmdb_id) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            WHERE d.user_id = :userId
-              AND c.type = 'EPISODE'
-              AND sc.release_year IS NOT NULL
+            WITH watched_series AS (
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type IN ('EPISODE', 'SEASON', 'SERIES')
+                UNION
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id
+                WHERE p.user_id = :userId
+            )
+            SELECT ((series.release_year / 10) * 10) AS decade,
+                   COUNT(DISTINCT series.tmdb_id) AS count
+            FROM watched_series watched
+            JOIN contents series ON series.tmdb_id = watched.series_tmdb_id AND series.type = 'SERIES'
+            WHERE series.release_year IS NOT NULL
             GROUP BY decade
             ORDER BY decade
             """, nativeQuery = true)
@@ -73,13 +82,22 @@ public interface AllTimeStatsQueryRepository extends Repository<DiaryEntry, UUID
     List<CountryCount> countDistinctMoviesByCountry(@Param("userId") UUID userId);
 
     @Query(value = """
-            SELECT country AS country, COUNT(DISTINCT c.series_tmdb_id) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            JOIN contents sc ON sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(sc.countries) AS country
-            WHERE d.user_id = :userId
-              AND c.type = 'EPISODE'
+            WITH watched_series AS (
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type IN ('EPISODE', 'SEASON', 'SERIES')
+                UNION
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id
+                WHERE p.user_id = :userId
+            )
+            SELECT country AS country, COUNT(DISTINCT series.tmdb_id) AS count
+            FROM watched_series watched
+            JOIN contents series ON series.tmdb_id = watched.series_tmdb_id AND series.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(series.countries) AS country
             GROUP BY country
             ORDER BY count DESC, country
             """, nativeQuery = true)

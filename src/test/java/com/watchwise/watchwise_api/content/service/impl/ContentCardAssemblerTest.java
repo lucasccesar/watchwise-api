@@ -419,6 +419,9 @@ class ContentCardAssemblerTest {
                 droppedEntryRepository,
                 userListItemRepository,
                 contentRepository,
+                org.mockito.Mockito.mock(com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository.class),
+                org.mockito.Mockito.mock(com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository.class),
+                org.mockito.Mockito.mock(com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository.class),
                 new ContentStateResolver(),
                 Clock.systemUTC());
         ContentCardAssembler readOnlyAssembler = new ContentCardAssembler(

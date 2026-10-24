@@ -55,6 +55,16 @@ public class CommentPreviewAssembler {
                 viewerId);
     }
 
+    public Map<UUID, CommentPreviewData> assembleContentReviewPreviews(
+            Collection<UUID> reviewIds, UUID viewerId) {
+        return assemble(reviewIds,
+                ids -> commentRepository.countVisibleContentReviewComments(viewerId, ids).stream()
+                        .collect(Collectors.toMap(CommentRepository.ContentReviewCommentCount::getContentReviewId,
+                                CommentRepository.ContentReviewCommentCount::getCount)),
+                ids -> commentRepository.findRecentVisibleByContentReviewIds(viewerId, ids),
+                comment -> comment.getContentReview().getId(), viewerId);
+    }
+
     public Map<UUID, CommentPreviewData> assembleListPreviews(Collection<UUID> listIds, UUID viewerId) {
         return assemble(listIds,
                 ids -> commentRepository.countVisibleListComments(viewerId, ids).stream()

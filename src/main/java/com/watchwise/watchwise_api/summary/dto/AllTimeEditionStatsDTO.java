@@ -21,5 +21,18 @@ public record AllTimeEditionStatsDTO(
         List<GenreCountDTO> genreCounts,
         List<RatingCountDTO> ratingsDistribution,
         List<DiaryEntryResponseDTO> topRated,
-        List<DiaryEntryResponseDTO> bottomRated) {
+        List<DiaryEntryResponseDTO> bottomRated,
+        List<ContentRatingSummaryDTO> currentSeriesAndSeasonTopRated,
+        List<ContentRatingSummaryDTO> currentSeriesAndSeasonBottomRated) {
+
+    public AllTimeEditionStatsDTO(ContentType type, long watchedCount, long minutesWatched, long totalTheaterVisits,
+            double averageMinutesPerMonth, double averageMinutesPerWeek, double averageMinutesPerDay,
+            List<YearCountDTO> watchCountByYear, List<DecadeCountDTO> watchCountByDecade,
+            List<CountryCountDTO> watchCountByCountry, List<ContentWatchCountDTO> mostLoggedContent,
+            List<GenreCountDTO> genreCounts, List<RatingCountDTO> ratingsDistribution,
+            List<DiaryEntryResponseDTO> topRated, List<DiaryEntryResponseDTO> bottomRated) {
+        this(type, watchedCount, minutesWatched, totalTheaterVisits, averageMinutesPerMonth, averageMinutesPerWeek,
+                averageMinutesPerDay, watchCountByYear, watchCountByDecade, watchCountByCountry, mostLoggedContent,
+                genreCounts, ratingsDistribution, topRated, bottomRated, List.of(), List.of());
+    }
 }

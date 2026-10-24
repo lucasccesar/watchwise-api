@@ -49,7 +49,7 @@ class PersonCreditViewerStateResolverTest {
     }
 
     @Test
-    void shouldPreferDirectSeriesDiaryActivityToIncompleteEpisodeProgress() {
+    void shouldNotTreatDirectSeriesDiaryMarkerAsCompletedEpisodeProgress() {
         UUID viewerId = UUID.randomUUID();
         var viewerStateService = mock(ContentViewerStateService.class);
         var diaryRepository = mock(DiaryEntryRepository.class);
@@ -67,7 +67,10 @@ class PersonCreditViewerStateResolverTest {
         var result = new PersonCreditViewerStateResolver(viewerStateService, diaryRepository, metadataRepository)
                 .resolve(viewerId, List.of(credit));
 
-        assertThat(result.statesByCoordinate().get(coordinate).watchStatus()).isEqualTo(WatchStatus.WATCHED);
+        var state = result.statesByCoordinate().get(coordinate);
+        assertThat(state.watchStatus()).isEqualTo(WatchStatus.UNKNOWN);
+        assertThat(state.watchedEpisodeCount()).isNull();
+        assertThat(state.releasedEpisodeCount()).isNull();
     }
 
     @Test
@@ -116,6 +119,32 @@ class PersonCreditViewerStateResolverTest {
         assertThat(result.statesByCoordinate().get(coordinate).watchStatus()).isEqualTo(WatchStatus.WATCHED);
         assertThat(result.statesByCoordinate().get(coordinate).watchedEpisodeCount()).isEqualTo(3);
         assertThat(result.statesByCoordinate().get(coordinate).releasedEpisodeCount()).isEqualTo(3);
+    }
+
+    @Test
+    void shouldPreserveCurrentCompletionProjectionWhenEpisodeEventCountIsIncomplete() {
+        UUID viewerId = UUID.randomUUID();
+        var viewerStateService = mock(ContentViewerStateService.class);
+        var diaryRepository = mock(DiaryEntryRepository.class);
+        var metadataRepository = mock(SeriesProgressMetadataRepository.class);
+        var credit = series("42");
+        ContentCoordinate coordinate = seriesCoordinate("42");
+        ContentViewerStateDTO completedState = new ContentViewerStateDTO(
+                WatchStatus.WATCHED, null, null, LocalDate.of(2026, 10, 2), 1, null, 1,
+                null, false, null, false, null, List.of(), null, null);
+        when(viewerStateService.resolve(viewerId, List.of(coordinate), Map.of()))
+                .thenReturn(new ContentViewerStateService.Resolution(Map.of(coordinate, completedState), Map.of()));
+        when(diaryRepository.findWatchedMediaForPersonCredits(viewerId, List.of("42"))).thenReturn(List.of());
+        when(diaryRepository.findEpisodeSeriesCountsByUserIdAndSeriesTmdbIdIn(viewerId, List.of("42")))
+                .thenReturn(List.of(seriesCount("42", 1L)));
+        when(metadataRepository.findAllBySeriesTmdbIdIn(List.of("42"))).thenReturn(List.of(metadata("42", 3)));
+
+        var result = new PersonCreditViewerStateResolver(viewerStateService, diaryRepository, metadataRepository)
+                .resolve(viewerId, List.of(credit));
+
+        ContentViewerStateDTO state = result.statesByCoordinate().get(coordinate);
+        assertThat(state.watchStatus()).isEqualTo(WatchStatus.WATCHED);
+        assertThat(state.lastWatchNumber()).isEqualTo(1);
     }
 
     @Test

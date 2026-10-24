@@ -29,6 +29,10 @@ import com.watchwise.watchwise_api.content.service.ContentCoordinate;
 import com.watchwise.watchwise_api.content.service.ContentService;
 import com.watchwise.watchwise_api.content.service.impl.ContentCardAssembler;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.comment.repository.CommentRepository;
+import com.watchwise.watchwise_api.like.repository.LikeRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.dto.DeletionImpactDTO;
@@ -111,6 +115,9 @@ import java.util.stream.Stream;
 public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     private final DiaryEntryRepository diaryEntryRepository;
+    private final ContentReviewRepository contentReviewRepository;
+    private final CommentRepository commentRepository;
+    private final LikeRepository likeRepository;
     private final DiaryEntryReadRepository diaryEntryReadRepository;
     private final UserRepository userRepository;
     private final UserBlockAccessService userBlockAccessService;
@@ -319,26 +326,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
 
     @Override
     public Page<SeriesInProgressResponseDTO> getSeriesInProgress(UUID viewerId, UUID userId, Integer pageNumber, Integer pageSize) {
-        User target = userRepository.findById(userId)
-                .orElseThrow(() -> new NotFoundException("User not found"));
-
-        assertCanViewDiary(viewerId, userId, target);
-
-        PageRequest pageRequest = pageRequestFactory.build(pageNumber, pageSize);
-        Page<DiaryEntryRepository.SeriesInProgress> seriesInProgress =
-                diaryEntryRepository.findSeriesInProgressByUserId(userId, pageRequest);
-        List<String> seriesTmdbIds = seriesInProgress.getContent().stream()
-                .map(DiaryEntryRepository.SeriesInProgress::getSeriesTmdbId)
-                .distinct()
-                .toList();
-        Map<String, Map<Integer, Long>> watchedEpisodeCountsBySeriesAndSeason =
-                loadWatchedEpisodeCountsBySeriesAndSeason(userId, seriesTmdbIds);
-        Map<String, String> customPosterBySeries = loadSeriesPosters(userId, seriesTmdbIds);
-
-        return seriesInProgress.map(row -> toSeriesInProgressResponse(
-                row,
-                watchedEpisodeCountsBySeriesAndSeason.getOrDefault(row.getSeriesTmdbId(), Map.of()),
-                customPosterBySeries.get(row.getSeriesTmdbId())));
+        SeriesInProgressPageResponseDTO result = getSeriesInProgress(
+                viewerId, userId, pageNumber, pageSize,
+                SeriesProgressReadRepository.SeriesProgressSort.LAST_WATCHED, Sort.Direction.DESC);
+        return new PageImpl<>(result.content(), pageRequestFactory.build(pageNumber, pageSize),
+                result.totalElements());
     }
 
     @Override
@@ -643,6 +635,11 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .filter(key -> ContentReviewSource.DROPPED.name().equals(key.getSource()))
                 .map(DiaryEntryRepository.ContentReviewKey::getReviewId)
                 .toList();
+        List<UUID> contentReviewIds = reviewKeys.getContent().stream()
+                .filter(key -> ContentReviewSource.CONTENT_REVIEW.name().equals(key.getSource())
+                        || ContentReviewSource.LEGACY_ACTIVITY.name().equals(key.getSource()))
+                .map(DiaryEntryRepository.ContentReviewKey::getReviewId)
+                .toList();
 
         Map<UUID, DiaryEntry> diaryById = diaryIds.isEmpty()
                 ? Map.of()
@@ -652,6 +649,27 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 ? Map.of()
                 : droppedEntryRepository.findByIdInWithUserAndContent(droppedIds).stream()
                         .collect(Collectors.toMap(DroppedEntry::getId, entry -> entry));
+        Map<UUID, ContentReview> contentReviewsById = contentReviewIds.isEmpty() ? Map.of()
+                : contentReviewRepository.findAllById(contentReviewIds).stream()
+                        .collect(Collectors.toMap(ContentReview::getId, entry -> entry));
+        Map<UUID, User> contentReviewUsers = contentReviewsById.isEmpty() ? Map.of()
+                : userRepository.findAllById(contentReviewsById.values().stream()
+                        .map(ContentReview::getUserId).distinct().toList()).stream()
+                        .collect(Collectors.toMap(User::getId, user -> user));
+        Map<UUID, Content> contentReviewContents = contentReviewsById.isEmpty() ? Map.of()
+                : contentRepository.findAllById(contentReviewsById.values().stream()
+                        .map(ContentReview::getContentId).distinct().toList()).stream()
+                        .collect(Collectors.toMap(Content::getId, content -> content));
+        Set<UUID> likedContentReviewIds = contentReviewIds.isEmpty() || viewerId == null ? Set.of()
+                : likeRepository.findLikedContentReviewIds(viewerId, contentReviewIds);
+        Map<UUID, Long> contentReviewLikeCounts = contentReviewIds.isEmpty() ? Map.of()
+                : likeRepository.countByContentReviewIdIn(contentReviewIds).stream()
+                        .collect(Collectors.toMap(LikeRepository.ContentReviewLikeCount::getReviewId,
+                                LikeRepository.ContentReviewLikeCount::getCount));
+        Map<UUID, Long> contentReviewCommentCounts = contentReviewIds.isEmpty() ? Map.of()
+                : commentRepository.countVisibleContentReviewComments(viewerId, contentReviewIds).stream()
+                        .collect(Collectors.toMap(CommentRepository.ContentReviewCommentCount::getContentReviewId,
+                                CommentRepository.ContentReviewCommentCount::getCount));
 
         Set<UUID> likedDiaryIds = likeService.getLikedDiaryEntryIds(viewerId, diaryIds);
         Set<UUID> likedDroppedIds = likeService.getLikedDroppedEntryIds(viewerId, droppedIds);
@@ -671,7 +689,9 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 : userContentPosterService.findByUserAndContentPairs(posterKeys);
 
         List<ContentReviewResponseDTO> reviews = reviewKeys.getContent().stream()
-                .map(key -> toContentReviewResponse(key, diaryById, droppedById, likedDiaryIds, likedDroppedIds,
+                .map(key -> toContentReviewResponse(key, diaryById, droppedById, contentReviewsById,
+                        contentReviewUsers, contentReviewContents, likedContentReviewIds,
+                        contentReviewLikeCounts, contentReviewCommentCounts, likedDiaryIds, likedDroppedIds,
                         commentCountsByDiaryId, commentCountsByDroppedId, watchedWithByEntryId,
                         customPosterByAuthorAndContent))
                 .toList();
@@ -687,6 +707,12 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             DiaryEntryRepository.ContentReviewKey key,
             Map<UUID, DiaryEntry> diaryById,
             Map<UUID, DroppedEntry> droppedById,
+            Map<UUID, ContentReview> contentReviewsById,
+            Map<UUID, User> contentReviewUsers,
+            Map<UUID, Content> contentReviewContents,
+            Set<UUID> likedContentReviewIds,
+            Map<UUID, Long> contentReviewLikeCounts,
+            Map<UUID, Long> contentReviewCommentCounts,
             Set<UUID> likedDiaryIds,
             Set<UUID> likedDroppedIds,
             Map<UUID, Long> commentCountsByDiaryId,
@@ -704,6 +730,18 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                     watchedWithByEntryId.getOrDefault(entry.getId(), List.of()),
                     customPosterByAuthorAndContent.get(posterKey));
             return ContentReviewResponseDTO.fromDiary(diaryResponse, userMapper.userToUserPreviewDto(entry.getUser()));
+        }
+
+        if (ContentReviewSource.CONTENT_REVIEW.name().equals(key.getSource())
+                || ContentReviewSource.LEGACY_ACTIVITY.name().equals(key.getSource())) {
+            ContentReview review = contentReviewsById.get(key.getReviewId());
+            User owner = contentReviewUsers.get(review.getUserId());
+            Content content = contentReviewContents.get(review.getContentId());
+            return ContentReviewResponseDTO.fromContentReview(
+                    review, userMapper.userToUserPreviewDto(owner), contentMapper.contentToContentRefDto(content),
+                    Math.toIntExact(contentReviewLikeCounts.getOrDefault(review.getId(), 0L)),
+                    contentReviewCommentCounts.getOrDefault(review.getId(), 0L),
+                    likedContentReviewIds.contains(review.getId()));
         }
 
         DroppedEntry entry = droppedById.get(key.getReviewId());

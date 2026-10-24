@@ -10,6 +10,7 @@ import com.watchwise.watchwise_api.content.dto.WatchStatus;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.follower.entity.FollowStatus;
@@ -57,6 +58,7 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
     private final LikeService likeService;
     private final CommentRepository commentRepository;
     private final DiaryEntryRepository diaryEntryRepository;
+    private final ContentRatingRepository contentRatingRepository;
     private final ContentRepository contentRepository;
     private final PageRequestFactory pageRequestFactory;
     private final UserBlockAccessService userBlockAccessService;
@@ -232,12 +234,26 @@ public class UserListItemPageReaderImpl implements UserListItemPageReader {
         Set<UUID> contentIds = items.stream()
                 .map(UserListItemResponseDTO::content)
                 .filter(Objects::nonNull)
+                .filter(content -> content.type() == ContentType.MOVIE || content.type() == ContentType.EPISODE)
+                .map(ContentRefDTO::id)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<UUID> opinionContentIds = items.stream()
+                .map(UserListItemResponseDTO::content)
+                .filter(Objects::nonNull)
+                .filter(content -> content.type() == ContentType.SERIES || content.type() == ContentType.SEASON)
                 .map(ContentRefDTO::id)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<UUID, Double> contentAverages = new HashMap<>();
         if (!contentIds.isEmpty()) {
             for (DiaryEntryRepository.ContentStats stats : diaryEntryRepository.findContentStatsByContentIdIn(contentIds)) {
+                contentAverages.put(stats.getContentId(), stats.getAverageScore());
+            }
+        }
+        if (!opinionContentIds.isEmpty()) {
+            for (ContentRatingRepository.PublicRatingStats stats :
+                    contentRatingRepository.findPublicStatsByContentIdIn(opinionContentIds)) {
                 contentAverages.put(stats.getContentId(), stats.getAverageScore());
             }
         }

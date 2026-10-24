@@ -43,6 +43,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.notification.repository.NotificationRepository;
 import com.watchwise.watchwise_api.summary.dto.AllTimeStatsResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
+import com.watchwise.watchwise_api.summary.dto.ContentRatingSummaryDTO;
 import com.watchwise.watchwise_api.summary.dto.DailyWatchCountDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsGridResponseDTO;
 import com.watchwise.watchwise_api.summary.dto.EpisodeRatingsMapItemDTO;
@@ -97,6 +98,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anySet;
@@ -173,6 +175,9 @@ class SummaryServiceImplTest {
     private AllTimeStatsReader allTimeStatsReader;
 
     @Mock
+    private CurrentRatingSummaryReader currentRatingSummaryReader;
+
+    @Mock
     private UserBlockAccessService userBlockAccessService;
 
     @InjectMocks
@@ -207,6 +212,22 @@ class SummaryServiceImplTest {
 
         assertThat(result).isSameAs(expected);
         verify(allTimeStatsReader).read(lucasId, ContentType.MOVIE);
+    }
+
+    @Test
+    @DisplayName("[getAllTimeStats] Should Expose Typed Current Series Ratings")
+    void shouldExposeTypedCurrentSeriesAndSeasonRatingsInAggregateAllTimeStats() {
+        ContentRefDTO reference = new ContentRefDTO(UUID.randomUUID(), null, ContentType.SEASON,
+                "1399", 1, null, null, null, null, null);
+        ContentRatingSummaryDTO currentRating = new ContentRatingSummaryDTO(reference, 9, 2L);
+        when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
+        when(currentRatingSummaryReader.readSeriesRatings(lucasId, 10))
+                .thenReturn(new CurrentRatingSummaryReader.Ratings(List.of(currentRating), List.of()));
+
+        AllTimeStatsResponseDTO result = summaryService.getAllTimeStats(lucasId, lucasId);
+
+        assertThat(result.currentSeriesAndSeasonTopRated()).containsExactly(currentRating);
+        assertThat(result.currentSeriesAndSeasonBottomRated()).isEmpty();
     }
 
     @BeforeEach
@@ -255,6 +276,8 @@ class SummaryServiceImplTest {
                 .thenReturn(Map.of());
         lenient().when(userContentPosterService.findByUserAndContentIds(any(), any()))
                 .thenReturn(Map.of());
+        lenient().when(currentRatingSummaryReader.readSeriesRatings(any(), anyInt()))
+                .thenReturn(CurrentRatingSummaryReader.Ratings.empty());
     }
 
     @Test

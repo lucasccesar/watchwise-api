@@ -4,6 +4,8 @@ import com.watchwise.watchwise_api.content.dto.ContentPageStatsDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStatsResponseDTO;
 import com.watchwise.watchwise_api.content.dto.RatingDistributionDTO;
 import com.watchwise.watchwise_api.content.service.ContentStatsService;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,12 +30,19 @@ class ContentPageStatsServiceImplTest {
     @Mock
     private DiaryEntryRepository diaryEntryRepository;
 
+    @Mock
+    private ContentRepository contentRepository;
+
+    @Mock
+    private ContentRatingRepository ratingRepository;
+
     private ContentPageStatsServiceImpl statsService;
     private UUID contentId;
 
     @BeforeEach
     void setUp() {
-        statsService = new ContentPageStatsServiceImpl(contentStatsService, diaryEntryRepository);
+        statsService = new ContentPageStatsServiceImpl(
+                contentStatsService, diaryEntryRepository, contentRepository, ratingRepository);
         contentId = UUID.randomUUID();
     }
 

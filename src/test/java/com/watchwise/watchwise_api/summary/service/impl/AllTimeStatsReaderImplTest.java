@@ -18,6 +18,7 @@ import com.watchwise.watchwise_api.diaryentry.dto.DiaryEntryResponseDTO;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.mapper.DiaryEntryMapper;
 import com.watchwise.watchwise_api.summary.dto.AllTimeEditionStatsDTO;
+import com.watchwise.watchwise_api.summary.dto.ContentRatingSummaryDTO;
 import com.watchwise.watchwise_api.summary.repository.AllTimeStatsQueryRepository;
 import com.watchwise.watchwise_api.summary.repository.ProfileSummaryQueryRepository;
 import com.watchwise.watchwise_api.top5entry.repository.Top5EntryRepository;
@@ -69,6 +70,9 @@ class AllTimeStatsReaderImplTest {
     @Mock
     private ContentCardAssembler contentCardAssembler;
 
+    @Mock
+    private CurrentRatingSummaryReader currentRatingSummaryReader;
+
     @InjectMocks
     private AllTimeStatsReaderImpl reader;
 
@@ -102,6 +106,44 @@ class AllTimeStatsReaderImplTest {
         assertThat(result.totalTheaterVisits()).isZero();
         assertThat(result.watchCountByYear()).isEmpty();
         assertThat(result.ratingsDistribution()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("[read] Should Use Current Series Ratings - When Reading Series Edition")
+    void shouldUseCurrentSeriesRatingsWhenReadingSeriesEdition() {
+        UUID userId = UUID.randomUUID();
+        ProfileSummaryQueryRepository.ScoreCount seriesScore = scoreCount(8, 1L);
+        ContentRefDTO seriesRef = new ContentRefDTO(UUID.randomUUID(), null, ContentType.SERIES,
+                "33007", null, null, null, null, null, null);
+        ContentRatingSummaryDTO currentRating = new ContentRatingSummaryDTO(seriesRef, 8, 3L);
+        when(queryRepository.findMinWatchedDateByUserIdAndContentType(userId, ContentType.EPISODE)).thenReturn(null);
+        when(profileSummaryQueryRepository.countByUserIdAndContentType(userId, ContentType.EPISODE)).thenReturn(0L);
+        when(profileSummaryQueryRepository.sumRuntimeMinutesByUserIdAndContentType(userId, ContentType.EPISODE))
+                .thenReturn(0L);
+        when(profileSummaryQueryRepository.countDistinctEpisodesByGenre(userId)).thenReturn(List.of());
+        when(profileSummaryQueryRepository.countLatestScoresByUserIdAndContentType(userId, ContentType.SERIES.name()))
+                .thenReturn(List.of(seriesScore));
+        when(queryRepository.countByUserIdAndContentTypeGroupByYear(userId, ContentType.EPISODE.name()))
+                .thenReturn(List.of());
+        when(queryRepository.countDistinctSeriesByDecade(userId)).thenReturn(List.of());
+        when(queryRepository.countDistinctSeriesByCountry(userId)).thenReturn(List.of());
+        when(queryRepository.countMostLoggedSeries(eq(userId), any())).thenReturn(List.of());
+        when(queryRepository.findTopRatedByUserIdAndContentType(eq(userId), eq(ContentType.SERIES), any()))
+                .thenReturn(List.of());
+        when(queryRepository.findBottomRatedByUserIdAndContentType(eq(userId), eq(ContentType.SERIES), any()))
+                .thenReturn(List.of());
+        when(currentRatingSummaryReader.readSeriesRatings(userId, 10))
+                .thenReturn(new CurrentRatingSummaryReader.Ratings(List.of(currentRating), List.of(currentRating)));
+
+        AllTimeEditionStatsDTO result = reader.read(userId, ContentType.SERIES);
+
+        assertThat(result.ratingsDistribution()).containsExactly(new com.watchwise.watchwise_api.summary.dto.RatingCountDTO(8, 1L));
+        String json = new ObjectMapper().writeValueAsString(result);
+        assertThat(json).contains("\"currentSeriesAndSeasonTopRated\"",
+                "\"currentSeriesAndSeasonBottomRated\"");
+        assertThat(result.currentSeriesAndSeasonTopRated()).containsExactly(currentRating);
+        assertThat(result.currentSeriesAndSeasonBottomRated()).containsExactly(currentRating);
+        verify(profileSummaryQueryRepository).countLatestScoresByUserIdAndContentType(userId, ContentType.SERIES.name());
     }
 
     @Test
@@ -173,6 +215,20 @@ class AllTimeStatsReaderImplTest {
             @Override
             public UUID getContentId() {
                 return contentId;
+            }
+
+            @Override
+            public Long getCount() {
+                return count;
+            }
+        };
+    }
+
+    private ProfileSummaryQueryRepository.ScoreCount scoreCount(int score, long count) {
+        return new ProfileSummaryQueryRepository.ScoreCount() {
+            @Override
+            public Integer getScore() {
+                return score;
             }
 
             @Override

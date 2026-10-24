@@ -11,6 +11,12 @@ import com.watchwise.watchwise_api.content.service.ContentSchedule;
 import com.watchwise.watchwise_api.content.service.ContentScheduleKey;
 import com.watchwise.watchwise_api.content.service.ContentStateResolver;
 import com.watchwise.watchwise_api.content.service.ContentViewerStateService;
+import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
+import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
+import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
+import com.watchwise.watchwise_api.diarycompletion.entity.DiaryCompletionProjection;
+import com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepositoryCustom;
@@ -26,6 +32,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -52,6 +61,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
     private final DroppedEntryRepository droppedEntryRepository;
     private final UserListItemRepository userListItemRepository;
     private final ContentRepository contentRepository;
+    private final ContentRatingRepository ratingRepository;
+    private final ContentReviewRepository reviewRepository;
+    private final DiaryCompletionProjectionRepository completionRepository;
     private final ContentStateResolver contentStateResolver;
     private final Clock clock;
 
@@ -62,6 +74,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             DroppedEntryRepository droppedEntryRepository,
             UserListItemRepository userListItemRepository,
             ContentRepository contentRepository,
+            ContentRatingRepository ratingRepository,
+            ContentReviewRepository reviewRepository,
+            DiaryCompletionProjectionRepository completionRepository,
             Clock clock) {
         this(
                 diaryEntryRepository,
@@ -69,6 +84,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 droppedEntryRepository,
                 userListItemRepository,
                 contentRepository,
+                ratingRepository,
+                reviewRepository,
+                completionRepository,
                 new ContentStateResolver(),
                 clock);
     }
@@ -79,6 +97,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
             DroppedEntryRepository droppedEntryRepository,
             UserListItemRepository userListItemRepository,
             ContentRepository contentRepository,
+            ContentRatingRepository ratingRepository,
+            ContentReviewRepository reviewRepository,
+            DiaryCompletionProjectionRepository completionRepository,
             ContentStateResolver contentStateResolver,
             Clock clock) {
         this.diaryEntryRepository = Objects.requireNonNull(diaryEntryRepository, "diaryEntryRepository is required");
@@ -88,6 +109,9 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
         this.userListItemRepository = Objects.requireNonNull(
                 userListItemRepository, "userListItemRepository is required");
         this.contentRepository = Objects.requireNonNull(contentRepository, "contentRepository is required");
+        this.ratingRepository = Objects.requireNonNull(ratingRepository, "ratingRepository is required");
+        this.reviewRepository = Objects.requireNonNull(reviewRepository, "reviewRepository is required");
+        this.completionRepository = Objects.requireNonNull(completionRepository, "completionRepository is required");
         this.contentStateResolver = Objects.requireNonNull(
                 contentStateResolver, "contentStateResolver is required");
         this.clock = Objects.requireNonNull(clock, "clock is required");
@@ -153,8 +177,29 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
                 .map(Content::getId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        List<DiaryEntry> diaryEntries = diaryEntryRepository.findViewerStateEntriesByContentIdIn(
-                viewerId, contentIds);
+        Set<UUID> diaryEventContentIds = contentByCoordinate.values().stream()
+                .filter(content -> content.getType() == ContentType.MOVIE
+                        || content.getType() == ContentType.EPISODE)
+                .map(Content::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<UUID> opinionIds = contentByCoordinate.values().stream()
+                .filter(content -> content.getType() == ContentType.SERIES
+                        || content.getType() == ContentType.SEASON)
+                .map(Content::getId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<UUID, ContentRating> ratingByContentId = opinionIds.isEmpty() ? Map.of()
+                : ratingRepository.findByUserIdAndContentIdIn(viewerId, opinionIds).stream()
+                        .collect(Collectors.toMap(ContentRating::getContentId, rating -> rating));
+        Map<UUID, List<ContentReview>> reviewsByContentId = opinionIds.isEmpty() ? Map.of()
+                : reviewRepository.findByUserIdAndContentIdInOrderByCreatedAtDesc(viewerId, opinionIds)
+                        .stream().collect(Collectors.groupingBy(ContentReview::getContentId));
+        Map<UUID, List<DiaryCompletionProjection>> completionsByContentId = opinionIds.isEmpty() ? Map.of()
+                : completionRepository.findCurrentByUserIdAndContentIdIn(viewerId, opinionIds)
+                        .stream().collect(Collectors.groupingBy(DiaryCompletionProjection::getContentId));
+        List<DiaryEntry> diaryEntries = diaryEventContentIds.isEmpty()
+                ? List.of()
+                : diaryEntryRepository.findViewerStateEntriesByContentIdIn(viewerId, diaryEventContentIds);
         List<WatchlistEntry> watchlistEntries = watchlistEntryRepository
                 .findByUserIdAndContentIdInWithContent(viewerId, contentIds);
         List<DroppedEntry> droppedEntries = droppedEntryRepository
@@ -211,25 +256,60 @@ public class ContentViewerStateServiceImpl implements ContentViewerStateService 
 
             WatchlistEntry watchlistEntry = watchlistByContentId.get(content.getId());
             DroppedEntry droppedEntry = droppedByContentId.get(content.getId());
+            boolean opinionContent = opinionIds.contains(content.getId());
+            ContentRating rating = ratingByContentId.get(content.getId());
+            List<ContentReview> reviews = reviewsByContentId.getOrDefault(content.getId(), List.of()).stream()
+                    .filter(review -> review.getComment() != null && !review.getComment().isBlank())
+                    .sorted(Comparator.comparing(this::reviewPublicationTime).reversed()
+                            .thenComparing(ContentReview::getId, Comparator.reverseOrder()))
+                    .toList();
+            List<DiaryCompletionProjection> completions = completionsByContentId.getOrDefault(content.getId(), List.of());
+            DiaryCompletionProjection latestCompletion = completions.isEmpty() ? null : completions.getFirst();
+            WatchStatus watchStatus = watchProgress.status();
+            Integer watchedEpisodeCount = watchProgress.watchedEpisodeCount();
+            Integer releasedEpisodeCount = watchProgress.releasedEpisodeCount();
+            if (opinionContent && latestCompletion != null) {
+                watchStatus = WatchStatus.WATCHED;
+                if (!Objects.equals(watchedEpisodeCount, releasedEpisodeCount)) {
+                    watchedEpisodeCount = null;
+                    releasedEpisodeCount = null;
+                }
+            }
             statesByCoordinate.put(coordinate, new ContentViewerStateDTO(
-                    watchProgress.status(),
-                    latestDiaryEntry == null ? null : latestDiaryEntry.getScore(),
-                    latestDiaryEntry == null ? null : latestDiaryEntry.getComment(),
-                    latestDiaryEntry == null ? null : latestDiaryEntry.getWatchedDate(),
-                    latestDiaryEntry == null ? null : latestDiaryEntry.getWatchNumber(),
-                    latestDiaryEntry == null ? null : latestDiaryEntry.getWatchedInTheater(),
-                    contentDiaryEntries.size(),
-                    latestDiaryEntry == null ? null : latestDiaryEntry.getId(),
+                    watchStatus,
+                    opinionContent ? rating == null ? null : rating.getScore()
+                            : latestDiaryEntry == null ? null : latestDiaryEntry.getScore(),
+                    opinionContent ? reviews.isEmpty() ? null : reviews.getFirst().getComment()
+                            : latestDiaryEntry == null ? null : latestDiaryEntry.getComment(),
+                    opinionContent ? latestCompletion == null ? null : latestCompletion.getCompletedOn()
+                            : latestDiaryEntry == null ? null : latestDiaryEntry.getWatchedDate(),
+                    opinionContent ? latestCompletion == null ? null : latestCompletion.getWatchNumber()
+                            : latestDiaryEntry == null ? null : latestDiaryEntry.getWatchNumber(),
+                    opinionContent ? null : latestDiaryEntry == null ? null : latestDiaryEntry.getWatchedInTheater(),
+                    opinionContent ? completions.size() : contentDiaryEntries.size(),
+                    opinionContent ? latestCompletion == null ? null : latestCompletion.getAnchorDiaryEntryId()
+                            : latestDiaryEntry == null ? null : latestDiaryEntry.getId(),
                     watchlistEntry != null,
                     watchlistEntry == null ? null : watchlistEntry.getId(),
                     droppedEntry != null,
                     droppedEntry == null ? null : droppedEntry.getId(),
                     toListMemberships(listItemsByContentId.getOrDefault(content.getId(), List.of())),
-                    watchProgress.watchedEpisodeCount(),
-                    watchProgress.releasedEpisodeCount()));
+                    watchedEpisodeCount,
+                    releasedEpisodeCount,
+                    opinionContent && rating != null ? rating.getVersion() : null,
+                    opinionContent ? reviews.size() : 0,
+                    opinionContent ? reviews.stream().map(ContentReview::getId).toList() : List.of()));
         }
 
         return new Resolution(statesByCoordinate, existingContentIdsByCoordinate);
+    }
+
+    private LocalDateTime reviewPublicationTime(ContentReview review) {
+        Instant instant = review.getSourcePublishedAt() != null
+                ? review.getSourcePublishedAt() : review.getCreatedAt();
+        return review.getSourcePublishedOn() != null && review.getSourcePublishedAt() == null
+                ? review.getSourcePublishedOn().atStartOfDay()
+                : LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
 
     private ContentStateResolver.WatchProgress resolveWatchProgress(

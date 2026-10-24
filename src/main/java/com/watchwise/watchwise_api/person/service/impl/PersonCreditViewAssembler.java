@@ -64,7 +64,8 @@ public class PersonCreditViewAssembler {
                 : new ContentCardStatsDTO(stats.averageScore(), stats.playsCount(), stats.reviewsCount(), stats.commentsCount());
         ContentCardViewerStateDTO viewerState = new ContentCardViewerStateDTO(state.watchStatus(), state.myRating(),
                 state.lastWatchedDate(), state.lastWatchNumber(), state.watchedInTheater(), state.playsCount(),
-                state.inWatchlist(), state.dropped(), state.watchedEpisodeCount(), state.releasedEpisodeCount());
+                state.inWatchlist(), state.dropped(), state.watchedEpisodeCount(), state.releasedEpisodeCount(),
+                state.currentRatingVersion(), state.reviewsCount(), state.reviewIds());
         String posterUrl = TmdbImageUrlBuilder.posterUrl(credit.posterPath());
         ContentPreviewStatus previewStatus = isBlank(credit.title()) || posterUrl == null || credit.releaseDate() == null
                 ? ContentPreviewStatus.PARTIAL : ContentPreviewStatus.AVAILABLE;

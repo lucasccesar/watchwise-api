@@ -41,6 +41,11 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user
             WHERE d.user.id IN :userIds
             AND d.ignore = false
+            AND NOT EXISTS (
+                SELECT 1 FROM LegacyDiaryMigrationMap migration
+                WHERE migration.oldDiaryEntryId = d.id
+                  AND migration.destinationKind = 'CONTENT_REVIEW'
+            )
             AND (
                 CAST(:cursorCreatedAt AS timestamp) IS NULL
                 OR d.createdAt < :cursorCreatedAt
@@ -152,6 +157,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 JOIN users u ON u.id = d.user_id
                 WHERE d.content_id = :contentId
                   AND d.comment IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM legacy_diary_migration_maps m
+                                  WHERE m.old_diary_entry_id = d.id
+                                    AND m.destination_kind = 'CONTENT_REVIEW')
                   AND (u.is_profile_public = true
                        OR u.id = :viewerId
                        OR EXISTS (
@@ -188,6 +196,29 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                UNION ALL
+                SELECT r.id AS review_id,
+                       CASE WHEN r.publication_kind = 'WRITTEN_REVIEW' THEN 'CONTENT_REVIEW'
+                            ELSE 'LEGACY_ACTIVITY' END AS source,
+                       (SELECT COUNT(*) FROM likes l WHERE l.content_review_id = r.id) AS likes_count,
+                       COALESCE(r.source_published_at AT TIME ZONE 'UTC',
+                                r.source_published_on::timestamp,
+                                r.created_at AT TIME ZONE 'UTC') AS created_at
+                FROM content_reviews r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.content_id = :contentId
+                  AND r.comment IS NOT NULL AND btrim(r.comment) <> ''
+                  AND (u.is_profile_public = true OR u.id = :viewerId OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                             AND f.status = 'ACCEPTED'))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                                  WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                                     OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
+                  AND (:sort <> 'FOLLOWING' OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                             AND f.status = 'ACCEPTED'))
             ) reviews
             ORDER BY CASE WHEN :sort = 'POPULAR' THEN likes_count END DESC,
                      created_at DESC, review_id DESC
@@ -200,6 +231,9 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 JOIN users u ON u.id = d.user_id
                 WHERE d.content_id = :contentId
                   AND d.comment IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM legacy_diary_migration_maps m
+                                  WHERE m.old_diary_entry_id = d.id
+                                    AND m.destination_kind = 'CONTENT_REVIEW')
                   AND (u.is_profile_public = true
                        OR u.id = :viewerId
                        OR EXISTS (
@@ -236,6 +270,23 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            WHERE f.follower_id = :viewerId AND f.followed_id = u.id
                            AND f.status = 'ACCEPTED'
                        ))
+                UNION ALL
+                SELECT r.id
+                FROM content_reviews r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.content_id = :contentId
+                  AND r.comment IS NOT NULL AND btrim(r.comment) <> ''
+                  AND (u.is_profile_public = true OR u.id = :viewerId OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                             AND f.status = 'ACCEPTED'))
+                  AND NOT EXISTS (SELECT 1 FROM user_blocks b
+                                  WHERE (b.blocker_id = :viewerId AND b.blocked_id = u.id)
+                                     OR (b.blocker_id = u.id AND b.blocked_id = :viewerId))
+                  AND (:sort <> 'FOLLOWING' OR EXISTS (
+                           SELECT 1 FROM followers f
+                           WHERE f.follower_id = :viewerId AND f.followed_id = u.id
+                             AND f.status = 'ACCEPTED'))
             ) reviews
             """, nativeQuery = true)
     Page<ContentReviewKey> findContentReviewKeys(
@@ -682,6 +733,18 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     }
 
     @Query(value = """
+            WITH watched_series AS (
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_entries history
+                JOIN contents c ON c.id = history.content_id
+                WHERE history.user_id = :userId
+                  AND c.type IN ('SERIES', 'SEASON', 'EPISODE')
+                UNION
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id
+                WHERE p.user_id = :userId
+            )
             SELECT
                 COALESCE(SUM(CASE WHEN c.type = 'MOVIE' THEN COALESCE(c.runtime_minutes, 0) ELSE 0 END), 0)
                     AS "totalMinutesWatchedMovies",
@@ -690,11 +753,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 COUNT(CASE WHEN c.type = 'MOVIE' THEN 1 END) AS "totalMoviesWatched",
                 COUNT(DISTINCT CASE WHEN c.type = 'MOVIE' THEN c.tmdb_id END) AS "totalDistinctMoviesWatched",
                 COUNT(CASE WHEN c.type = 'EPISODE' THEN 1 END) AS "totalEpisodesWatched",
-                COUNT(DISTINCT CASE
-                    WHEN c.type = 'SERIES' THEN c.tmdb_id
-                    WHEN c.type IN ('SEASON', 'EPISODE') THEN c.series_tmdb_id
-                    ELSE NULL
-                END) AS "distinctSeriesWatched"
+                (SELECT COUNT(*) FROM watched_series) AS "distinctSeriesWatched"
             FROM diary_entries d
             JOIN contents c ON c.id = d.content_id
             WHERE d.user_id = :userId
@@ -719,16 +778,24 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             @Param("start") LocalDate start, @Param("end") LocalDate end);
 
     @Query(value = """
-            SELECT genre AS genre,
-                   COUNT(DISTINCT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
-            WHERE d.user_id = :userId
-            AND c.type IN ('EPISODE', 'SERIES')
+            WITH watched_series AS (
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type IN ('EPISODE', 'SEASON', 'SERIES')
+                UNION
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id
+                WHERE p.user_id = :userId
+            )
+            SELECT genre AS genre, COUNT(DISTINCT series.tmdb_id) AS count
+            FROM watched_series watched
+            JOIN contents series ON series.tmdb_id = watched.series_tmdb_id AND series.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(series.genres) AS genre
             GROUP BY genre
-            ORDER BY count DESC
+            ORDER BY count DESC, genre ASC
             """, nativeQuery = true)
     List<GenreCount> countDistinctTitlesByGenreAndUserIdForSeries(@Param("userId") UUID userId);
 
@@ -1008,17 +1075,26 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
     List<GenreCount> countEntriesByGenreAndUserIdForMovies(@Param("userId") UUID userId);
 
     @Query(value = """
-            SELECT genre AS genre,
-                   COUNT(DISTINCT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END) AS count
-            FROM diary_entries d
-            JOIN contents c ON c.id = d.content_id
-            LEFT JOIN contents sc ON c.type = 'EPISODE' AND sc.tmdb_id = c.series_tmdb_id AND sc.type = 'SERIES'
-            CROSS JOIN LATERAL unnest(CASE WHEN c.type = 'EPISODE' THEN sc.genres ELSE c.genres END) AS genre
-            WHERE d.user_id = :userId
-            AND c.type IN ('EPISODE', 'SERIES')
-            AND d.watched_date BETWEEN :start AND :end
+            WITH watched_series AS (
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = :userId
+                  AND c.type IN ('EPISODE', 'SEASON', 'SERIES')
+                  AND d.watched_date BETWEEN :start AND :end
+                UNION
+                SELECT CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END AS series_tmdb_id
+                FROM diary_completion_projections p
+                JOIN contents c ON c.id = p.content_id
+                WHERE p.user_id = :userId
+                  AND p.completed_on BETWEEN :start AND :end
+            )
+            SELECT genre AS genre, COUNT(DISTINCT series.tmdb_id) AS count
+            FROM watched_series watched
+            JOIN contents series ON series.tmdb_id = watched.series_tmdb_id AND series.type = 'SERIES'
+            CROSS JOIN LATERAL unnest(series.genres) AS genre
             GROUP BY genre
-            ORDER BY count DESC
+            ORDER BY count DESC, genre ASC
             """, nativeQuery = true)
     List<GenreCount> countDistinctTitlesByGenreAndUserIdForSeriesAndWatchedDateBetween(
             @Param("userId") UUID userId, @Param("start") LocalDate start, @Param("end") LocalDate end);

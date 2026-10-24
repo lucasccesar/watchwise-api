@@ -55,6 +55,7 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
     @Transactional(readOnly = true)
     public Snapshot read(UUID userId, ContentType type) {
         ContentType watchedContentType = type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.EPISODE;
+        ContentType ratingContentType = type == ContentType.MOVIE ? ContentType.MOVIE : ContentType.SERIES;
         LocalDate windowEnd = LocalDate.now();
         LocalDate windowStart = windowEnd.minusDays(WATCH_TIME_WINDOW_DAYS - 1L);
 
@@ -70,7 +71,7 @@ public class ProfileSummaryDataReaderImpl implements ProfileSummaryDataReader {
                 ? queryRepository.countDistinctMoviesByGenre(userId)
                 : queryRepository.countDistinctEpisodesByGenre(userId));
         List<RatingCountDTO> ratingsDistribution = toRatingCounts(
-                queryRepository.countLatestScoresByUserIdAndContentType(userId, watchedContentType.name()));
+                queryRepository.countLatestScoresByUserIdAndContentType(userId, ratingContentType.name()));
 
         List<DiaryEntry> recentEpisodeEntries = type == ContentType.SERIES
                 ? queryRepository.findRecentEpisodes(userId, PageRequest.of(0, RECENT_EPISODES_LIMIT))

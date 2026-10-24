@@ -14,6 +14,7 @@ import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
+import com.watchwise.watchwise_api.contentrating.repository.ContentRatingRepository;
 import com.watchwise.watchwise_api.contentposter.service.UserContentPosterService;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.dto.SeriesInProgressResponseDTO;
@@ -119,6 +120,9 @@ class UserListServiceImplTest {
     private DiaryEntryRepository diaryEntryRepository;
 
     @Mock
+    private ContentRatingRepository contentRatingRepository;
+
+    @Mock
     private UserListItemRepository userListItemRepository;
 
     @Mock
@@ -172,6 +176,7 @@ class UserListServiceImplTest {
         lenient().when(diaryEntryRepository.findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(any()))
                 .thenReturn(List.of());
         lenient().when(diaryEntryRepository.findContentStatsByContentIdIn(any())).thenReturn(List.of());
+        lenient().when(contentRatingRepository.findPublicStatsByContentIdIn(any())).thenReturn(List.of());
         lenient().when(contentRepository.findByTypeAndTmdbIdIn(eq(ContentType.SERIES), any()))
                 .thenAnswer(invocation -> ((Set<String>) invocation.getArgument(1)).stream()
                         .filter(genresBySeriesId::containsKey)
@@ -180,7 +185,8 @@ class UserListServiceImplTest {
                         .toList());
         ReflectionTestUtils.setField(userListService, "userListItemPageReader", new UserListItemPageReaderImpl(
                 userListRepository, followerRepository, userListItemService, likeService, commentRepository,
-                diaryEntryRepository, contentRepository, pageRequestFactory, userBlockAccessService));
+                diaryEntryRepository, contentRatingRepository, contentRepository, pageRequestFactory,
+                userBlockAccessService));
         lenient().when(contentMapper.contentToContentRefDto(any(Content.class)))
                 .thenAnswer(invocation -> {
                     Content content = invocation.getArgument(0);
@@ -1198,12 +1204,15 @@ class UserListServiceImplTest {
                 buildPublicEpisodeRatingAggregate("100", 1, 2, 10L, 1L)))
                 .when(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(Set.of("100"));
         doReturn(List.of(
-                buildContentStats(series.content().id(), 7.0),
-                buildContentStats(season.content().id(), 6.5),
                 buildContentStats(episode.content().id(), 8.5),
                 buildContentStats(movie.content().id(), 9.0)))
                 .when(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(
-                        series.content().id(), season.content().id(), episode.content().id(), movie.content().id()));
+                        episode.content().id(), movie.content().id()));
+        doReturn(List.of(
+                buildPublicRatingStats(series.content().id(), 7.0),
+                buildPublicRatingStats(season.content().id(), 6.5)))
+                .when(contentRatingRepository).findPublicStatsByContentIdIn(Set.of(
+                        series.content().id(), season.content().id()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(
                 lucasId, list.getId(), null, null, null, null, null, null);
@@ -1349,8 +1358,8 @@ class UserListServiceImplTest {
                 .thenAnswer(invocation -> buildDetailedResponseDto(list, invocation.getArgument(1)));
         doReturn(List.of(buildPublicEpisodeRatingAggregate("100", 1, 1, 8L, 1L)))
                 .when(diaryEntryRepository).findPublicEpisodeRatingAggregatesBySeriesTmdbIdIn(Set.of("100"));
-        doReturn(List.of(buildContentStats(series.content().id(), 7.0)))
-                .when(diaryEntryRepository).findContentStatsByContentIdIn(Set.of(series.content().id()));
+        doReturn(List.of(buildPublicRatingStats(series.content().id(), 7.0)))
+                .when(contentRatingRepository).findPublicStatsByContentIdIn(Set.of(series.content().id()));
 
         UserListDetailedResponseDTO result = userListService.getUserListById(
                 marinaId, list.getId(), null, null, null, null, null, null);
@@ -2350,6 +2359,13 @@ class UserListServiceImplTest {
 
     private DiaryEntryRepository.ContentStats buildContentStats(UUID contentId, double averageScore) {
         DiaryEntryRepository.ContentStats stats = mock(DiaryEntryRepository.ContentStats.class);
+        when(stats.getContentId()).thenReturn(contentId);
+        when(stats.getAverageScore()).thenReturn(averageScore);
+        return stats;
+    }
+
+    private ContentRatingRepository.PublicRatingStats buildPublicRatingStats(UUID contentId, double averageScore) {
+        ContentRatingRepository.PublicRatingStats stats = mock(ContentRatingRepository.PublicRatingStats.class);
         when(stats.getContentId()).thenReturn(contentId);
         when(stats.getAverageScore()).thenReturn(averageScore);
         return stats;

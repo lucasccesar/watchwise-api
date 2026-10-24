@@ -51,11 +51,28 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                 FROM episode_entries ee
                 WHERE NOT EXISTS (
                     SELECT 1
-                    FROM diary_entries completion
+                    FROM diary_completion_projections completion
                     JOIN contents completed_series ON completed_series.id = completion.content_id
+                    JOIN user_series_history_states state
+                      ON state.user_id = completion.user_id
+                     AND state.series_tmdb_id = ee.series_tmdb_id
+                    LEFT JOIN series_progress_metadata released
+                      ON released.series_tmdb_id = ee.series_tmdb_id
                     WHERE completion.user_id = :userId
                     AND completed_series.type = 'SERIES'
                     AND completed_series.tmdb_id = ee.series_tmdb_id
+                    AND completion.history_revision = state.history_revision
+                    AND completion.schedule_version = state.schedule_version
+                    AND (completion.valid_until IS NULL OR completion.valid_until > CURRENT_TIMESTAMP)
+                    AND (released.regular_released_episode_count IS NULL OR
+                         released.regular_released_episode_count <= (
+                             SELECT COUNT(DISTINCT (watched_content.season_number, watched_content.episode_number))
+                             FROM diary_entries watched
+                             JOIN contents watched_content ON watched_content.id = watched.content_id
+                             WHERE watched.user_id = :userId AND watched_content.type = 'EPISODE'
+                               AND watched_content.season_number > 0
+                               AND watched_content.series_tmdb_id = ee.series_tmdb_id
+                         ))
                 )
                 AND NOT EXISTS (
                     SELECT 1
@@ -185,11 +202,28 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                 FROM episode_entries ee
                 WHERE NOT EXISTS (
                     SELECT 1
-                    FROM diary_entries completion
+                    FROM diary_completion_projections completion
                     JOIN contents completed_series ON completed_series.id = completion.content_id
+                    JOIN user_series_history_states state
+                      ON state.user_id = completion.user_id
+                     AND state.series_tmdb_id = ee.series_tmdb_id
+                    LEFT JOIN series_progress_metadata released
+                      ON released.series_tmdb_id = ee.series_tmdb_id
                     WHERE completion.user_id = :userId
                     AND completed_series.type = 'SERIES'
                     AND completed_series.tmdb_id = ee.series_tmdb_id
+                    AND completion.history_revision = state.history_revision
+                    AND completion.schedule_version = state.schedule_version
+                    AND (completion.valid_until IS NULL OR completion.valid_until > CURRENT_TIMESTAMP)
+                    AND (released.regular_released_episode_count IS NULL OR
+                         released.regular_released_episode_count <= (
+                             SELECT COUNT(DISTINCT (watched_content.season_number, watched_content.episode_number))
+                             FROM diary_entries watched
+                             JOIN contents watched_content ON watched_content.id = watched.content_id
+                             WHERE watched.user_id = :userId AND watched_content.type = 'EPISODE'
+                               AND watched_content.season_number > 0
+                               AND watched_content.series_tmdb_id = ee.series_tmdb_id
+                         ))
                 )
                 AND NOT EXISTS (
                     SELECT 1
@@ -364,11 +398,28 @@ public interface SeriesProgressReadRepository extends Repository<DiaryEntry, UUI
                 FROM episode_entries ee
                 WHERE NOT EXISTS (
                     SELECT 1
-                    FROM diary_entries completion
+                    FROM diary_completion_projections completion
                     JOIN contents completed_series ON completed_series.id = completion.content_id
+                    JOIN user_series_history_states state
+                      ON state.user_id = completion.user_id
+                     AND state.series_tmdb_id = ee.series_tmdb_id
+                    LEFT JOIN series_progress_metadata released
+                      ON released.series_tmdb_id = ee.series_tmdb_id
                     WHERE completion.user_id = :userId
                     AND completed_series.type = 'SERIES'
                     AND completed_series.tmdb_id = ee.series_tmdb_id
+                    AND completion.history_revision = state.history_revision
+                    AND completion.schedule_version = state.schedule_version
+                    AND (completion.valid_until IS NULL OR completion.valid_until > CURRENT_TIMESTAMP)
+                    AND (released.regular_released_episode_count IS NULL OR
+                         released.regular_released_episode_count <= (
+                             SELECT COUNT(DISTINCT (watched_content.season_number, watched_content.episode_number))
+                             FROM diary_entries watched
+                             JOIN contents watched_content ON watched_content.id = watched.content_id
+                             WHERE watched.user_id = :userId AND watched_content.type = 'EPISODE'
+                               AND watched_content.season_number > 0
+                               AND watched_content.series_tmdb_id = ee.series_tmdb_id
+                         ))
                 )
                 AND NOT EXISTS (
                     SELECT 1

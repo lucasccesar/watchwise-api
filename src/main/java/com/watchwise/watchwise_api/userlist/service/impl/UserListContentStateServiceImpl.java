@@ -72,8 +72,9 @@ public class UserListContentStateServiceImpl implements UserListContentStateServ
                 .filter(item -> item.getContent() != null)
                 .toList();
 
-        Set<UUID> contentIds = contentItems.stream()
+        Set<UUID> directContentIds = contentItems.stream()
                 .map(UserListItem::getContent)
+                .filter(content -> content.getType() == ContentType.MOVIE || content.getType() == ContentType.EPISODE)
                 .map(Content::getId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toUnmodifiableSet());
@@ -93,9 +94,9 @@ public class UserListContentStateServiceImpl implements UserListContentStateServ
                 .map(content -> new SeasonKey(content.getSeriesTmdbId(), content.getSeasonNumber()))
                 .collect(Collectors.toUnmodifiableSet());
 
-        Set<UUID> watchedDirectContentIds = contentIds.isEmpty()
+        Set<UUID> watchedDirectContentIds = directContentIds.isEmpty()
                 ? Set.of()
-                : immutableSet(diaryEntryRepository.findWatchedDirectContentIds(viewerId, contentIds));
+                : immutableSet(diaryEntryRepository.findWatchedDirectContentIds(viewerId, directContentIds));
         Set<WatchedEpisodeCoordinate> watchedEpisodeCoordinates = seriesTmdbIds.isEmpty()
                 ? Set.of()
                 : immutableSet(diaryEntryRepository.findWatchedEpisodeCoordinates(viewerId, seriesTmdbIds));

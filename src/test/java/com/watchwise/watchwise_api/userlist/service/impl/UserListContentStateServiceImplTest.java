@@ -121,11 +121,11 @@ class UserListContentStateServiceImplTest {
         when(contentScheduleReader.readSeason(SERIES_TMDB_ID, SEASON_NUMBER, "BR", "pt-BR"))
                 .thenReturn(new ContentScheduleLookup.Found(seasonSchedule));
 
-        Set<UUID> contentIds = Set.of(movie.getId(), firstSeries.getId(), secondSeries.getId(), season.getId(), episode.getId());
+        Set<UUID> directContentIds = Set.of(movie.getId(), episode.getId());
         Set<String> seriesTmdbIds = Set.of(SERIES_TMDB_ID);
         Set<WatchedEpisodeCoordinate> watchedEpisodes = Set.of(
                 new WatchedEpisodeCoordinate(SERIES_TMDB_ID, SEASON_NUMBER, 2));
-        when(diaryEntryRepository.findWatchedDirectContentIds(viewerId, contentIds))
+        when(diaryEntryRepository.findWatchedDirectContentIds(viewerId, directContentIds))
                 .thenReturn(Set.of(movie.getId(), episode.getId()));
         when(diaryEntryRepository.findWatchedEpisodeCoordinates(viewerId, seriesTmdbIds))
                 .thenReturn(watchedEpisodes);
@@ -157,7 +157,7 @@ class UserListContentStateServiceImplTest {
                 .containsEntry(secondList.getId(), 66.66666666666667)
                 .containsEntry(nestedOnlyList.getId(), 0.0);
 
-        verify(diaryEntryRepository).findWatchedDirectContentIds(viewerId, contentIds);
+        verify(diaryEntryRepository).findWatchedDirectContentIds(viewerId, directContentIds);
         verify(diaryEntryRepository).findWatchedEpisodeCoordinates(viewerId, seriesTmdbIds);
         verify(contentScheduleReader).readMovie(MOVIE_TMDB_ID, "BR", "pt-BR");
         verify(contentScheduleReader).readSeries(SERIES_TMDB_ID, "BR", "pt-BR");
@@ -176,8 +176,6 @@ class UserListContentStateServiceImplTest {
         ContentSchedule seriesSchedule = schedule(ContentScheduleKey.series(SERIES_TMDB_ID));
         WatchedEpisodeCoordinate watchedEpisode = new WatchedEpisodeCoordinate(SERIES_TMDB_ID, SEASON_NUMBER, 1);
 
-        when(diaryEntryRepository.findWatchedDirectContentIds(viewerId, Set.of(series.getId())))
-                .thenReturn(Set.of());
         when(diaryEntryRepository.findWatchedEpisodeCoordinates(viewerId, Set.of(SERIES_TMDB_ID)))
                 .thenReturn(Set.of(watchedEpisode));
         when(contentScheduleReader.readSeries(SERIES_TMDB_ID, "BR", "pt-BR"))
@@ -188,6 +186,7 @@ class UserListContentStateServiceImplTest {
         UserListContentStateResult result = service.resolve(viewerId, List.of(item));
 
         assertThat(result.stateByItemId()).containsEntry(item.getId(), state);
+        verify(diaryEntryRepository, org.mockito.Mockito.never()).findWatchedDirectContentIds(any(), any());
         verify(diaryEntryRepository).findWatchedEpisodeCoordinates(viewerId, Set.of(SERIES_TMDB_ID));
         verify(contentStateResolver).resolve(
                 eq(series), eq(seriesSchedule), eq(Set.of()), eq(Set.of(watchedEpisode)), same(clock));
@@ -200,8 +199,6 @@ class UserListContentStateServiceImplTest {
         UserList list = list();
         Content series = content(ContentType.SERIES, SERIES_TMDB_ID, null, null, null);
         UserListItem item = contentItem(list, series, 1);
-        when(diaryEntryRepository.findWatchedDirectContentIds(viewerId, Set.of(series.getId())))
-                .thenReturn(Set.of());
         when(diaryEntryRepository.findWatchedEpisodeCoordinates(viewerId, Set.of(SERIES_TMDB_ID)))
                 .thenReturn(Set.of());
         when(contentScheduleReader.readSeries(SERIES_TMDB_ID, "BR", "pt-BR"))
@@ -213,6 +210,7 @@ class UserListContentStateServiceImplTest {
 
         assertThat(result.stateByItemId()).containsEntry(item.getId(), unknown);
         assertThat(result.watchedPercentageByListId()).containsEntry(list.getId(), 0.0);
+        verify(diaryEntryRepository, org.mockito.Mockito.never()).findWatchedDirectContentIds(any(), any());
         ArgumentCaptor<ContentSchedule> scheduleCaptor = ArgumentCaptor.forClass(ContentSchedule.class);
         verify(contentStateResolver).resolve(eq(series), scheduleCaptor.capture(), eq(Set.of()), eq(Set.of()), same(clock));
         assertThat(scheduleCaptor.getValue().key()).isEqualTo(ContentScheduleKey.series(SERIES_TMDB_ID));
@@ -229,8 +227,6 @@ class UserListContentStateServiceImplTest {
         UserList list = list();
         Content series = content(ContentType.SERIES, SERIES_TMDB_ID, null, null, null);
         UserListItem item = contentItem(list, series, 1);
-        when(diaryEntryRepository.findWatchedDirectContentIds(viewerId, Set.of(series.getId())))
-                .thenReturn(Set.of());
         when(diaryEntryRepository.findWatchedEpisodeCoordinates(viewerId, Set.of(SERIES_TMDB_ID)))
                 .thenReturn(Set.of());
         when(contentScheduleReader.readSeries(SERIES_TMDB_ID, "BR", "pt-BR"))
