@@ -1,3 +1,3 @@
 package com.watchwise.watchwise_api.contentreview.entity;
 
-public enum ReviewPublicationKind { WRITTEN_REVIEW, LEGACY_ACTIVITY }
+public enum ReviewPublicationKind { WRITTEN_REVIEW }

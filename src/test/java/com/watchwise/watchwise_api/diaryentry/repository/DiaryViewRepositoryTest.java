@@ -219,22 +219,12 @@ class DiaryViewRepositoryTest {
                 .userId(owner.id())
                 .contentId(season.getId())
                 .contentType(ContentType.SEASON)
-                .publicationKind(ReviewPublicationKind.LEGACY_ACTIVITY)
-                .contextKind(ReviewContextKind.LEGACY)
-                .comment("Legacy pass 2 text")
-                .watchNumber(2)
+                .publicationKind(ReviewPublicationKind.WRITTEN_REVIEW)
+                .contextKind(ReviewContextKind.MANUAL)
+                .comment("Season pass 3 review")
+                .watchNumber(3)
                 .createdAt(Instant.parse("2026-01-06T00:00:00Z"))
                 .updatedAt(Instant.parse("2026-01-06T00:00:00Z"))
-                .build());
-        contentReviewRepository.saveAndFlush(ContentReview.builder()
-                .userId(owner.id())
-                .contentId(season.getId())
-                .contentType(ContentType.SEASON)
-                .publicationKind(ReviewPublicationKind.LEGACY_ACTIVITY)
-                .contextKind(ReviewContextKind.LEGACY)
-                .watchNumber(3)
-                .createdAt(Instant.parse("2026-01-07T00:00:00Z"))
-                .updatedAt(Instant.parse("2026-01-07T00:00:00Z"))
                 .build());
 
         when(completionScopeLoader.load(any(), anyString(), anyString(), any()))
@@ -268,13 +258,18 @@ class DiaryViewRepositoryTest {
                 assertThat(previews.get(0).get("comment")).isEqualTo("Season review");
                 assertThat(((Number) previews.get(0).get("watchNumber")).intValue()).isEqualTo(1);
             } else if (watchNumber == 2) {
-                assertThat(((Number) item.get("reviewCount")).intValue()).isEqualTo(2);
-                assertThat(previews).hasSize(2);
+                assertThat(((Number) item.get("reviewCount")).intValue()).isEqualTo(1);
+                assertThat(previews).hasSize(1);
                 assertThat(previews.stream().map(preview -> preview.get("comment")))
-                        .contains("Season pass 2 review", "Legacy pass 2 text");
+                        .containsExactly("Season pass 2 review");
                 assertThat(previews.stream()
                         .map(preview -> ((Number) preview.get("watchNumber")).intValue()))
                         .containsOnly(2);
+            } else if (watchNumber == 3) {
+                assertThat(((Number) item.get("reviewCount")).intValue()).isEqualTo(1);
+                assertThat(previews).singleElement()
+                        .extracting(preview -> preview.get("comment"))
+                        .isEqualTo("Season pass 3 review");
             } else {
                 assertThat(((Number) item.get("reviewCount")).intValue()).isZero();
                 assertThat(previews).isEmpty();

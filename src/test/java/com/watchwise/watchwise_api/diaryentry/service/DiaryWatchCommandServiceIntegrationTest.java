@@ -300,11 +300,13 @@ class DiaryWatchCommandServiceIntegrationTest {
                 .score(7).createdAt(Instant.now()).updatedAt(Instant.now()).build());
         ContentReview seriesReview = contentReviewRepository.saveAndFlush(ContentReview.builder()
                 .userId(owner.id()).contentId(series.getId()).contentType(ContentType.SERIES)
-                .publicationKind(ReviewPublicationKind.LEGACY_ACTIVITY).contextKind(ReviewContextKind.LEGACY)
+                .publicationKind(ReviewPublicationKind.WRITTEN_REVIEW).contextKind(ReviewContextKind.MANUAL)
+                .watchNumber(1)
                 .comment("kept series review").createdAt(Instant.now()).updatedAt(Instant.now()).build());
         ContentReview seasonReview = contentReviewRepository.saveAndFlush(ContentReview.builder()
                 .userId(owner.id()).contentId(season.getId()).contentType(ContentType.SEASON)
-                .publicationKind(ReviewPublicationKind.LEGACY_ACTIVITY).contextKind(ReviewContextKind.LEGACY)
+                .publicationKind(ReviewPublicationKind.WRITTEN_REVIEW).contextKind(ReviewContextKind.MANUAL)
+                .watchNumber(1)
                 .comment("kept season review").createdAt(Instant.now()).updatedAt(Instant.now()).build());
 
         diaryEntryService.deleteAllDiaryEntriesForSeries(owner.id(), "9001");

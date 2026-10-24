@@ -15,8 +15,6 @@ import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
-import com.watchwise.watchwise_api.diarycompletion.entity.LegacyDiaryMigrationMap;
-import com.watchwise.watchwise_api.diarycompletion.repository.LegacyDiaryMigrationMapRepository;
 import com.watchwise.watchwise_api.diarycompletion.service.CompletionScopeLoader;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
@@ -25,6 +23,7 @@ import com.watchwise.watchwise_api.report.repository.ReportSubmissionRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -92,9 +91,6 @@ class ContentReviewSocialIntegrationTest {
 
     @Autowired
     private DiaryEntryRepository diaryEntryRepository;
-
-    @Autowired
-    private LegacyDiaryMigrationMapRepository migrationMapRepository;
 
     @Autowired
     private ReportSubmissionRepository reportSubmissionRepository;
@@ -173,54 +169,6 @@ class ContentReviewSocialIntegrationTest {
                 "select target_type from notifications where user_id = ? and type = 'COMMENT_RECEIVED' and target_id = ?",
                 String.class, reviewer.id(), review.getId());
         assertThat(targetType).isEqualTo("CONTENT_REVIEW");
-    }
-
-    @Test
-    void legacyActivityIsReadableButRejectsNewInteractionsAndAllowsRemovingExistingOnes() throws Exception {
-        RegisteredUser owner = registerUser();
-        RegisteredUser actor = registerUser();
-        ContentReview legacyActivity = persistReview(owner.id(), ReviewPublicationKind.LEGACY_ACTIVITY,
-                "historical text", null);
-
-        mockMvc.perform(postLike(actor, legacyActivity.getId()))
-                .andExpect(status().isNotFound());
-        mockMvc.perform(postComment(actor, legacyActivity.getId(), "new comment", null))
-                .andExpect(status().isNotFound());
-
-        mockMvc.perform(get("/reviews/{reviewId}/comments", legacyActivity.getId())
-                        .queryParam("page", "1")
-                        .queryParam("size", "10")
-                        .cookie(actor.accessToken()))
-                .andExpect(status().isOk());
-        mockMvc.perform(deleteRequest(actor, "/reviews/" + legacyActivity.getId() + "/like"))
-                .andExpect(status().isNoContent());
-
-        UUID oldCommentId = UUID.randomUUID();
-        jdbc.update("""
-                insert into comments (id, user_id, content_review_id, text, contains_spoiler,
-                                     created_at, updated_at, likes_count)
-                values (?, ?, ?, 'historical comment', false, current_timestamp, current_timestamp, 0)
-                """, oldCommentId, actor.id(), legacyActivity.getId());
-        jdbc.update("""
-                insert into likes (id, user_id, content_review_id, created_at)
-                values (?, ?, ?, current_timestamp)
-                """, UUID.randomUUID(), actor.id(), legacyActivity.getId());
-
-        mockMvc.perform(get("/reviews/{reviewId}/comments", legacyActivity.getId())
-                        .queryParam("page", "1")
-                        .queryParam("size", "10")
-                        .cookie(actor.accessToken()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].text").value("historical comment"));
-
-        mockMvc.perform(deleteRequest(actor, "/reviews/" + legacyActivity.getId() + "/like"))
-                .andExpect(status().isNoContent());
-        mockMvc.perform(deleteRequest(actor, "/comments/" + oldCommentId))
-                .andExpect(status().isNoContent());
-        assertThat(jdbc.queryForObject("select count(*) from likes where user_id = ? and content_review_id = ?",
-                Integer.class, actor.id(), legacyActivity.getId())).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from comments where id = ?", Integer.class, oldCommentId))
-                .isZero();
     }
 
     @Test
@@ -337,7 +285,8 @@ class ContentReviewSocialIntegrationTest {
     }
 
     @Test
-    void reviewTargetTypesKeepUuidDomainsSeparateAndResolveMappedLegacyIds() throws Exception {
+    @DisplayName("[postReport] Should Keep Review Target Types Separate - When UUID Domains Overlap")
+    void shouldKeepReviewTargetTypesSeparateWhenUuidDomainsOverlap() throws Exception {
         RegisteredUser owner = registerUser();
         RegisteredUser reporter = registerUser();
         UUID sharedId = UUID.randomUUID();
@@ -360,22 +309,13 @@ class ContentReviewSocialIntegrationTest {
         mockMvc.perform(postReport(reporter, "REVIEW", sharedId)).andExpect(status().isCreated());
         mockMvc.perform(postReport(reporter, "CONTENT_REVIEW", sharedId)).andExpect(status().isCreated());
 
-        UUID oldDiaryEntryId = UUID.randomUUID();
-        ContentReview mappedReview = persistReview(owner.id(), ReviewPublicationKind.LEGACY_ACTIVITY,
-                "mapped legacy review text", null);
-        migrationMapRepository.saveAndFlush(LegacyDiaryMigrationMap.builder()
-                .oldDiaryEntryId(oldDiaryEntryId)
-                .userId(owner.id())
-                .destinationKind("CONTENT_REVIEW")
-                .destinationId(mappedReview.getId())
-                .build());
-        mockMvc.perform(postReport(reporter, "REVIEW", oldDiaryEntryId)).andExpect(status().isCreated());
+        UUID missingDiaryEntryId = UUID.randomUUID();
+        mockMvc.perform(postReport(reporter, "REVIEW", missingDiaryEntryId)).andExpect(status().isNotFound());
 
         assertThat(snapshot(reporter.id(), "REVIEW", sharedId)).contains("diary review text")
                 .doesNotContain("content review text");
         assertThat(snapshot(reporter.id(), "CONTENT_REVIEW", sharedId)).contains("content review text")
                 .doesNotContain("diary review text");
-        assertThat(snapshot(reporter.id(), "REVIEW", oldDiaryEntryId)).contains("mapped legacy review text");
         assertThat(review.getId()).isEqualTo(sharedId);
     }
 

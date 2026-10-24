@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.LocalDate;
 import org.springframework.data.domain.PageRequest;
 import com.watchwise.watchwise_api.content.entity.ContentType;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -84,18 +85,14 @@ class OpinionReadConsumersIntegrationTest {
     }
 
     @Test
-    void reviewPageFiltersPrivateAuthorsBeforePaginationAndOmitsMigratedLegacyRow() {
+    @DisplayName("[findContentReviewKeys] Should Filter Private Authors Before Pagination - When Reading Review Page")
+    void shouldFilterPrivateAuthorsBeforePaginationWhenReadingReviewPage() {
         UUID viewer = user(true);
         UUID publicOwner = user(true);
         UUID privateOwner = user(false);
         UUID series = content("SERIES", "33004", null, null, 300);
         UUID publicReview = review(publicOwner, series, 8);
         review(privateOwner, series, 9);
-        UUID oldDiaryId = watched(publicOwner, series);
-        jdbc.update("update diary_entries set comment = 'legacy' where id = ?", oldDiaryId);
-        jdbc.update("insert into legacy_diary_migration_maps(id,old_diary_entry_id,user_id,destination_kind,destination_id) values (?,?,?,'CONTENT_REVIEW',?)",
-                UUID.randomUUID(), oldDiaryId, publicOwner, publicReview);
-
         var page = diaryEntries.findContentReviewKeys(series, viewer, PageRequest.of(0, 1));
 
         assertThat(page.getTotalElements()).isEqualTo(1);

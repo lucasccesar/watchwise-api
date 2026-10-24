@@ -41,11 +41,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             SELECT d FROM DiaryEntry d JOIN FETCH d.content JOIN FETCH d.user
             WHERE d.user.id IN :userIds
             AND d.ignore = false
-            AND NOT EXISTS (
-                SELECT 1 FROM LegacyDiaryMigrationMap migration
-                WHERE migration.oldDiaryEntryId = d.id
-                  AND migration.destinationKind = 'CONTENT_REVIEW'
-            )
             AND (
                 CAST(:cursorCreatedAt AS timestamp) IS NULL
                 OR d.createdAt < :cursorCreatedAt
@@ -157,9 +152,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 JOIN users u ON u.id = d.user_id
                 WHERE d.content_id = :contentId
                   AND d.comment IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM legacy_diary_migration_maps m
-                                  WHERE m.old_diary_entry_id = d.id
-                                    AND m.destination_kind = 'CONTENT_REVIEW')
                   AND (u.is_profile_public = true
                        OR u.id = :viewerId
                        OR EXISTS (
@@ -197,9 +189,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                            AND f.status = 'ACCEPTED'
                        ))
                 UNION ALL
-                SELECT r.id AS review_id,
-                       CASE WHEN r.publication_kind = 'WRITTEN_REVIEW' THEN 'CONTENT_REVIEW'
-                            ELSE 'LEGACY_ACTIVITY' END AS source,
+                SELECT r.id AS review_id, 'CONTENT_REVIEW' AS source,
                        (SELECT COUNT(*) FROM likes l WHERE l.content_review_id = r.id) AS likes_count,
                        COALESCE(r.source_published_at AT TIME ZONE 'UTC',
                                 r.source_published_on::timestamp,
@@ -207,6 +197,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 FROM content_reviews r
                 JOIN users u ON u.id = r.user_id
                 WHERE r.content_id = :contentId
+                  AND r.publication_kind = 'WRITTEN_REVIEW'
                   AND r.comment IS NOT NULL AND btrim(r.comment) <> ''
                   AND (u.is_profile_public = true OR u.id = :viewerId OR EXISTS (
                            SELECT 1 FROM followers f
@@ -231,9 +222,6 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 JOIN users u ON u.id = d.user_id
                 WHERE d.content_id = :contentId
                   AND d.comment IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM legacy_diary_migration_maps m
-                                  WHERE m.old_diary_entry_id = d.id
-                                    AND m.destination_kind = 'CONTENT_REVIEW')
                   AND (u.is_profile_public = true
                        OR u.id = :viewerId
                        OR EXISTS (
@@ -275,6 +263,7 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
                 FROM content_reviews r
                 JOIN users u ON u.id = r.user_id
                 WHERE r.content_id = :contentId
+                  AND r.publication_kind = 'WRITTEN_REVIEW'
                   AND r.comment IS NOT NULL AND btrim(r.comment) <> ''
                   AND (u.is_profile_public = true OR u.id = :viewerId OR EXISTS (
                            SELECT 1 FROM followers f

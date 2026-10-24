@@ -555,6 +555,17 @@ class DiaryEntryServiceImplTest {
     }
 
     @Test
+    @DisplayName("[getDiaryEntry] Should Throw NotFoundException - When Diary Entry Id Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenDiaryEntryIdDoesNotExist() {
+        UUID missingDiaryEntryId = UUID.randomUUID();
+        when(diaryEntryRepository.findByIdWithContentAndUser(missingDiaryEntryId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> diaryEntryService.getDiaryEntry(lucasId, missingDiaryEntryId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Diary entry not found");
+    }
+
+    @Test
     @DisplayName("[getDiaryEntries] Should Use Read Query - When Non-Default Sort Is Requested")
     void shouldUseReadQueryWhenNonDefaultSortIsRequested() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));

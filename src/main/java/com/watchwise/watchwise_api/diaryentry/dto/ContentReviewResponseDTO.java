@@ -4,7 +4,6 @@ import com.watchwise.watchwise_api.content.dto.ContentCardDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.user.dto.UserPreviewDTO;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
-import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -52,8 +51,7 @@ public record ContentReviewResponseDTO(
             int likesCount, long commentsCount, boolean likedByMe) {
         return new ContentReviewResponseDTO(
                 review.getId(),
-                review.getPublicationKind() == ReviewPublicationKind.WRITTEN_REVIEW
-                        ? ContentReviewSource.CONTENT_REVIEW : ContentReviewSource.LEGACY_ACTIVITY,
+                ContentReviewSource.CONTENT_REVIEW,
                 review.getUserId(), reviewer, content, review.getComment(), review.getScoreAtPublication(),
                 null, review.getWatchNumber(), null, null, null, false,
                 review.getSourcePublishedAt() != null

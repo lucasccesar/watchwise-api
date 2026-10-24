@@ -2,6 +2,7 @@ package com.watchwise.watchwise_api.contentreview.repository;
 
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -71,13 +72,13 @@ class ContentOpinionSchemaTest {
         assertThat(jdbc.queryForObject("select count(*) from content_reviews where user_id = ?", Integer.class, owner)).isEqualTo(3);
     }
 
-    @Test void rejectsWrittenReviewWithoutPassButAllowsLegacyActivityWithoutPass() {
+    @Test
+    @DisplayName("[update] Should Reject Written Review - When Pass Number Is Missing")
+    void shouldRejectWrittenReviewWhenPassNumberIsMissing() {
         UUID owner = user();
         UUID series = content("SERIES");
         assertThatThrownBy(() -> jdbc.update("insert into content_reviews(id,user_id,content_id,content_type,publication_kind,context_kind,comment) values (?,?,?,'SERIES','WRITTEN_REVIEW','UNKNOWN','written')", UUID.randomUUID(), owner, series))
                 .isInstanceOf(DataIntegrityViolationException.class);
-        jdbc.update("insert into content_reviews(id,user_id,content_id,content_type,publication_kind,context_kind) values (?,?,?,'SERIES','LEGACY_ACTIVITY','LEGACY')", UUID.randomUUID(), owner, series);
-        assertThat(jdbc.queryForObject("select count(*) from content_reviews where user_id = ?", Integer.class, owner)).isEqualTo(1);
     }
 
     @Test void editingCommentCannotRewriteScoreSnapshotThroughRepositorySave() {

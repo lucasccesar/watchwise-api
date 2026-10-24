@@ -7,8 +7,6 @@ import com.watchwise.watchwise_api.common.exception.ForbiddenException;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
-import com.watchwise.watchwise_api.diarycompletion.entity.LegacyDiaryMigrationMap;
-import com.watchwise.watchwise_api.diarycompletion.repository.LegacyDiaryMigrationMapRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
@@ -52,7 +50,6 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
     private final CommentRepository commentRepository;
     private final DiaryEntryRepository diaryEntryRepository;
     private final ContentReviewRepository contentReviewRepository;
-    private final LegacyDiaryMigrationMapRepository migrationMapRepository;
     private final UserListRepository userListRepository;
     private final PickRepository pickRepository;
     private final PickSelectionRepository pickSelectionRepository;
@@ -130,11 +127,7 @@ public class ReportTargetResolverImpl implements ReportTargetResolver {
             return resolveDiaryReview(reporterId, diaryEntry);
         }
 
-        LegacyDiaryMigrationMap mapping = migrationMapRepository.findByOldDiaryEntryId(targetId).orElse(null);
-        if (mapping == null || !"CONTENT_REVIEW".equals(mapping.getDestinationKind())) {
-            throw new NotFoundException("Report target not found");
-        }
-        return resolveContentReview(reporterId, mapping.getDestinationId(), ReportTargetType.REVIEW, targetId);
+        throw new NotFoundException("Report target not found");
     }
 
     private ResolvedReportTarget resolveDiaryReview(UUID reporterId, DiaryEntry review) {

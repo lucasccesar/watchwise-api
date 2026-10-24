@@ -667,8 +667,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
                 .map(DiaryEntryRepository.ContentReviewKey::getReviewId)
                 .toList();
         List<UUID> contentReviewIds = reviewKeys.getContent().stream()
-                .filter(key -> ContentReviewSource.CONTENT_REVIEW.name().equals(key.getSource())
-                        || ContentReviewSource.LEGACY_ACTIVITY.name().equals(key.getSource()))
+                .filter(key -> ContentReviewSource.CONTENT_REVIEW.name().equals(key.getSource()))
                 .map(DiaryEntryRepository.ContentReviewKey::getReviewId)
                 .toList();
 
@@ -763,8 +762,7 @@ public class DiaryEntryServiceImpl implements DiaryEntryService {
             return ContentReviewResponseDTO.fromDiary(diaryResponse, userMapper.userToUserPreviewDto(entry.getUser()));
         }
 
-        if (ContentReviewSource.CONTENT_REVIEW.name().equals(key.getSource())
-                || ContentReviewSource.LEGACY_ACTIVITY.name().equals(key.getSource())) {
+        if (ContentReviewSource.CONTENT_REVIEW.name().equals(key.getSource())) {
             ContentReview review = contentReviewsById.get(key.getReviewId());
             User owner = contentReviewUsers.get(review.getUserId());
             Content content = contentReviewContents.get(review.getContentId());

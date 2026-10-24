@@ -5,12 +5,7 @@ import com.watchwise.watchwise_api.comment.repository.CommentRepository;
 import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
-import com.watchwise.watchwise_api.contentreview.entity.ContentReview;
-import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
-import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
-import com.watchwise.watchwise_api.diarycompletion.entity.LegacyDiaryMigrationMap;
-import com.watchwise.watchwise_api.diarycompletion.repository.LegacyDiaryMigrationMapRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -32,6 +27,7 @@ import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserListVisibility;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -46,7 +42,6 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -58,7 +53,6 @@ class ReportTargetResolverImplTest {
     @Mock CommentRepository commentRepository;
     @Mock DiaryEntryRepository diaryEntryRepository;
     @Mock ContentReviewRepository contentReviewRepository;
-    @Mock LegacyDiaryMigrationMapRepository migrationMapRepository;
     @Mock UserListRepository userListRepository;
     @Mock PickRepository pickRepository;
     @Mock PickSelectionRepository pickSelectionRepository;
@@ -109,39 +103,15 @@ class ReportTargetResolverImplTest {
     }
 
     @Test
-    void resolvesLiveDiaryEntryBeforeMigrationMapWhenLegacyIdsOverlap() {
+    @DisplayName("[resolve] Should Throw NotFoundException - When Diary Review Id Does Not Exist")
+    void shouldThrowNotFoundExceptionWhenDiaryReviewIdDoesNotExist() {
         UUID reporterId = UUID.randomUUID();
-        UUID overlappingId = UUID.randomUUID();
-        UUID migratedReviewId = UUID.randomUUID();
-        User liveDiaryOwner = user(UUID.randomUUID(), "live-diary-author", true);
-        User migratedReviewOwner = user(UUID.randomUUID(), "migrated-review-author", true);
-        DiaryEntry liveDiaryReview = DiaryEntry.builder().id(overlappingId).user(liveDiaryOwner)
-                .content(Content.builder().id(UUID.randomUUID()).type(ContentType.MOVIE).tmdbId("603").build())
-                .comment("live diary review").score(8).createdAt(LocalDateTime.now()).build();
-        ContentReview mappedReview = ContentReview.builder().id(migratedReviewId)
-                .userId(migratedReviewOwner.getId()).contentId(UUID.randomUUID()).contentType(ContentType.SERIES)
-                .publicationKind(ReviewPublicationKind.WRITTEN_REVIEW).contextKind(ReviewContextKind.UNKNOWN)
-                .comment("review reached only through the migration map").scoreAtPublication(6)
-                .createdAt(java.time.Instant.now()).build();
-        LegacyDiaryMigrationMap mapping = LegacyDiaryMigrationMap.builder().id(UUID.randomUUID())
-                .oldDiaryEntryId(overlappingId).userId(migratedReviewOwner.getId())
-                .destinationKind("CONTENT_REVIEW").destinationId(migratedReviewId).build();
-        when(diaryEntryRepository.findByIdWithContentAndUser(overlappingId)).thenReturn(Optional.of(liveDiaryReview));
-        lenient().when(migrationMapRepository.findByOldDiaryEntryId(overlappingId)).thenReturn(Optional.of(mapping));
-        lenient().when(contentReviewRepository.findById(migratedReviewId)).thenReturn(Optional.of(mappedReview));
-        lenient().when(userRepository.findById(migratedReviewOwner.getId()))
-                .thenReturn(Optional.of(migratedReviewOwner));
-        lenient().when(userBlockAccessService.isBlockedEitherDirection(reporterId, migratedReviewOwner.getId()))
-                .thenReturn(false);
-        when(userBlockAccessService.isBlockedEitherDirection(reporterId, liveDiaryOwner.getId())).thenReturn(false);
+        UUID missingDiaryEntryId = UUID.randomUUID();
+        when(diaryEntryRepository.findByIdWithContentAndUser(missingDiaryEntryId)).thenReturn(Optional.empty());
 
-        ResolvedReportTarget result = resolver.resolve(reporterId, ReportTargetType.REVIEW, overlappingId);
-
-        assertThat(result.targetId()).isEqualTo(overlappingId);
-        assertThat(result.ownerId()).isEqualTo(liveDiaryOwner.getId());
-        assertThat(result.snapshot()).contains("live diary review", "\"score\":8")
-                .doesNotContain("review reached only through the migration map");
-        verify(migrationMapRepository, never()).findByOldDiaryEntryId(overlappingId);
+        assertThatThrownBy(() -> resolver.resolve(reporterId, ReportTargetType.REVIEW, missingDiaryEntryId))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessage("Report target not found");
     }
 
     @Test
