@@ -57,6 +57,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -119,6 +120,9 @@ class DiaryEntryControllerIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private UserRepository userRepository;
@@ -1744,6 +1748,21 @@ class DiaryEntryControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("[createDiaryEntry] Should Persist A Direct EPISODE Write With Ignore False")
+    void shouldPersistDirectEpisodeWriteWithIgnoreFalse() throws Exception {
+        RegisteredUser user = registerUser("creatediarydirectepisodeignore");
+
+        mockMvc.perform(createRequest(user, episodeBody("998", 1, 1, null, null)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.entry.content.type").value("EPISODE"))
+                .andExpect(jsonPath("$.entry.ignore").value(false));
+
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT \"ignore\" FROM diary_entries WHERE user_id = ?", Boolean.class, user.id()))
+                .containsExactly(false);
+    }
+
+    @Test
     @DisplayName("[createDiaryEntry] Should Return BadRequest And Not Persist - When SeasonNumber Is Negative")
     void shouldReturnBadRequestAndNotPersistWhenSeasonNumberIsNegative() throws Exception {
         RegisteredUser user = registerUser("creatediaryseasonnegative");
@@ -2224,9 +2243,19 @@ class DiaryEntryControllerIntegrationTest {
         List<String> eventTypes = JsonPath.read(
                 bulkResult.getResponse().getContentAsString(), "$.events[*].entry.content.type");
         assertThat(eventTypes).containsOnly("EPISODE");
+        List<Boolean> eventIgnoreFlags = JsonPath.read(
+                bulkResult.getResponse().getContentAsString(), "$.events[*].entry.ignore");
+        assertThat(eventIgnoreFlags).containsOnly(true);
 
-        List<DiaryEntry> allEntries = diaryEntryRepository.findAll();
-        assertThat(allEntries).hasSize(3);
+        List<String> persistedTypes = jdbcTemplate.queryForList("""
+                SELECT c.type FROM diary_entries d
+                JOIN contents c ON c.id = d.content_id
+                WHERE d.user_id = ?
+                """, String.class, user.id());
+        List<Boolean> ignoreFlags = jdbcTemplate.queryForList(
+                "SELECT \"ignore\" FROM diary_entries WHERE user_id = ?", Boolean.class, user.id());
+        assertThat(persistedTypes).hasSize(3).containsOnly("EPISODE");
+        assertThat(ignoreFlags).hasSize(3).containsOnly(true);
     }
 
     @Test
@@ -2314,6 +2343,17 @@ class DiaryEntryControllerIntegrationTest {
         List<Integer> createdWatchNumbers = JsonPath.read(
                 bulkResult.getResponse().getContentAsString(), "$.events[*].entry.watchNumber");
         assertThat(createdWatchNumbers).containsOnly(1);
+        List<Boolean> createdIgnoreFlags = JsonPath.read(
+                bulkResult.getResponse().getContentAsString(), "$.events[*].entry.ignore");
+        assertThat(createdIgnoreFlags).containsOnly(true);
+        List<String> createdEntryIds = JsonPath.read(
+                bulkResult.getResponse().getContentAsString(), "$.events[*].entry.id");
+        assertThat(createdEntryIds).hasSize(1);
+        assertThat(createdEntryIds.stream()
+                .map(id -> jdbcTemplate.queryForObject(
+                        "SELECT \"ignore\" FROM diary_entries WHERE id = ?", Boolean.class, java.util.UUID.fromString(id)))
+                .toList())
+                .containsOnly(true);
         assertThat(diaryEntryRepository.findAll()).hasSize(4);
     }
 

@@ -211,15 +211,27 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
                 SELECT p.content_id
                 FROM diary_completion_projections p
                 JOIN contents c ON c.id = p.content_id
+                JOIN users owner ON owner.id = p.user_id
                 JOIN user_series_history_states state ON state.user_id = p.user_id
                   AND state.series_tmdb_id = CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END
+                JOIN calendar_schedule_completeness marker
+                  ON marker.series_tmdb_id = state.series_tmdb_id
+                 AND marker.group_type = CASE WHEN c.type = 'SERIES' THEN 'SERIES' ELSE 'SEASON' END
+                 AND marker.season_number IS NOT DISTINCT FROM CASE WHEN c.type = 'SEASON' THEN c.season_number ELSE NULL END
+                 AND marker.region = owner.preferred_region
+                 AND marker.language = owner.preferred_language
+                 AND marker.scope_version = p.schedule_version
+                 AND marker.complete = TRUE
                 WHERE p.user_id = :userId
                   AND p.content_id IN (:contentIds)
                   AND p.content_type = :contentType
+                  AND c.type = p.content_type
                   AND :contentType IN ('SERIES', 'SEASON')
                   AND p.history_revision = state.history_revision
+                  AND p.history_revision = state.computed_revision
                   AND (c.type = 'SEASON' OR p.schedule_version = state.schedule_version)
-                  AND (p.valid_until IS NULL OR p.valid_until > CURRENT_TIMESTAMP)
+                  AND p.valid_until > CURRENT_TIMESTAMP
+                  AND state.valid_until > CURRENT_TIMESTAMP
                 UNION ALL
                 SELECT c.id AS content_id
                 FROM diary_entries d
@@ -243,14 +255,26 @@ public interface ProfileSummaryQueryRepository extends Repository<DiaryEntry, UU
                 SELECT p.content_id
                 FROM diary_completion_projections p
                 JOIN contents c ON c.id = p.content_id
+                JOIN users owner ON owner.id = p.user_id
                 JOIN user_series_history_states state ON state.user_id = p.user_id
                   AND state.series_tmdb_id = CASE WHEN c.type = 'SERIES' THEN c.tmdb_id ELSE c.series_tmdb_id END
+                JOIN calendar_schedule_completeness marker
+                  ON marker.series_tmdb_id = state.series_tmdb_id
+                 AND marker.group_type = CASE WHEN c.type = 'SERIES' THEN 'SERIES' ELSE 'SEASON' END
+                 AND marker.season_number IS NOT DISTINCT FROM CASE WHEN c.type = 'SEASON' THEN c.season_number ELSE NULL END
+                 AND marker.region = owner.preferred_region
+                 AND marker.language = owner.preferred_language
+                 AND marker.scope_version = p.schedule_version
+                 AND marker.complete = TRUE
                 WHERE p.user_id = :userId
                   AND p.content_type = :contentType
+                  AND c.type = p.content_type
                   AND :contentType IN ('SERIES', 'SEASON')
                   AND p.history_revision = state.history_revision
+                  AND p.history_revision = state.computed_revision
                   AND (c.type = 'SEASON' OR p.schedule_version = state.schedule_version)
-                  AND (p.valid_until IS NULL OR p.valid_until > CURRENT_TIMESTAMP)
+                  AND p.valid_until > CURRENT_TIMESTAMP
+                  AND state.valid_until > CURRENT_TIMESTAMP
                 UNION ALL
                 SELECT c.id AS content_id
                 FROM diary_entries d

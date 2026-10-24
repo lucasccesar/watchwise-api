@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.watchlist.repository;
 
 import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
+import com.watchwise.watchwise_api.calendar.entity.CalendarScheduleCompleteness;
 import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
@@ -357,7 +358,6 @@ class WatchlistEntryRepositoryTest {
         Content episode = contentRepository.save(buildEpisode("1400", 1, 1));
         Content completedSeries = contentRepository.save(buildContent("1400", ContentType.SERIES));
         diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, episode));
-        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, completedSeries));
         saveCompletion(completedSeries, "1400");
 
         List<CalendarScheduleKey> result = watchlistEntryRepository.findActiveCalendarScheduleKeys();
@@ -371,7 +371,6 @@ class WatchlistEntryRepositoryTest {
         Content episode = contentRepository.save(buildEpisode("1401", 1, 1));
         Content oldMarker = contentRepository.save(buildContent("1401", ContentType.SERIES));
         diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, episode));
-        diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, oldMarker));
         saveCompletion(oldMarker, "1401");
         metadataRepository.saveAndFlush(SeriesProgressMetadata.builder()
                 .seriesTmdbId("1401").regularReleasedEpisodeCount(2).knownRuntimeEpisodeCount(0)
@@ -381,14 +380,91 @@ class WatchlistEntryRepositoryTest {
                 new CalendarScheduleKey(ContentType.SERIES, "1401", "en-US", "US"));
     }
 
+    @Test
+    @DisplayName("[findActiveCalendarScheduleKeys] Should Suppress Only Current Completions - When Projection Evidence Is Stale Or Incomplete")
+    void shouldSuppressOnlyCurrentCompletionsWhenProjectionEvidenceIsStaleOrIncomplete() {
+        String[] seriesIds = {"1500", "1501", "1502", "1503", "1504", "1505"};
+        Content[] seriesContents = new Content[seriesIds.length];
+        for (int i = 0; i < seriesIds.length; i++) {
+            String seriesId = seriesIds[i];
+            seriesContents[i] = contentRepository.save(buildContent(seriesId, ContentType.SERIES));
+            Content episode = contentRepository.save(buildEpisode(seriesId, 1, 1));
+            diaryEntryRepository.saveAndFlush(buildDiaryEntry(lucas, episode));
+        }
+
+        persistCompletionEvidence(seriesIds[0], seriesContents[0], 1L, 1L,
+                Instant.parse("2099-01-01T00:00:00Z"), Instant.parse("2099-01-01T00:00:00Z"), true, "US");
+        persistCompletionEvidence(seriesIds[1], seriesContents[1], 2L, 1L,
+                Instant.parse("2099-01-01T00:00:00Z"), Instant.parse("2099-01-01T00:00:00Z"), true, "US");
+        persistCompletionEvidence(seriesIds[2], seriesContents[2], 1L, 1L,
+                Instant.parse("2000-01-01T00:00:00Z"), Instant.parse("2099-01-01T00:00:00Z"), true, "US");
+        persistCompletionEvidence(seriesIds[3], seriesContents[3], 1L, 1L,
+                Instant.parse("2099-01-01T00:00:00Z"), null, true, "US");
+        persistCompletionEvidence(seriesIds[4], seriesContents[4], 1L, 1L,
+                Instant.parse("2099-01-01T00:00:00Z"), Instant.parse("2099-01-01T00:00:00Z"), false, "US");
+        persistCompletionEvidence(seriesIds[5], seriesContents[5], 1L, 1L,
+                Instant.parse("2099-01-01T00:00:00Z"), Instant.parse("2099-01-01T00:00:00Z"), true, "BR");
+        entityManager.flush();
+        entityManager.clear();
+
+        List<CalendarScheduleKey> result = watchlistEntryRepository.findActiveCalendarScheduleKeys();
+
+        assertThat(result).doesNotContain(new CalendarScheduleKey(ContentType.SERIES, seriesIds[0], "en-US", "US"));
+        assertThat(result).extracting(CalendarScheduleKey::tmdbId)
+                .contains(seriesIds[1], seriesIds[2], seriesIds[3], seriesIds[4], seriesIds[5]);
+    }
+
     private void saveCompletion(Content series, String seriesTmdbId) {
+        Instant validUntil = Instant.parse("2099-01-01T00:00:00Z");
+        entityManager.persist(CalendarScheduleCompleteness.builder()
+                .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                .seriesTmdbId(seriesTmdbId)
+                .region(lucas.getPreferredRegion())
+                .language(lucas.getPreferredLanguage())
+                .expectedEpisodeCount(1)
+                .complete(true)
+                .scopeVersion(1L)
+                .lastCheckedAt(LocalDateTime.now())
+                .build());
         historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
                 .id(new UserSeriesHistoryState.Key(lucas.getId(), seriesTmdbId))
-                .historyRevision(1L).computedRevision(1L).scheduleVersion(1L).build());
+                .historyRevision(1L).computedRevision(1L).scheduleVersion(1L).validUntil(validUntil).build());
         projectionRepository.saveAndFlush(DiaryCompletionProjection.builder()
                 .userId(lucas.getId()).contentId(series.getId()).contentType(ContentType.SERIES)
                 .watchNumber(1).orderedAt(Instant.parse("2024-01-01T00:00:00Z"))
-                .historyRevision(1L).scheduleVersion(1L).build());
+                .historyRevision(1L).scheduleVersion(1L).validUntil(validUntil).build());
+    }
+
+    private void persistCompletionEvidence(
+            String seriesTmdbId, Content series, long historyRevision, long computedRevision,
+            Instant stateValidUntil, Instant projectionValidUntil, boolean markerComplete, String markerRegion) {
+        entityManager.persist(CalendarScheduleCompleteness.builder()
+                .groupType(CalendarScheduleCompleteness.GroupType.SERIES)
+                .seriesTmdbId(seriesTmdbId)
+                .region(markerRegion)
+                .language(lucas.getPreferredLanguage())
+                .expectedEpisodeCount(1)
+                .complete(markerComplete)
+                .scopeVersion(1L)
+                .lastCheckedAt(LocalDateTime.now())
+                .build());
+        historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(lucas.getId(), seriesTmdbId))
+                .historyRevision(historyRevision)
+                .computedRevision(computedRevision)
+                .scheduleVersion(1L)
+                .validUntil(stateValidUntil)
+                .build());
+        projectionRepository.saveAndFlush(DiaryCompletionProjection.builder()
+                .userId(lucas.getId())
+                .contentId(series.getId())
+                .contentType(ContentType.SERIES)
+                .watchNumber(1)
+                .orderedAt(Instant.parse("2024-01-01T00:00:00Z"))
+                .historyRevision(historyRevision)
+                .scheduleVersion(1L)
+                .validUntil(projectionValidUntil)
+                .build());
     }
 
     private WatchlistEntry buildEntry(User user, Content content, ContentType type, Integer position) {

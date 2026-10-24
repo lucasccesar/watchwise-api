@@ -655,27 +655,31 @@ class SummaryServiceImplTest {
     void shouldResolveTheSeriesRankingCardWithTheSelectedTypeForMonthInReview() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
         Content series = buildContent("1399", ContentType.SERIES);
-        DiaryEntry recent = buildDiaryEntry(series, LocalDateTime.now());
+        Content episode = buildEpisode("1399", 1, 1);
+        DiaryEntry recent = buildDiaryEntry(episode, LocalDateTime.now());
         when(diaryEntryRepository.findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
-                eq(lucasId), eq(ContentType.SERIES), any(), any(), any())).thenReturn(List.of(recent));
+                eq(lucasId), eq(ContentType.EPISODE), any(), any(), any())).thenReturn(List.of(recent));
         when(diaryEntryMapper.diaryEntryToResponseDto(recent, false))
                 .thenReturn(buildDiaryEntryResponseDto(recent));
         UUID seriesContentId = UUID.randomUUID();
         when(diaryEntryRepository.sumRuntimeMinutesByUserIdGroupBySeriesTmdbIdAndWatchedDateBetween(
                 eq(lucasId), any(), any(), any())).thenReturn(List.of(seriesRuntime("1399", seriesContentId, 320L)));
 
-        ContentCardDTO card = cardFor(series, "Breaking Bad", "/breaking-bad.jpg");
+        ContentCardDTO episodeCard = cardFor(episode, "Breaking Bad S02E03", "/breaking-bad.jpg");
+        ContentCardDTO seriesCard = cardFor(series, "Breaking Bad", "/breaking-bad.jpg");
         when(contentCardAssembler.assemble(anyCollection(), any(ContentCardContext.class), anySet()))
-                .thenReturn(Map.of(ContentCoordinate.from(series), card));
+                .thenReturn(Map.of(ContentCoordinate.from(episode), episodeCard,
+                        ContentCoordinate.from(series), seriesCard));
 
         MonthInReviewResponseDTO result = summaryService.getMonthInReview(
                 lucasId, lucasId, ContentType.SERIES, YearMonth.of(2026, 8));
 
         assertThat(result.topSeriesByWatchTime()).hasSize(1);
         assertThat(serialize(result).get("topSeriesByWatchTime").get(0).get("card")).isNotNull();
-        assertThat(result.recentWatched().getFirst().card()).isEqualTo(card);
+        assertThat(result.recentWatched().getFirst().card()).isEqualTo(episodeCard);
+        assertThat(result.topSeriesByWatchTime().getFirst().card()).isEqualTo(seriesCard);
         verify(diaryEntryRepository, never()).findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
-                eq(lucasId), eq(ContentType.EPISODE), any(), any(), any());
+                eq(lucasId), eq(ContentType.SERIES), any(), any(), any());
     }
 
     @Test
@@ -952,27 +956,27 @@ class SummaryServiceImplTest {
     }
 
     @Test
-    @DisplayName("[getMonthInReview] Should Return Recent Watched Titles Without Episodes - When Type Is SERIES")
-    void shouldReturnRecentWatchedTitlesWithoutEpisodesWhenTypeIsSeries() {
+    @DisplayName("[getMonthInReview] Should Return Recent Episode Events - When Type Is SERIES")
+    void shouldReturnRecentEpisodeEventsWhenTypeIsSeries() {
         when(userRepository.findById(lucasId)).thenReturn(Optional.of(lucas));
-        Content seriesContent = buildContent("1399", ContentType.SERIES);
-        DiaryEntry seriesEntry = buildDiaryEntry(seriesContent, LocalDateTime.now());
+        Content episode = buildEpisode("1399", 1, 3);
+        DiaryEntry episodeEntry = buildDiaryEntry(episode, LocalDateTime.now());
         DiaryEntryResponseDTO seriesResponse = new DiaryEntryResponseDTO(
-                seriesEntry.getId(), lucasId, null, null, null, LocalDate.of(2026, 8, 10), 1,
-                null, null, false, seriesEntry.getCreatedAt(), seriesEntry.getUpdatedAt(), 0, false);
+                episodeEntry.getId(), lucasId, null, null, null, LocalDate.of(2026, 8, 10), 1,
+                null, null, false, episodeEntry.getCreatedAt(), episodeEntry.getUpdatedAt(), 0, false);
         when(diaryEntryRepository.findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
-                eq(lucasId), eq(ContentType.SERIES), any(), any(), any()))
-                .thenReturn(List.of(seriesEntry));
-        when(diaryEntryMapper.diaryEntryToResponseDto(seriesEntry, false)).thenReturn(seriesResponse);
+                eq(lucasId), eq(ContentType.EPISODE), any(), any(), any()))
+                .thenReturn(List.of(episodeEntry));
+        when(diaryEntryMapper.diaryEntryToResponseDto(episodeEntry, false)).thenReturn(seriesResponse);
 
         MonthInReviewResponseDTO result = summaryService.getMonthInReview(
                 lucasId, lucasId, ContentType.SERIES, YearMonth.of(2026, 8));
 
         assertThat(result.recentWatched()).containsExactly(seriesResponse);
         verify(diaryEntryRepository).findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
-                lucasId, ContentType.SERIES, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31), PageRequest.of(0, 6));
+                lucasId, ContentType.EPISODE, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31), PageRequest.of(0, 6));
         verify(diaryEntryRepository, never()).findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
-                eq(lucasId), eq(ContentType.EPISODE), any(), any(), any());
+                eq(lucasId), eq(ContentType.SERIES), any(), any(), any());
     }
 
     @Test
@@ -1568,6 +1572,19 @@ class SummaryServiceImplTest {
                 .id(UUID.randomUUID())
                 .tmdbId(tmdbId)
                 .type(type)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private Content buildEpisode(String seriesTmdbId, int seasonNumber, int episodeNumber) {
+        LocalDateTime now = LocalDateTime.now();
+        return Content.builder()
+                .id(UUID.randomUUID())
+                .type(ContentType.EPISODE)
+                .seriesTmdbId(seriesTmdbId)
+                .seasonNumber(seasonNumber)
+                .episodeNumber(episodeNumber)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

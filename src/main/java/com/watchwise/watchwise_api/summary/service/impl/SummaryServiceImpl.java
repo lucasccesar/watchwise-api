@@ -304,13 +304,14 @@ public class SummaryServiceImpl implements SummaryService {
         PageRequest topN = PageRequest.of(0, MONTH_TOP_LIMIT);
 
         List<DiaryEntry> recentWatchedEntries = diaryEntryRepository
-                .findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(userId, type, start, end, topN)
+                .findByUserIdAndContentTypeAndWatchedDateBetweenOrderByWatchedDateDesc(
+                        userId, watchedContentType, start, end, topN)
                 .stream().toList();
 
         List<DiaryEntry> topRatedRaw = diaryEntryRepository
-                .findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
+                .findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end, topN);
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository
-                .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
+                .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end, topN);
 
         List<RatingCountDTO> ratingsDistribution = diaryEntryRepository
                 .countByUserIdAndContentTypeAndWatchedDateBetweenGroupByScore(userId, watchedContentType, start, end)
@@ -417,9 +418,9 @@ public class SummaryServiceImpl implements SummaryService {
         PageRequest topN = PageRequest.of(0, YEAR_TOP_LIMIT);
 
         List<DiaryEntry> topRatedRaw = diaryEntryRepository
-                .findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
+                .findTopRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end, topN);
         List<DiaryEntry> bottomRatedRaw = diaryEntryRepository
-                .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, type, start, end, topN);
+                .findBottomRatedByUserIdAndContentTypeAndWatchedDateBetween(userId, watchedContentType, start, end, topN);
 
         List<RatingCountDTO> ratingsDistribution = diaryEntryRepository
                 .countByUserIdAndContentTypeAndWatchedDateBetweenGroupByScore(userId, watchedContentType, start, end)

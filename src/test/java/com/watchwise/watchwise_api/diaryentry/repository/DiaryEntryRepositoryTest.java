@@ -13,6 +13,7 @@ import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.diarycompletion.entity.DiaryCompletionProjection;
 import com.watchwise.watchwise_api.diarycompletion.entity.UserSeriesHistoryState;
+import com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
 import com.watchwise.watchwise_api.dropped.entity.DroppedEntry;
 import com.watchwise.watchwise_api.dropped.repository.DroppedEntryRepository;
@@ -93,6 +94,9 @@ class DiaryEntryRepositoryTest {
 
     @Autowired
     private ContentReviewRepository contentReviewRepository;
+
+    @Autowired
+    private DiaryCompletionProjectionRepository projectionRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -764,6 +768,58 @@ class DiaryEntryRepositoryTest {
             assertThat(activity.getScore()).isEqualTo(8);
             assertThat(activity.getComment()).isEqualTo("series review");
             assertThat(activity.getTimesWatched()).isEqualTo(1L);
+        });
+    }
+
+    @Test
+    @DisplayName("[countDiaryEntriesByUserIdAndContentIdsAndContentType] Should Count Only Current Series Completions - When Projection Evidence Is Stale")
+    void shouldCountOnlyCurrentSeriesCompletionsWhenProjectionEvidenceIsStale() {
+        Content current = contentRepository.save(buildContent("1510", ContentType.SERIES));
+        Content staleRevision = contentRepository.save(buildContent("1511", ContentType.SERIES));
+        Content expiredState = contentRepository.save(buildContent("1512", ContentType.SERIES));
+        Content missingMarker = contentRepository.save(buildContent("1513", ContentType.SERIES));
+        Content nullProjectionExpiry = contentRepository.save(buildContent("1514", ContentType.SERIES));
+        List<Content> series = List.of(current, staleRevision, expiredState, missingMarker, nullProjectionExpiry);
+        List<DiaryEntry> anchors = new java.util.ArrayList<>();
+        for (int i = 0; i < series.size(); i++) {
+            Content episode = contentRepository.save(buildEpisode(series.get(i).getTmdbId(), 1, 1));
+            anchors.add(diaryEntryRepository.saveAndFlush(buildEntry(lucas, episode)));
+        }
+
+        Instant future = Instant.parse("2099-01-01T00:00:00Z");
+        persistSummaryCompletion(current, anchors.get(0), 1L, 1L, future, future, true);
+        persistSummaryCompletion(staleRevision, anchors.get(1), 2L, 1L, future, future, true);
+        persistSummaryCompletion(expiredState, anchors.get(2), 1L, 1L,
+                Instant.parse("2000-01-01T00:00:00Z"), future, true);
+        persistSummaryCompletion(missingMarker, anchors.get(3), 1L, 1L, future, future, false);
+        persistSummaryCompletion(nullProjectionExpiry, anchors.get(4), 1L, 1L, future, null, true);
+        entityManager.flush();
+        entityManager.clear();
+
+        List<ProfileSummaryQueryRepository.ContentWatchCount> counts =
+                profileSummaryQueryRepository.countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                        lucas.getId(), series.stream().map(Content::getId).toList(), "SERIES");
+        List<ProfileSummaryQueryRepository.ContentWatchCount> ranked =
+                profileSummaryQueryRepository.countDiaryEntriesGroupByContentType(
+                        lucas.getId(), "SERIES", PageRequest.of(0, 10));
+        List<DiaryCompletionProjection> currentProjections = projectionRepository
+                .findCurrentByUserIdAndContentIdIn(lucas.getId(), series.stream().map(Content::getId).toList());
+        List<DiaryCompletionProjectionRepository.PublicCompletionCount> publicCounts = projectionRepository
+                .countPublicCurrentPassesByContentIdIn(series.stream().map(Content::getId).toList());
+
+        assertThat(counts).singleElement().satisfies(count -> {
+            assertThat(count.getContentId()).isEqualTo(current.getId());
+            assertThat(count.getCount()).isEqualTo(1L);
+        });
+        assertThat(ranked).singleElement().satisfies(count -> {
+            assertThat(count.getContentId()).isEqualTo(current.getId());
+            assertThat(count.getCount()).isEqualTo(1L);
+        });
+        assertThat(currentProjections).extracting(DiaryCompletionProjection::getContentId)
+                .containsExactly(current.getId());
+        assertThat(publicCounts).singleElement().satisfies(count -> {
+            assertThat(count.getContentId()).isEqualTo(current.getId());
+            assertThat(count.getCount()).isEqualTo(1L);
         });
     }
 
@@ -1584,6 +1640,32 @@ class DiaryEntryRepositoryTest {
                 .historyRevision(1L)
                 .scheduleVersion(scopeVersion)
                 .validUntil(validUntil)
+                .build());
+    }
+
+    private void persistSummaryCompletion(
+            Content series, DiaryEntry anchor, long historyRevision, long computedRevision,
+            Instant stateValidUntil, Instant projectionValidUntil, boolean completeMarker) {
+        if (completeMarker) {
+            persistSeriesMarker(series.getTmdbId(), 1L);
+        }
+        entityManager.persist(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(lucas.getId(), series.getTmdbId()))
+                .historyRevision(historyRevision)
+                .computedRevision(computedRevision)
+                .scheduleVersion(1L)
+                .validUntil(stateValidUntil)
+                .build());
+        entityManager.persist(DiaryCompletionProjection.builder()
+                .userId(lucas.getId())
+                .contentId(series.getId())
+                .contentType(ContentType.SERIES)
+                .watchNumber(1)
+                .anchorDiaryEntryId(anchor.getId())
+                .orderedAt(Instant.parse("2026-01-01T00:00:00Z"))
+                .historyRevision(historyRevision)
+                .scheduleVersion(1L)
+                .validUntil(projectionValidUntil)
                 .build());
     }
 

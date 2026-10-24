@@ -136,9 +136,12 @@ public class DiaryViewRepositoryImpl implements DiaryViewRepository {
                  AND ((p.content_type = 'SERIES' AND marker.group_type = 'SERIES' AND marker.season_number IS NULL)
                       OR (p.content_type = 'SEASON' AND marker.group_type = 'SEASON'
                           AND marker.season_number = c.season_number))
+                 AND marker.complete = TRUE
                 WHERE p.user_id = :ownerId
                   AND p.valid_until > :now
                   AND p.history_revision = state.history_revision
+                  AND p.history_revision = state.computed_revision
+                  AND state.valid_until > :now
                 """;
     }
 

@@ -137,10 +137,16 @@ class OpinionReadConsumersIntegrationTest {
                 UUID.randomUUID(), owner, season, 7);
         review(owner, series, 6);
         review(owner, series, 8);
-        jdbc.update("insert into user_series_history_states(user_id,series_tmdb_id,history_revision,computed_revision,schedule_version) values (?, '33006', 1, 1, 1)", owner);
-        jdbc.update("insert into diary_completion_projections(id,user_id,content_id,content_type,watch_number,ordered_at,history_revision,schedule_version) values (?,?,?,'SERIES',1,CURRENT_TIMESTAMP,1,1)",
+        jdbc.update("""
+                insert into user_series_history_states(
+                    user_id,series_tmdb_id,history_revision,computed_revision,schedule_version,valid_until)
+                values (?, '33006', 1, 1, 1, CURRENT_TIMESTAMP + INTERVAL '1 year')
+                """, owner);
+        scheduleMarker(owner, "33006", "SERIES", null, 1);
+        scheduleMarker(owner, "33006", "SEASON", 1, 2);
+        jdbc.update("insert into diary_completion_projections(id,user_id,content_id,content_type,watch_number,ordered_at,history_revision,schedule_version,valid_until) values (?,?,?,'SERIES',1,CURRENT_TIMESTAMP,1,1,CURRENT_TIMESTAMP + INTERVAL '1 year')",
                 UUID.randomUUID(), owner, series);
-        jdbc.update("insert into diary_completion_projections(id,user_id,content_id,content_type,watch_number,ordered_at,history_revision,schedule_version) values (?,?,?,'SEASON',1,CURRENT_TIMESTAMP,1,999)",
+        jdbc.update("insert into diary_completion_projections(id,user_id,content_id,content_type,watch_number,ordered_at,history_revision,schedule_version,valid_until) values (?,?,?,'SEASON',1,CURRENT_TIMESTAMP,1,2,CURRENT_TIMESTAMP + INTERVAL '1 year')",
                 UUID.randomUUID(), owner, season);
 
         assertThat(profileQueries.countLatestScoresByUserIdAndContentType(owner, "SERIES"))
@@ -169,6 +175,22 @@ class OpinionReadConsumersIntegrationTest {
                     assertThat(row.getContentId()).isEqualTo(season);
                     assertThat(row.getCount()).isEqualTo(1L);
                 });
+
+        jdbc.update("""
+                update calendar_schedule_completeness set scope_version = 2
+                where series_tmdb_id = '33006' and group_type = 'SERIES'
+                """);
+        assertThat(profileQueries.countDiaryEntriesGroupByContentType(owner, "SERIES", PageRequest.of(0, 10)))
+                .isEmpty();
+        jdbc.update("""
+                update calendar_schedule_completeness set scope_version = 3
+                where series_tmdb_id = '33006' and group_type = 'SEASON' and season_number = 1
+                """);
+        assertThat(profileQueries.countDiaryEntriesGroupByContentType(owner, "SEASON", PageRequest.of(0, 10)))
+                .isEmpty();
+        assertThat(profileQueries.countDiaryEntriesByUserIdAndContentIdsAndContentType(
+                owner, java.util.List.of(season), "SEASON"))
+                .isEmpty();
     }
 
     @Test
@@ -211,6 +233,16 @@ class OpinionReadConsumersIntegrationTest {
         jdbc.update("insert into users(id, username, email, password, profile_picture, name, is_profile_public) values (?, ?, ?, 'hash', 'picture', 'Test', ?)",
                 id, id.toString(), id + "@example.com", isPublic);
         return id;
+    }
+
+    private void scheduleMarker(UUID owner, String seriesTmdbId, String groupType, Integer seasonNumber, long scopeVersion) {
+        jdbc.update("""
+                insert into calendar_schedule_completeness(
+                    id,group_type,series_tmdb_id,season_number,region,language,
+                    expected_episode_count,complete,last_checked_at,scope_version)
+                select ?, ?, ?, ?, preferred_region, preferred_language, 1, true, CURRENT_TIMESTAMP, ?
+                from users where id = ?
+                """, UUID.randomUUID(), groupType, seriesTmdbId, seasonNumber, scopeVersion, owner);
     }
 
     private UUID content(String type, String tmdbId, String seriesTmdbId, Integer season, Integer runtime) {

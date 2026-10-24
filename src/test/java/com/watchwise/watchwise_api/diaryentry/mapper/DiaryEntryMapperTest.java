@@ -110,4 +110,37 @@ class DiaryEntryMapperTest {
         assertThat(result.watchNumber()).isEqualTo(1);
         assertThat(result.likedByMe()).isFalse();
     }
+
+    @Test
+    @DisplayName("[diaryEntryToResponseDto] Should Map Episode Event Coordinates And Visibility Flag - When Mapping A Bulk Watch Event")
+    void shouldMapEpisodeEventCoordinatesAndIgnoreFlagWhenMappingABulkWatchEvent() {
+        User user = User.builder().id(UUID.randomUUID()).build();
+        Content episode = Content.builder()
+                .id(UUID.randomUUID())
+                .type(ContentType.EPISODE)
+                .seriesTmdbId("1399")
+                .seasonNumber(2)
+                .episodeNumber(3)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        DiaryEntry entry = DiaryEntry.builder()
+                .id(UUID.randomUUID())
+                .user(user)
+                .content(episode)
+                .watchNumber(2)
+                .ignore(false)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+
+        DiaryEntryResponseDTO result = diaryEntryMapper.diaryEntryToResponseDto(entry, false);
+
+        assertThat(result.content().type()).isEqualTo(ContentType.EPISODE);
+        assertThat(result.content().seriesTmdbId()).isEqualTo("1399");
+        assertThat(result.content().seasonNumber()).isEqualTo(2);
+        assertThat(result.content().episodeNumber()).isEqualTo(3);
+        assertThat(result.watchNumber()).isEqualTo(2);
+        assertThat(result.ignore()).isFalse();
+    }
 }

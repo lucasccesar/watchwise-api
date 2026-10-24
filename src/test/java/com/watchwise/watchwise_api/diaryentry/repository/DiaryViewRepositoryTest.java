@@ -14,13 +14,17 @@ import com.watchwise.watchwise_api.contentreview.entity.ReviewContextKind;
 import com.watchwise.watchwise_api.contentreview.entity.ReviewPublicationKind;
 import com.watchwise.watchwise_api.contentreview.repository.ContentReviewRepository;
 import com.watchwise.watchwise_api.diarycompletion.entity.UserSeriesHistoryState;
+import com.watchwise.watchwise_api.diarycompletion.entity.DiaryCompletionProjection;
 import com.watchwise.watchwise_api.diarycompletion.model.CompletionScope;
 import com.watchwise.watchwise_api.diarycompletion.model.EpisodeCoordinate;
 import com.watchwise.watchwise_api.diarycompletion.model.VersionedCompletionScope;
 import com.watchwise.watchwise_api.diarycompletion.repository.UserSeriesHistoryStateRepository;
+import com.watchwise.watchwise_api.diarycompletion.repository.DiaryCompletionProjectionRepository;
 import com.watchwise.watchwise_api.diarycompletion.service.CompletionScopeLoader;
 import com.watchwise.watchwise_api.diaryentry.entity.DiaryEntry;
+import com.watchwise.watchwise_api.diaryentry.dto.DiaryViewFilter;
 import com.watchwise.watchwise_api.diaryentry.repository.DiaryEntryRepository;
+import com.watchwise.watchwise_api.diaryentry.repository.DiaryViewRepository;
 import com.watchwise.watchwise_api.platformimport.parser.impl.LetterboxdItemCsvParserImpl;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
@@ -97,6 +101,12 @@ class DiaryViewRepositoryTest {
 
     @Autowired
     private UserSeriesHistoryStateRepository historyStateRepository;
+
+    @Autowired
+    private DiaryCompletionProjectionRepository projectionRepository;
+
+    @Autowired
+    private DiaryViewRepository diaryViewRepository;
 
     @Autowired
     private CalendarScheduleCompletenessRepository completenessRepository;
@@ -282,6 +292,63 @@ class DiaryViewRepositoryTest {
                         .param("hasReview", "true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(3));
+    }
+
+    @Test
+    @DisplayName("[diaryView] Should Hide A Projection Until Its History Revision Is Computed")
+    void shouldHideAProjectionUntilItsHistoryRevisionIsComputed() throws Exception {
+        RegisteredUser owner = registerUser();
+        Content series = persistContent(ContentType.SERIES, "4998", null, null, null);
+        Content episode = persistContent(ContentType.EPISODE, null, "4998", 1, 1);
+        DiaryEntry anchor = persistEntry(userRepository.findById(owner.id()).orElseThrow(),
+                episode, LocalDate.of(2026, 1, 2), EPISODE_RECORDED_AT);
+        Instant validUntil = Instant.parse("2099-01-01T00:00:00Z");
+        historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
+                .id(new UserSeriesHistoryState.Key(owner.id(), "4998"))
+                .historyRevision(2L)
+                .computedRevision(1L)
+                .scheduleVersion(1L)
+                .validUntil(validUntil)
+                .build());
+        completenessRepository.saveAndFlush(markerFor("4998", CalendarScheduleCompleteness.GroupType.SERIES, null)
+                .toBuilder().scopeVersion(1L).build());
+        projectionRepository.saveAndFlush(DiaryCompletionProjection.builder()
+                .userId(owner.id())
+                .contentId(series.getId())
+                .contentType(ContentType.SERIES)
+                .watchNumber(1)
+                .anchorDiaryEntryId(anchor.getId())
+                .completedOn(LocalDate.of(2026, 1, 2))
+                .orderedAt(Instant.parse("2026-01-02T12:00:00Z"))
+                .historyRevision(2L)
+                .scheduleVersion(1L)
+                .validUntil(validUntil)
+                .build());
+
+        var stalePage = diaryViewRepository.findPage(owner.id(), "US", "en-US", Instant.now(),
+                new DiaryViewFilter(null, null, null, null, null, null),
+                org.springframework.data.domain.PageRequest.of(0, 20));
+
+        assertThat(stalePage.getContent()).extracting(DiaryViewRepository.DiaryViewKey::kind)
+                .containsExactly("PERSISTED_ENTRY");
+        assertThat(stalePage.getTotalElements()).isEqualTo(1L);
+
+        UserSeriesHistoryState.Key stateKey = new UserSeriesHistoryState.Key(owner.id(), "4998");
+        historyStateRepository.deleteById(stateKey);
+        historyStateRepository.saveAndFlush(UserSeriesHistoryState.builder()
+                .id(stateKey)
+                .historyRevision(2L)
+                .computedRevision(2L)
+                .scheduleVersion(1L)
+                .validUntil(validUntil)
+                .build());
+        var currentPage = diaryViewRepository.findPage(owner.id(), "US", "en-US", Instant.now(),
+                new DiaryViewFilter(null, null, null, null, null, null),
+                org.springframework.data.domain.PageRequest.of(0, 20));
+
+        assertThat(currentPage.getContent()).extracting(DiaryViewRepository.DiaryViewKey::kind)
+                .containsExactlyInAnyOrder("PERSISTED_ENTRY", "DERIVED_COMPLETION");
+        assertThat(currentPage.getTotalElements()).isEqualTo(2L);
     }
 
     private RegisteredUser registerUser() throws Exception {

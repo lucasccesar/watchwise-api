@@ -5,6 +5,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.mapper.ContentMapper;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.contentrating.entity.ContentRating;
@@ -120,7 +121,10 @@ public class DiaryViewServiceImpl implements com.watchwise.watchwise_api.diaryen
     }
 
     private String completionKey(DiaryViewRepository.DiaryViewKey key) {
-        String base = key.contentType() + ":" + key.seriesTmdbId();
+        String contentId = key.contentType() == ContentType.SERIES
+                ? key.tmdbId()
+                : key.seriesTmdbId();
+        String base = key.contentType() + ":" + contentId;
         if (key.seasonNumber() != null) {
             base += ":" + key.seasonNumber();
         }
