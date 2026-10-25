@@ -19,9 +19,12 @@ public record ImportPreviewItemDTO(
         LocalDate watchedDate,
         Instant watchedAt,
         ImportDatePrecision datePrecision,
-        JsonNode resolvedTarget
+        JsonNode resolvedTarget,
+        String reviewText,
+        Integer reviewTextLength,
+        Boolean reviewTextTruncated
 ) {
     public ImportPreviewItemDTO(UUID itemId, ImportRecordKind kind, ImportDecision decision, String outcome) {
-        this(itemId, 0, kind, decision, outcome, null, null, null, null, null);
+        this(itemId, 0, kind, decision, outcome, null, null, null, null, null, null, null, false);
     }
 }

@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.entity.UserList;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportPreviewServiceImpl;
+import com.watchwise.watchwise_api.platformimport.service.impl.ImportedReviewTextNormalizer;
 import com.watchwise.watchwise_api.platformimport.service.ExternalContentAliasService;
 import com.watchwise.watchwise_api.common.pagination.PageRequestFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -94,7 +95,8 @@ class ImportPreviewServiceTest {
     @BeforeEach
     void setUp() {
         service = new ImportPreviewServiceImpl(importJobRepository, importItemRepository, importModeRegistry,
-                externalContentAliasService, userListRepository, objectMapper, importLimits, clock, pageRequestFactory);
+                externalContentAliasService, userListRepository, objectMapper, new ImportedReviewTextNormalizer(),
+                importLimits, clock, pageRequestFactory);
     }
 
     @Test
@@ -285,6 +287,56 @@ class ImportPreviewServiceTest {
                         ImportResolutionOperation.EditableField.WATCHED_DATE, "2021-01-01")), 4))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("cancel and create a new import");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Allow A Review Fix - When The Source Review Exceeds Its Limit")
+    void shouldAllowAReviewFixWhenTheSourceReviewExceedsItsLimit() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.SERIES_EXPANSION,
+                "{\"review\":\"original\",\"_watchwiseExpansion\":{\"schemaVersion\":1,\"childCount\":12}}", 1);
+        item.setOutcome("NORMALIZATION_ISSUE");
+        item.setIssue("REVIEW_TEXT_TOO_LONG: Edit the review.");
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        service.resolve(ownerId, jobId, List.of(new ImportResolutionOperation.EditField(itemId,
+                ImportResolutionOperation.EditableField.REVIEW, "Shorter review.")), 4);
+
+        assertThat(item.getOutcome()).isEqualTo("RESOLVED");
+        assertThat(item.getIssue()).isNull();
+        assertThat(item.getPayloadJson()).contains("Shorter review.");
+        assertThat(job.getPreviewVersion()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject An Overlong Review Edit - When It Still Exceeds The Review Limit")
+    void shouldRejectAnOverlongReviewEditWhenItStillExceedsTheReviewLimit() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.DIARY_EVENT, "{}", 1);
+        item.setOutcome("NORMALIZATION_ISSUE");
+        item.setIssue("REVIEW_TEXT_TOO_LONG: Edit the review.");
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.EditField(itemId,
+                        ImportResolutionOperation.EditableField.REVIEW, "x".repeat(20_001))), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("20000");
 
         assertThat(item.getDecision()).isNull();
         assertThat(job.getPreviewVersion()).isEqualTo(4);
@@ -597,8 +649,37 @@ class ImportPreviewServiceTest {
 
         assertThat(result.getContent()).containsExactly(
                 new com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO(
-                        itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null, null, null, null, null));
+                        itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null, null, null, null, null,
+                        null, null, false));
         assertThat(result.getTotalElements()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("[preview] Should Project Review Text Safely - When The Diary Item Contains A Review")
+    void shouldProjectReviewTextSafelyWhenTheDiaryItemContainsAReview() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID shortId = UUID.randomUUID();
+        UUID longId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem shortReview = item(shortId, jobId, 4, ImportRecordKind.DIARY_EVENT,
+                "{\"review\":\"First<br>Second &amp; third\"}", 1);
+        String unicodeReview = "x".repeat(19_999) + "🎬" + "y";
+        ImportItem longReview = item(longId, jobId, 4, ImportRecordKind.SERIES_EXPANSION,
+                "{\"review\":\"" + unicodeReview + "\"}", 2);
+        when(importJobRepository.findOwnedById(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                jobId, 4, PageRequest.of(0, 20)))
+                .thenReturn(new PageImpl<>(List.of(shortReview, longReview), PageRequest.of(0, 20), 2));
+
+        var result = service.preview(ownerId, jobId, 0, 20);
+
+        assertThat(result.getContent()).extracting(
+                com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO::reviewText)
+                .containsExactly("First\nSecond & third", "x".repeat(19_999));
+        assertThat(result.getContent().get(1).reviewTextLength()).isEqualTo(20_002);
+        assertThat(result.getContent().get(1).reviewTextTruncated()).isTrue();
     }
 
     @Test

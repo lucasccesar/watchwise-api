@@ -115,18 +115,19 @@ public class WatchEventImportApplier implements ImportUnitApplier {
                 throw new IllegalStateException("Diary events support only movies and episodes");
             }
 
-            LocalDate watchedDate = parseDate(firstText(resolution.path("fields"), "watchedOn", "watchedDate"),
+            JsonNode fields = resolution.path("fields");
+            LocalDate watchedDate = parseDate(overrideText(fields, "WATCHED_DATE", "watchedOn", "watchedDate"),
                     firstText(source, "watchedOn", "watchedDate"));
             Instant watchedAt = parseInstant(firstText(resolution.path("fields"), "sourceWatchedAt"),
                     text(source.path("sourceWatchedAt")));
-            Integer score = parseInteger(firstText(resolution.path("fields"), "score"), source.path("score"));
-            String review = firstText(resolution.path("fields"), "review", "comment");
+            Integer score = parseInteger(overrideText(fields, "RATING", "score"), source.path("score"));
+            String review = overrideText(fields, "REVIEW", "review", "comment");
             if (review == null) review = text(source.path("review"));
-            Boolean explicitTheaterFlag = resolution.path("fields").path("watchedInTheater").isBoolean()
-                    && resolution.path("fields").path("watchedInTheater").asBoolean() ? Boolean.TRUE : null;
-            Boolean watchedInTheater = media.type() == ContentType.MOVIE
-                    && (Boolean.TRUE.equals(explicitTheaterFlag) || theaterTagMatcher.matches(tags(source)))
-                    ? Boolean.TRUE : null;
+            if (review != null && review.isBlank()) review = null;
+            Boolean explicitTheaterFlag = overrideBoolean(fields, "WATCHED_IN_THEATER", "watchedInTheater");
+            Boolean watchedInTheater = media.type() != ContentType.MOVIE ? null
+                    : explicitTheaterFlag != null ? explicitTheaterFlag
+                    : theaterTagMatcher.matches(tags(source)) ? Boolean.TRUE : null;
 
             Integer assignedPass = null;
             if (item.getDecision() == ImportDecision.ASSIGN_PASS) {
@@ -189,6 +190,23 @@ public class WatchEventImportApplier implements ImportUnitApplier {
             String value = text(node.path(name));
             if (value != null) return value;
         }
+        return null;
+    }
+
+    private String overrideText(JsonNode fields, String enumName, String... aliases) {
+        JsonNode value = fields.get(enumName);
+        if (value != null && value.isTextual()) return value.asString();
+        return firstText(fields, aliases);
+    }
+
+    private Boolean overrideBoolean(JsonNode fields, String enumName, String alias) {
+        JsonNode value = fields.get(enumName);
+        if (value == null) value = fields.get(alias);
+        if (value == null || value.isNull()) return null;
+        if (value.isBoolean()) return value.asBoolean();
+        if (!value.isTextual()) return null;
+        if ("true".equalsIgnoreCase(value.asString())) return Boolean.TRUE;
+        if ("false".equalsIgnoreCase(value.asString())) return Boolean.FALSE;
         return null;
     }
 

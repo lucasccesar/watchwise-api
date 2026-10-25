@@ -191,6 +191,21 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
         itemRepository.saveAndFlush(parent);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean markOversizedReviewIssue(ImportExecutionContext context, UUID parentId) {
+        ImportItem parent = itemRepository.findById(parentId)
+                .orElseThrow(() -> new IllegalStateException("Staged series expansion was not found"));
+        validateContext(context, parent);
+        if (!hasPreparedPlan(parent)) return false;
+        ObjectNode effective = effectiveParentPayload(parsePayload(parent.getPayloadJson()));
+        if (!effective.path(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_MARKER).asBoolean(false)) return false;
+        parent.setOutcome("NORMALIZATION_ISSUE");
+        parent.setIssue(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE
+                + ": Edit the review to 20,000 characters or fewer; the original text is preserved.");
+        itemRepository.saveAndFlush(parent);
+        return true;
+    }
+
     @Override
     public void onTerminal(ImportExecutionContext context, ImportItem child) {
         if (child.getParentSourceId() == null || !"series_diary_child".equals(child.getObjectKind())) return;
@@ -256,6 +271,14 @@ public class LetterboxdSeriesExpansionApplier implements ImportUnitApplier, Impo
                 : metadata.path("targetPass").asInt(0);
         String scopeHash = metadata.path("scopeHash").asString(null);
         if (!eventIds.isEmpty()) {
+            String parentReview = text(opinionPayload, "review");
+            if (parentReview != null
+                    && parentReview.length() > ImportedReviewTextNormalizer.MAX_REVIEW_LENGTH) {
+                pauseParentForIssue(context, parent,
+                        ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE
+                                + ": Edit the review to 20,000 characters or fewer; the original text is preserved.");
+                return;
+            }
             HistoricalViewingEvidence evidence = new HistoricalViewingEvidence(
                     series, targetPass, scopeHash, Set.copyOf(eventIds));
             Integer currentRating = integer(opinionPayload, "currentRatingScore");

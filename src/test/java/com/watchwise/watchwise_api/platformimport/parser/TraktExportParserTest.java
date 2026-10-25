@@ -69,12 +69,15 @@ class TraktExportParserTest {
     @Test
     void watchedSummariesProduceSeriesOnlyAndNonMediaRecordsAreIgnored() {
         TraktItemParserImpl items = new TraktItemParserImpl(mapper);
-        String json = "[{\"plays\":12,\"show\":{\"title\":\"Example\",\"year\":2020,\"ids\":{\"tmdb\":123}}},{\"type\":\"comment\",\"comment\":{\"id\":5}}]";
+        String json = "[{\"plays\":12,\"last_watched_at\":\"2025-06-03T03:30:00Z\",\"show\":{\"title\":\"Example\",\"year\":2020,\"aired_episodes\":84,\"ids\":{\"tmdb\":123}}},{\"type\":\"comment\",\"comment\":{\"id\":5}}]";
         List<NormalizedImportRecord> records = new ArrayList<>();
         items.parse(new java.io.ByteArrayInputStream(json.getBytes(java.nio.charset.StandardCharsets.UTF_8)), CONTEXT,
                 "watched-shows.json", ImportRecordKind.WATCHED_SUMMARY, records::add);
         assertThat(records).hasSize(1);
         assertThat(((ImportTarget.ContentTarget) records.getFirst().target()).content()).isEqualTo(MediaReference.series("123"));
+        assertThat(records.getFirst().payload().path("declaredPlays").asInt()).isEqualTo(12);
+        assertThat(records.getFirst().payload().path("declaredLastWatchedOn").asString()).isEqualTo("2025-06-03");
+        assertThat(records.getFirst().payload().path("airedEpisodeCount").asInt()).isEqualTo(84);
     }
 
     @Test

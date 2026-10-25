@@ -93,6 +93,12 @@ public class TraktItemParserImpl implements TraktItemParser {
         copyText(row, payload, "uri", "sourceContentUri");
         copyDate(row, payload, "watched_at", "watchedOn", context.timeZone(), path, recordNumber);
         copyText(row, payload, "watched_at", "sourceWatchedAt");
+        if (kind == ImportRecordKind.WATCHED_SUMMARY) {
+            copyPositiveCount(row, payload, "plays", "declaredPlays", path, recordNumber);
+            copyText(row, payload, "last_watched_at", "sourceLastWatchedAt");
+            copyDate(row, payload, "last_watched_at", "declaredLastWatchedOn", context.timeZone(), path, recordNumber);
+            copyNonNegativeCount(media, payload, "aired_episodes", "airedEpisodeCount", path, recordNumber);
+        }
         copyDate(row, payload, "rated_at", "sourceRecordedOn", context.timeZone(), path, recordNumber);
         if (!payload.has("sourceRecordedOn")) copyDate(row, payload, "listed_at", "sourceRecordedOn", context.timeZone(), path, recordNumber);
         JsonNode score = row.path("rating");
@@ -155,6 +161,22 @@ public class TraktItemParserImpl implements TraktItemParser {
     }
     private void copyText(JsonNode from, tools.jackson.databind.node.ObjectNode to, String source, String target) {
         String value = text(from, source); if (value != null) to.put(target, value);
+    }
+    private void copyPositiveCount(JsonNode from, tools.jackson.databind.node.ObjectNode to, String source,
+                                   String target, String path, long record) {
+        JsonNode value = from.path(source);
+        if (value.isMissingNode() || value.isNull()) return;
+        if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 1)
+            throw failure(path, record, source, "Expected positive integer");
+        to.put(target, value.intValue());
+    }
+    private void copyNonNegativeCount(JsonNode from, tools.jackson.databind.node.ObjectNode to, String source,
+                                      String target, String path, long record) {
+        JsonNode value = from.path(source);
+        if (value.isMissingNode() || value.isNull()) return;
+        if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0)
+            throw failure(path, record, source, "Expected non-negative integer");
+        to.put(target, value.intValue());
     }
     private BadRequestException failure(String path, long record, String field, String message) {
         return new BadRequestException(path + " record " + record + " field " + field + ": " + message);

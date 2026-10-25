@@ -52,17 +52,20 @@ public class HistoryNormalizationSupport {
     private final ImportJobRepository jobRepository;
     private final ImportUnitTransaction unitTransaction;
     private final ImportIdentityNormalizer identityNormalizer;
+    private final ImportedReviewTextNormalizer reviewTextNormalizer;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
     public HistoryNormalizationSupport(ImportItemRepository itemRepository, ImportJobRepository jobRepository,
                                        ImportUnitTransaction unitTransaction,
                                        ImportIdentityNormalizer identityNormalizer,
+                                       ImportedReviewTextNormalizer reviewTextNormalizer,
                                        ObjectMapper objectMapper, Clock clock) {
         this.itemRepository = itemRepository;
         this.jobRepository = jobRepository;
         this.unitTransaction = unitTransaction;
         this.identityNormalizer = identityNormalizer;
+        this.reviewTextNormalizer = reviewTextNormalizer;
         this.objectMapper = objectMapper;
         this.clock = clock;
     }
@@ -72,6 +75,10 @@ public class HistoryNormalizationSupport {
         if (trakt) normalizeTraktEpisodeTargets(context);
         normalizeEventGroups(context, trakt);
         normalizeContentFragments(context, trakt);
+        if (trakt) {
+            annotateTraktSummaryPreview(context);
+            annotateTraktOpinionPreview(context);
+        }
         return new NormalizedHistoryPlan(context.jobId(),
                 count(context, ImportRecordKind.DIARY_EVENT)
                         + count(context, ImportRecordKind.SERIES_EXPANSION),
@@ -267,11 +274,21 @@ public class HistoryNormalizationSupport {
             return;
         }
         if (group.event == null) {
-            walkEventFragments(context, eventKey, page -> save(context, page.stream()
-                    .filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
-                    .filter(item -> "NORMALIZATION_ISSUE".equals(item.getOutcome()) || item.getIssue() != null)
-                    .map(item -> update(item, item.getNormalizedKind(), item.getPayloadJson(),
-                            item.getResolvedTargetJson(), item.getResolvedContentKey(), "MATCHED", null)).toList()));
+            walkEventFragments(context, eventKey, page -> {
+                List<ImportUnitTransaction.HistoryNormalizationUpdate> updates = new ArrayList<>();
+                for (ImportItem item : page) {
+                    if (item.getDecision() == ImportDecision.SKIP_ITEM) continue;
+                    String textIssue = item.getNormalizedKind() == ImportRecordKind.REVIEW
+                            ? overlongReviewIssue(effectiveReviewPayload(readPayload(item.getPayloadJson()))) : null;
+                    if (textIssue != null) {
+                        updates.add(issue(item, textIssue));
+                    } else if ("NORMALIZATION_ISSUE".equals(item.getOutcome()) || item.getIssue() != null) {
+                        updates.add(update(item, item.getNormalizedKind(), item.getPayloadJson(),
+                                item.getResolvedTargetJson(), item.getResolvedContentKey(), "MATCHED", null));
+                    }
+                }
+                save(context, updates);
+            });
             return;
         }
 
@@ -313,17 +330,25 @@ public class HistoryNormalizationSupport {
         }
 
         ObjectNode eventPayload = readObject(event.getPayloadJson());
-        JsonNode reviewPayload = readPayload(review.getPayloadJson());
+        JsonNode reviewPayload = effectiveReviewPayload(readPayload(review.getPayloadJson()));
         JsonNode reviewText = reviewPayload.get("review");
+        String textIssue = null;
+        String normalized = null;
         if (reviewText != null && reviewText.isTextual() && !reviewText.asString().isBlank()) {
-            eventPayload.set("review", reviewText.deepCopy());
+            String original = reviewText.asString();
+            normalized = reviewTextNormalizer.normalize(original);
+            eventPayload.put("review", normalized);
+            if (normalized.length() > ImportedReviewTextNormalizer.MAX_REVIEW_LENGTH) {
+                textIssue = overlongReviewIssue(normalized);
+            }
         }
         JsonNode score = reviewPayload.get("score");
         if (score != null && score.isIntegralNumber()) eventPayload.set("score", score.deepCopy());
 
         save(context, List.of(
                 update(event, ImportRecordKind.DIARY_EVENT, writeJson(eventPayload), event.getResolvedTargetJson(),
-                        event.getResolvedContentKey(), "MATCHED", null),
+                        event.getResolvedContentKey(), textIssue == null ? "MATCHED" : "NORMALIZATION_ISSUE",
+                        textIssue),
                 update(review, review.getNormalizedKind(), review.getPayloadJson(), review.getResolvedTargetJson(),
                         review.getResolvedContentKey(), "ABSORBED", null)));
     }
@@ -343,7 +368,7 @@ public class HistoryNormalizationSupport {
         ObjectNode parentPayload = readObject(event.getPayloadJson());
         List<ImportUnitTransaction.HistoryNormalizationUpdate> updates = new ArrayList<>(2);
         if (review != null) {
-            JsonNode reviewPayload = readPayload(review.getPayloadJson());
+            JsonNode reviewPayload = effectiveReviewPayload(readPayload(review.getPayloadJson()));
             mergeSeriesReviewSnapshot(parentPayload, reviewPayload);
             updates.add(update(review, review.getNormalizedKind(), review.getPayloadJson(),
                     review.getResolvedTargetJson(), review.getResolvedContentKey(), "ABSORBED", null));
@@ -355,13 +380,42 @@ public class HistoryNormalizationSupport {
 
     private void mergeSeriesReviewSnapshot(ObjectNode parentPayload, JsonNode reviewPayload) {
         JsonNode text = reviewPayload.get("review");
-        if (text != null && text.isTextual() && !text.asString().isBlank()) parentPayload.set("review", text.deepCopy());
+        if (text != null && text.isTextual() && !text.asString().isBlank()) {
+            String original = text.asString();
+            String normalized = reviewTextNormalizer.normalize(original);
+            parentPayload.put("review", normalized);
+            if (normalized.length() > ImportedReviewTextNormalizer.MAX_REVIEW_LENGTH) {
+                parentPayload.put(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_MARKER, true);
+            }
+        }
         JsonNode score = reviewPayload.get("score");
         if (score != null && score.isIntegralNumber()) parentPayload.set("reviewScoreAtPublication", score.deepCopy());
         JsonNode sourceRecordedOn = reviewPayload.get("sourceRecordedOn");
         if (sourceRecordedOn != null && sourceRecordedOn.isTextual()) {
             parentPayload.set("reviewSourceRecordedOn", sourceRecordedOn.deepCopy());
         }
+    }
+
+    private String overlongReviewIssue(JsonNode payload) {
+        String review = textOrNull(payload.path("review"));
+        if (review == null || review.isBlank()) return null;
+        return overlongReviewIssue(reviewTextNormalizer.normalize(review));
+    }
+
+    private String overlongReviewIssue(String normalized) {
+        return normalized.length() > ImportedReviewTextNormalizer.MAX_REVIEW_LENGTH
+                ? ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE
+                + ": Edit the review to 20,000 characters or fewer; the original text is preserved."
+                : null;
+    }
+
+    private JsonNode effectiveReviewPayload(JsonNode payload) {
+        JsonNode source = payload.path("source").isObject() ? payload.path("source") : payload;
+        JsonNode editedReview = payload.path("resolution").path("fields").path("REVIEW");
+        if (!source.isObject() || !editedReview.isTextual()) return source;
+        ObjectNode effective = (ObjectNode) source.deepCopy();
+        effective.set("review", editedReview.deepCopy());
+        return effective;
     }
 
     private boolean addSourceIdentity(EventGroupSummary group, ImportItem item) {
@@ -414,6 +468,101 @@ public class HistoryNormalizationSupport {
             renewLease(context);
             if (keys.size() < BATCH_SIZE) return;
         }
+    }
+
+    private void annotateTraktSummaryPreview(ImportExecutionContext context) {
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        while (true) {
+            List<ImportItem> summaries = itemRepository.findHistoryRowsAfter(context.jobId(), context.ownerId(),
+                    context.planGeneration(), List.of(ImportRecordKind.WATCHED_SUMMARY), ACTIVE_OUTCOMES,
+                    afterOrdinal, afterId, PageRequest.of(0, BATCH_SIZE));
+            if (summaries.isEmpty()) return;
+            List<ImportUnitTransaction.HistoryNormalizationUpdate> updates = new ArrayList<>();
+            for (ImportItem summary : summaries) {
+                afterOrdinal = summary.getOrdinal();
+                afterId = summary.getId();
+                if (summary.getDecision() == ImportDecision.SKIP_ITEM || summary.getIssue() != null
+                        || summary.getResolvedTargetJson() == null) continue;
+                ImportTarget target = readTarget(summary.getResolvedTargetJson());
+                if (!(target instanceof ImportTarget.ContentTarget contentTarget)
+                        || hasDetailEventForSummary(context, contentTarget.content())) continue;
+                updates.add(update(summary, summary.getNormalizedKind(), summary.getPayloadJson(),
+                        summary.getResolvedTargetJson(), summary.getResolvedContentKey(), summary.getOutcome(),
+                        summaryCoverageIssue(contentTarget.content().type())));
+            }
+            save(context, updates);
+            renewLease(context);
+            if (summaries.size() < BATCH_SIZE) return;
+        }
+    }
+
+    private boolean hasDetailEventForSummary(ImportExecutionContext context, MediaReference media) {
+        List<String> detailOutcomes = List.of("MATCHED", "RESOLVED");
+        String exactKey = contentKey(new ImportTarget.ContentTarget(media));
+        if (itemRepository.existsDetailDiaryEventByContentKey(context.jobId(), context.planGeneration(), exactKey,
+                detailOutcomes, ImportDecision.SKIP_ITEM.name())) return true;
+        if (media.type() == ContentType.SERIES) {
+            String episodePrefix = "CONTENT|EPISODE|" + media.tmdbId() + "|";
+            return itemRepository.existsDetailDiaryEventByContentKeyPrefix(context.jobId(),
+                    context.planGeneration(), episodePrefix, detailOutcomes, ImportDecision.SKIP_ITEM.name());
+        }
+        return media.type() == ContentType.EPISODE
+                && itemRepository.existsDetailDiaryEventByContentKeyPrefix(context.jobId(),
+                context.planGeneration(), exactKey + "|", detailOutcomes, ImportDecision.SKIP_ITEM.name());
+    }
+
+    private String summaryCoverageIssue(ContentType type) {
+        return switch (type) {
+            case SERIES -> "UNKNOWN_WATCH_COVERAGE: Trakt's show summary does not identify watched episodes. "
+                    + "It will not create episodes or prove a complete series pass.";
+            case SEASON -> "UNKNOWN_WATCH_COVERAGE: Trakt's season summary does not identify the watched episodes. "
+                    + "It will not create episodes or prove a complete season pass.";
+            case MOVIE -> "UNKNOWN_WATCH_COVERAGE: Trakt's watched summary has no matching diary event in this ZIP. "
+                    + "It will not create a DiaryEntry.";
+            case EPISODE -> "UNKNOWN_WATCH_COVERAGE: Trakt's episode summary has no matching diary event in this ZIP. "
+                    + "It will not create a DiaryEntry.";
+        };
+    }
+
+    private void annotateTraktOpinionPreview(ImportExecutionContext context) {
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        while (true) {
+            List<ImportItem> opinions = itemRepository.findHistoryRowsAfter(context.jobId(), context.ownerId(),
+                    context.planGeneration(), List.of(ImportRecordKind.REVIEW, ImportRecordKind.CURRENT_RATING),
+                    ACTIVE_OUTCOMES, afterOrdinal, afterId, PageRequest.of(0, BATCH_SIZE));
+            if (opinions.isEmpty()) return;
+            List<ImportUnitTransaction.HistoryNormalizationUpdate> updates = new ArrayList<>();
+            for (ImportItem item : opinions) {
+                afterOrdinal = item.getOrdinal();
+                afterId = item.getId();
+                if (item.getDecision() == ImportDecision.SKIP_ITEM || item.getIssue() != null
+                        || item.getResolvedTargetJson() == null) continue;
+                ImportTarget target = readTarget(item.getResolvedTargetJson());
+                if (!(target instanceof ImportTarget.ContentTarget contentTarget)) continue;
+                String issue = opinionEvidenceIssue(contentTarget.content().type());
+                if (issue != null) {
+                    updates.add(update(item, item.getNormalizedKind(), item.getPayloadJson(),
+                            item.getResolvedTargetJson(), item.getResolvedContentKey(), item.getOutcome(), issue));
+                }
+            }
+            save(context, updates);
+            renewLease(context);
+            if (opinions.size() < BATCH_SIZE) return;
+        }
+    }
+
+    private String opinionEvidenceIssue(ContentType type) {
+        if (type == ContentType.SERIES || type == ContentType.SEASON) {
+            return "OPINION_EVIDENCE_PENDING: A complete watched pass is required to restore this "
+                    + type.name().toLowerCase(java.util.Locale.ROOT) + " opinion; otherwise it stays deferred.";
+        }
+        if (type == ContentType.MOVIE || type == ContentType.EPISODE) {
+            return "OPINION_EVIDENCE_PENDING: This rating/review requires a matching diary event; "
+                    + "a rating alone does not create a watch.";
+        }
+        return null;
     }
 
     private void normalizeContentGroup(ImportExecutionContext context, String contentKey, boolean trakt) {
@@ -546,8 +695,9 @@ public class HistoryNormalizationSupport {
                             review.getResolvedTargetJson(), review.getResolvedContentKey(), "ABSORBED", null));
                     continue;
                 }
+                JsonNode reviewPayload = effectiveReviewPayload(readPayload(review.getPayloadJson()));
                 ObjectNode parentPayload = readObject(parent.getPayloadJson());
-                mergeSeriesReviewSnapshot(parentPayload, readPayload(review.getPayloadJson()));
+                mergeSeriesReviewSnapshot(parentPayload, reviewPayload);
                 updates.add(update(parent, ImportRecordKind.SERIES_EXPANSION, writeJson(parentPayload),
                         parent.getResolvedTargetJson(), parent.getResolvedContentKey(), "MATCHED", null));
                 updates.add(update(review, review.getNormalizedKind(), review.getPayloadJson(),

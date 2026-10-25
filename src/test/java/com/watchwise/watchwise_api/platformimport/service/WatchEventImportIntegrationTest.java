@@ -208,6 +208,33 @@ class WatchEventImportIntegrationTest {
     }
 
     @Test
+    void shouldApplyUppercasePreviewFieldOverridesToDiaryEvent() throws Exception {
+        User owner = createUser();
+        Content movie = createMovie();
+        ImportJob job = createJob(owner.getId(), "letterboxd:account-1", ImportSourceFormat.LETTERBOXD_ZIP);
+        ImportItem event = createEvent(job, movie, 0, "edited-event", "2025-02-03", 5, "Original review");
+        var source = objectMapper.createObjectNode().put("watchedDate", "2025-02-03")
+                .put("score", 5).put("review", "Original review");
+        var fields = objectMapper.createObjectNode().put("WATCHED_DATE", "2025-02-04")
+                .put("RATING", "8").put("REVIEW", "Edited review");
+        var resolution = objectMapper.createObjectNode();
+        resolution.set("fields", fields);
+        var payload = objectMapper.createObjectNode().put("_watchwiseResolution", 1);
+        payload.set("source", source);
+        payload.set("resolution", resolution);
+        event.setPayloadJson(writeJson(payload));
+        itemRepository.saveAndFlush(event);
+
+        apply(job, event);
+
+        assertThat(watches(owner.getId(), movie.getId())).singleElement().satisfies(watch -> {
+            assertThat(watch.watchedDate()).isEqualTo(LocalDate.of(2025, 2, 4));
+            assertThat(watch.score()).isEqualTo(8);
+            assertThat(watch.comment()).isEqualTo("Edited review");
+        });
+    }
+
+    @Test
     void shouldApplyCurrentRatingOnlyToNewestWatchWhileKeepingOlderEventScores() throws Exception {
         User owner = createUser();
         Content movie = createMovie();

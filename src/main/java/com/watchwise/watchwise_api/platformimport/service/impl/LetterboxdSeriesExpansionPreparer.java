@@ -49,6 +49,7 @@ public class LetterboxdSeriesExpansionPreparer {
                 try {
                     var plan = planner.plan(context.ownerId(), parent, Instant.now(clock));
                     issueCount += applier.stageForPreview(context, parent.getId(), plan);
+                    if (applier.markOversizedReviewIssue(context, parent.getId())) issueCount++;
                 } catch (LetterboxdSeriesExpansionPlanner.SeriesExpansionIssueException issue) {
                     applier.markPreviewIssue(context, parent.getId(), issue.getMessage());
                     issueCount++;

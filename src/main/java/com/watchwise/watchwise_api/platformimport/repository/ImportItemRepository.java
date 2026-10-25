@@ -217,6 +217,38 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
                             @Param("skipDecision") ImportDecision skipDecision,
                             @Param("resolvedDecision") ImportDecision resolvedDecision);
 
+    @Query(value = """
+            SELECT EXISTS (
+                SELECT 1 FROM import_items event
+                WHERE event.job_id = :jobId AND event.plan_generation = :generation
+                  AND event.normalized_kind = 'DIARY_EVENT'
+                  AND event.resolved_content_key = :contentKey
+                  AND event.outcome IN (:outcomes)
+                  AND (event.decision IS NULL OR event.decision <> :skipDecision)
+            )
+            """, nativeQuery = true)
+    boolean existsDetailDiaryEventByContentKey(@Param("jobId") UUID jobId,
+                                                @Param("generation") long generation,
+                                                @Param("contentKey") String contentKey,
+                                                @Param("outcomes") Collection<String> outcomes,
+                                                @Param("skipDecision") String skipDecision);
+
+    @Query(value = """
+            SELECT EXISTS (
+                SELECT 1 FROM import_items event
+                WHERE event.job_id = :jobId AND event.plan_generation = :generation
+                  AND event.normalized_kind = 'DIARY_EVENT'
+                  AND left(event.resolved_content_key, length(:prefix)) = :prefix
+                  AND event.outcome IN (:outcomes)
+                  AND (event.decision IS NULL OR event.decision <> :skipDecision)
+            )
+            """, nativeQuery = true)
+    boolean existsDetailDiaryEventByContentKeyPrefix(@Param("jobId") UUID jobId,
+                                                      @Param("generation") long generation,
+                                                      @Param("prefix") String prefix,
+                                                      @Param("outcomes") Collection<String> outcomes,
+                                                      @Param("skipDecision") String skipDecision);
+
     List<ImportItem> findByJobIdAndPlanGenerationAndOutcomeInOrderByOrdinalAscIdAsc(
             UUID jobId, long planGeneration, Collection<String> outcomes, Pageable pageable);
 

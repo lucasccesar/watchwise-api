@@ -1,6 +1,16 @@
 package com.watchwise.watchwise_api.platformimport.service;
 
+import com.watchwise.watchwise_api.calendar.service.CalendarEpisodeSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleKey;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleLookup;
+import com.watchwise.watchwise_api.calendar.service.CalendarScheduleProvider;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeasonSchedule;
+import com.watchwise.watchwise_api.calendar.service.CalendarSeriesSchedule;
+import com.watchwise.watchwise_api.common.tmdb.TmdbLookupOrigin;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
+import com.watchwise.watchwise_api.content.entity.Content;
+import com.watchwise.watchwise_api.content.entity.ContentType;
+import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.platformimport.entity.ImportItem;
 import com.watchwise.watchwise_api.platformimport.entity.ImportJob;
 import com.watchwise.watchwise_api.platformimport.model.AliasQuery;
@@ -39,6 +49,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -46,13 +57,16 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -62,6 +76,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = {
         "spring.docker.compose.enabled=false",
@@ -90,6 +105,7 @@ class HistoryNormalizationTest {
     @Autowired private UserRepository userRepository;
     @Autowired private ImportJobRepository jobRepository;
     @Autowired private ImportItemRepository itemRepository;
+    @Autowired private ContentRepository contentRepository;
     @Autowired private ImportWorker worker;
     @Autowired private PlatformContentResolver contentResolver;
     @Autowired private PasswordEncoder passwordEncoder;
@@ -97,6 +113,7 @@ class HistoryNormalizationTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private TestAliasService aliasService;
     @MockitoSpyBean private ImportIdentityNormalizer identityNormalizer;
+    @MockitoBean private CalendarScheduleProvider calendarScheduleProvider;
 
     @BeforeEach
     void setUp() {
@@ -134,6 +151,99 @@ class HistoryNormalizationTest {
                     assertThat(payload.path("review").asString()).isEqualTo("A thoughtful review.");
                 });
         assertThat(rows).filteredOn(row -> "ABSORBED".equals(row.getOutcome())).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Convert Letterboxd Review Formatting Before Merging - When It Is A Diary Event")
+    void shouldConvertLetterboxdReviewFormattingBeforeMergingIntoDiaryEvent() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP,
+                "letterboxd:review-formatting");
+        ImportTarget movie = contentTarget(MediaReference.movie("603"));
+        String eventKey = "https://letterboxd.com/user/film/arrival/diary/formatting/";
+        item(job, ImportRecordKind.DIARY_EVENT, "diary", eventKey, movie,
+                payload("Arrival", 2016, "2025-05-30", null, null), 1);
+        item(job, ImportRecordKind.REVIEW, "review", eventKey, movie,
+                payload("Arrival", 2016, null, 7, "First<br>Second &amp; third"), 2);
+
+        run(job);
+
+        ImportItem normalizedDiary = currentItems(job).stream()
+                .filter(row -> row.getNormalizedKind() == ImportRecordKind.DIARY_EVENT)
+                .findFirst().orElseThrow();
+        assertThat(read(normalizedDiary.getPayloadJson()).path("review").asString())
+                .isEqualTo("First\nSecond & third");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Keep Overlong Letterboxd Review Editable - Before Applying Diary Event")
+    void shouldKeepOverlongLetterboxdReviewEditableBeforeApplyingDiaryEvent() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP,
+                "letterboxd:long-review");
+        ImportTarget movie = contentTarget(MediaReference.movie("603"));
+        String eventKey = "https://letterboxd.com/user/film/arrival/diary/long-review/";
+        item(job, ImportRecordKind.DIARY_EVENT, "diary", eventKey, movie,
+                payload("Arrival", 2016, "2025-05-30", null, null), 1);
+        String originalReview = "x".repeat(20_001);
+        item(job, ImportRecordKind.REVIEW, "review", eventKey, movie,
+                payload("Arrival", 2016, null, 7, originalReview), 2);
+
+        ImportJob waiting = runWorker(job);
+        assertThat(waiting.getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(waiting.isWorkPending()).isFalse();
+
+        ImportItem normalizedDiary = currentItems(job).stream()
+                .filter(row -> row.getNormalizedKind() == ImportRecordKind.DIARY_EVENT)
+                .findFirst().orElseThrow();
+        assertThat(normalizedDiary.getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
+        assertThat(normalizedDiary.getIssue()).contains("REVIEW_TEXT_TOO_LONG");
+        assertThat(read(normalizedDiary.getPayloadJson()).path("review").asString()).isEqualTo(originalReview);
+        assertThat(read(normalizedDiary.getPayloadJson()).path("score").asInt()).isEqualTo(7);
+        ImportItem review = currentItems(job).stream()
+                .filter(row -> "review".equals(row.getSourceId())).findFirst().orElseThrow();
+        assertThat(review.getOutcome()).isEqualTo("ABSORBED");
+        assertThat(read(review.getPayloadJson()).path("review").asString()).isEqualTo(originalReview);
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Stage Series Episodes While An Overlong Review Remains Editable")
+    void shouldStageSeriesEpisodesWhileAnOverlongReviewRemainsEditable() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP,
+                "letterboxd:long-series-review");
+        createLocalSeriesAndEpisode("91001", 1, 1);
+        ImportTarget series = contentTarget(MediaReference.series("91001"));
+        String eventKey = "https://letterboxd.com/user/film/series/diary/long-review/";
+        item(job, ImportRecordKind.DIARY_EVENT, "diary", eventKey, series,
+                payload("Example Series", 2020, "2025-05-30", null, null), 1);
+        String originalReview = "x".repeat(20_001);
+        item(job, ImportRecordKind.REVIEW, "review", eventKey, series,
+                payload("Example Series", 2020, null, 7, originalReview), 2);
+        CalendarSeasonSchedule season = new CalendarSeasonSchedule("91001", 1, "US", "en-US",
+                "Example Series", null, List.of(new CalendarEpisodeSchedule(1, "Episode 1",
+                LocalDate.of(2020, 1, 1), (LocalTime) null, null, null, null)));
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
+                new CalendarScheduleKey(ContentType.SERIES, "91001", "en-US", "US"),
+                List.of(new CalendarSeriesSchedule.Season(season, 1, TmdbLookupOrigin.REMOTE)),
+                Map.of(1, 1), 1, true);
+        when(calendarScheduleProvider.loadSeries("91001", "US", "en-US"))
+                .thenReturn(new CalendarScheduleLookup.FoundSeries(schedule));
+        ImportJob waiting = runWorker(job);
+        assertThat(waiting.getState()).isEqualTo(ImportJobState.RESOLVING);
+        assertThat(waiting.isWorkPending()).isFalse();
+
+        ImportItem parent = currentItems(job).stream()
+                .filter(row -> row.getNormalizedKind() == ImportRecordKind.SERIES_EXPANSION)
+                .findFirst().orElseThrow();
+        assertThat(parent.getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
+        assertThat(parent.getIssue()).contains("REVIEW_TEXT_TOO_LONG");
+        assertThat(currentItems(job)).filteredOn(row -> row.getNormalizedKind() == ImportRecordKind.DIARY_EVENT)
+                .hasSize(1);
+        ImportItem review = currentItems(job).stream()
+                .filter(row -> "review".equals(row.getSourceId())).findFirst().orElseThrow();
+        assertThat(review.getOutcome()).isEqualTo("ABSORBED");
+        assertThat(read(parent.getPayloadJson()).path("review").asString()).isEqualTo(originalReview);
     }
 
     @Test
@@ -453,6 +563,16 @@ class HistoryNormalizationTest {
     void shouldKeepSeriesOpinionsOnTheirExpansionParentWhenCurrentRatingDisagrees() throws Exception {
         User owner = createUser();
         ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.LETTERBOXD_ZIP, "letterboxd:test");
+        createLocalSeriesAndEpisode("42", 1, 1);
+        CalendarSeasonSchedule season = new CalendarSeasonSchedule("42", 1, "US", "en-US", "Example Series",
+                null, List.of(new CalendarEpisodeSchedule(1, "Episode 1", LocalDate.of(2020, 1, 1),
+                (LocalTime) null, null, null, null)));
+        CalendarSeriesSchedule schedule = new CalendarSeriesSchedule(
+                new CalendarScheduleKey(ContentType.SERIES, "42", "en-US", "US"),
+                List.of(new CalendarSeriesSchedule.Season(season, 1, TmdbLookupOrigin.REMOTE)),
+                Map.of(1, 1), 1, true);
+        when(calendarScheduleProvider.loadSeries("42", "US", "en-US"))
+                .thenReturn(new CalendarScheduleLookup.FoundSeries(schedule));
         ImportTarget series = contentTarget(MediaReference.series("42"));
         String eventKey = "https://letterboxd.com/user/film/example-series/";
         ImportItem event = item(job, ImportRecordKind.DIARY_EVENT, "series-event", eventKey, series,
@@ -696,6 +816,47 @@ class HistoryNormalizationTest {
     }
 
     @Test
+    @DisplayName("[normalize] Should Preview Unknown Trakt Summary Coverage - When No Detail Events Exist")
+    void shouldPreviewUnknownTraktSummaryCoverageWhenNoDetailEventsExist() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.TRAKT_ZIP, "trakt:summary-preview");
+        ObjectNode payload = objectMapper.createObjectNode().put("title", "Example Series")
+                .put("declaredPlays", 1).put("airedEpisodeCount", 84);
+        ImportItem summary = item(job, ImportRecordKind.WATCHED_SUMMARY, "show-summary", "show-summary",
+                contentTarget(MediaReference.series("123")), payload, 1);
+        ImportItem rating = item(job, ImportRecordKind.CURRENT_RATING, "show-rating", "show-rating",
+                contentTarget(MediaReference.series("123")), payload("Example Series", 2020, null, 8, null), 2);
+
+        run(job);
+
+        ImportItem previewSummary = itemRepository.findById(summary.getId()).orElseThrow();
+        assertThat(previewSummary.getOutcome()).isEqualTo("MATCHED");
+        assertThat(previewSummary.getIssue()).contains("UNKNOWN_WATCH_COVERAGE");
+        ImportItem previewRating = itemRepository.findById(rating.getId()).orElseThrow();
+        assertThat(previewRating.getOutcome()).isEqualTo("MATCHED");
+        assertThat(previewRating.getIssue()).contains("OPINION_EVIDENCE_PENDING");
+    }
+
+    @Test
+    @DisplayName("[normalize] Should Not Warn About Trakt Summary - When Detail Episode Is Present")
+    void shouldNotWarnAboutTraktSummaryWhenDetailEpisodeIsPresent() throws Exception {
+        User owner = createUser();
+        ImportJob job = createResolvingJob(owner.getId(), ImportSourceFormat.TRAKT_ZIP, "trakt:summary-covered");
+        ObjectNode payload = objectMapper.createObjectNode().put("title", "Example Series")
+                .put("declaredPlays", 1).put("airedEpisodeCount", 84);
+        item(job, ImportRecordKind.DIARY_EVENT, "episode-1", "episode-1",
+                contentTarget(MediaReference.episode("123", 1, 1)), payload("Episode", 2020, null, null, null), 1);
+        ImportItem summary = item(job, ImportRecordKind.WATCHED_SUMMARY, "show-summary", "show-summary",
+                contentTarget(MediaReference.series("123")), payload, 2);
+
+        run(job);
+
+        ImportItem previewSummary = itemRepository.findById(summary.getId()).orElseThrow();
+        assertThat(previewSummary.getOutcome()).isEqualTo("MATCHED");
+        assertThat(previewSummary.getIssue()).isNull();
+    }
+
+    @Test
     @DisplayName("[parse] Should Leave Letterboxd Content Type Open - When The Title May Be A Series")
     void shouldLeaveLetterboxdContentTypeOpenWhenTheTitleMayBeASeries() {
         var context = new ImportReadContext(UUID.randomUUID(), UUID.randomUUID(), "fixture",
@@ -725,6 +886,14 @@ class HistoryNormalizationTest {
                 .build());
     }
 
+    private void createLocalSeriesAndEpisode(String seriesId, int seasonNumber, int episodeNumber) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        contentRepository.saveAndFlush(Content.builder().type(ContentType.SERIES).tmdbId(seriesId)
+                .createdAt(now).updatedAt(now).build());
+        contentRepository.saveAndFlush(Content.builder().type(ContentType.EPISODE).seriesTmdbId(seriesId)
+                .seasonNumber(seasonNumber).episodeNumber(episodeNumber).createdAt(now).updatedAt(now).build());
+    }
+
     private ImportJob createResolvingJob(UUID ownerId, ImportSourceFormat format, String namespace) {
         LocalDateTime now = LocalDateTime.now(clock);
         ImportPlatform platform = format == ImportSourceFormat.TRAKT_ZIP
@@ -737,7 +906,7 @@ class HistoryNormalizationTest {
                 .sourceNamespace(namespace)
                 .state(ImportJobState.RESOLVING)
                 .previewVersion(1)
-                .selectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{}}")
+                .selectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{\"history\":true,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}")
                 .timezone("UTC")
                 .storageKey(UUID.randomUUID().toString())
                 .uploadSizeBytes(1)
@@ -858,7 +1027,12 @@ class HistoryNormalizationTest {
     }
 
     private void run(ImportJob job) {
-        assertThat(runWorker(job).getState()).isEqualTo(ImportJobState.READY);
+        ImportJob result = runWorker(job);
+        List<String> rows = currentItems(job).stream()
+                .map(item -> item.getNormalizedKind() + ":" + item.getOutcome() + ":" + item.getIssue()).toList();
+        assertThat(result.getState()).withFailMessage("state=%s phase=%s pending=%s checkpoint=%s items=%s",
+                result.getState(), result.getWorkPhase(), result.isWorkPending(), result.getCheckpoint(), rows)
+                .isEqualTo(ImportJobState.READY);
     }
 
     private ImportJob runWorker(ImportJob job) {
@@ -869,7 +1043,8 @@ class HistoryNormalizationTest {
     private ImportJob restartResolve(UUID jobId, long previewVersion, long generation) {
         ImportJob job = jobRepository.findById(jobId).orElseThrow();
         job.setPreviewVersion(previewVersion);
-        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":" + generation + ",\"selection\":{}}");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":" + generation
+                + ",\"selection\":{\"history\":true,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}");
         job.setState(ImportJobState.RESOLVING);
         job.setWorkPhase("RESOLVE");
         job.setWorkPending(true);

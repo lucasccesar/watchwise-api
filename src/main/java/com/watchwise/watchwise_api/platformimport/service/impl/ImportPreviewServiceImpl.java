@@ -75,6 +75,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     private final ExternalContentAliasService externalContentAliasService;
     private final UserListRepository userListRepository;
     private final ObjectMapper objectMapper;
+    private final ImportedReviewTextNormalizer reviewTextNormalizer;
     private final ImportLimits importLimits;
     private final Clock clock;
     private final PageRequestFactory pageRequestFactory;
@@ -86,6 +87,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             ExternalContentAliasService externalContentAliasService,
             UserListRepository userListRepository,
             ObjectMapper objectMapper,
+            ImportedReviewTextNormalizer reviewTextNormalizer,
             ImportLimits importLimits,
             Clock clock,
             PageRequestFactory pageRequestFactory) {
@@ -95,6 +97,7 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         this.externalContentAliasService = externalContentAliasService;
         this.userListRepository = userListRepository;
         this.objectMapper = objectMapper;
+        this.reviewTextNormalizer = reviewTextNormalizer;
         this.importLimits = importLimits;
         this.clock = clock;
         this.pageRequestFactory = pageRequestFactory;
@@ -426,8 +429,14 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             throw new BadRequestException("Edited field is not valid for this import item");
         }
         switch (editField.field()) {
-            case TITLE, DESCRIPTION, REVIEW, CATEGORY_NAME -> {
+            case TITLE, DESCRIPTION, CATEGORY_NAME -> {
                 if (value.isBlank()) throw new BadRequestException("Edited field cannot be blank");
+            }
+            case REVIEW -> {
+                if (value.isBlank()) throw new BadRequestException("Edited field cannot be blank");
+                if (value.length() > ImportedReviewTextNormalizer.MAX_REVIEW_LENGTH) {
+                    throw new BadRequestException("Review cannot exceed 20000 characters");
+                }
             }
             case COVER_IMAGE -> validateCoverImage(value);
             case RELEASE_YEAR -> {
@@ -770,6 +779,13 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         } else if (operation instanceof ImportResolutionOperation.AssignPass) {
             item.setOutcome("RESOLVED");
             item.setIssue(null);
+        } else if (operation instanceof ImportResolutionOperation.EditField editField
+                && editField.field() == ImportResolutionOperation.EditableField.REVIEW
+                && "NORMALIZATION_ISSUE".equals(item.getOutcome())
+                && item.getIssue() != null
+                && item.getIssue().startsWith(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE)) {
+            item.setOutcome("RESOLVED");
+            item.setIssue(null);
         } else if (operation instanceof ImportResolutionOperation.SkipItem
                 || operation instanceof ImportResolutionOperation.RemoveNominee
                 || operation instanceof ImportResolutionOperation.RemoveCategory) {
@@ -919,11 +935,33 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
     private ImportPreviewItemDTO toPreviewItem(ImportItem item) {
         PreviewWatchDate watchDate = previewWatchDate(item);
+        PreviewReviewText reviewText = previewReviewText(item);
         return new ImportPreviewItemDTO(
                 item.getId(), item.getOrdinal(), item.getNormalizedKind(),
                 item.getDecision(), item.getOutcome(), item.getIssue(),
                 watchDate.date(), watchDate.timestamp(), watchDate.precision(),
-                optionalJson(item.getResolvedTargetJson()));
+                optionalJson(item.getResolvedTargetJson()), reviewText.text(), reviewText.length(),
+                reviewText.truncated());
+    }
+
+    private PreviewReviewText previewReviewText(ImportItem item) {
+        if ("ABSORBED".equals(item.getOutcome())) return new PreviewReviewText(null, null, false);
+        JsonNode payload = readPayload(item.getPayloadJson());
+        JsonNode source = sourcePayload(payload);
+        JsonNode fields = payload.path("resolution").path("fields");
+        JsonNode value = fields.path("REVIEW").isTextual() ? fields.path("REVIEW") : source.path("review");
+        if (!value.isTextual()) return new PreviewReviewText(null, null, false);
+        String normalized = reviewTextNormalizer.normalize(value.asString());
+        if (normalized == null) return new PreviewReviewText(null, null, false);
+        int length = normalized.length();
+        boolean truncated = length > ImportedReviewTextNormalizer.MAX_REVIEW_LENGTH;
+        int previewLength = Math.min(length, ImportedReviewTextNormalizer.MAX_REVIEW_LENGTH);
+        if (truncated && previewLength > 0 && Character.isHighSurrogate(normalized.charAt(previewLength - 1))
+                && Character.isLowSurrogate(normalized.charAt(previewLength))) {
+            previewLength--;
+        }
+        String preview = normalized.substring(0, previewLength);
+        return new PreviewReviewText(preview, length, truncated);
     }
 
     private PreviewWatchDate previewWatchDate(ImportItem item) {
@@ -1015,5 +1053,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     }
 
     private record PreviewWatchDate(LocalDate date, Instant timestamp, ImportDatePrecision precision) {
+    }
+
+    private record PreviewReviewText(String text, Integer length, boolean truncated) {
     }
 }
