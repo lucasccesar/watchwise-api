@@ -34,32 +34,58 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
             UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind);
 
     @Query(value = """
-            SELECT * FROM import_items item
-            WHERE item.job_id = :jobId AND item.plan_generation = :generation
-              AND item.parent_source_id = :parentSourceId AND item.normalized_kind = 'LIST_ITEM'
-              AND (item.ordinal > :afterOrdinal
-                   OR (item.ordinal = :afterOrdinal AND item.id > CAST(:afterId AS uuid)))
-            ORDER BY item.ordinal ASC, item.id ASC
+            WITH staged AS (
+                SELECT item.*,
+                       COALESCE(
+                           CASE WHEN COALESCE(item.payload_json::jsonb ->> 'rank',
+                                              item.payload_json::jsonb #>> '{source,rank}') ~ '^[0-9]+$'
+                                THEN COALESCE(item.payload_json::jsonb ->> 'rank',
+                                              item.payload_json::jsonb #>> '{source,rank}')::bigint END,
+                           item.ordinal + 1) AS source_rank
+                FROM import_items item
+                WHERE item.job_id = :jobId AND item.plan_generation = :generation
+                  AND item.parent_source_id = :parentSourceId AND item.normalized_kind = 'LIST_ITEM'
+            )
+            SELECT * FROM staged
+            WHERE source_rank > :afterRank
+               OR (source_rank = :afterRank AND ordinal > :afterOrdinal)
+               OR (source_rank = :afterRank AND ordinal = :afterOrdinal AND id > CAST(:afterId AS uuid))
+            ORDER BY source_rank ASC, ordinal ASC, id ASC
             LIMIT :batchSize
             """, nativeQuery = true)
     List<ImportItem> findListItemsAfter(@Param("jobId") UUID jobId, @Param("generation") long generation,
                                        @Param("parentSourceId") String parentSourceId,
+                                       @Param("afterRank") long afterRank,
                                        @Param("afterOrdinal") long afterOrdinal, @Param("afterId") String afterId,
                                        @Param("batchSize") int batchSize);
 
     @Query(value = """
-            SELECT * FROM import_items item
-            WHERE item.job_id = :jobId AND item.plan_generation = :generation
-              AND item.normalized_kind = 'WATCHLIST_ITEM'
-              AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED'))
-              AND (item.ordinal > :afterOrdinal
-                   OR (item.ordinal = :afterOrdinal AND item.id > CAST(:afterId AS uuid)))
-            ORDER BY item.ordinal ASC, item.id ASC
+            WITH staged AS (
+                SELECT item.*,
+                       COALESCE(
+                           CASE WHEN COALESCE(item.payload_json::jsonb ->> 'rank',
+                                              item.payload_json::jsonb #>> '{source,rank}') ~ '^[0-9]+$'
+                                THEN COALESCE(item.payload_json::jsonb ->> 'rank',
+                                              item.payload_json::jsonb #>> '{source,rank}')::bigint END,
+                           item.ordinal + 1) AS source_rank
+                FROM import_items item
+                WHERE item.job_id = :jobId AND item.plan_generation = :generation
+                  AND item.normalized_kind = 'WATCHLIST_ITEM'
+                  AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED'))
+            )
+            SELECT * FROM staged
+            WHERE source_rank > :afterRank
+               OR (source_rank = :afterRank AND ordinal > :afterOrdinal)
+               OR (source_rank = :afterRank AND ordinal = :afterOrdinal
+                   AND id > CAST(:afterId AS uuid))
+            ORDER BY source_rank ASC, ordinal ASC, id ASC
             LIMIT :batchSize
             """, nativeQuery = true)
     List<ImportItem> findWatchlistItemsAfter(@Param("jobId") UUID jobId, @Param("generation") long generation,
+                                            @Param("afterRank") long afterRank,
                                             @Param("afterOrdinal") long afterOrdinal,
-                                            @Param("afterId") String afterId, @Param("batchSize") int batchSize);
+                                            @Param("afterId") String afterId,
+                                            @Param("batchSize") int batchSize);
 
     @Query(value = """
             SELECT * FROM import_items item
@@ -77,14 +103,24 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
                                           @Param("batchSize") int batchSize);
 
     @Query(value = """
-            SELECT DISTINCT ON (item.resolved_content_key) item.id
-            FROM import_items item
-            WHERE item.job_id = :jobId AND item.plan_generation = :generation
-              AND item.parent_source_id = :parentSourceId AND item.normalized_kind = 'LIST_ITEM'
-              AND item.resolved_content_key IN (:contentKeys)
-              AND item.resolved_content_key IS NOT NULL
-              AND (item.decision IS NULL OR item.decision <> 'SKIP_ITEM')
-            ORDER BY item.resolved_content_key, item.ordinal ASC, item.id ASC
+            WITH staged AS (
+                SELECT item.id, item.resolved_content_key, item.ordinal, item.decision,
+                       COALESCE(
+                           CASE WHEN COALESCE(item.payload_json::jsonb ->> 'rank',
+                                              item.payload_json::jsonb #>> '{source,rank}') ~ '^[0-9]+$'
+                                THEN COALESCE(item.payload_json::jsonb ->> 'rank',
+                                              item.payload_json::jsonb #>> '{source,rank}')::bigint END,
+                           item.ordinal + 1) AS source_rank
+                FROM import_items item
+                WHERE item.job_id = :jobId AND item.plan_generation = :generation
+                  AND item.parent_source_id = :parentSourceId AND item.normalized_kind = 'LIST_ITEM'
+                  AND item.resolved_content_key IN (:contentKeys)
+                  AND item.resolved_content_key IS NOT NULL
+                  AND (item.decision IS NULL OR item.decision <> 'SKIP_ITEM')
+            )
+            SELECT DISTINCT ON (resolved_content_key) id
+            FROM staged
+            ORDER BY resolved_content_key, source_rank ASC, ordinal ASC, id ASC
             """, nativeQuery = true)
     List<UUID> findFirstListItemsForContentKeys(@Param("jobId") UUID jobId,
                                                 @Param("generation") long generation,
@@ -114,6 +150,22 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
     List<String> findSourceWatchEvidenceContentKeys(@Param("jobId") UUID jobId,
                                                     @Param("generation") long generation,
                                                     @Param("contentKeys") Collection<String> contentKeys);
+
+    @Query(value = """
+            SELECT DISTINCT series.id
+            FROM import_items item
+            CROSS JOIN LATERAL jsonb_array_elements_text(CAST(:seriesIdsJson AS jsonb)) AS series(id)
+            WHERE item.job_id = :jobId AND item.plan_generation = :generation
+              AND item.normalized_kind IN ('DIARY_EVENT', 'WATCHED_MARKER', 'WATCHED_SUMMARY', 'SERIES_EXPANSION')
+              AND (item.decision IS NULL OR item.decision <> 'SKIP_ITEM')
+              AND (left(item.resolved_content_key, length('CONTENT|EPISODE|' || series.id || '|'))
+                       = 'CONTENT|EPISODE|' || series.id || '|'
+                   OR left(item.resolved_content_key, length('CONTENT|SEASON|' || series.id || '|'))
+                       = 'CONTENT|SEASON|' || series.id || '|')
+            """, nativeQuery = true)
+    List<String> findSourceWatchedSeriesIds(@Param("jobId") UUID jobId,
+                                            @Param("generation") long generation,
+                                            @Param("seriesIdsJson") String seriesIdsJson);
 
     long countByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKindAndObjectKindAndOutcome(
             UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind,

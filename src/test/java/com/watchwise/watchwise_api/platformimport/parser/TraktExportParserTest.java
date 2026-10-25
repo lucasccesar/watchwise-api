@@ -99,7 +99,7 @@ class TraktExportParserTest {
     }
 
     @Test
-    void usesTraktRankAsTheListItemOrderWhenSourceRowsAreOutOfOrder() {
+    void preservesCheckpointOrdinalAndRetainsTraktRankWhenSourceRowsAreOutOfOrder() {
         TraktItemParserImpl items = new TraktItemParserImpl(mapper);
         String json = "[{\"id\":42,\"type\":\"movie\",\"rank\":2,\"movie\":{\"title\":\"B\",\"ids\":{\"tmdb\":51002}}},"
                 + "{\"id\":41,\"type\":\"movie\",\"rank\":1,\"movie\":{\"title\":\"A\",\"ids\":{\"tmdb\":51001}}}]";
@@ -107,7 +107,8 @@ class TraktExportParserTest {
 
         items.parse(stream(json), CONTEXT, "lists/list-41.json", ImportRecordKind.LIST_ITEM, records::add);
 
-        assertThat(records).extracting(NormalizedImportRecord::ordinal).containsExactly(1, 0);
+        assertThat(records).extracting(NormalizedImportRecord::ordinal).containsExactly(0, 1);
+        assertThat(records).extracting(record -> record.payload().path("rank").asInt()).containsExactly(2, 1);
     }
 
     @Test

@@ -9,10 +9,12 @@ public record PreparedListImport(
         String description,
         UUID parentItemId,
         long itemCount,
+        Long declaredItemCount,
         UUID linkedListId) {
 
     public PreparedListImport {
-        if (sourceKey == null || operationKey == null || parentItemId == null || itemCount < 0) {
+        if (sourceKey == null || operationKey == null || parentItemId == null || itemCount < 0
+                || declaredItemCount != null && declaredItemCount < 0) {
             throw new IllegalArgumentException("Prepared list import fields are required");
         }
     }

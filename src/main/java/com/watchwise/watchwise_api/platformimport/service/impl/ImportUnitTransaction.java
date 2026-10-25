@@ -104,6 +104,9 @@ public class ImportUnitTransaction {
             } catch (LetterboxdSeriesExpansionPlanner.SeriesExpansionIssueException exception) {
                 pauseForExpansionIssue(job, item, exception.getMessage());
                 return true;
+            } catch (ListItemCountMismatchException exception) {
+                pauseForListIssue(job, item, exception.getMessage());
+                return true;
             }
             if (!applier.isComplete(context, item.getId())) {
                 if (!"EXPANDING".equals(item.getOutcome())) item.setOutcome("MATCHED");
@@ -400,6 +403,16 @@ public class ImportUnitTransaction {
         itemRepository.save(item);
         job.setState(ImportJobState.READY);
         job.setWorkPhase("APPLY");
+        job.setWorkPending(false);
+        job.setNextRunAt(null);
+        releaseLease(job);
+    }
+
+    private void pauseForListIssue(ImportJob job, ImportItem item, String issue) {
+        item.setOutcome("NORMALIZATION_ISSUE");
+        item.setIssue(issue);
+        itemRepository.save(item);
+        job.setState(ImportJobState.READY);
         job.setWorkPending(false);
         job.setNextRunAt(null);
         releaseLease(job);

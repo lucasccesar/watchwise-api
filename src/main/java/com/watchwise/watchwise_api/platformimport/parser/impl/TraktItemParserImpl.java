@@ -134,10 +134,10 @@ public class TraktItemParserImpl implements TraktItemParser {
             if (episode) { query.put("seasonNumber", season); if (episodeNumber != null) query.put("episodeNumber", episodeNumber); }
         }
         String kindId = kind == ImportRecordKind.LIST_ITEM ? "list_item" : kind.name().toLowerCase(Locale.ROOT);
-        int ordinal = rank == null ? Math.toIntExact(recordNumber - 1) : rank - 1;
         return new NormalizedImportRecord(kind.name().toLowerCase(Locale.ROOT) + ":" + id, kind,
                 new ImportSourceKey(context.sourceNamespace(), kindId, id), null,
-                ref == null ? null : new ImportTarget.ContentTarget(ref), payload, ordinal);
+                ref == null ? null : new ImportTarget.ContentTarget(ref), payload,
+                Math.toIntExact(recordNumber - 1));
     }
 
     private String inferBranch(JsonNode row, ImportRecordKind kind) {

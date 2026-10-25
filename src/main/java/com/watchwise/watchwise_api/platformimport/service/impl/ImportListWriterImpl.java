@@ -98,15 +98,18 @@ public class ImportListWriterImpl implements ImportListWriter {
         addPart(digest, metadataItem.getSourceId());
         addPart(digest, title);
         addPart(digest, description);
+        addPart(digest, text(effectivePayload(metadataItem), "sourceItemCount"));
         addPart(digest, linkedListId == null ? null : linkedListId.toString());
 
+        long afterRank = -1;
         long afterOrdinal = -1;
         UUID afterId = FIRST_ID;
         while (true) {
             List<ImportItem> page = itemRepository.findListItemsAfter(context.jobId(), context.planGeneration(),
-                    metadataItem.getSourceId(), afterOrdinal, afterId.toString(), BATCH_SIZE);
+                    metadataItem.getSourceId(), afterRank, afterOrdinal, afterId.toString(), BATCH_SIZE);
             if (page.isEmpty()) break;
             for (ImportItem item : page) {
+                afterRank = sourceRank(item);
                 afterOrdinal = item.getOrdinal();
                 afterId = item.getId();
                 if (item.getDecision() == ImportDecision.SKIP_ITEM) {
@@ -229,12 +232,14 @@ public class ImportListWriterImpl implements ImportListWriter {
 
     private void processMembers(ImportExecutionContext context, ImportItem metadataItem, UUID listId) {
         int nextPosition = userListItemService.nextImportedPosition(context.ownerId(), listId);
+        long afterRank = -1;
         long afterOrdinal = -1;
         UUID afterId = FIRST_ID;
         while (true) {
             List<ImportItem> page = itemRepository.findListItemsAfter(context.jobId(), context.planGeneration(),
-                    metadataItem.getSourceId(), afterOrdinal, afterId.toString(), BATCH_SIZE);
+                    metadataItem.getSourceId(), afterRank, afterOrdinal, afterId.toString(), BATCH_SIZE);
             if (page.isEmpty()) break;
+            afterRank = sourceRank(page.getLast());
             afterOrdinal = page.getLast().getOrdinal();
             afterId = page.getLast().getId();
             nextPosition = processMemberBatch(context, listId, metadataItem.getSourceId(), page, nextPosition);
@@ -325,12 +330,14 @@ public class ImportListWriterImpl implements ImportListWriter {
     }
 
     private void prepareContentReferences(ImportExecutionContext context, ImportItem metadataItem) {
+        long afterRank = -1;
         long afterOrdinal = -1;
         UUID afterId = FIRST_ID;
         while (true) {
             List<ImportItem> page = itemRepository.findListItemsAfter(context.jobId(), context.planGeneration(),
-                    metadataItem.getSourceId(), afterOrdinal, afterId.toString(), BATCH_SIZE);
+                    metadataItem.getSourceId(), afterRank, afterOrdinal, afterId.toString(), BATCH_SIZE);
             if (page.isEmpty()) return;
+            afterRank = sourceRank(page.getLast());
             afterOrdinal = page.getLast().getOrdinal();
             afterId = page.getLast().getId();
             List<String> contentKeys = page.stream().filter(item -> item.getDecision() != ImportDecision.SKIP_ITEM)
@@ -393,6 +400,12 @@ public class ImportListWriterImpl implements ImportListWriter {
         };
     }
 
+    private long sourceRank(ImportItem item) {
+        JsonNode rank = effectivePayload(item).path("rank");
+        if (rank.isIntegralNumber() && rank.canConvertToLong() && rank.longValue() > 0) return rank.longValue();
+        return Math.addExact(item.getOrdinal(), 1);
+    }
+
     private void reserveAndSkip(ImportExecutionContext context, ImportItem item, ImportSourceKey key, String reason) {
         LinkReservation reservation = ledger.reserve(context.ownerId(), context.jobId(), key,
                 ImportEventDeduplicator.payloadHash(item.getPayloadJson()));
@@ -409,12 +422,14 @@ public class ImportListWriterImpl implements ImportListWriter {
     }
 
     private void skipAllMembers(ImportExecutionContext context, ImportItem metadataItem, String reason) {
+        long afterRank = -1;
         long afterOrdinal = -1;
         UUID afterId = FIRST_ID;
         while (true) {
             List<ImportItem> page = itemRepository.findListItemsAfter(context.jobId(), context.planGeneration(),
-                    metadataItem.getSourceId(), afterOrdinal, afterId.toString(), BATCH_SIZE);
+                    metadataItem.getSourceId(), afterRank, afterOrdinal, afterId.toString(), BATCH_SIZE);
             if (page.isEmpty()) return;
+            afterRank = sourceRank(page.getLast());
             afterOrdinal = page.getLast().getOrdinal();
             afterId = page.getLast().getId();
             for (ImportItem item : page) reserveAndSkip(context, item, memberKey(context, item), reason);

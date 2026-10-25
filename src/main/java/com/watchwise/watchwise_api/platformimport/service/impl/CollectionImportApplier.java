@@ -22,6 +22,8 @@ import java.util.UUID;
 
 @Component
 public class CollectionImportApplier implements ImportUnitApplier {
+    private static final int WATCHLIST_BATCH_SIZE = 200;
+    private static final UUID FIRST_ID = new UUID(0, 0);
     private final ImportItemRepository itemRepository;
     private final ImportListWriter listWriter;
     private final ImportWatchlistWriter watchlistWriter;
@@ -62,7 +64,7 @@ public class CollectionImportApplier implements ImportUnitApplier {
             return;
         }
         if (item.getNormalizedKind() == ImportRecordKind.WATCHLIST_ITEM) {
-            applyWatchlistBatch(context, item);
+            applyWatchlistBatch(context);
             return;
         }
 
@@ -75,29 +77,33 @@ public class CollectionImportApplier implements ImportUnitApplier {
         ImportSourceKey operationKey = listWriter.operationKey(context, item);
         long itemCount = itemRepository.countByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
                 context.jobId(), context.planGeneration(), item.getSourceId(), ImportRecordKind.LIST_ITEM);
-        listWriter.apply(context, new PreparedListImport(identityKey, operationKey, name, description,
-                item.getId(), itemCount, linkedListId));
+        JsonNode declaredCount = payload.get("sourceItemCount");
+        Long declaredItemCount = null;
+        if (declaredCount != null && !declaredCount.isNull()) {
+            if (!declaredCount.isIntegralNumber() || !declaredCount.canConvertToLong() || declaredCount.longValue() < 0) {
+                throw new IllegalStateException("Declared source list item count is invalid");
+            }
+            declaredItemCount = declaredCount.longValue();
+        }
+        PreparedListImport plan = new PreparedListImport(identityKey, operationKey, name, description,
+                item.getId(), itemCount, declaredItemCount, linkedListId);
+        if (plan.declaredItemCount() != null && plan.declaredItemCount() != plan.itemCount()) {
+            throw new ListItemCountMismatchException(plan.declaredItemCount(), plan.itemCount());
+        }
+        listWriter.apply(context, plan);
     }
 
-    private void applyWatchlistBatch(ImportExecutionContext context, ImportItem first) {
-        long afterOrdinal = first.getOrdinal() - 1;
-        UUID afterId = new UUID(0, 0);
+    private void applyWatchlistBatch(ImportExecutionContext context) {
         List<ImportItem> page = itemRepository.findWatchlistItemsAfter(context.jobId(), context.planGeneration(),
-                afterOrdinal, afterId.toString(), 200);
-        if (page.isEmpty() || page.getFirst().getId().equals(first.getId())) {
-            if (!page.isEmpty()) applyWatchlistPage(context, page);
-            return;
-        }
-        List<ImportItem> batch = page.stream().filter(item -> item.getOrdinal() > first.getOrdinal()
-                || (item.getOrdinal() == first.getOrdinal() && item.getId().compareTo(first.getId()) >= 0))
-                .limit(200).toList();
-        if (batch.isEmpty()) batch = List.of(first);
-        applyWatchlistPage(context, batch);
+                -1, -1, FIRST_ID.toString(), WATCHLIST_BATCH_SIZE);
+        if (page.isEmpty()) throw new IllegalStateException("Pending watchlist batch is unexpectedly empty");
+        applyWatchlistPage(context, page);
     }
 
     private void applyWatchlistPage(ImportExecutionContext context, List<ImportItem> page) {
         java.util.ArrayList<NormalizedImportRecord> records = new java.util.ArrayList<>(page.size());
         java.util.HashSet<com.watchwise.watchwise_api.content.dto.MediaReference> sourceWatched = new java.util.HashSet<>();
+        java.util.Map<UUID, ImportTarget.ContentTarget> targets = new java.util.LinkedHashMap<>();
         java.util.List<String> contentKeys = page.stream().map(ImportItem::getResolvedContentKey)
                 .filter(key -> key != null && !key.isBlank()).distinct().toList();
         java.util.Set<String> watchedContentKeys = contentKeys.isEmpty() ? java.util.Set.of()
@@ -108,12 +114,32 @@ public class CollectionImportApplier implements ImportUnitApplier {
             if (!(target instanceof ImportTarget.ContentTarget contentTarget)) {
                 throw new IllegalStateException("Watchlist item must resolve to a content target");
             }
+            targets.put(item.getId(), contentTarget);
+        }
+        java.util.List<String> seriesIds = targets.values().stream().map(ImportTarget.ContentTarget::content)
+                .filter(reference -> reference.type() == com.watchwise.watchwise_api.content.entity.ContentType.SERIES)
+                .map(com.watchwise.watchwise_api.content.dto.MediaReference::tmdbId).distinct().toList();
+        java.util.Set<String> watchedSeriesIds = java.util.Set.of();
+        if (!seriesIds.isEmpty()) {
+            try {
+                watchedSeriesIds = java.util.Set.copyOf(itemRepository.findSourceWatchedSeriesIds(
+                        context.jobId(), context.planGeneration(), objectMapper.writeValueAsString(seriesIds)));
+            } catch (JacksonException exception) {
+                throw new IllegalStateException("Source watchlist evidence could not be serialized", exception);
+            }
+        }
+        for (ImportItem item : page) {
+            ImportTarget.ContentTarget contentTarget = targets.get(item.getId());
             if (watchedContentKeys.contains(item.getResolvedContentKey())) {
+                sourceWatched.add(contentTarget.content());
+            }
+            if (contentTarget.content().type() == com.watchwise.watchwise_api.content.entity.ContentType.SERIES
+                    && watchedSeriesIds.contains(contentTarget.content().tmdbId())) {
                 sourceWatched.add(contentTarget.content());
             }
             records.add(new NormalizedImportRecord(item.getId().toString(), item.getNormalizedKind(),
                     new ImportSourceKey(item.getSourceNamespace(), item.getObjectKind(), item.getSourceId()),
-                    item.getParentSourceId(), target, readPayload(item.getPayloadJson()),
+                    item.getParentSourceId(), contentTarget, readPayload(item.getPayloadJson()),
                     Math.toIntExact(item.getOrdinal())));
         }
         watchlistWriter.apply(context, new PreparedWatchlistImport(records, sourceWatched));
@@ -122,7 +148,11 @@ public class CollectionImportApplier implements ImportUnitApplier {
     @Override
     public boolean isComplete(ImportExecutionContext context, UUID unitId) {
         ImportItem item = itemRepository.findById(unitId).orElse(null);
-        if (item == null || item.getNormalizedKind() != ImportRecordKind.LIST_ITEM) return true;
+        if (item == null) return true;
+        if (item.getNormalizedKind() == ImportRecordKind.WATCHLIST_ITEM) {
+            return "APPLIED".equals(item.getOutcome()) || "SKIPPED".equals(item.getOutcome());
+        }
+        if (item.getNormalizedKind() != ImportRecordKind.LIST_ITEM) return true;
         if ("APPLIED".equals(item.getOutcome()) || "SKIPPED".equals(item.getOutcome())) return true;
         ImportItem parent = parent(context, item);
         return parent == null || "APPLIED".equals(parent.getOutcome()) || "SKIPPED".equals(parent.getOutcome());

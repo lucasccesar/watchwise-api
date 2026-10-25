@@ -32,6 +32,7 @@ import com.watchwise.watchwise_api.userlist.repository.UserListRepository;
 import com.watchwise.watchwise_api.userlist.service.UserListItemService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -143,6 +144,92 @@ class ImportCollectionWritersIntegrationTest {
     }
 
     @Test
+    void appliesWatchlistItemsByRankWhenSourceRowsAreReversed() throws Exception {
+        User owner = createUser();
+        createMovie("52006");
+        createMovie("52007");
+        ImportJob job = createJob(owner);
+        ImportItem rankTwo = createRankedWatchlistItem(job, "rank-two", "52006", 0, 2);
+        ImportItem rankOne = createRankedWatchlistItem(job, "rank-one", "52007", 1, 1);
+
+        ImportItem firstPendingOrdinal = items.findApplyPending(job.getId(), 1, PageRequest.of(0, 200)).getFirst();
+        apply(job, firstPendingOrdinal);
+
+        assertThat(watchlistEntries.findByUserIdOrderByPositionAsc(owner.getId()))
+                .extracting(entry -> entry.getContent().getTmdbId()).containsExactly("52007", "52006");
+        assertThat(items.findById(rankTwo.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
+        assertThat(items.findById(rankOne.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
+    }
+
+    @Test
+    void advancesWatchlistCursorAcrossEqualRanksWithoutSkippingOrRepeating() throws Exception {
+        User owner = createUser();
+        ImportJob job = createJob(owner);
+        createRankedWatchlistItem(job, "equal-rank-first", "52008", 0, 5);
+        createRankedWatchlistItem(job, "equal-rank-second", "52009", 1, 5);
+        createRankedWatchlistItem(job, "equal-rank-third", "52010", 2, 5);
+        long afterRank = -1;
+        long afterOrdinal = -1;
+        UUID afterId = new UUID(0, 0);
+        List<String> seen = new java.util.ArrayList<>();
+
+        while (seen.size() < 4) {
+            List<ImportItem> page = items.findWatchlistItemsAfter(job.getId(), 1, afterRank, afterOrdinal,
+                    afterId.toString(), 1);
+            if (page.isEmpty()) break;
+            ImportItem last = page.getFirst();
+            seen.add(last.getSourceId());
+            afterRank = 5;
+            afterOrdinal = last.getOrdinal();
+            afterId = last.getId();
+        }
+
+        assertThat(seen).containsExactly("equal-rank-first", "equal-rank-second", "equal-rank-third");
+    }
+
+    @Test
+    void advancesCallerAcrossRankPagesWhenItsSourceOrdinalIsOutsideTheFirstBatch() throws Exception {
+        User owner = createUser();
+        LocalDateTime now = LocalDateTime.now();
+        List<Content> movies = new java.util.ArrayList<>(201);
+        List<ImportItem> staged = new java.util.ArrayList<>(201);
+        ImportJob job = createJob(owner);
+        for (int ordinal = 0; ordinal < 201; ordinal++) {
+            String movieTmdbId = Integer.toString(60_001 + ordinal);
+            int rank = 201 - ordinal;
+            movies.add(Content.builder().type(ContentType.MOVIE).tmdbId(movieTmdbId)
+                    .createdAt(now).updatedAt(now).build());
+            var payload = mapper.createObjectNode().put("title", "Movie " + movieTmdbId).put("rank", rank);
+            staged.add(ImportItem.builder().jobId(job.getId()).planGeneration(1).ordinal(ordinal)
+                    .normalizedKind(ImportRecordKind.WATCHLIST_ITEM).sourceNamespace(job.getSourceNamespace())
+                    .objectKind("watchlist_content").sourceId("rank-" + rank)
+                    .payloadJson(mapper.writeValueAsString(payload))
+                    .resolvedTargetJson(mapper.writeValueAsString(new ImportTarget.ContentTarget(
+                            MediaReference.movie(movieTmdbId))))
+                    .resolvedContentKey("CONTENT|MOVIE|" + movieTmdbId).outcome("MATCHED").build());
+        }
+        contents.saveAllAndFlush(movies);
+        List<ImportItem> savedItems = items.saveAllAndFlush(staged);
+        ImportItem firstPendingOrdinal = savedItems.getFirst();
+
+        apply(job, firstPendingOrdinal);
+
+        assertThat(items.findById(firstPendingOrdinal.getId()).orElseThrow().getOutcome()).isEqualTo("MATCHED");
+        assertThat(watchlistEntries.count()).isEqualTo(200L);
+
+        apply(job, firstPendingOrdinal);
+
+        assertThat(items.findById(firstPendingOrdinal.getId()).orElseThrow().getOutcome()).isEqualTo("APPLIED");
+        assertThat(watchlistEntries.findByUserIdOrderByPositionAsc(owner.getId()))
+                .extracting(entry -> entry.getContent().getTmdbId())
+                .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 201)
+                        .mapToObj(offset -> Integer.toString(60_201 - offset)).toList());
+        assertThat(items.findAllByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
+                job.getId(), 1, null, ImportRecordKind.WATCHLIST_ITEM))
+                .extracting(ImportItem::getOutcome).containsOnly("APPLIED");
+    }
+
+    @Test
     void skipsWatchlistItemsWithDiaryOrUnknownAssertionEvidence() throws Exception {
         User owner = createUser();
         createMovie("52005");
@@ -163,6 +250,28 @@ class ImportCollectionWritersIntegrationTest {
         assertThat(watchlistEntries.findByUserIdOrderByPositionAsc(owner.getId())).isEmpty();
         assertThat(items.findById(watchedMovieItem.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
         assertThat(items.findById(assertedSeriesItem.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+    }
+
+    @Test
+    void skipsSeriesFromWatchlistWhenOnlyEpisodeOrSeasonWatchEvidenceIsStaged() throws Exception {
+        User owner = createUser();
+        LocalDateTime now = LocalDateTime.now();
+        contents.saveAndFlush(Content.builder().type(ContentType.SERIES).tmdbId("53002")
+                .createdAt(now).updatedAt(now).build());
+        contents.saveAndFlush(Content.builder().type(ContentType.SERIES).tmdbId("53003")
+                .createdAt(now).updatedAt(now).build());
+        ImportJob job = createJob(owner);
+        ImportItem episodeWatchedSeries = createWatchlistSeriesItem(job, "series-with-episode-marker", "53002", 0);
+        ImportItem seasonWatchedSeries = createWatchlistSeriesItem(job, "series-with-season-marker", "53003", 1);
+        createWatchedDetailMarker(job, "episode-watch-marker", MediaReference.episode("53002", 1, 1), 10);
+        createWatchedDetailMarker(job, "season-watch-marker", MediaReference.season("53003", 1), 11);
+
+        apply(job, episodeWatchedSeries);
+
+        assertThat(watchlistEntries.findByUserIdOrderByPositionAsc(owner.getId())).isEmpty();
+        assertThat(items.findById(episodeWatchedSeries.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+        assertThat(items.findById(seasonWatchedSeries.getId()).orElseThrow().getOutcome()).isEqualTo("SKIPPED");
+        assertThat(diaryEntries.count()).isZero();
     }
 
     @Test
@@ -199,13 +308,52 @@ class ImportCollectionWritersIntegrationTest {
     void createsASelectedEmptyListAsPublic() throws Exception {
         User owner = createUser();
         ImportJob job = createJob(owner);
-        ImportItem metadata = createListMetadata(job, "trakt-list-55", "Empty list", null, 0);
+        ImportItem metadata = createListMetadata(job, "trakt-list-55", "Empty list", null, 0, 0L);
 
         apply(job, metadata);
 
         UserList empty = userLists.findByUserId(owner.getId()).getFirst();
         assertThat(empty.getVisibility().name()).isEqualTo("PUBLIC");
         assertThat(userListItems.findByUserListIdWithContentAndChildListOrderByPositionAsc(empty.getId())).isEmpty();
+    }
+
+    @Test
+    void doesNotCreateListWhenDeclaredSourceItemCountExceedsStagedItems() throws Exception {
+        User owner = createUser();
+        ImportJob job = createJob(owner);
+        ImportItem metadata = createListMetadata(job, "trakt-list-incomplete", "Incomplete list", null, 0, 2L);
+
+        apply(job, metadata);
+
+        assertThat(userLists.findByUserId(owner.getId())).isEmpty();
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM external_import_links
+                WHERE user_id = ? AND source_namespace = ? AND state = 'APPLIED'
+                """, Long.class, owner.getId(), job.getSourceNamespace())).isZero();
+        ImportItem result = items.findById(metadata.getId()).orElseThrow();
+        assertThat(result.getOutcome()).isEqualTo("NORMALIZATION_ISSUE");
+        assertThat(result.getIssue()).startsWith("LIST_ITEM_COUNT_MISMATCH:");
+        ImportJob paused = jobs.findById(job.getId()).orElseThrow();
+        assertThat(paused.getState()).isEqualTo(ImportJobState.READY);
+        assertThat(paused.isWorkPending()).isFalse();
+    }
+
+    @Test
+    void ordersTraktListMembersByRankEvenWhenSourceRowsAreOutOfOrder() throws Exception {
+        User owner = createUser();
+        createMovie("57001");
+        createMovie("57002");
+        String listSourceId = "trakt-list-rank-test";
+        ImportJob job = createJob(owner);
+        ImportItem metadata = createListMetadata(job, listSourceId, "Ranked list", null, 0);
+        createRankedListItem(job, "rank-two", listSourceId, "57001", 0, 2);
+        createRankedListItem(job, "rank-one", listSourceId, "57002", 1, 1);
+
+        apply(job, metadata);
+
+        UserList list = userLists.findByUserId(owner.getId()).getFirst();
+        assertThat(userListItems.findByUserListIdWithContentAndChildListOrderByPositionAsc(list.getId()))
+                .extracting(item -> item.getContent().getTmdbId()).containsExactly("57002", "57001");
     }
 
     @Test
@@ -298,7 +446,13 @@ class ImportCollectionWritersIntegrationTest {
 
     private ImportItem createListMetadata(ImportJob job, String sourceId, String name, String description, long ordinal)
             throws Exception {
+        return createListMetadata(job, sourceId, name, description, ordinal, null);
+    }
+
+    private ImportItem createListMetadata(ImportJob job, String sourceId, String name, String description,
+                                          long ordinal, Long sourceItemCount) throws Exception {
         var payload = mapper.createObjectNode().put("title", name).put("description", description);
+        if (sourceItemCount != null) payload.put("sourceItemCount", sourceItemCount);
         ImportItem item = ImportItem.builder().jobId(job.getId()).planGeneration(1).ordinal(ordinal)
                 .normalizedKind(ImportRecordKind.LIST_METADATA).sourceNamespace(job.getSourceNamespace())
                 .objectKind("list_metadata").sourceId(sourceId).payloadJson(mapper.writeValueAsString(payload))
@@ -319,9 +473,33 @@ class ImportCollectionWritersIntegrationTest {
         return items.saveAndFlush(item);
     }
 
+    private ImportItem createRankedListItem(ImportJob job, String sourceId, String parentSourceId,
+                                            String movieTmdbId, long ordinal, int rank) throws Exception {
+        var payload = mapper.createObjectNode().put("title", "Movie " + movieTmdbId)
+                .put("rank", rank).put("description", sourceId);
+        ImportItem item = ImportItem.builder().jobId(job.getId()).planGeneration(1).ordinal(ordinal + 1)
+                .normalizedKind(ImportRecordKind.LIST_ITEM).sourceNamespace(job.getSourceNamespace())
+                .objectKind("list_item").sourceId(sourceId).parentSourceId(parentSourceId)
+                .payloadJson(mapper.writeValueAsString(payload))
+                .resolvedTargetJson(mapper.writeValueAsString(new ImportTarget.ContentTarget(MediaReference.movie(movieTmdbId))))
+                .resolvedContentKey("CONTENT|MOVIE|" + movieTmdbId).outcome("MATCHED").build();
+        return items.saveAndFlush(item);
+    }
+
     private ImportItem createWatchlistItem(ImportJob job, String sourceId, String movieTmdbId, long ordinal)
             throws Exception {
         var payload = mapper.createObjectNode().put("title", "Movie " + movieTmdbId);
+        ImportItem item = ImportItem.builder().jobId(job.getId()).planGeneration(1).ordinal(ordinal)
+                .normalizedKind(ImportRecordKind.WATCHLIST_ITEM).sourceNamespace(job.getSourceNamespace())
+                .objectKind("watchlist_content").sourceId(sourceId).payloadJson(mapper.writeValueAsString(payload))
+                .resolvedTargetJson(mapper.writeValueAsString(new ImportTarget.ContentTarget(MediaReference.movie(movieTmdbId))))
+                .resolvedContentKey("CONTENT|MOVIE|" + movieTmdbId).outcome("MATCHED").build();
+        return items.saveAndFlush(item);
+    }
+
+    private ImportItem createRankedWatchlistItem(ImportJob job, String sourceId, String movieTmdbId,
+                                                 long ordinal, int rank) throws Exception {
+        var payload = mapper.createObjectNode().put("title", "Movie " + movieTmdbId).put("rank", rank);
         ImportItem item = ImportItem.builder().jobId(job.getId()).planGeneration(1).ordinal(ordinal)
                 .normalizedKind(ImportRecordKind.WATCHLIST_ITEM).sourceNamespace(job.getSourceNamespace())
                 .objectKind("watchlist_content").sourceId(sourceId).payloadJson(mapper.writeValueAsString(payload))
@@ -349,6 +527,21 @@ class ImportCollectionWritersIntegrationTest {
                 .objectKind("watched_content").sourceId(sourceId).payloadJson(mapper.writeValueAsString(payload))
                 .resolvedTargetJson(mapper.writeValueAsString(new ImportTarget.ContentTarget(MediaReference.movie(movieTmdbId))))
                 .resolvedContentKey("CONTENT|MOVIE|" + movieTmdbId).outcome("MATCHED").build();
+        return items.saveAndFlush(item);
+    }
+
+    private ImportItem createWatchedDetailMarker(ImportJob job, String sourceId, MediaReference reference,
+                                                 long ordinal) throws Exception {
+        var payload = mapper.createObjectNode().put("title", "Watched detail " + sourceId);
+        ImportItem item = ImportItem.builder().jobId(job.getId()).planGeneration(1).ordinal(ordinal)
+                .normalizedKind(ImportRecordKind.WATCHED_MARKER).sourceNamespace(job.getSourceNamespace())
+                .objectKind("watched_content").sourceId(sourceId).payloadJson(mapper.writeValueAsString(payload))
+                .resolvedTargetJson(mapper.writeValueAsString(new ImportTarget.ContentTarget(reference)))
+                .resolvedContentKey(reference.type() == ContentType.EPISODE
+                        ? "CONTENT|EPISODE|" + reference.seriesTmdbId() + "|" + reference.seasonNumber()
+                        + "|" + reference.episodeNumber()
+                        : "CONTENT|SEASON|" + reference.seriesTmdbId() + "|" + reference.seasonNumber())
+                .outcome("MATCHED").build();
         return items.saveAndFlush(item);
     }
 
