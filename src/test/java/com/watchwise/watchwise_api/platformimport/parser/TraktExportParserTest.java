@@ -67,6 +67,23 @@ class TraktExportParserTest {
     }
 
     @Test
+    void preservesExactRatingPublicationInstantAndUserZoneDate() {
+        var context = new ImportReadContext(CONTEXT.ownerId(), CONTEXT.jobId(), CONTEXT.storageKey(),
+                CONTEXT.sourceNamespace(), ZoneId.of("America/Los_Angeles"));
+        String json = "[{\"rating\":8,\"rated_at\":\"2025-06-04T03:30:00Z\","
+                + "\"show\":{\"title\":\"Example\",\"year\":2020,\"ids\":{\"tmdb\":123}}}]";
+        List<NormalizedImportRecord> records = new ArrayList<>();
+
+        ratings.parse(stream(json), context, "ratings/ratings-shows.json", records::add);
+
+        assertThat(records).hasSize(1);
+        assertThat(records.getFirst().payload().path("sourcePublishedAt").asString())
+                .isEqualTo("2025-06-04T03:30:00Z");
+        assertThat(records.getFirst().payload().path("sourceRecordedOn").asString())
+                .isEqualTo("2025-06-03");
+    }
+
+    @Test
     void watchedSummariesProduceSeriesOnlyAndNonMediaRecordsAreIgnored() {
         TraktItemParserImpl items = new TraktItemParserImpl(mapper);
         String json = "[{\"plays\":12,\"last_watched_at\":\"2025-06-03T03:30:00Z\",\"show\":{\"title\":\"Example\",\"year\":2020,\"aired_episodes\":84,\"ids\":{\"tmdb\":123}}},{\"type\":\"comment\",\"comment\":{\"id\":5}}]";

@@ -18,6 +18,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
@@ -93,7 +94,7 @@ public class ImportedOpinionPlanner {
         String text = reviewTextNormalizer.normalize(text(payload.path("review")));
         HistoricalOpinion review = text == null || text.isBlank() ? null
                 : new HistoricalOpinion(content, positiveWatchNumber(payload), text, score,
-                null, publishedOn(payload), text(payload.path("contextJson")));
+                publishedAt(payload), publishedOn(payload), text(payload.path("contextJson")));
         Integer initialScore = item.getNormalizedKind() == ImportRecordKind.CURRENT_RATING || review == null
                 ? score : null;
         return new ImportedOpinionUnit(item.getId().toString(),
@@ -161,6 +162,16 @@ public class ImportedOpinionPlanner {
             return LocalDate.parse(value.asString());
         } catch (DateTimeParseException exception) {
             throw new IllegalStateException("Opinion publication date is invalid", exception);
+        }
+    }
+
+    private Instant publishedAt(JsonNode payload) {
+        JsonNode value = payload.path("sourcePublishedAt");
+        if (!value.isTextual() || value.asString().isBlank()) return null;
+        try {
+            return Instant.parse(value.asString());
+        } catch (DateTimeParseException exception) {
+            throw new IllegalStateException("Opinion publication instant is invalid", exception);
         }
     }
 

@@ -15,6 +15,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import org.springframework.data.domain.Pageable;
@@ -54,6 +56,31 @@ class ImportedOpinionPlannerTest {
         assertThat(units.get(0).initialScore()).isNull();
         assertThat(units.get(1).review()).isNull();
         assertThat(units.get(1).initialScore()).isEqualTo(8);
+    }
+
+    @Test
+    void preservesExactPublicationInstantAndRecordedLocalDateOnHistoricalReview() throws Exception {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID reviewId = UUID.randomUUID();
+        ObjectMapper mapper = new ObjectMapper();
+        String payload = "{\"review\":\"A review\",\"score\":7,"
+                + "\"sourcePublishedAt\":\"2025-06-04T03:30:00Z\","
+                + "\"sourceRecordedOn\":\"2025-06-03\"}";
+        var review = item(mapper, jobId, reviewId, ImportRecordKind.REVIEW, "review-1", payload);
+        ImportItemRepository repository = Mockito.mock(ImportItemRepository.class);
+        when(repository.findHistoryRowsAfter(eq(jobId), eq(ownerId), eq(2L), anyCollection(), anyCollection(),
+                eq(-1L), any(UUID.class), any(Pageable.class))).thenReturn(List.of(review));
+        ImportedOpinionPlanner planner = new ImportedOpinionPlanner(repository, mapper,
+                new ImportedReviewTextNormalizer());
+        ImportExecutionContext context = new ImportExecutionContext(ownerId, jobId, 3, 2,
+                "trakt-account-7", UUID.randomUUID());
+
+        var unit = planner.nextBatch(context, new NormalizedHistoryPlan(jobId, 0, 0, 1, 0, 0), null, 50)
+                .getFirst();
+
+        assertThat(unit.review().sourcePublishedAt()).isEqualTo(Instant.parse("2025-06-04T03:30:00Z"));
+        assertThat(unit.review().sourcePublishedOn()).isEqualTo(LocalDate.parse("2025-06-03"));
     }
 
     private ImportItem item(ObjectMapper mapper, UUID jobId, UUID itemId, ImportRecordKind kind,

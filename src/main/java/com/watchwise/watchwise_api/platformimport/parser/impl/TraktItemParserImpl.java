@@ -100,6 +100,7 @@ public class TraktItemParserImpl implements TraktItemParser {
             copyNonNegativeCount(media, payload, "aired_episodes", "airedEpisodeCount", path, recordNumber);
         }
         copyDate(row, payload, "rated_at", "sourceRecordedOn", context.timeZone(), path, recordNumber);
+        copyInstant(row, payload, "rated_at", "sourcePublishedAt", path, recordNumber);
         if (!payload.has("sourceRecordedOn")) copyDate(row, payload, "listed_at", "sourceRecordedOn", context.timeZone(), path, recordNumber);
         JsonNode score = row.path("rating");
         if (!score.isMissingNode() && !score.isNull()) {
@@ -157,6 +158,12 @@ public class TraktItemParserImpl implements TraktItemParser {
                           ZoneId zone, String path, long record) {
         String value = text(from, source); if (value == null) return;
         try { to.put(target, LocalDate.ofInstant(Instant.parse(value), zone).toString()); }
+        catch (RuntimeException ex) { throw failure(path, record, source, "Invalid timestamp"); }
+    }
+    private void copyInstant(JsonNode from, tools.jackson.databind.node.ObjectNode to, String source, String target,
+                             String path, long record) {
+        String value = text(from, source); if (value == null) return;
+        try { to.put(target, Instant.parse(value).toString()); }
         catch (RuntimeException ex) { throw failure(path, record, source, "Invalid timestamp"); }
     }
     private void copyText(JsonNode from, tools.jackson.databind.node.ObjectNode to, String source, String target) {
