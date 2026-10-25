@@ -149,6 +149,42 @@ class WatchEventImportIntegrationTest {
     }
 
     @Test
+    void shouldApplyCurrentRatingOnlyToNewestWatchWhileKeepingOlderEventScores() throws Exception {
+        User owner = createUser();
+        Content movie = createMovie();
+        ImportJob job = createJob(owner.getId(), "letterboxd:account-1", ImportSourceFormat.LETTERBOXD_ZIP);
+        ImportItem oldest = createEvent(job, movie, 0, "rated-event-1", "2023-01-02", 4, "oldest review");
+        ImportItem older = createEvent(job, movie, 1, "rated-event-2", "2024-03-04", 6, "older review");
+        ImportItem newest = createEvent(job, movie, 2, "rated-event-3", "2025-05-06", 7, "newest review");
+        ImportItem currentRating = createCurrentRating(job, movie, 3, "current-rating-1", 9);
+
+        ImportJob resolvingJob = jobRepository.findById(job.getId()).orElseThrow();
+        resolvingJob.setState(ImportJobState.RESOLVING);
+        resolvingJob.setWorkPhase("RESOLVE");
+        jobRepository.saveAndFlush(resolvingJob);
+        normalizeAfterResolution(job.getId(), false);
+
+        ImportItem normalizedOldest = itemRepository.findById(oldest.getId()).orElseThrow();
+        ImportItem normalizedOlder = itemRepository.findById(older.getId()).orElseThrow();
+        ImportItem normalizedNewest = itemRepository.findById(newest.getId()).orElseThrow();
+        assertThat(objectMapper.readTree(normalizedOldest.getPayloadJson()).path("score").asInt()).isEqualTo(4);
+        assertThat(objectMapper.readTree(normalizedOlder.getPayloadJson()).path("score").asInt()).isEqualTo(6);
+        assertThat(objectMapper.readTree(normalizedNewest.getPayloadJson()).path("score").asInt()).isEqualTo(9);
+        assertThat(itemRepository.findById(currentRating.getId()).orElseThrow().getOutcome()).isEqualTo("ABSORBED");
+
+        ImportJob applyingJob = requeueAfterResolution(job.getId());
+        for (ImportItem event : List.of(normalizedOldest, normalizedOlder, normalizedNewest)) {
+            assertThatCode(() -> apply(applyingJob, event)).doesNotThrowAnyException();
+        }
+
+        assertThat(watches(owner.getId(), movie.getId())).extracting(WatchRow::score).containsExactly(4, 6, 9);
+        assertThat(watches(owner.getId(), movie.getId())).extracting(WatchRow::comment)
+                .containsExactly("oldest review", "older review", "newest review");
+        assertThat(watches(owner.getId(), movie.getId())).extracting(WatchRow::watchedDate)
+                .containsExactly(LocalDate.of(2023, 1, 2), LocalDate.of(2024, 3, 4), LocalDate.of(2025, 5, 6));
+    }
+
+    @Test
     void shouldPauseForManualOrCrossPlatformMatchesUntilLinkedOrIgnored() {
         User owner = createUser();
         Content movie = createMovie();
@@ -406,6 +442,27 @@ class WatchEventImportIntegrationTest {
                 .sourceEventKey(sourceId)
                 .parserVersion(job.getSourceFormat() == ImportSourceFormat.LETTERBOXD_ZIP
                         ? "letterboxd-history-v1" : "trakt-history-v1")
+                .resolvedContentKey("CONTENT|MOVIE|" + movie.getTmdbId())
+                .resolvedTargetJson(writeJson(new ImportTarget.ContentTarget(MediaReference.movie(movie.getTmdbId()))))
+                .payloadJson(writeJson(payload))
+                .outcome("MATCHED")
+                .ordinal(ordinal)
+                .build());
+    }
+
+    private ImportItem createCurrentRating(ImportJob job, Content movie, int ordinal, String sourceId, int score) {
+        var payload = objectMapper.createObjectNode();
+        payload.put("title", "C4 fixture " + movie.getTmdbId());
+        payload.put("score", score);
+        return itemRepository.saveAndFlush(ImportItem.builder()
+                .jobId(job.getId())
+                .planGeneration(1)
+                .normalizedKind(ImportRecordKind.CURRENT_RATING)
+                .sourceNamespace(job.getSourceNamespace())
+                .objectKind("current_rating")
+                .sourceId(sourceId)
+                .sourceEventKey(sourceId)
+                .parserVersion("letterboxd-history-v1")
                 .resolvedContentKey("CONTENT|MOVIE|" + movie.getTmdbId())
                 .resolvedTargetJson(writeJson(new ImportTarget.ContentTarget(MediaReference.movie(movie.getTmdbId()))))
                 .payloadJson(writeJson(payload))
