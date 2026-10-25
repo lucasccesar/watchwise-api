@@ -30,6 +30,7 @@ import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportUnitTransaction;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportWorker;
+import com.watchwise.watchwise_api.platformimport.service.impl.WatchEventImportApplier;
 import com.watchwise.watchwise_api.platformimport.storage.ImportFileStore;
 import com.watchwise.watchwise_api.platformimport.storage.PrivateImportFileStore;
 import com.watchwise.watchwise_api.content.dto.MediaReference;
@@ -50,6 +51,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -84,6 +86,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = {
         "spring.docker.compose.enabled=false",
@@ -122,6 +125,7 @@ class ImportWorkerIntegrationTest {
     @Autowired private com.watchwise.watchwise_api.platformimport.service.ImportUploadQuotaService uploadQuotaService;
     @Autowired private ImportWorker worker;
     @MockitoSpyBean private ImportUnitTransaction unitTransaction;
+    @MockitoBean private WatchEventImportApplier watchEventImportApplier;
     @MockitoSpyBean private ImportItemRepository itemRepositorySpy;
     @Autowired private ImportCleanupJob cleanupJob;
     @Autowired private ImportJobService jobService;
@@ -140,6 +144,7 @@ class ImportWorkerIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        when(watchEventImportApplier.supports(any(ImportRecordKind.class))).thenReturn(false);
         jdbc.execute("CREATE TABLE IF NOT EXISTS " + TEST_FACTS_TABLE + " (owner_id UUID NOT NULL, source_id VARCHAR(1000) NOT NULL UNIQUE)");
         jdbc.execute("TRUNCATE " + TEST_FACTS_TABLE);
         jdbc.execute("TRUNCATE import_items, external_import_links, external_content_aliases, imported_watch_assertions, import_deferred_records, letterboxd_seed_loads, import_file_cleanup_tasks, import_jobs CASCADE");

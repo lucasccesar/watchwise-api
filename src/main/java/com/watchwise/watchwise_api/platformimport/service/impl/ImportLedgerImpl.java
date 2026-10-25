@@ -22,7 +22,7 @@ public class ImportLedgerImpl implements ImportLedger {
   if (!Boolean.TRUE.equals(jobBelongsToOwner)) {
    throw new NotFoundException("Import job not found");
   }
-  jdbc.update("""
+  int inserted = jdbc.update("""
    INSERT INTO external_import_links(id,user_id,source_namespace,object_kind,source_id,state,owning_job_id,payload_hash,created_at,updated_at)
    SELECT ?, ?, ?, ?, ?, 'IN_PROGRESS', j.id, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
    FROM import_jobs j WHERE j.id = ? AND j.user_id = ?
@@ -48,7 +48,7 @@ public class ImportLedgerImpl implements ImportLedger {
     """, jobId, existing.id(), existing.owningJobId());
    return new LinkReservation(existing.id(), ImportLinkState.IN_PROGRESS, jobId);
   }
-  return new LinkReservation(existing.id(), existing.state(), existing.owningJobId());
+  return new LinkReservation(existing.id(), existing.state(), existing.owningJobId(), inserted == 1);
  }
 
  private boolean canTransfer(ExistingReservation reservation) {

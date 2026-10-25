@@ -807,6 +807,10 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         } else {
             resolution.set(overlayKey, objectMapper.valueToTree(operation));
         }
+        if (operation instanceof ImportResolutionOperation.AssignPass
+                && item.getIssue() != null && item.getIssue().contains("MATCH_REQUIRED")) {
+            resolution.put("linkExistingOnly", true);
+        }
         return writeJson(overlay);
     }
 

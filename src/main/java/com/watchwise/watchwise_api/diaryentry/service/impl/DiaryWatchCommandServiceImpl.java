@@ -56,6 +56,20 @@ public class DiaryWatchCommandServiceImpl implements DiaryWatchCommandService {
     @Override
     @Transactional
     public WatchMutationResult recordPrepared(UUID owner, WatchEventCommand command) {
+        return recordPrepared(owner, command, ExistingPassPolicy.IDEMPOTENT)
+                .orElseThrow(() -> new IllegalStateException("Idempotent watch command returned no result"));
+    }
+
+    @Override
+    @Transactional
+    public Optional<WatchMutationResult> recordPreparedImport(UUID owner, WatchEventCommand command,
+                                                              boolean linkExistingPass) {
+        return recordPrepared(owner, command, linkExistingPass
+                ? ExistingPassPolicy.REQUIRE_EXISTING : ExistingPassPolicy.NEW_ONLY);
+    }
+
+    private Optional<WatchMutationResult> recordPrepared(UUID owner, WatchEventCommand command,
+                                                         ExistingPassPolicy passPolicy) {
         validateCommand(owner, command);
         userRepository.findById(owner).orElseThrow(() -> new NotFoundException("User not found"));
 
@@ -75,7 +89,13 @@ public class DiaryWatchCommandServiceImpl implements DiaryWatchCommandService {
         Optional<DiaryEntry> existing = diaryEntryRepository.findFirstByUserIdAndContentIdAndWatchNumber(
                 owner, content.getId(), watchNumber);
         if (existing.isPresent()) {
-            return new WatchMutationResult(existing.get().getId(), false, currentHistoryRevision(owner, media));
+            if (passPolicy == ExistingPassPolicy.NEW_ONLY) {
+                return Optional.empty();
+            }
+            return Optional.of(new WatchMutationResult(existing.get().getId(), false, currentHistoryRevision(owner, media)));
+        }
+        if (passPolicy == ExistingPassPolicy.REQUIRE_EXISTING) {
+            return Optional.empty();
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -106,7 +126,7 @@ public class DiaryWatchCommandServiceImpl implements DiaryWatchCommandService {
             diaryProjectionInvalidator.markSeriesChanged(owner, media.seriesTmdbId());
             revision = currentHistoryRevision(owner, media);
         }
-        return new WatchMutationResult(entry.getId(), true, revision);
+        return Optional.of(new WatchMutationResult(entry.getId(), true, revision));
     }
 
     private void validateCommand(UUID owner, WatchEventCommand command) {
@@ -224,4 +244,6 @@ public class DiaryWatchCommandServiceImpl implements DiaryWatchCommandService {
         }
         return new ConflictException("Diary entry could not be saved due to a conflict");
     }
+
+    private enum ExistingPassPolicy { IDEMPOTENT, REQUIRE_EXISTING, NEW_ONLY }
 }

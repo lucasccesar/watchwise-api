@@ -78,7 +78,10 @@ class ImportLedgerRepositoryTest {
         LinkReservation first = ledger.reserve(user, firstJob, key, "hash-one");
         LinkReservation duplicate = ledger.reserve(user, secondJob, key, "hash-two");
         assertThat(jdbc.queryForObject("select count(*) from external_import_links where user_id = ?", Integer.class, user)).isEqualTo(1);
-        assertThat(duplicate).isEqualTo(first);
+        assertThat(first.newlyCreated()).isTrue();
+        assertThat(duplicate.newlyCreated()).isFalse();
+        assertThat(duplicate.linkId()).isEqualTo(first.linkId());
+        assertThat(duplicate.state()).isEqualTo(first.state());
         assertThat(duplicate.owningJobId()).isEqualTo(firstJob);
     }
 
@@ -95,7 +98,12 @@ class ImportLedgerRepositoryTest {
         assertThatThrownBy(() -> ledger.reserve(owner, otherJob, key, "hash"))
                 .isInstanceOf(NotFoundException.class);
 
-        assertThat(ledger.reserve(owner, ownerJob, key, "hash")).isEqualTo(original);
+        LinkReservation repeat = ledger.reserve(owner, ownerJob, key, "hash");
+        assertThat(original.newlyCreated()).isTrue();
+        assertThat(repeat.newlyCreated()).isFalse();
+        assertThat(repeat.linkId()).isEqualTo(original.linkId());
+        assertThat(repeat.state()).isEqualTo(original.state());
+        assertThat(repeat.owningJobId()).isEqualTo(original.owningJobId());
         assertThat(jdbc.queryForObject("select count(*) from external_import_links where user_id = ? and source_id = ?", Integer.class, owner, key.sourceId())).isEqualTo(1);
     }
 
@@ -128,7 +136,13 @@ class ImportLedgerRepositoryTest {
             assertThat(secondStarting.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(awaitLockWait(secondPid.get())).isTrue();
             releaseFirst.countDown();
-            assertThat(second.get(10, TimeUnit.SECONDS)).isEqualTo(first.get(10, TimeUnit.SECONDS));
+            LinkReservation original = first.get(10, TimeUnit.SECONDS);
+            LinkReservation repeat = second.get(10, TimeUnit.SECONDS);
+            assertThat(original.newlyCreated()).isTrue();
+            assertThat(repeat.newlyCreated()).isFalse();
+            assertThat(repeat.linkId()).isEqualTo(original.linkId());
+            assertThat(repeat.state()).isEqualTo(original.state());
+            assertThat(repeat.owningJobId()).isEqualTo(original.owningJobId());
         } catch (Exception exception) {
             throw new AssertionError(exception);
         } finally {
