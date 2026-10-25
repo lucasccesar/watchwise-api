@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
@@ -25,6 +26,94 @@ public interface ImportItemRepository extends JpaRepository<ImportItem, UUID> {
 
     List<ImportItem> findAllByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
             UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind);
+
+    Optional<ImportItem> findFirstByJobIdAndPlanGenerationAndNormalizedKindAndSourceId(
+            UUID jobId, long planGeneration, ImportRecordKind normalizedKind, String sourceId);
+
+    long countByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKind(
+            UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind);
+
+    @Query(value = """
+            SELECT * FROM import_items item
+            WHERE item.job_id = :jobId AND item.plan_generation = :generation
+              AND item.parent_source_id = :parentSourceId AND item.normalized_kind = 'LIST_ITEM'
+              AND (item.ordinal > :afterOrdinal
+                   OR (item.ordinal = :afterOrdinal AND item.id > CAST(:afterId AS uuid)))
+            ORDER BY item.ordinal ASC, item.id ASC
+            LIMIT :batchSize
+            """, nativeQuery = true)
+    List<ImportItem> findListItemsAfter(@Param("jobId") UUID jobId, @Param("generation") long generation,
+                                       @Param("parentSourceId") String parentSourceId,
+                                       @Param("afterOrdinal") long afterOrdinal, @Param("afterId") String afterId,
+                                       @Param("batchSize") int batchSize);
+
+    @Query(value = """
+            SELECT * FROM import_items item
+            WHERE item.job_id = :jobId AND item.plan_generation = :generation
+              AND item.normalized_kind = 'WATCHLIST_ITEM'
+              AND (item.outcome IS NULL OR item.outcome IN ('MATCHED', 'RESOLVED'))
+              AND (item.ordinal > :afterOrdinal
+                   OR (item.ordinal = :afterOrdinal AND item.id > CAST(:afterId AS uuid)))
+            ORDER BY item.ordinal ASC, item.id ASC
+            LIMIT :batchSize
+            """, nativeQuery = true)
+    List<ImportItem> findWatchlistItemsAfter(@Param("jobId") UUID jobId, @Param("generation") long generation,
+                                            @Param("afterOrdinal") long afterOrdinal,
+                                            @Param("afterId") String afterId, @Param("batchSize") int batchSize);
+
+    @Query(value = """
+            SELECT * FROM import_items item
+            WHERE item.job_id = :jobId AND item.plan_generation = :generation
+              AND item.normalized_kind = :kind
+              AND (item.ordinal > :afterOrdinal
+                   OR (item.ordinal = :afterOrdinal AND item.id > CAST(:afterId AS uuid)))
+            ORDER BY item.ordinal ASC, item.id ASC
+            LIMIT :batchSize
+            """, nativeQuery = true)
+    List<ImportItem> findItemsOfKindAfter(@Param("jobId") UUID jobId, @Param("generation") long generation,
+                                          @Param("kind") String kind,
+                                          @Param("afterOrdinal") long afterOrdinal,
+                                          @Param("afterId") String afterId,
+                                          @Param("batchSize") int batchSize);
+
+    @Query(value = """
+            SELECT DISTINCT ON (item.resolved_content_key) item.id
+            FROM import_items item
+            WHERE item.job_id = :jobId AND item.plan_generation = :generation
+              AND item.parent_source_id = :parentSourceId AND item.normalized_kind = 'LIST_ITEM'
+              AND item.resolved_content_key IN (:contentKeys)
+              AND item.resolved_content_key IS NOT NULL
+              AND (item.decision IS NULL OR item.decision <> 'SKIP_ITEM')
+            ORDER BY item.resolved_content_key, item.ordinal ASC, item.id ASC
+            """, nativeQuery = true)
+    List<UUID> findFirstListItemsForContentKeys(@Param("jobId") UUID jobId,
+                                                @Param("generation") long generation,
+                                                @Param("parentSourceId") String parentSourceId,
+                                                @Param("contentKeys") Collection<String> contentKeys);
+
+    @Query(value = """
+            SELECT EXISTS (
+                SELECT 1 FROM import_items item
+                WHERE item.job_id = :jobId AND item.plan_generation = :generation
+                  AND item.resolved_content_key = :contentKey
+                  AND item.normalized_kind IN ('DIARY_EVENT', 'WATCHED_MARKER', 'WATCHED_SUMMARY', 'SERIES_EXPANSION')
+                  AND (item.decision IS NULL OR item.decision <> 'SKIP_ITEM')
+            )
+            """, nativeQuery = true)
+    boolean existsSourceWatchEvidence(@Param("jobId") UUID jobId, @Param("generation") long generation,
+                                      @Param("contentKey") String contentKey);
+
+    @Query(value = """
+            SELECT DISTINCT item.resolved_content_key
+            FROM import_items item
+            WHERE item.job_id = :jobId AND item.plan_generation = :generation
+              AND item.resolved_content_key IN (:contentKeys)
+              AND item.normalized_kind IN ('DIARY_EVENT', 'WATCHED_MARKER', 'WATCHED_SUMMARY', 'SERIES_EXPANSION')
+              AND (item.decision IS NULL OR item.decision <> 'SKIP_ITEM')
+            """, nativeQuery = true)
+    List<String> findSourceWatchEvidenceContentKeys(@Param("jobId") UUID jobId,
+                                                    @Param("generation") long generation,
+                                                    @Param("contentKeys") Collection<String> contentKeys);
 
     long countByJobIdAndPlanGenerationAndParentSourceIdAndNormalizedKindAndObjectKindAndOutcome(
             UUID jobId, long planGeneration, String parentSourceId, ImportRecordKind normalizedKind,

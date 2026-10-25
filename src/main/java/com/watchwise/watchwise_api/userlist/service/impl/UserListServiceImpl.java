@@ -22,6 +22,7 @@ import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
@@ -84,6 +85,7 @@ public class UserListServiceImpl implements UserListService {
     private final SeriesProgressReader seriesProgressReader;
     private final UserContentPosterService userContentPosterService;
     private final UserBlockAccessService userBlockAccessService;
+    private final ImportLedger importLedger;
 
     static final int RANK_PARK_OFFSET = 1_000_000_000;
     private static final int USER_LIST_PAGE_SIZE = 10;
@@ -467,7 +469,8 @@ public class UserListServiceImpl implements UserListService {
     @Override
     @Transactional
     public UserListResponseDTO createUserList(UUID userId, UserListCreationDTO userListCreationDTO) {
-        User user = userRepository.getReferenceById(userId);
+        User user = userRepository.findByIdForListCreation(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
         LocalDateTime now = LocalDateTime.now();
 
         UserList userList = UserList.builder()
@@ -486,7 +489,8 @@ public class UserListServiceImpl implements UserListService {
     @Override
     @Transactional
     public UserListDetailedResponseDTO createUserListWithItems(UUID userId, UserListBulkCreationDTO userListBulkCreationDTO) {
-        User user = userRepository.getReferenceById(userId);
+        User user = userRepository.findByIdForListCreation(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
         LocalDateTime now = LocalDateTime.now();
 
         UserList userList = UserList.builder()
@@ -591,6 +595,7 @@ public class UserListServiceImpl implements UserListService {
     public void deleteUserList(UUID userId, UUID listId) {
         UserList userList = findOwnedList(userId, listId);
 
+        importLedger.markDeletedByTarget(userId, "USER_LIST", listId);
         userListItemService.removeItemsReferencingChildList(listId);
         userListRepository.delete(userList);
     }

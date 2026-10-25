@@ -6,6 +6,7 @@ import com.watchwise.watchwise_api.platformimport.model.ImportInventory;
 import com.watchwise.watchwise_api.platformimport.model.ImportJobState;
 import com.watchwise.watchwise_api.platformimport.model.ImportModeKey;
 import com.watchwise.watchwise_api.platformimport.model.ImportReadContext;
+import com.watchwise.watchwise_api.platformimport.model.ImportRecordKind;
 import com.watchwise.watchwise_api.platformimport.model.ImportSelection;
 import com.watchwise.watchwise_api.platformimport.model.ImportSourceFormat;
 import com.watchwise.watchwise_api.platformimport.model.NormalizedHistoryPlan;
@@ -228,6 +229,8 @@ public class ImportWorker {
             if (unavailable) break;
         }
 
+        if (!unavailable) markCollectionLengthIssues(context);
+
         ImportUnitTransaction.ResolutionState state;
         if (unavailable) {
             state = ImportUnitTransaction.ResolutionState.RETRY;
@@ -240,6 +243,60 @@ public class ImportWorker {
                     : ImportUnitTransaction.ResolutionState.READY;
         }
         unitTransaction.settleResolution(context, state);
+    }
+
+    private void markCollectionLengthIssues(ImportExecutionContext context) {
+        for (String kind : List.of("LIST_METADATA", "LIST_ITEM")) {
+            long afterOrdinal = -1;
+            UUID afterId = new UUID(0, 0);
+            while (true) {
+                List<ImportItem> page = itemRepository.findItemsOfKindAfter(context.jobId(),
+                        context.planGeneration(), kind, afterOrdinal, afterId.toString(), MAX_BATCH_SIZE);
+                if (page.isEmpty()) break;
+                afterOrdinal = page.getLast().getOrdinal();
+                afterId = page.getLast().getId();
+                for (ImportItem item : page) {
+                    if (item.getDecision() == com.watchwise.watchwise_api.platformimport.model.ImportDecision.SKIP_ITEM) {
+                        continue;
+                    }
+                    String issue = collectionLengthIssue(item);
+                    boolean collectionIssue = item.getIssue() != null
+                            && (item.getIssue().startsWith("LIST_ITEM_DESCRIPTION_TOO_LONG")
+                            || item.getIssue().startsWith("LIST_METADATA_FIELDS_TOO_LONG"));
+                    if (issue != null) {
+                        item.setOutcome("NORMALIZATION_ISSUE");
+                        item.setIssue(issue);
+                    } else if (collectionIssue && "NORMALIZATION_ISSUE".equals(item.getOutcome())) {
+                        item.setOutcome("RESOLVED");
+                        item.setIssue(null);
+                    }
+                }
+                itemRepository.saveAll(page);
+            }
+        }
+    }
+
+    private String collectionLengthIssue(ImportItem item) {
+        try {
+            JsonNode root = objectMapper.readTree(item.getPayloadJson());
+            JsonNode source = root.path("source").isObject() ? root.path("source") : root;
+            JsonNode fields = root.path("resolution").path("fields");
+            JsonNode titleValue = fields.path("TITLE").isTextual() ? fields.path("TITLE") : source.path("title");
+            JsonNode descriptionValue = fields.path("DESCRIPTION").isTextual()
+                    ? fields.path("DESCRIPTION") : source.path("description");
+            String title = titleValue.isTextual() ? titleValue.asString() : null;
+            String description = descriptionValue.isTextual() ? descriptionValue.asString() : null;
+            if (item.getNormalizedKind() == ImportRecordKind.LIST_ITEM) {
+                return description != null && description.length() > 400
+                        ? "LIST_ITEM_DESCRIPTION_TOO_LONG: Edit the note to 400 characters or fewer." : null;
+            }
+            if (title != null && title.length() > 255 || description != null && description.length() > 400) {
+                return "LIST_METADATA_FIELDS_TOO_LONG: Edit the name or description to fit the limits.";
+            }
+            return null;
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Collection item payload is invalid", exception);
+        }
     }
 
     private NormalizedHistoryPlan normalizeHistory(ClaimedJob job, ImportExecutionContext context,

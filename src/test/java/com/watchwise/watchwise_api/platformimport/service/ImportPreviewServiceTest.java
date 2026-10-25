@@ -318,6 +318,54 @@ class ImportPreviewServiceTest {
     }
 
     @Test
+    @DisplayName("[resolve] Should Allow A List Item Description Fix - When The Source Note Exceeds Its Limit")
+    void shouldAllowAListItemDescriptionFixWhenTheSourceNoteExceedsItsLimit() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.LIST_ITEM,
+                "{\"title\":\"Example\",\"description\":\"" + "x".repeat(401) + "\"}", 1);
+        item.setOutcome("NORMALIZATION_ISSUE");
+        item.setIssue("LIST_ITEM_DESCRIPTION_TOO_LONG: Edit the note.");
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        service.resolve(ownerId, jobId, List.of(new ImportResolutionOperation.EditField(itemId,
+                ImportResolutionOperation.EditableField.DESCRIPTION, "Short note.")), 4);
+
+        assertThat(item.getOutcome()).isEqualTo("RESOLVED");
+        assertThat(item.getIssue()).isNull();
+        assertThat(item.getPayloadJson()).contains("Short note.");
+        assertThat(job.getPreviewVersion()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("[resolve] Should Reject An Overlong List Item Description Edit - When It Still Exceeds Its Limit")
+    void shouldRejectAnOverlongListItemDescriptionEditWhenItStillExceedsItsLimit() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.LIST_ITEM, "{}", 1);
+        when(importJobRepository.findOwnedByIdForUpdate(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findAllByJobIdAndPlanGenerationAndIdIn(eq(jobId), eq(4L), anyCollection()))
+                .thenReturn(List.of(item));
+
+        assertThatThrownBy(() -> service.resolve(ownerId, jobId,
+                List.of(new ImportResolutionOperation.EditField(itemId,
+                        ImportResolutionOperation.EditableField.DESCRIPTION, "x".repeat(401))), 4))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("400");
+
+        assertThat(item.getDecision()).isNull();
+        assertThat(job.getPreviewVersion()).isEqualTo(4);
+    }
+
+    @Test
     @DisplayName("[resolve] Should Reject An Overlong Review Edit - When It Still Exceeds The Review Limit")
     void shouldRejectAnOverlongReviewEditWhenItStillExceedsTheReviewLimit() {
         UUID ownerId = UUID.randomUUID();
@@ -650,7 +698,7 @@ class ImportPreviewServiceTest {
         assertThat(result.getContent()).containsExactly(
                 new com.watchwise.watchwise_api.platformimport.dto.ImportPreviewItemDTO(
                         itemId, 1, ImportRecordKind.LIST_ITEM, null, null, null, null, null, null, null,
-                        null, null, false));
+                        null, null, false, null, null, false, null, null, false));
         assertThat(result.getTotalElements()).isEqualTo(1);
     }
 
@@ -680,6 +728,54 @@ class ImportPreviewServiceTest {
                 .containsExactly("First\nSecond & third", "x".repeat(19_999));
         assertThat(result.getContent().get(1).reviewTextLength()).isEqualTo(20_002);
         assertThat(result.getContent().get(1).reviewTextTruncated()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[preview] Should Project List Notes With A Safe Length - When A List Item Has A Note")
+    void shouldProjectListNotesWithSafeLengthWhenAListItemHasANote() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        String note = "x".repeat(401);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.LIST_ITEM,
+                "{\"title\":\"Example\",\"description\":\"" + note + "\"}", 1);
+        when(importJobRepository.findOwnedById(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                jobId, 4, PageRequest.of(0, 20)))
+                .thenReturn(new PageImpl<>(List.of(item), PageRequest.of(0, 20), 1));
+
+        var result = service.preview(ownerId, jobId, 0, 20).getContent().getFirst();
+
+        assertThat(result.itemDescription()).isEqualTo("x".repeat(400));
+        assertThat(result.itemDescriptionLength()).isEqualTo(401);
+        assertThat(result.itemDescriptionTruncated()).isTrue();
+    }
+
+    @Test
+    @DisplayName("[preview] Should Project List Metadata Within Field Limits - When Name And Description Are Long")
+    void shouldProjectListMetadataWithinFieldLimitsWhenNameAndDescriptionAreLong() {
+        UUID ownerId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+        ImportJob job = job(ownerId, jobId, 4, ImportJobState.READY);
+        setPlanGeneration(job, 4);
+        ImportItem item = item(itemId, jobId, 4, ImportRecordKind.LIST_METADATA,
+                "{\"title\":\"" + "n".repeat(256) + "\",\"description\":\"" + "d".repeat(401) + "\"}", 1);
+        when(importJobRepository.findOwnedById(jobId, ownerId)).thenReturn(Optional.of(job));
+        when(importItemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                jobId, 4, PageRequest.of(0, 20)))
+                .thenReturn(new PageImpl<>(List.of(item), PageRequest.of(0, 20), 1));
+
+        var result = service.preview(ownerId, jobId, 0, 20).getContent().getFirst();
+
+        assertThat(result.itemTitle()).isEqualTo("n".repeat(255));
+        assertThat(result.itemTitleLength()).isEqualTo(256);
+        assertThat(result.itemTitleTruncated()).isTrue();
+        assertThat(result.itemDescription()).isEqualTo("d".repeat(400));
+        assertThat(result.itemDescriptionLength()).isEqualTo(401);
+        assertThat(result.itemDescriptionTruncated()).isTrue();
     }
 
     @Test

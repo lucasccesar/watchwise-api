@@ -11,6 +11,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.Collection;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -27,26 +30,58 @@ public class ContentWatchEligibilityServiceImpl implements ContentWatchEligibili
 
     @Override
     public WatchlistEligibility getWatchlistEligibility(UUID ownerId, MediaReference reference) {
-        if (ownerId == null || reference == null) {
-            throw new IllegalArgumentException("Owner and media reference are required");
+        return getWatchlistEligibility(ownerId, java.util.List.of(reference)).get(reference);
+    }
+
+    @Override
+    public Map<MediaReference, WatchlistEligibility> getWatchlistEligibility(
+            UUID ownerId, Collection<MediaReference> references) {
+        if (ownerId == null || references == null) {
+            throw new IllegalArgumentException("Owner and media references are required");
+        }
+        Set<String> movieIds = new LinkedHashSet<>();
+        Set<String> seriesIds = new LinkedHashSet<>();
+        for (MediaReference reference : references) {
+            if (reference == null) throw new IllegalArgumentException("Media reference is required");
+            if (reference.type() == ContentType.MOVIE) movieIds.add(reference.tmdbId());
+            else if (reference.type() == ContentType.SERIES) seriesIds.add(reference.tmdbId());
+            else throw new BadRequestException("Watchlist supports MOVIE and SERIES content only");
         }
 
-        if (reference.type() != ContentType.MOVIE && reference.type() != ContentType.SERIES) {
-            throw new BadRequestException("Watchlist supports MOVIE and SERIES content only");
-        }
-        String type = reference.type().name();
-        String tmdbId = reference.tmdbId();
+        Set<String> diaryMovies = movieIds.isEmpty() ? Set.of()
+                : Set.copyOf(diaryEntryRepository.findWatchedContentIdsForWatchlist(ownerId,
+                ContentType.MOVIE, movieIds));
+        Set<String> diarySeries = seriesIds.isEmpty() ? Set.of()
+                : Set.copyOf(diaryEntryRepository.findWatchedContentIdsForWatchlist(ownerId,
+                ContentType.SERIES, seriesIds));
+        Set<String> diaryEpisodeSeries = seriesIds.isEmpty() ? Set.of()
+                : Set.copyOf(diaryEntryRepository.findWatchedSeriesIdsForWatchlist(ownerId, seriesIds));
+        Set<String> assertionMovies = movieIds.isEmpty() ? Set.of()
+                : Set.copyOf(importedWatchAssertionRepository.findUnknownWatchedContentIdsForWatchlist(
+                ownerId, ContentType.MOVIE, movieIds));
+        Set<String> assertionSeries = seriesIds.isEmpty() ? Set.of()
+                : Set.copyOf(importedWatchAssertionRepository.findUnknownWatchedContentIdsForWatchlist(
+                ownerId, ContentType.SERIES, seriesIds));
+        Set<String> assertionChildSeries = seriesIds.isEmpty() ? Set.of()
+                : Set.copyOf(importedWatchAssertionRepository.findUnknownWatchedSeriesIdsForWatchlist(
+                ownerId, seriesIds));
 
-        Set<String> evidence = new LinkedHashSet<>();
-        if (diaryEntryRepository.existsWatchEvidenceForWatchlist(ownerId, type, tmdbId)) {
-            evidence.add(DIARY_ENTRY);
+        Map<MediaReference, WatchlistEligibility> result = new LinkedHashMap<>();
+        for (MediaReference reference : references) {
+            Set<String> evidence = new LinkedHashSet<>();
+            if (reference.type() == ContentType.MOVIE
+                    ? diaryMovies.contains(reference.tmdbId())
+                    : diarySeries.contains(reference.tmdbId()) || diaryEpisodeSeries.contains(reference.tmdbId())) {
+                evidence.add(DIARY_ENTRY);
+            }
+            if (reference.type() == ContentType.MOVIE
+                    ? assertionMovies.contains(reference.tmdbId())
+                    : assertionSeries.contains(reference.tmdbId()) || assertionChildSeries.contains(reference.tmdbId())) {
+                evidence.add(IMPORTED_WATCH_ASSERTION);
+            }
+            boolean allowed = evidence.isEmpty();
+            result.put(reference, new WatchlistEligibility(allowed, allowed ? null : WATCHED_CONTENT, evidence));
         }
-        if (importedWatchAssertionRepository.existsUnknownWatchEvidenceForWatchlist(
-                ownerId, type, tmdbId)) {
-            evidence.add(IMPORTED_WATCH_ASSERTION);
-        }
-
-        boolean allowed = evidence.isEmpty();
-        return new WatchlistEligibility(allowed, allowed ? null : WATCHED_CONTENT, evidence);
+        return Map.copyOf(result);
     }
 }

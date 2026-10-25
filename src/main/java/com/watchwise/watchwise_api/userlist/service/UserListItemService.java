@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import com.watchwise.watchwise_api.userlist.service.ImportedUserListItemResult;
 
 public interface UserListItemService {
 
@@ -57,6 +58,12 @@ public interface UserListItemService {
 
     UserListItemsWithState addItemsWithState(
             UUID userId, UUID listId, UserListItemBulkCreationDTO userListItemBulkCreationDTO);
+
+    int nextImportedPosition(UUID userId, UUID listId);
+
+    ImportedUserListBatchResult appendImportedItems(
+            UUID userId, UUID listId, List<UUID> contentIds, Map<UUID, String> descriptionsByContentId,
+            int nextPosition);
 
     UserListItemResponseDTO updateItem(UUID userId, UUID listId, UUID itemId, UserListItemPatchDTO userListItemPatchDTO);
 

@@ -19,6 +19,7 @@ import com.watchwise.watchwise_api.follower.entity.FollowStatus;
 import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListItemPatchDTO;
@@ -87,6 +88,9 @@ class UserListItemServiceImplTest {
 
     @Mock
     private UserBlockAccessService userBlockAccessService;
+
+    @Mock
+    private ImportLedger importLedger;
 
     @InjectMocks
     private UserListItemServiceImpl userListItemService;
@@ -1584,6 +1588,7 @@ class UserListItemServiceImplTest {
 
         userListItemService.removeItem(lucasId, listId, item.getId());
 
+        verify(importLedger).markDeletedByTarget(lucasId, "USER_LIST_ITEM", item.getId());
         verify(userListItemRepository).delete(item);
         verify(userContentPosterService, never()).delete(lucasId, fightClub.getId());
         verify(userListItemRepository).parkPositionsInRange(

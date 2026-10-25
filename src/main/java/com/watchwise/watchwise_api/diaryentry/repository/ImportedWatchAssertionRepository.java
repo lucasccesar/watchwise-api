@@ -1,6 +1,7 @@
 package com.watchwise.watchwise_api.diaryentry.repository;
 
 import com.watchwise.watchwise_api.diaryentry.entity.ImportedWatchAssertion;
+import com.watchwise.watchwise_api.content.entity.ContentType;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -49,4 +50,24 @@ public interface ImportedWatchAssertionRepository extends JpaRepository<Imported
             @Param("userId") UUID userId,
             @Param("type") String type,
             @Param("tmdbId") String tmdbId);
+
+    @Query("""
+            SELECT DISTINCT assertion.content.tmdbId FROM ImportedWatchAssertion assertion
+            WHERE assertion.user.id = :userId AND assertion.coverage = 'UNKNOWN'
+              AND assertion.content.type = :type AND assertion.content.tmdbId IN :tmdbIds
+            """)
+    java.util.List<String> findUnknownWatchedContentIdsForWatchlist(
+            @Param("userId") UUID userId, @Param("type") ContentType type,
+            @Param("tmdbIds") java.util.Collection<String> tmdbIds);
+
+    @Query("""
+            SELECT DISTINCT assertion.content.seriesTmdbId FROM ImportedWatchAssertion assertion
+            WHERE assertion.user.id = :userId AND assertion.coverage = 'UNKNOWN'
+              AND assertion.content.type IN (
+                com.watchwise.watchwise_api.content.entity.ContentType.SEASON,
+                com.watchwise.watchwise_api.content.entity.ContentType.EPISODE)
+              AND assertion.content.seriesTmdbId IN :seriesTmdbIds
+            """)
+    java.util.List<String> findUnknownWatchedSeriesIdsForWatchlist(
+            @Param("userId") UUID userId, @Param("seriesTmdbIds") java.util.Collection<String> seriesTmdbIds);
 }

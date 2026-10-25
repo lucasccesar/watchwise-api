@@ -28,6 +28,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
@@ -41,6 +42,8 @@ import com.watchwise.watchwise_api.watchlist.entity.WatchlistEntry;
 import com.watchwise.watchwise_api.watchlist.mapper.WatchlistEntryMapper;
 import com.watchwise.watchwise_api.watchlist.repository.WatchlistEntryRepository;
 import com.watchwise.watchwise_api.watchlist.service.WatchlistEntryService;
+import com.watchwise.watchwise_api.watchlist.service.ImportedWatchlistItem;
+import com.watchwise.watchwise_api.watchlist.service.ImportedWatchlistWriteResult;
 import com.watchwise.watchwise_api.seriesprogress.repository.SeriesProgressReadRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -85,6 +88,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private final ContentCardAssembler contentCardAssembler;
     private final SeriesProgressReadRepository seriesProgressReadRepository;
     private final UserBlockAccessService userBlockAccessService;
+    private final ImportLedger importLedger;
 
     @Value("${app.watchlist.view.max-materialized-sort-candidates:1000}")
     private int maxMaterializedSortCandidates = 1000;
@@ -527,6 +531,87 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
 
     @Override
     @Transactional
+    public List<ImportedWatchlistWriteResult> appendImportedEntries(UUID userId, List<ImportedWatchlistItem> items) {
+        if (userId == null || items == null) throw new IllegalArgumentException("Owner and items are required");
+        if (items.isEmpty()) return List.of();
+
+        List<UUID> contentIds = items.stream().map(ImportedWatchlistItem::contentId).distinct().toList();
+        Map<UUID, Content> contentById = contentRepository.findAllById(contentIds).stream()
+                .collect(Collectors.toMap(Content::getId, content -> content));
+        if (contentById.size() != contentIds.size()) throw new NotFoundException("Watchlist content not found");
+        for (ImportedWatchlistItem item : items) {
+            validateType(item.content().type());
+            if (!matchesReference(contentById.get(item.contentId()), item.content())) {
+                throw new BadRequestException("Watchlist content reference does not match its resolved content");
+            }
+        }
+
+        userContentMutationLock.lock(userId);
+        List<MediaReference> references = items.stream().map(ImportedWatchlistItem::content).distinct().toList();
+        Map<MediaReference, WatchlistEligibility> eligibility = contentWatchEligibilityService
+                .getWatchlistEligibility(userId, references);
+        advisoryLock.lock(lockIdentity(userId));
+
+        Map<UUID, WatchlistEntry> existingByContentId = watchlistEntryRepository
+                .findByUserIdAndContentIdInWithContent(userId, contentIds).stream()
+                .collect(Collectors.toMap(entry -> entry.getContent().getId(), entry -> entry));
+        User owner = userRepository.getReferenceById(userId);
+        int position = Math.toIntExact(watchlistEntryRepository.countByUserId(userId) + 1);
+        LocalDateTime now = LocalDateTime.now();
+        Map<UUID, WatchlistEntry> pending = new LinkedHashMap<>();
+        Map<UUID, ImportedWatchlistWriteResult> resultByContentId = new LinkedHashMap<>();
+
+        for (ImportedWatchlistItem item : items) {
+            UUID contentId = item.contentId();
+            if (resultByContentId.containsKey(contentId)) continue;
+            WatchlistEntry existing = existingByContentId.get(contentId);
+            if (existing != null) {
+                resultByContentId.put(contentId, new ImportedWatchlistWriteResult(contentId, existing.getId(),
+                        ImportedWatchlistWriteResult.Outcome.ALREADY_PRESENT, "ALREADY_IN_WATCHLIST"));
+                continue;
+            }
+            WatchlistEligibility allowed = eligibility.get(item.content());
+            if (allowed == null || !allowed.allowed()) {
+                resultByContentId.put(contentId, new ImportedWatchlistWriteResult(contentId, null,
+                        ImportedWatchlistWriteResult.Outcome.INELIGIBLE,
+                        allowed == null ? "WATCHED_CONTENT" : allowed.reason()));
+                continue;
+            }
+
+            Content content = contentById.get(contentId);
+            releaseDateSnapshotService.writeThrough(owner, content);
+            WatchlistEntry entry = WatchlistEntry.builder().user(owner).content(content).type(item.content().type())
+                    .position(position++).createdAt(now).updatedAt(now).build();
+            pending.put(contentId, entry);
+        }
+
+        try {
+            List<WatchlistEntry> saved = watchlistEntryRepository.saveAll(pending.values());
+            watchlistEntryRepository.flush();
+            for (WatchlistEntry entry : saved) {
+                resultByContentId.put(entry.getContent().getId(), new ImportedWatchlistWriteResult(
+                        entry.getContent().getId(), entry.getId(), ImportedWatchlistWriteResult.Outcome.INSERTED, null));
+            }
+            return items.stream().map(ImportedWatchlistItem::contentId).distinct()
+                    .map(resultByContentId::get).toList();
+        } catch (DataIntegrityViolationException exception) {
+            throw mapUniqueConstraintViolation(exception);
+        }
+    }
+
+    private boolean matchesReference(Content content, MediaReference reference) {
+        if (content == null || content.getType() != reference.type()) return false;
+        return switch (reference.type()) {
+            case MOVIE, SERIES -> reference.tmdbId().equals(content.getTmdbId());
+            case SEASON, EPISODE -> reference.seriesTmdbId().equals(content.getSeriesTmdbId())
+                    && reference.seasonNumber().equals(content.getSeasonNumber())
+                    && (reference.type() != ContentType.EPISODE
+                    || reference.episodeNumber().equals(content.getEpisodeNumber()));
+        };
+    }
+
+    @Override
+    @Transactional
     public void removeEntry(UUID userId, ContentType type, UUID watchlistEntryId) {
         validateType(type);
         advisoryLock.lock(lockIdentity(userId));
@@ -553,6 +638,7 @@ public class WatchlistEntryServiceImpl implements WatchlistEntryService {
     private void deleteAndCloseGap(WatchlistEntry entry) {
         UUID userId = entry.getUser().getId();
         int removedPosition = entry.getPosition();
+        importLedger.markDeletedByTarget(userId, "WATCHLIST_ENTRY", entry.getId());
         watchlistEntryRepository.delete(entry);
         watchlistEntryRepository.flush();
         watchlistEntryRepository.parkPositionsInRange(

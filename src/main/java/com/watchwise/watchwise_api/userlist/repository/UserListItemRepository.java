@@ -74,6 +74,17 @@ public interface UserListItemRepository extends JpaRepository<UserListItem, UUID
 
     long countByUserListId(UUID userListId);
 
+    @Query("SELECT COALESCE(MAX(item.position), 0) FROM UserListItem item WHERE item.userList.id = :userListId")
+    int findMaxPositionByUserListId(@Param("userListId") UUID userListId);
+
+    @Query("""
+            SELECT item FROM UserListItem item JOIN FETCH item.content
+            WHERE item.userList.id = :userListId AND item.content.id IN :contentIds
+            ORDER BY item.position ASC
+            """)
+    List<UserListItem> findByUserListIdAndContentIdInWithContent(
+            @Param("userListId") UUID userListId, @Param("contentIds") Collection<UUID> contentIds);
+
     List<UserListItem> findByUserListIdOrderByPositionAsc(UUID userListId);
 
     @Query("""

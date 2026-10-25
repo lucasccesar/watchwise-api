@@ -29,6 +29,7 @@ import com.watchwise.watchwise_api.follower.repository.FollowerRepository;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryCreationDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryReorderDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistEntryResponseDTO;
@@ -98,6 +99,7 @@ class WatchlistEntryServiceImplTest {
     @Mock private ContentCardAssembler contentCardAssembler;
     @Mock private SeriesProgressReadRepository seriesProgressReadRepository;
     @Mock private UserBlockAccessService userBlockAccessService;
+    @Mock private ImportLedger importLedger;
     @Spy private PageRequestFactory pageRequestFactory = new PageRequestFactory();
     @InjectMocks private WatchlistEntryServiceImpl watchlistEntryService;
 
@@ -244,6 +246,7 @@ class WatchlistEntryServiceImplTest {
 
         watchlistEntryService.removeEntry(userId, ContentType.SERIES, seriesEntry.getId());
 
+        verify(importLedger).markDeletedByTarget(userId, "WATCHLIST_ENTRY", seriesEntry.getId());
         verify(watchlistEntryRepository).parkPositionsInRange(
                 userId, 3, Integer.MAX_VALUE, WatchlistEntryServiceImpl.POSITION_PARK_OFFSET);
         verify(watchlistEntryRepository).settleParkedPositions(

@@ -111,8 +111,21 @@ public class TraktItemParserImpl implements TraktItemParser {
         copyText(row, payload, "review", "review");
         if (row.path("rewatched").isBoolean()) payload.put("sourceRewatch", row.path("rewatched").booleanValue());
         JsonNode tags = row.path("tags"); if (tags.isArray()) payload.set("tags", tags.deepCopy());
-        if (row.path("rank").canConvertToInt()) payload.put("rank", row.path("rank").intValue());
-        copyText(row, payload, "description", "description");
+        Integer rank = null;
+        if (kind == ImportRecordKind.LIST_ITEM || kind == ImportRecordKind.WATCHLIST_ITEM) {
+            rank = optionalPositiveInt(row, "rank", path, recordNumber, "rank");
+            if (rank != null) {
+                if (rank > limits.maxRecords()) throw failure(path, recordNumber, "rank", "Rank exceeds the item limit");
+                payload.put("rank", rank);
+            }
+        } else if (row.path("rank").canConvertToInt()) {
+            payload.put("rank", row.path("rank").intValue());
+        }
+        if (kind == ImportRecordKind.LIST_ITEM && text(row, "notes") != null) {
+            copyText(row, payload, "notes", "description");
+        } else {
+            copyText(row, payload, "description", "description");
+        }
         payload.put("sourceFile", path);
         payload.put("sourceRecordNumber", recordNumber);
         if (ref == null) {
@@ -121,9 +134,10 @@ public class TraktItemParserImpl implements TraktItemParser {
             if (episode) { query.put("seasonNumber", season); if (episodeNumber != null) query.put("episodeNumber", episodeNumber); }
         }
         String kindId = kind == ImportRecordKind.LIST_ITEM ? "list_item" : kind.name().toLowerCase(Locale.ROOT);
+        int ordinal = rank == null ? Math.toIntExact(recordNumber - 1) : rank - 1;
         return new NormalizedImportRecord(kind.name().toLowerCase(Locale.ROOT) + ":" + id, kind,
                 new ImportSourceKey(context.sourceNamespace(), kindId, id), null,
-                ref == null ? null : new ImportTarget.ContentTarget(ref), payload, Math.toIntExact(recordNumber - 1));
+                ref == null ? null : new ImportTarget.ContentTarget(ref), payload, ordinal);
     }
 
     private String inferBranch(JsonNode row, ImportRecordKind kind) {

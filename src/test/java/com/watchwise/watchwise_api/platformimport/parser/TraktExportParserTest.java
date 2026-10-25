@@ -84,6 +84,33 @@ class TraktExportParserTest {
     }
 
     @Test
+    void mapsTraktListNotesToTheListItemDescription() {
+        TraktItemParserImpl items = new TraktItemParserImpl(mapper);
+        String json = """
+                [{"id":41,"type":"movie","rank":1,"notes":"Watch the director's cut","movie":{"title":"Example","year":2001,"ids":{"tmdb":51001}}}]
+                """;
+        List<NormalizedImportRecord> records = new ArrayList<>();
+
+        items.parse(stream(json), CONTEXT, "lists/list-41.json", ImportRecordKind.LIST_ITEM, records::add);
+
+        assertThat(records).hasSize(1);
+        assertThat(records.getFirst().payload().path("description").asString())
+                .isEqualTo("Watch the director's cut");
+    }
+
+    @Test
+    void usesTraktRankAsTheListItemOrderWhenSourceRowsAreOutOfOrder() {
+        TraktItemParserImpl items = new TraktItemParserImpl(mapper);
+        String json = "[{\"id\":42,\"type\":\"movie\",\"rank\":2,\"movie\":{\"title\":\"B\",\"ids\":{\"tmdb\":51002}}},"
+                + "{\"id\":41,\"type\":\"movie\",\"rank\":1,\"movie\":{\"title\":\"A\",\"ids\":{\"tmdb\":51001}}}]";
+        List<NormalizedImportRecord> records = new ArrayList<>();
+
+        items.parse(stream(json), CONTEXT, "lists/list-41.json", ImportRecordKind.LIST_ITEM, records::add);
+
+        assertThat(records).extracting(NormalizedImportRecord::ordinal).containsExactly(1, 0);
+    }
+
+    @Test
     void watchedSummariesProduceSeriesOnlyAndNonMediaRecordsAreIgnored() {
         TraktItemParserImpl items = new TraktItemParserImpl(mapper);
         String json = "[{\"plays\":12,\"last_watched_at\":\"2025-06-03T03:30:00Z\",\"show\":{\"title\":\"Example\",\"year\":2020,\"aired_episodes\":84,\"ids\":{\"tmdb\":123}}},{\"type\":\"comment\",\"comment\":{\"id\":5}}]";

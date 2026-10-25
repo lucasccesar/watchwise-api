@@ -26,6 +26,7 @@ import com.watchwise.watchwise_api.like.service.LikeService;
 import com.watchwise.watchwise_api.user.entity.User;
 import com.watchwise.watchwise_api.user.repository.UserRepository;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import com.watchwise.watchwise_api.userlist.dto.UserListBulkCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListCreationDTO;
 import com.watchwise.watchwise_api.userlist.dto.UserListDetailedResponseDTO;
@@ -135,6 +136,9 @@ class UserListServiceImplTest {
     private UserBlockAccessService userBlockAccessService;
 
     @Mock
+    private ImportLedger importLedger;
+
+    @Mock
     private ContentRepository contentRepository;
 
     @Spy
@@ -169,6 +173,9 @@ class UserListServiceImplTest {
 
         lucas = buildUser(lucasId, "lucas", true);
         marina = buildUser(marinaId, "marina", true);
+
+        lenient().when(userRepository.findByIdForListCreation(lucasId)).thenReturn(Optional.of(lucas));
+        lenient().when(userRepository.findByIdForListCreation(marinaId)).thenReturn(Optional.of(marina));
 
         lenient().when(likeService.getLikedListIds(any(), any())).thenReturn(Set.of());
         lenient().when(userContentPosterService.findByUserAndContentIds(any(), any()))
@@ -1738,7 +1745,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserList] Should Save New List With Provided Fields")
     void shouldSaveNewListWithProvidedFields() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
@@ -1746,6 +1752,8 @@ class UserListServiceImplTest {
                 lucasId, new UserListCreationDTO("Best sci-fi of the 90s", "A curated list", UserListVisibility.PRIVATE));
 
         assertThat(result.name()).isEqualTo("Best sci-fi of the 90s");
+        verify(userRepository).findByIdForListCreation(lucasId);
+        verify(userRepository).findByIdForListCreation(lucasId);
         verify(userListRepository).save(listCaptor.capture());
         assertThat(listCaptor.getValue().getUser()).isEqualTo(lucas);
         assertThat(listCaptor.getValue().getName()).isEqualTo("Best sci-fi of the 90s");
@@ -1758,7 +1766,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserList] Should Assign Rank One Past The Current Ranked Lists Count")
     void shouldAssignRankOnePastTheCurrentRankedListsCountOnCreate() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.countByUserIdAndRankIsNotNull(lucasId)).thenReturn(3L);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
@@ -1772,7 +1779,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserList] Should Map With Empty Preview And Zero Nested Lists Count - Without Querying Items")
     void shouldMapWithEmptyPreviewAndZeroNestedListsCountWithoutQueryingItemsOnCreate() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userListMapper.userListToResponseDto(any(UserList.class), eq(List.of()), eq(0L), eq(0.0), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any()))
                 .thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
@@ -1786,7 +1792,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserList] Should Default Visibility To Public - When Omitted")
     void shouldDefaultVisibilityToPublicWhenOmitted() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
@@ -1799,7 +1804,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserList] Should Persist A Null Description - When Omitted")
     void shouldPersistANullDescriptionWhenOmitted() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(userListMapper.userListToResponseDto(any(UserList.class), any(), anyLong(), anyDouble(), anyBoolean(), anyLong(), anyLong(), anyLong(), any(), any())).thenAnswer(invocation -> buildResponseDto(invocation.getArgument(0)));
 
@@ -1814,7 +1818,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserListWithItems] Should Create List And Add All Items In Order")
     void shouldCreateListAndAddAllItemsInOrderWhenPayloadIsValid() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> {
             UserList list = invocation.getArgument(0);
             list.setId(UUID.randomUUID());
@@ -1836,6 +1839,7 @@ class UserListServiceImplTest {
         UserListDetailedResponseDTO result = userListService.createUserListWithItems(
                 lucasId, new UserListBulkCreationDTO("Best sci-fi of the 90s", "A curated list", UserListVisibility.PRIVATE, List.of(movieRef, seriesRef)));
 
+        verify(userRepository).findByIdForListCreation(lucasId);
         assertThat(result.name()).isEqualTo("Best sci-fi of the 90s");
         assertThat(result.items()).containsExactly(movieItem, seriesItem);
 
@@ -1852,7 +1856,6 @@ class UserListServiceImplTest {
     @DisplayName("[createUserListWithItems] Should Not Resolve State Again - When Batch Items Are Already Resolved")
     void shouldNotResolveStateAgainWhenBatchItemsAreAlreadyResolved() {
         UUID savedListId = UUID.randomUUID();
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> {
             UserList list = invocation.getArgument(0);
             list.setId(savedListId);
@@ -1876,7 +1879,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserListWithItems] Should Default Visibility To Public - When Omitted")
     void shouldDefaultVisibilityToPublicWhenOmittedOnBulkCreate() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> {
             UserList list = invocation.getArgument(0);
             list.setId(UUID.randomUUID());
@@ -1898,7 +1900,6 @@ class UserListServiceImplTest {
     @Test
     @DisplayName("[createUserListWithItems] Should Propagate Exception - When Adding Items Fails")
     void shouldPropagateExceptionWhenAddingItemsFails() {
-        when(userRepository.getReferenceById(lucasId)).thenReturn(lucas);
         when(userListRepository.save(any(UserList.class))).thenAnswer(invocation -> {
             UserList list = invocation.getArgument(0);
             list.setId(UUID.randomUUID());
@@ -2213,6 +2214,7 @@ class UserListServiceImplTest {
 
         userListService.deleteUserList(lucasId, list.getId());
 
+        verify(importLedger).markDeletedByTarget(lucasId, "USER_LIST", list.getId());
         verify(userListRepository).delete(list);
     }
 

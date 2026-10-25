@@ -429,8 +429,21 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
             throw new BadRequestException("Edited field is not valid for this import item");
         }
         switch (editField.field()) {
-            case TITLE, DESCRIPTION, CATEGORY_NAME -> {
+            case TITLE, CATEGORY_NAME -> {
                 if (value.isBlank()) throw new BadRequestException("Edited field cannot be blank");
+                if (item.getNormalizedKind() == ImportRecordKind.LIST_METADATA && value.length() > 255) {
+                    throw new BadRequestException("List name cannot exceed 255 characters");
+                }
+            }
+            case DESCRIPTION -> {
+                if (item.getNormalizedKind() != ImportRecordKind.LIST_ITEM
+                        && item.getNormalizedKind() != ImportRecordKind.LIST_METADATA && value.isBlank()) {
+                    throw new BadRequestException("Edited field cannot be blank");
+                }
+                if ((item.getNormalizedKind() == ImportRecordKind.LIST_ITEM
+                        || item.getNormalizedKind() == ImportRecordKind.LIST_METADATA) && value.length() > 400) {
+                    throw new BadRequestException("List description cannot exceed 400 characters");
+                }
             }
             case REVIEW -> {
                 if (value.isBlank()) throw new BadRequestException("Edited field cannot be blank");
@@ -471,6 +484,22 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
         }
     }
 
+    private boolean listMetadataLengthsValid(ImportItem item) {
+        JsonNode root = readPayload(item.getPayloadJson());
+        JsonNode source = sourcePayload(root);
+        JsonNode fields = root.path("resolution").path("fields");
+        JsonNode titleNode = fields.path("TITLE").isTextual() ? fields.path("TITLE") : source.path("title");
+        JsonNode descriptionNode = fields.path("DESCRIPTION").isTextual()
+                ? fields.path("DESCRIPTION") : source.path("description");
+        String title = titleNode.isTextual() ? titleNode.asString() : null;
+        String description = descriptionNode.isTextual() ? descriptionNode.asString() : null;
+        if (item.getNormalizedKind() == ImportRecordKind.LIST_ITEM) {
+            return description == null || description.length() <= 400;
+        }
+        return title != null && !title.isBlank() && title.length() <= 255
+                && (description == null || description.length() <= 400);
+    }
+
     private boolean isEditableForKind(
             ImportRecordKind kind, ImportResolutionOperation.EditableField field) {
         return switch (field) {
@@ -480,7 +509,8 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                     ImportRecordKind.LIST_ITEM, ImportRecordKind.WATCHLIST_ITEM,
                     ImportRecordKind.SERIES_EXPANSION, ImportRecordKind.TEMPLATE,
                     ImportRecordKind.TEMPLATE_CATEGORY, ImportRecordKind.TEMPLATE_OPTION).contains(kind);
-            case DESCRIPTION -> kind == ImportRecordKind.LIST_METADATA || kind == ImportRecordKind.TEMPLATE;
+            case DESCRIPTION -> kind == ImportRecordKind.LIST_METADATA || kind == ImportRecordKind.LIST_ITEM
+                    || kind == ImportRecordKind.TEMPLATE;
             case RELEASE_YEAR -> Set.of(ImportRecordKind.DIARY_EVENT, ImportRecordKind.REVIEW,
                     ImportRecordKind.WATCHED_MARKER, ImportRecordKind.WATCHED_SUMMARY,
                     ImportRecordKind.CURRENT_RATING, ImportRecordKind.LIST_ITEM,
@@ -786,6 +816,16 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
                 && item.getIssue().startsWith(ImportedReviewTextNormalizer.REVIEW_TOO_LONG_ISSUE)) {
             item.setOutcome("RESOLVED");
             item.setIssue(null);
+        } else if (operation instanceof ImportResolutionOperation.EditField editField
+                && (editField.field() == ImportResolutionOperation.EditableField.TITLE
+                || editField.field() == ImportResolutionOperation.EditableField.DESCRIPTION)
+                && "NORMALIZATION_ISSUE".equals(item.getOutcome())
+                && item.getIssue() != null
+                && (item.getIssue().startsWith("LIST_ITEM_DESCRIPTION_TOO_LONG")
+                || item.getIssue().startsWith("LIST_METADATA_FIELDS_TOO_LONG"))
+                && listMetadataLengthsValid(item)) {
+            item.setOutcome("RESOLVED");
+            item.setIssue(null);
         } else if (operation instanceof ImportResolutionOperation.SkipItem
                 || operation instanceof ImportResolutionOperation.RemoveNominee
                 || operation instanceof ImportResolutionOperation.RemoveCategory) {
@@ -935,13 +975,56 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
 
     private ImportPreviewItemDTO toPreviewItem(ImportItem item) {
         PreviewWatchDate watchDate = previewWatchDate(item);
+        PreviewItemTitle itemTitle = previewItemTitle(item);
+        PreviewItemDescription itemDescription = previewItemDescription(item);
         PreviewReviewText reviewText = previewReviewText(item);
         return new ImportPreviewItemDTO(
                 item.getId(), item.getOrdinal(), item.getNormalizedKind(),
                 item.getDecision(), item.getOutcome(), item.getIssue(),
                 watchDate.date(), watchDate.timestamp(), watchDate.precision(),
-                optionalJson(item.getResolvedTargetJson()), reviewText.text(), reviewText.length(),
+                optionalJson(item.getResolvedTargetJson()), itemTitle.text(), itemTitle.length(),
+                itemTitle.truncated(), itemDescription.text(), itemDescription.length(),
+                itemDescription.truncated(), reviewText.text(), reviewText.length(),
                 reviewText.truncated());
+    }
+
+    private PreviewItemTitle previewItemTitle(ImportItem item) {
+        if (item.getNormalizedKind() != ImportRecordKind.LIST_METADATA) {
+            return new PreviewItemTitle(null, null, false);
+        }
+        JsonNode root = readPayload(item.getPayloadJson());
+        JsonNode source = sourcePayload(root);
+        JsonNode edited = root.path("resolution").path("fields").path("TITLE");
+        JsonNode value = edited.isTextual() ? edited : source.path("title");
+        if (!value.isTextual()) return new PreviewItemTitle(null, null, false);
+        String text = value.asString();
+        int length = text.length();
+        int previewLength = Math.min(length, 255);
+        if (previewLength < length && previewLength > 0 && Character.isHighSurrogate(text.charAt(previewLength - 1))
+                && Character.isLowSurrogate(text.charAt(previewLength))) {
+            previewLength--;
+        }
+        return new PreviewItemTitle(text.substring(0, previewLength), length, length > 255);
+    }
+
+    private PreviewItemDescription previewItemDescription(ImportItem item) {
+        if (item.getNormalizedKind() != ImportRecordKind.LIST_METADATA
+                && item.getNormalizedKind() != ImportRecordKind.LIST_ITEM) {
+            return new PreviewItemDescription(null, null, false);
+        }
+        JsonNode root = readPayload(item.getPayloadJson());
+        JsonNode source = sourcePayload(root);
+        JsonNode edited = root.path("resolution").path("fields").path("DESCRIPTION");
+        JsonNode value = edited.isTextual() ? edited : source.path("description");
+        if (!value.isTextual()) return new PreviewItemDescription(null, null, false);
+        String text = value.asString();
+        int length = text.length();
+        int previewLength = Math.min(length, 400);
+        if (previewLength < length && previewLength > 0 && Character.isHighSurrogate(text.charAt(previewLength - 1))
+                && Character.isLowSurrogate(text.charAt(previewLength))) {
+            previewLength--;
+        }
+        return new PreviewItemDescription(text.substring(0, previewLength), length, length > 400);
     }
 
     private PreviewReviewText previewReviewText(ImportItem item) {
@@ -1055,6 +1138,12 @@ public class ImportPreviewServiceImpl implements ImportPreviewService {
     private record PreviewWatchDate(LocalDate date, Instant timestamp, ImportDatePrecision precision) {
     }
 
+    private record PreviewItemTitle(String text, Integer length, boolean truncated) {
+    }
+
     private record PreviewReviewText(String text, Integer length, boolean truncated) {
+    }
+
+    private record PreviewItemDescription(String text, Integer length, boolean truncated) {
     }
 }

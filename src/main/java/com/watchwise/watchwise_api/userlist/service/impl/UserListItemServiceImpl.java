@@ -7,6 +7,7 @@ import com.watchwise.watchwise_api.common.exception.NotFoundException;
 import com.watchwise.watchwise_api.content.dto.ContentRefCreationDTO;
 import com.watchwise.watchwise_api.content.dto.ContentRefDTO;
 import com.watchwise.watchwise_api.content.dto.ContentStateDTO;
+import com.watchwise.watchwise_api.content.entity.Content;
 import com.watchwise.watchwise_api.content.entity.ContentType;
 import com.watchwise.watchwise_api.content.repository.ContentRepository;
 import com.watchwise.watchwise_api.content.service.ContentService;
@@ -31,6 +32,7 @@ import com.watchwise.watchwise_api.userlist.service.UserListContentStateResult;
 import com.watchwise.watchwise_api.userlist.service.UserListContentStateService;
 import com.watchwise.watchwise_api.userlist.service.UserListItemsWithState;
 import com.watchwise.watchwise_api.userblock.service.UserBlockAccessService;
+import com.watchwise.watchwise_api.platformimport.service.ImportLedger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -62,6 +64,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     private final UserListContentStateService userListContentStateService;
     private final UserContentPosterService userContentPosterService;
     private final UserBlockAccessService userBlockAccessService;
+    private final ImportLedger importLedger;
 
     static final int POSITION_PARK_OFFSET = 1_000_000_000;
 
@@ -365,6 +368,88 @@ public class UserListItemServiceImpl implements UserListItemService {
 
     @Override
     @Transactional
+    public int nextImportedPosition(UUID userId, UUID listId) {
+        findOwnedListForUpdate(userId, listId);
+        assertListIsNotLockedAsListOfLists(listId);
+        return Math.addExact(userListItemRepository.findMaxPositionByUserListId(listId), 1);
+    }
+
+    @Override
+    @Transactional
+    public com.watchwise.watchwise_api.userlist.service.ImportedUserListBatchResult appendImportedItems(
+            UUID userId, UUID listId, List<UUID> contentIds, Map<UUID, String> descriptionsByContentId,
+            int nextPosition) {
+        if (contentIds == null || contentIds.isEmpty()) {
+            return new com.watchwise.watchwise_api.userlist.service.ImportedUserListBatchResult(List.of(), nextPosition);
+        }
+        if (nextPosition < 1) throw new IllegalArgumentException("Next user list position must be positive");
+        if (descriptionsByContentId != null && descriptionsByContentId.values().stream()
+                .filter(java.util.Objects::nonNull).anyMatch(description -> description.length() > 400)) {
+            throw new BadRequestException("Imported list item description cannot exceed 400 characters");
+        }
+        UserList userList = findOwnedListForUpdate(userId, listId);
+        assertListIsNotLockedAsListOfLists(listId);
+
+        List<UUID> distinctIds = contentIds.stream().distinct().toList();
+        Map<UUID, Content> contentById = contentRepository.findAllById(distinctIds).stream()
+                .collect(Collectors.toMap(Content::getId, content -> content));
+        if (contentById.size() != distinctIds.size()) {
+            throw new NotFoundException("Imported list content reference not found");
+        }
+
+        UserListItemScope lockedScope = resolveExistingContentScope(listId);
+        for (UUID contentId : distinctIds) {
+            Content content = contentById.get(contentId);
+            assertContentTypeGroupMatches(lockedScope, content.getType());
+            if (lockedScope == null) lockedScope = UserListItemScope.forContentType(content.getType());
+        }
+
+        Map<UUID, UserListItem> existingByContentId = userListItemRepository
+                .findByUserListIdAndContentIdInWithContent(listId, distinctIds).stream()
+                .collect(Collectors.toMap(item -> item.getContent().getId(), item -> item));
+        LocalDateTime now = LocalDateTime.now();
+        Map<UUID, UserListItem> pendingByContentId = new LinkedHashMap<>();
+        int positionCursor = nextPosition;
+        for (UUID contentId : distinctIds) {
+            if (existingByContentId.containsKey(contentId)) continue;
+            pendingByContentId.put(contentId, UserListItem.builder()
+                    .userList(userList)
+                    .content(contentRepository.getReferenceById(contentId))
+                    .position(positionCursor)
+                    .description(descriptionsByContentId == null ? null : descriptionsByContentId.get(contentId))
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build());
+            positionCursor = Math.addExact(positionCursor, 1);
+        }
+
+        try {
+            List<UserListItem> saved = userListItemRepository.saveAll(pendingByContentId.values());
+            userListItemRepository.flush();
+            Map<UUID, UserListItem> savedByContentId = saved.stream()
+                    .collect(Collectors.toMap(item -> item.getContent().getId(), item -> item));
+            List<com.watchwise.watchwise_api.userlist.service.ImportedUserListItemResult> results = new ArrayList<>();
+            for (UUID contentId : contentIds) {
+                UserListItem existing = existingByContentId.get(contentId);
+                if (existing != null) {
+                    results.add(new com.watchwise.watchwise_api.userlist.service.ImportedUserListItemResult(
+                            contentId, existing.getId(), false));
+                    continue;
+                }
+                UserListItem inserted = savedByContentId.get(contentId);
+                results.add(new com.watchwise.watchwise_api.userlist.service.ImportedUserListItemResult(
+                        contentId, inserted.getId(), true));
+            }
+            int insertedCount = Math.toIntExact(saved.size());
+            return new com.watchwise.watchwise_api.userlist.service.ImportedUserListBatchResult(
+                    results, Math.addExact(nextPosition, insertedCount));
+        } catch (DataIntegrityViolationException exception) {
+            throw mapUniqueConstraintViolation(exception);
+        }
+    }
+
+    @Override
+    @Transactional
     public UserListItemResponseDTO updateItem(UUID userId, UUID listId, UUID itemId, UserListItemPatchDTO userListItemPatchDTO) {
         findOwnedList(userId, listId);
         UserListItem item = findOwnedItem(listId, itemId);
@@ -581,6 +666,7 @@ public class UserListItemServiceImpl implements UserListItemService {
     private void deleteAndCloseGap(UserListItem item) {
         UUID listId = item.getUserList().getId();
         int removedPosition = item.getPosition();
+        importLedger.markDeletedByTarget(item.getUserList().getUser().getId(), "USER_LIST_ITEM", item.getId());
         userListItemRepository.delete(item);
         userListItemRepository.flush();
 

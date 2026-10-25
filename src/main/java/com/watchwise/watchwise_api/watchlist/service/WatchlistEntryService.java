@@ -8,6 +8,10 @@ import com.watchwise.watchwise_api.watchlist.dto.WatchlistPageResponseDTO;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistSort;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistStatus;
 import com.watchwise.watchwise_api.watchlist.dto.WatchlistViewResponseDTO;
+import com.watchwise.watchwise_api.watchlist.service.ImportedWatchlistItem;
+import com.watchwise.watchwise_api.watchlist.service.ImportedWatchlistWriteResult;
+
+import java.util.List;
 
 import java.util.UUID;
 
@@ -27,6 +31,8 @@ public interface WatchlistEntryService {
             Integer pageSize);
 
     WatchlistEntryResponseDTO insertEntry(UUID userId, ContentType type, WatchlistEntryCreationDTO watchlistEntryCreationDTO);
+
+    List<ImportedWatchlistWriteResult> appendImportedEntries(UUID userId, List<ImportedWatchlistItem> items);
 
     void removeEntry(UUID userId, ContentType type, UUID watchlistEntryId);
 

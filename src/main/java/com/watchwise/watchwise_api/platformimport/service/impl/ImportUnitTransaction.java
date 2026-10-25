@@ -74,7 +74,8 @@ public class ImportUnitTransaction {
                 || item.getPlanGeneration() != context.planGeneration()) return false;
         if ("APPLIED".equals(item.getOutcome()) || "SKIPPED".equals(item.getOutcome())) return true;
 
-        ImportSourceKey sourceKey = sourceKey(item);
+        ImportUnitApplier applier = applierFor(item);
+        ImportSourceKey sourceKey = applier.sourceKey(context, item);
         SourceApplicationDecision sourceDecision = eventDeduplicator.decide(context.ownerId(), context.jobId(),
                 sourceKey, ImportEventDeduplicator.payloadHash(item.getPayloadJson()));
         if (sourceDecision == SourceApplicationDecision.SKIP_CONSUMED) {
@@ -95,7 +96,6 @@ public class ImportUnitTransaction {
             item.setOutcome("SKIPPED");
             item.setIssue(null);
         } else {
-            ImportUnitApplier applier = applierFor(item);
             try {
                 applier.apply(context, item.getId());
             } catch (WatchEventImportApplier.PassAssignmentRequiredException exception) {
@@ -115,8 +115,10 @@ public class ImportUnitTransaction {
             if (!ledger.isConsumed(context.ownerId(), sourceKey)) {
                 throw new IllegalStateException("Import unit did not commit its source ledger transition");
             }
-            item.setOutcome("APPLIED");
-            item.setIssue(null);
+            if (!"SKIPPED".equals(item.getOutcome())) {
+                item.setOutcome("APPLIED");
+                item.setIssue(null);
+            }
         }
 
         itemRepository.save(item);
@@ -375,10 +377,6 @@ public class ImportUnitTransaction {
         job.setCheckpoint(Long.toString(item.getOrdinal()));
         if (job.getState() == ImportJobState.IMPORTING && job.isWorkPending()) renew(job);
         else releaseLease(job);
-    }
-
-    private ImportSourceKey sourceKey(ImportItem item) {
-        return new ImportSourceKey(item.getSourceNamespace(), item.getObjectKind(), item.getSourceId());
     }
 
     private void pauseForPassAssignment(ImportJob job, ImportItem item, String issue,

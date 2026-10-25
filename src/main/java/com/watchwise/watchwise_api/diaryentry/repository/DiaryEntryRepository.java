@@ -320,6 +320,23 @@ public interface DiaryEntryRepository extends JpaRepository<DiaryEntry, UUID>, D
             @Param("tmdbId") String tmdbId);
 
     @Query("""
+            SELECT DISTINCT content.tmdbId FROM DiaryEntry entry JOIN entry.content content
+            WHERE entry.user.id = :userId AND content.type = :type AND content.tmdbId IN :tmdbIds
+            """)
+    List<String> findWatchedContentIdsForWatchlist(@Param("userId") UUID userId,
+                                                   @Param("type") ContentType type,
+                                                   @Param("tmdbIds") Collection<String> tmdbIds);
+
+    @Query("""
+            SELECT DISTINCT content.seriesTmdbId FROM DiaryEntry entry JOIN entry.content content
+            WHERE entry.user.id = :userId
+              AND content.type = com.watchwise.watchwise_api.content.entity.ContentType.EPISODE
+              AND content.seriesTmdbId IN :seriesTmdbIds
+            """)
+    List<String> findWatchedSeriesIdsForWatchlist(@Param("userId") UUID userId,
+                                                  @Param("seriesTmdbIds") Collection<String> seriesTmdbIds);
+
+    @Query("""
             SELECT d FROM DiaryEntry d JOIN FETCH d.content
             WHERE d.user.id = :userId
             AND d.content.id IN :contentIds
