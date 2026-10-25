@@ -26,6 +26,7 @@ import com.watchwise.watchwise_api.platformimport.repository.ImportFileCleanupTa
 import com.watchwise.watchwise_api.platformimport.repository.ImportItemRepository;
 import com.watchwise.watchwise_api.platformimport.repository.ImportJobRepository;
 import com.watchwise.watchwise_api.platformimport.service.ImportJobService;
+import com.watchwise.watchwise_api.platformimport.service.ImportExecutionContext;
 import com.watchwise.watchwise_api.platformimport.service.ImportModeHandler;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportCleanupJob;
 import com.watchwise.watchwise_api.platformimport.service.impl.ImportUnitTransaction;
@@ -139,6 +140,7 @@ class ImportWorkerIntegrationTest {
     private final Set<String> storageKeys = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static final AtomicInteger NORMALIZE_EMISSION_COUNT = new AtomicInteger();
     private static final AtomicInteger NORMALIZE_HANDLER_EMISSIONS = new AtomicInteger();
+    private static final AtomicInteger NORMALIZE_PAGE_RESET_AT = new AtomicInteger(-1);
     private static final java.util.concurrent.atomic.AtomicBoolean EMIT_UNRESOLVED = new java.util.concurrent.atomic.AtomicBoolean();
     private static final AtomicReference<String> NORMALIZE_NAMESPACE_OVERRIDE = new AtomicReference<>();
 
@@ -152,6 +154,7 @@ class ImportWorkerIntegrationTest {
         testAliasService.reset();
         NORMALIZE_EMISSION_COUNT.set(0);
         NORMALIZE_HANDLER_EMISSIONS.set(0);
+        NORMALIZE_PAGE_RESET_AT.set(-1);
         EMIT_UNRESOLVED.set(false);
         NORMALIZE_NAMESPACE_OVERRIDE.set(null);
         importLimits.setMaxRecords(500000);
@@ -256,6 +259,66 @@ class ImportWorkerIntegrationTest {
         assertThatThrownBy(() -> jobService.retry(owner.getId(), job.getId()))
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("The import source file is no longer available");
+    }
+
+    @Test
+    @DisplayName("[ImportWorker] Should Resume Global Normalization Ordinals - When A Later Page Restarts Its Local Ordinal")
+    void shouldResumeGlobalNormalizationOrdinalsWhenLaterPageRestartsItsLocalOrdinal() {
+        User owner = createUser();
+        ImportJob job = createInspectionJob(owner.getId());
+        job.setWorkPhase("NORMALIZE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{\"history\":true,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}");
+        job.setWorkPending(true);
+        job.setNextRunAt(LocalDateTime.now(clock).minusSeconds(1));
+        job.setLeaseToken(UUID.randomUUID());
+        job.setLeaseUntil(LocalDateTime.now(clock).plusMinutes(2));
+        jobRepository.saveAndFlush(job);
+
+        NORMALIZE_PAGE_RESET_AT.set(205);
+        NORMALIZE_EMISSION_COUNT.set(208);
+        List<NormalizedImportRecord> firstCheckpointBatch = new ArrayList<>(200);
+        for (int localOrdinal = 0; localOrdinal < 200; localOrdinal++) {
+            firstCheckpointBatch.add(normalizationFixtureRecord(job.getSourceNamespace(), "page-a", localOrdinal));
+        }
+        ImportExecutionContext context = new ImportExecutionContext(owner.getId(), job.getId(),
+                job.getPreviewVersion(), 1, job.getSourceNamespace(), job.getLeaseToken());
+
+        assertThat(unitTransaction.saveNormalized(context, firstCheckpointBatch, "trakt-history-v1")).isTrue();
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getCheckpoint()).isEqualTo("NORMALIZE:199");
+        List<UUID> checkpointItemIds = itemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                        job.getId(), 1, org.springframework.data.domain.PageRequest.of(0, 200)).getContent().stream()
+                .map(ImportItem::getId).toList();
+
+        LocalDateTime restartAt = LocalDateTime.now(clock).minusSeconds(1);
+        jdbc.update("UPDATE import_jobs SET lease_until = ?, next_run_at = ? WHERE id = ?",
+                restartAt, restartAt, job.getId());
+
+        worker.runAvailable(1);
+
+        List<ImportItem> staged = itemRepository.findByJobIdAndPlanGenerationOrderByOrdinalAscIdAsc(
+                job.getId(), 1, org.springframework.data.domain.PageRequest.of(0, 300)).getContent();
+        List<String> expectedSourceIds = new ArrayList<>(208);
+        for (int localOrdinal = 0; localOrdinal < 205; localOrdinal++) {
+            expectedSourceIds.add("page-a-" + localOrdinal);
+        }
+        for (int localOrdinal = 0; localOrdinal < 3; localOrdinal++) {
+            expectedSourceIds.add("page-b-" + localOrdinal);
+        }
+        assertThat(NORMALIZE_HANDLER_EMISSIONS.get()).isEqualTo(208);
+        assertThat(staged).hasSize(208);
+        assertThat(staged).extracting(ImportItem::getOrdinal)
+                .containsExactlyElementsOf(java.util.stream.LongStream.range(0, 208).boxed().toList());
+        assertThat(staged.subList(0, 200)).extracting(ImportItem::getId)
+                .containsExactlyElementsOf(checkpointItemIds);
+        assertThat(staged).extracting(ImportItem::getSourceId).containsExactlyElementsOf(expectedSourceIds);
+        ImportItem firstSecondPageItem = staged.get(205);
+        assertThat(firstSecondPageItem.getOrdinal()).isEqualTo(205);
+        assertThat(firstSecondPageItem.getPayloadJson()).contains("\"sourceFile\":\"page-b\"")
+                .contains("\"sourceRecordNumber\":0");
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getState())
+                .isEqualTo(ImportJobState.RESOLVING);
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getCheckpoint())
+                .isEqualTo("NORMALIZE:207");
     }
 
     @Test
@@ -376,6 +439,7 @@ class ImportWorkerIntegrationTest {
         ImportJob job = createRunnableJob(owner.getId(), 201);
         job.setState(ImportJobState.RESOLVING);
         job.setWorkPhase("RESOLVE");
+        job.setSelectionJson("{\"schemaVersion\":1,\"planGeneration\":1,\"selection\":{\"history\":false,\"watchlist\":false,\"listIds\":[],\"metadata\":null}}");
         jobRepository.saveAndFlush(job);
         List<ImportItem> items = new ArrayList<>(201);
         for (int ordinal = 0; ordinal < 201; ordinal++) {
@@ -693,6 +757,16 @@ class ImportWorkerIntegrationTest {
                 .build());
     }
 
+    private static NormalizedImportRecord normalizationFixtureRecord(String namespace, String sourceFile,
+                                                                     int localOrdinal) {
+        String sourceId = sourceFile + "-" + localOrdinal;
+        var payload = new tools.jackson.databind.ObjectMapper().createObjectNode()
+                .put("sourceFile", sourceFile).put("sourceRecordNumber", localOrdinal);
+        return new NormalizedImportRecord(sourceId, ImportRecordKind.DIARY_EVENT,
+                new ImportSourceKey(namespace, "diary_event", sourceId), null,
+                new ImportTarget.ContentTarget(MediaReference.movie("603")), payload, localOrdinal);
+    }
+
     private List<ImportItem> createItems(ImportJob job, int count, String prefix) {
         List<ImportItem> items = new ArrayList<>(count);
         for (int ordinal = 0; ordinal < count; ordinal++) {
@@ -774,8 +848,16 @@ class ImportWorkerIntegrationTest {
                 @Override
                 public void normalize(ImportReadContext context, ImportSelection selection,
                                       Consumer<NormalizedImportRecord> sink) {
+                    int pageResetAt = NORMALIZE_PAGE_RESET_AT.get();
                     for (int i = 0; i < NORMALIZE_EMISSION_COUNT.get(); i++) {
                         NORMALIZE_HANDLER_EMISSIONS.incrementAndGet();
+                        if (pageResetAt >= 0) {
+                            String sourceFile = i < pageResetAt ? "page-a" : "page-b";
+                            int localOrdinal = i < pageResetAt ? i : i - pageResetAt;
+                            sink.accept(normalizationFixtureRecord(context.sourceNamespace(), sourceFile,
+                                    localOrdinal));
+                            continue;
+                        }
                         var payload = new tools.jackson.databind.ObjectMapper().createObjectNode();
                         String sourceNamespace = NORMALIZE_NAMESPACE_OVERRIDE.get() == null
                                 ? context.sourceNamespace() : NORMALIZE_NAMESPACE_OVERRIDE.get();

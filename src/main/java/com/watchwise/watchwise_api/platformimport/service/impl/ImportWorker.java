@@ -183,10 +183,19 @@ public class ImportWorker {
         ImportSelection selection = selection(job.selectionJson());
         String parserVersion = parserVersion(job.sourceFormat());
         AtomicLong lastOrdinal = new AtomicLong(normalizeCheckpoint(job.checkpoint()));
+        AtomicLong emittedOrdinal = new AtomicLong();
         AtomicLong acceptedCount = new AtomicLong(itemRepository.countByJobId(job.id()));
         List<NormalizedImportRecord> batch = new ArrayList<>(MAX_BATCH_SIZE);
         modeRegistry.normalize(modeKey(job), readContext(job), selection, record -> {
-            if (record.ordinal() <= lastOrdinal.get()) return;
+            long globalOrdinal = emittedOrdinal.getAndIncrement();
+            if (globalOrdinal > Integer.MAX_VALUE) {
+                if (!batch.isEmpty()) {
+                    persistNormalized(context, batch, lastOrdinal, parserVersion);
+                    batch.clear();
+                }
+                throw new RecordLimitExceededException();
+            }
+            if (globalOrdinal <= lastOrdinal.get()) return;
             if (!context.sourceNamespace().equals(record.sourceKey().namespace())) {
                 throw new IllegalStateException("Normalized import source namespace does not match its job");
             }
@@ -198,7 +207,8 @@ public class ImportWorker {
                 throw new RecordLimitExceededException();
             }
             acceptedCount.incrementAndGet();
-            batch.add(record);
+            batch.add(new NormalizedImportRecord(record.itemId(), record.kind(), record.sourceKey(),
+                    record.parentSourceId(), record.target(), record.payload(), Math.toIntExact(globalOrdinal)));
             if (batch.size() == MAX_BATCH_SIZE) {
                 persistNormalized(context, batch, lastOrdinal, parserVersion);
                 batch.clear();
